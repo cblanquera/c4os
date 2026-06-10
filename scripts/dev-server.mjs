@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, extname, normalize, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const host = '127.0.0.1';
 const port = Number.parseInt(process.env.PORT ?? '5173', 10);
@@ -20,7 +20,14 @@ const contentTypes = new Map([
 /**
  * Resolves a request URL to a file under the project root.
  */
-function resolveRequestPath(url) {
+export function resolveRequestPath(url) {
+  const rawPath = url.split('?')[0];
+  const decodedPath = decodeURIComponent(rawPath);
+
+  if (decodedPath.split('/').includes('..')) {
+    return null;
+  }
+
   const requestedPath = new URL(url, `http://${host}:${port}`).pathname;
   const relativePath = requestedPath === '/' ? '/index.html' : requestedPath;
   const absolutePath = resolve(projectRoot, `.${normalize(relativePath)}`);
@@ -35,7 +42,7 @@ function resolveRequestPath(url) {
 /**
  * Serves the static scaffold for local Tauri development.
  */
-async function serveRequest(request, response) {
+export async function serveRequest(request, response) {
   const filePath = resolveRequestPath(request.url);
 
   if (!filePath) {
@@ -64,6 +71,12 @@ async function serveRequest(request, response) {
   }
 }
 
-createServer(serveRequest).listen(port, host, () => {
-  console.log(`C4OS dev server running at http://${host}:${port}`);
-});
+export function startDevServer() {
+  return createServer(serveRequest).listen(port, host, () => {
+    console.log(`C4OS dev server running at http://${host}:${port}`);
+  });
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startDevServer();
+}

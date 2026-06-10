@@ -70,7 +70,14 @@ h1 {
 .workspace-panel > div {
   background: #ffffff;
   min-height: 120px;
+  min-width: 0;
   padding: 22px;
+}
+
+.workspace-panel strong {
+  display: block;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .label {

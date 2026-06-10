@@ -28,3 +28,4 @@
 | item-024 | implementation | verified | codex | Text-like artifact records and viewer | Artifact persistence tests, JS tests, and native build pass. |
 | item-025 | verification | verified | codex | MVP technical test suite | Full local automated suite passes. |
 | item-026 | verification | verified | codex | App-build and product QA gates | macOS Apple Silicon local gates pass; Windows 11 x64 validation explicitly re-scoped out of public MVP release. |
+| item-027 | stabilization | verified | codex | Stabilization and release prep | README, dev-server regression coverage, release checklist, and full gates pass. |
