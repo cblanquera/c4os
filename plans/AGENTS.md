@@ -2,9 +2,9 @@
 
 This directory is a fuller version of spec-driven development. Treat the documents here as the product and architecture planning system that comes before implementation. The goal is to make requirements, evidence, decisions, risks, and acceptance gates explicit enough that implementation work can be traced back to intent.
 
-The process is based on a staged planning lifecycle: intake, discovery, specifications, architecture review, ADRs, readiness gaps, spikes, decision consolidation, MVP definition, acceptance criteria, non-goals, final grilling, readiness resolution, MVP freeze, epics, tasks, and implementation planning.
+The process is based on a staged planning lifecycle: intake, discovery, specifications, architecture review, ADRs, readiness gaps, spikes, validation evidence, decision consolidation, MVP definition, acceptance criteria, non-goals, final grilling, readiness resolution, MVP freeze, epics, tasks, and implementation planning.
 
-Do not start implementation from this directory alone. Use these documents to understand what should be built, why it should be built, what is intentionally out of scope, and which decisions or risks still block the work.
+Do not start implementation from this directory alone. Use these documents to understand what should be built, why it should be built, what is intentionally out of scope, and which decisions or risks still block the work. As of the current freeze, planning is ready for implementation sequencing, but release readiness still depends on app-build validation, code-level tests, and product QA gates.
 
 ## How The Folders Fit Together
 
@@ -17,11 +17,13 @@ The current planning flow is:
 5. Record architectural choices in `adr/`.
 6. Identify readiness gaps and unresolved assumptions.
 7. Investigate unknowns in `spikes/`.
-8. Track cross-cutting decision state in `decisions/`.
-9. Narrow the first shippable slice in `mvp/`.
-10. Use `acceptance/` as the verification contract for implementation.
-11. Run the final grill/readiness review before freezing scope.
-12. Freeze the MVP and only then convert the plan into epics, tasks, and implementation sequencing.
+8. Convert risky assumptions into evidence in `validation/`.
+9. Track cross-cutting decision state in `decisions/`.
+10. Narrow the first shippable slice in `mvp/`.
+11. Use `acceptance/` as the verification contract for implementation.
+12. Run the final grill/readiness review before freezing scope.
+13. Freeze the MVP in `plans/mvp/mvp-freeze.md`.
+14. Convert the frozen MVP into epics, tasks, dependencies, build order, and sprint sequencing in `implementation/`.
 
 ## Folder Purposes
 
@@ -39,9 +41,11 @@ Use this folder when you need the source of truth for what the product is suppos
 
 ### `mvp/`
 
-MVP scope, user journeys, validation plan, and success metrics. These files separate the smallest useful validation product from later ambitions.
+MVP scope, user journeys, validation plan, success metrics, and the frozen MVP implementation contract. These files separate the smallest useful validation product from later ambitions.
 
 Use this folder to decide whether a feature belongs in the first private alpha, V1, V2, or future work. If an implementation task is not clearly justified by MVP scope, treat it as suspect unless another document explicitly promotes it.
+
+`plans/mvp/mvp-freeze.md` is now the implementation contract. Features not listed there are out of scope for the first implementation pass.
 
 ### `research/`
 
@@ -54,6 +58,12 @@ Use this folder when a recommendation depends on an ecosystem standard, third-pa
 Time-boxed technical investigations for unresolved assumptions. Each spike should state the objective, context, questions to answer, hypothesis, investigation plan, success criteria, decisions unlocked, and estimated effort.
 
 Use this folder when the plan depends on something uncertain enough that research or prototyping must happen before an ADR can be finalized.
+
+### `validation/`
+
+Evidence gathered after review findings, spikes, or unresolved ADRs identify pre-implementation risk. This folder records the validation loop, evidence matrix, decision log, finding-specific proof, failure reproductions, fallback decisions, and acceptance-gate separation.
+
+Use this folder when a claim needs proof before it can unlock freeze-and-plan. Accepted evidence includes official documentation, source references, local probes, reproducible command transcripts, observed structured payloads, failure-mode reproduction, and explicit fallback or scope decisions. Do not use assumptions, UI-only observation for backend control, terminal scraping as proof of structured control, or post-execution audit as proof of pre-execution control.
 
 ### `adr/`
 
@@ -93,23 +103,27 @@ Implementation epics, task breakdowns, dependencies, build order, and sprint pla
 
 Use this folder to translate the frozen MVP into implementation work. Do not use it for speculative features, unresolved architecture, or pre-freeze task generation.
 
+The current implementation folder is valid because blocker/high readiness findings were resolved or explicitly converted into accepted fallback/scope decisions before MVP freeze.
+
 ## Working Rules For Agents
 
 - Preserve the distinction between requirements, decisions, risks, and acceptance criteria.
 - Do not silently promote future-scope features into MVP.
 - When changing a spec, check whether related MVP, ADR, decision, roadmap, review, spike, or acceptance documents also need updates.
 - When resolving an uncertainty, update the relevant spike and any ADR or decision rollup it unlocks.
+- When validation produces evidence, update `validation/evidence-matrix.md`, `validation/decision-log.md`, affected ADRs, and decision rollups.
 - When adding implementation detail, keep it at planning level unless the user explicitly asks for code.
 - Prefer adding traceable links between documents over duplicating large sections.
 - Keep unresolved items explicit. Do not rewrite ambiguity into false certainty.
 - Block implementation planning until blocker and high-risk findings from the final readiness review are accepted, rejected, or deferred.
 - Do not create `implementation/` epics or tasks before `plans/mvp/mvp-freeze.md` exists.
+- Do not treat implementation readiness as release readiness. App-build validation, code-level tests, product QA, and public-release platform gates must still be tracked after implementation begins.
 
 ## Unclear Areas To Clarify
 
 - The boundary between `adr/` and `decisions/` should stay disciplined: `adr/` holds individual decision records, while `decisions/` holds rollups and cross-ADR status. Some current files overlap, so future edits should avoid duplicating full ADR content in rollups.
 - The boundary between `research/` and `spikes/` depends on whether the work is evidence gathering or targeted validation. Use `research/` for broad context and `spikes/` for scoped investigations that unlock decisions.
 - The boundary between `reviews/` and `acceptance/` should remain explicit: reviews identify risks and critiques; acceptance documents define pass/fail criteria for implementation.
-- The lifecycle expects `plans/preplan-brief.md`, but that file is not currently present. If the brief exists elsewhere, either move it here or link to it from this directory.
-- The lifecycle later expects `plans/mvp/mvp-freeze.md` and `plans/implementation/`. Those should not exist until final readiness review findings are resolved.
+- `plans/preplan-brief.md` exists and is historical context. Later MVP and freeze documents supersede it where they conflict.
+- `plans/mvp/mvp-freeze.md` and `plans/implementation/` now exist because final readiness findings were resolved through the validation loop.
 - The original lifecycle mentions "Open Questions and Research Gaps" under `plans/reviews`, while the current tree has `plans/research/open-questions-and-research-gaps.md`. That is reasonable if the file is treated as research inventory, but keep the convention consistent going forward.
