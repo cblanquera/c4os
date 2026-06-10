@@ -3,10 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "build": "node scripts/build.mjs",
+    "tauri": "tauri",
     "test": "node --test"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.17.1",
     "opencode-ai": "^1.17.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
   }
 }

@@ -13,6 +13,8 @@ node_modules/
 dist/
 build/
 out/
+src-tauri/gen/
+src-tauri/target/
 .next/
 .nuxt/
 .svelte-kit/
