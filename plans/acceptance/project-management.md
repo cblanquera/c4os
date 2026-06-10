@@ -1,11 +1,14 @@
 # Overview
 
-Project Management covers registering and displaying one local Git project for MVP validation.
+Project Management covers registering local Git projects and using a minimal Project Selector to choose one selected project for MVP validation.
 
 # Success Criteria
 
-Requirement: A user can register one local Git project.
+Requirement: A user can register local Git projects.
 Expected Result: The app shows the selected project root, project name, current Git branch, and dirty state.
+
+Requirement: A user can choose one selected project from registered projects.
+Expected Result: The app keeps one project context visible and active, without exposing full project-management workflows.
 
 Requirement: The app communicates project scope.
 Expected Result: The user can identify the folder that bounds file access before starting a session.
@@ -20,9 +23,33 @@ Given a project has a root `AGENTS.md`
 When the project is opened
 Then the app displays that root instruction file as project guidance.
 
+Given a project has a root `AGENTS.md`
+When the app displays it
+Then the app does not treat it as a permission source or automatically inject it into app-owned model context.
+
+Given a project has a root `AGENTS.md`
+When the user explicitly asks the agent to read it
+Then the app treats the read as a normal logged project-root file read, not as hidden policy loading.
+
+Given a project has a root `AGENTS.md`
+When the user approves an agent-proposed edit to it
+Then the app treats the edit as a normal project-root file write, not as instruction or permission reconfiguration.
+
+Given OpenCode has runtime-native instruction loading behavior
+When the runtime control spike evaluates it
+Then the app can observe and disclose the loaded instruction files, or disable that behavior.
+
+Given OpenCode invisibly loads root or nested instruction files
+When the app cannot observe, disclose, or disable that behavior
+Then OpenCode is not accepted as the direct MVP runtime.
+
 Given a user attempts to add a second active project during MVP validation
 When the current MVP mode supports one active project
 Then the app prevents ambiguity by keeping only one active project context visible.
+
+Given multiple projects are registered
+When the user opens the Project Selector
+Then the app lists registered projects and allows selecting exactly one active project.
 
 # Security Acceptance Criteria
 
@@ -32,7 +59,7 @@ Then the operation is evaluated against the registered project root.
 
 Given a path resolves outside the registered project root
 When the agent proposes access to that path
-Then the app blocks the operation unless the MVP policy explicitly supports external approval.
+Then the app blocks the operation.
 
 # Performance Acceptance Criteria
 
@@ -50,11 +77,17 @@ Then the root path and Git state are visible without opening settings.
  - A non-Git folder is accepted as an MVP project.
  - The displayed project root differs from the access boundary.
  - Git state is missing or stale after project registration.
+ - Root `AGENTS.md` changes permissions or approval behavior.
+ - Editing root `AGENTS.md` automatically reloads model context, permission state, or instruction precedence.
+ - OpenCode invisibly injects instruction files into model context without app visibility or disclosure.
+ - The Project Selector exposes project search, grouping, archive, delete, favorites, metadata editing, cross-project views, or multi-project operations in MVP.
 
 # Out Of Scope
 
  - Multiple active projects.
+ - Full project management.
+ - Project search, grouping, archive, delete, favorites, and metadata editing.
+ - Cross-project views and multi-project operations.
  - Non-Git project workflows.
  - Worktree management.
  - Cloud-synced workspace handling.
-

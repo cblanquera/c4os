@@ -100,11 +100,11 @@ Next action: Define plugin signing, sandboxing, and permission review before rec
 
 ## ADR-017: Rich Artifact Preview Model
 
-Summary: Rich artifact previews are deferred; MVP keeps basic text, Markdown, logs, diffs, and generated files.
+Summary: Rich artifact previews are deferred; MVP keeps plain text, Markdown, logs, diffs, and generated source or config files only.
 
 Status: Deferred to V1/V2.
 
-Rationale: PDFs, HTML, images, spreadsheets, and documents introduce renderer and security risks. They are not needed for the core coding-first validation.
+Rationale: PDFs, active HTML, images, spreadsheets, documents, Chromium-backed previews, artifact execution, and export/duplicate workflows introduce renderer and security risks. They are not needed for the core coding-first validation.
 
 Affected documents:
 
@@ -177,4 +177,3 @@ Affected documents:
  - `plans/spikes/SPIKE-012-ux-onboarding-concept-load.md`
 
 Next action: Validate MVP onboarding comprehension before expanding UI concepts.
-

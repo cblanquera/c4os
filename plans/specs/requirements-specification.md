@@ -4,26 +4,20 @@ This document defines product requirements for the AI workspace before implement
 
 ## Product Scope
 
-The product is a general-purpose desktop AI workspace for coding, writing, research, analysis, operations, documentation, and other agent-assisted workflows. The MVP should not implement a custom agent runtime if OpenCode Runtime can satisfy the core requirements.
+The MVP is a coding-first desktop AI workspace for technical users working in local Git repositories. It validates whether a desktop control center improves trust, persistence, inspection, and control for one selected Git project and one active agent session at a time.
+
+The broader product may later expand into writing, research, analysis, operations, documentation, and other agent-assisted workflows, but those workflows are not MVP requirements.
 
 ## Core User Requirements
 
- - Users can register multiple local projects.
- - Users can create multiple sessions per project.
- - Users can run multiple concurrent agents.
- - Users can inspect, pause, resume, stop, and archive sessions.
+ - Users can register local Git projects and keep one selected project active at a time.
+ - Users can start, resume, and stop the current session for the selected project.
  - Users can grant local file access scoped to project roots.
  - Users can run local shell commands through an approval-aware tool model.
- - Users can connect Git repositories and inspect diffs.
- - Users can isolate risky or parallel file edits in Git worktrees.
- - Users can configure MCP servers.
- - Users can install and invoke skills.
- - Users can use project instructions through `AGENTS.md`.
- - Users can install plugins from local or marketplace sources.
- - Users can generate, view, export, and reopen artifacts.
- - Users can browse local files and generated outputs.
- - Users can view web/browser content in-app.
- - Users can switch models and providers.
+ - Users can inspect Git status, changed files, and diffs.
+ - Users can view root `AGENTS.md` project instructions.
+ - Users can capture basic text, log, diff, and generated-file artifacts.
+ - Users can select models through OpenRouter.
  - Users can use OpenRouter with BYOK provider credentials.
  - Users can keep workflows local-first whenever possible.
  - Users can review and approve risky actions.
@@ -31,29 +25,24 @@ The product is a general-purpose desktop AI workspace for coding, writing, resea
 
 ## Non-Functional Requirements
 
- - Interoperability: prefer AGENTS.md, Agent Skills, MCP, Codex-compatible plugins, and OpenCode-compatible configuration where practical.
+ - Interoperability: prefer root AGENTS.md, OpenCode-compatible execution, and OpenRouter-compatible model IDs for MVP.
  - Local-first: project files, session metadata, artifacts, and logs should live locally by default.
  - Security: use least privilege, explicit trust boundaries, per-tool approvals, and encrypted secret storage.
- - Durability: sessions, tool calls, artifacts, approvals, and summaries must survive app restart.
- - Explainability: every file edit, shell command, MCP call, approval, and plugin action should be traceable.
- - Extensibility: plugins should add skills, MCP servers, UI metadata, commands, assets, and app connectors without modifying core code.
- - Portability: users should be able to export skills, plugins, MCP config, sessions, and artifacts.
+ - Durability: sessions, tool calls, artifacts, and approvals must survive app restart.
+ - Explainability: every file edit, shell command, Git action, and approval should be traceable.
 
 ## MVP Requirements
 
- - Tauri desktop shell with side navigation, project list, session list, main conversation, tool activity, file browser, artifact viewer, and settings.
+ - Tauri desktop shell with project selection, main conversation, tool activity, read-only file browser, Git diff viewer, artifact viewer, and settings.
  - OpenCode Runtime integration as the execution engine.
  - OpenRouter provider configuration with BYOK-ready model selection.
  - Local SQLite metadata store.
- - Project registration and workspace root policy.
+ - Local Git project registration and selected-project root boundary.
  - Session persistence and resumability.
- - `AGENTS.md` discovery and display.
- - Skill discovery from user, project, and plugin paths.
- - MCP server configuration and tool listing.
+ - Root `AGENTS.md` discovery and display.
  - Shell/file/Git approval workflows.
- - Git diff viewer and worktree lifecycle management.
- - Local artifact store and preview system.
- - Plugin install from local path and marketplace manifest.
+ - Git status, changed-file list, and diff viewer.
+ - Local artifact store for text, logs, diffs, and generated files.
 
 ## Out Of Scope For MVP
 
@@ -62,6 +51,12 @@ The product is a general-purpose desktop AI workspace for coding, writing, resea
  - Enterprise admin console.
  - Full cloud sync.
  - Public marketplace publishing workflow.
+ - Plugin install from local path or marketplace manifest.
+ - MCP server configuration and tool listing.
+ - Skill discovery and invocation.
+ - Git worktree lifecycle management.
+ - Multiple active sessions or multiple concurrent agents.
+ - Non-Git project workflows.
  - Complex workflow automation designer.
  - Mobile clients.
 

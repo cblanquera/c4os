@@ -1,28 +1,32 @@
 # ADR-004: Policy Enforcement Authority
 
-Status: Unresolved.
+Status: Finalized for MVP. Broader post-MVP policy remains unresolved.
 
 ## Context
 
-The architecture states that the Tauri/Rust backend owns filesystem access, process management, secret storage, plugin validation, and policy enforcement. It also states that OpenCode Runtime should perform permission-aware tool use where available.
+The architecture states that the Tauri/Rust backend owns filesystem access, process management, secret storage, and the MVP Approval Gateway. It also states that OpenCode Runtime should perform permission-aware tool use where available.
 
 The review identifies this as a split-brain risk. If both layers can approve, deny, transform, or execute tools, auditability and safety depend on perfect synchronization.
 
+MVP scope is limited to file writes, shell commands, and runtime-proposed Git state changes. Plugin execution, MCP, browser automation, multi-agent execution, and data-flow-aware policy are excluded from MVP.
+
 ## Decision
 
-No final decision has been made.
+For MVP, the Tauri/Rust backend is the authoritative Approval Gateway for file writes, shell commands, and runtime-proposed Git state changes.
 
-The current documents imply layered enforcement, but they do not identify the authoritative enforcement point.
+OpenCode may provide runtime-native permission features as defense in depth, but it must not execute MVP-controlled actions before the backend Approval Gateway approves them. If OpenCode cannot expose pre-execution control for those action classes, the OpenCode integration is not viable for the accepted MVP without an adapter, proxy, fork, or scope reduction.
+
+When the backend denies or blocks an MVP-controlled action, the Runtime Adapter returns a structured denial result to OpenCode. The denial is recorded in the app-owned ledger and represented to the runtime as a blocked tool result, not as success and not as silent failure.
 
 ## Alternatives Considered
 
- - Backend-owned policy enforcement.
+ - Backend-owned approval enforcement.
  - Runtime-owned policy enforcement.
  - Layered backend and runtime enforcement.
 
 ## Alternatives That Should Be Considered
 
- - Backend as mandatory policy gateway for all tool families.
+ - Backend as mandatory approval gateway for MVP file writes, shell commands, and runtime-proposed Git state changes.
  - Runtime-native policy with backend limited to UX and audit.
  - A tool proxy that all local, MCP, browser, plugin, shell, Git, and artifact tools must traverse.
  - Deny any runtime mode that can execute outside the app policy envelope.
@@ -37,19 +41,20 @@ Layered policy can provide defense in depth, but only if one layer is authoritat
 
 ## Consequences
 
- - This decision blocks security architecture.
- - It determines whether OpenCode is an adapter behind app policy or a co-equal policy engine.
- - It affects audit completeness, approval UX, plugin execution, MCP tools, shell commands, and file access.
+ - This decision unblocks MVP security architecture.
+ - It makes OpenCode an execution adapter behind the app-owned Approval Gateway for MVP-controlled actions.
+ - It affects audit completeness, approval UX, shell commands, runtime-proposed Git state changes, and file writes.
+ - Runtime adapter work must define the exact structured denial payload expected by OpenCode.
+ - Plugin execution, MCP tools, browser tools, and data-flow policy still need post-MVP policy decisions.
 
 ## Follow-Up Questions
 
- - Which layer is authoritative on conflict?
  - Can OpenCode execute any tool before backend approval?
- - Can MCP calls bypass the backend ledger?
+ - Can OpenCode expose file write, shell, and Git proposals before execution?
  - Are approval decisions stored by the app, runtime, or both?
- - Can a plugin script execute through shell permissions instead of plugin permissions?
+ - What adapter, proxy, fork, or scope change is required if OpenCode cannot provide pre-execution control?
+ - For post-MVP: can MCP calls, plugin scripts, browser tools, and artifact renderers bypass the backend ledger?
 
 ## ADR Recommendation
 
-Create and resolve this ADR before architecture freeze.
-
+Validate this decision in the OpenCode runtime control and policy enforcement spikes before architecture freeze.

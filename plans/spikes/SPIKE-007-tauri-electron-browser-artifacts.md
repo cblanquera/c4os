@@ -1,35 +1,35 @@
 # Objective
 
-Determine whether Tauri is sufficient for the MVP and future browser/artifact requirements, or whether Electron/Chromium should be preferred.
+Validate Tauri WebView for MVP UI and document post-MVP Chromium triggers.
 
 # Context
 
-Specs prefer Tauri for footprint, Rust backend, and local-first posture. Reviews warn that browser viewing, screenshots, artifact previews, and automation may favor Electron or Chromium.
+Tauri is accepted for MVP because the MVP excludes browser panels, browser automation, screenshots, DOM extraction, active HTML rendering, and rich artifact previews. Reviews still warn that post-MVP browser viewing, screenshots, rich previews, and automation may favor Electron or Chromium.
 
 # Questions To Answer
 
  - Which platforms must be supported at launch?
- - Are Tauri WebViews sufficient for MVP UI and basic artifact rendering?
- - Do future browser automation or screenshot features require Chromium consistency?
- - Can browser content be isolated from privileged backend IPC in Tauri?
+ - Are Tauri WebViews sufficient for MVP app UI and text-like artifact previews?
+ - Which future browser automation, screenshot, local app preview, generated HTML preview, or rich artifact features require Chromium consistency?
+ - Can future browser content be isolated from privileged backend IPC in Tauri?
  - What migration cost would switching from Tauri to Electron create later?
 
 # Hypothesis
 
-Tauri is acceptable for the MVP if browser automation and rich artifact rendering are excluded, but future browser-heavy requirements may require a Chromium strategy.
+Tauri is acceptable for MVP if its WebView supports the basic app UI and text-like previews. Future browser-heavy or rich-preview requirements may require a Chromium strategy.
 
 # Investigation Plan
 
- - Compare Tauri and Electron against MVP UI needs.
+ - Validate Tauri against MVP UI needs.
  - Validate basic rendering needs for text, Markdown, logs, diffs, and settings.
- - Review security boundary options for remote content.
- - Document future browser/artifact features that would force reconsideration.
+ - Document post-MVP browser/artifact features that would force Chromium reconsideration.
+ - Review future security boundary options for remote content.
  - Estimate migration risk.
 
 # Success Criteria
 
- - Desktop shell recommendation is confirmed or challenged for MVP.
- - Browser/artifact requirements that require Chromium are identified.
+ - Tauri WebView is confirmed or challenged for MVP UI and text-like previews.
+ - Post-MVP browser/artifact requirements that require Chromium are identified.
  - Migration risks are documented.
 
 # Decisions Unlocked
@@ -41,4 +41,3 @@ Tauri is acceptable for the MVP if browser automation and rich artifact renderin
 # Estimated Effort
 
 2 to 4 engineering days.
-

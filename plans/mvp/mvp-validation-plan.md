@@ -107,7 +107,7 @@ Pass criteria:
 
 ### Task 4: Approve Local Actions
 
-User receives prompts for file write, shell, or Git actions.
+User receives prompts for file writes, shell commands, or runtime-proposed Git state changes.
 
 Pass criteria:
 
@@ -218,4 +218,3 @@ Proceed to V1 only if:
  - The next most valuable feature is clearly identified by validation data.
 
 Do not expand into plugins, marketplace, remote MCP, browser automation, direct providers, or multi-agent workflows until the MVP thesis is validated.
-

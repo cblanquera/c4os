@@ -10,7 +10,9 @@ The review identifies this as a make-or-break assumption. A CLI/TUI-oriented run
 
 ## Decision
 
-Use OpenCode Runtime as the first runtime target through a narrow adapter, but do not treat the decision as final until headless control and policy hooks are proven.
+Use OpenCode Runtime as the first runtime target through a narrow adapter, but do not treat the decision as final until headless control, structured events, and pre-execution Approval Gateway hooks are proven.
+
+MVP stop behavior requires canceling the active runtime/model stream and terminating app-supervised child processes while preserving app-owned transcript, tool history, approvals, and artifacts. Partial assistant output is persisted as stopped or interrupted and is not auto-regenerated, auto-deleted, or silently treated as complete. Stop is not session deletion and does not include partial-response editing, branch/regenerate controls, automatic continuation, pause/resume stream, background continuation, partial-response regeneration controls, or killing arbitrary external processes.
 
 ## Alternatives Considered
 
@@ -38,18 +40,24 @@ A runtime abstraction layer reduces lock-in but adds upfront architecture and ca
 ## Consequences
 
  - Runtime validation must precede UI buildout.
- - The app should own canonical records for sessions, tool calls, artifacts, policies, and plugins rather than treating OpenCode storage as the only source of truth.
- - If pre-execution tool interception is unavailable, the current security model must be revised.
+ - The app owns canonical MVP records for sessions, messages, tool calls, approvals, artifacts, projects, models, and settings rather than treating OpenCode storage as the source of truth.
+ - OpenCode-native session IDs, logs, and persistence files are adapter references only.
+ - If reliable pre-execution interception for file writes, shell commands, and Git state changes is unavailable, OpenCode is not viable as the direct MVP runtime.
+ - If OpenCode cannot cancel active runs and terminate app-supervised child processes without deleting app-owned session history or losing partial assistant output state, OpenCode is not viable as the direct MVP runtime.
+ - If OpenCode invisibly loads root or nested instruction files and the app cannot observe, disclose, or disable that behavior, OpenCode is not viable as the direct MVP runtime.
+ - UI-only approval prompts, post-execution audit logs, terminal scraping, or best-effort observation do not satisfy the MVP security model.
+ - A wrapper, proxy, fork, runtime replacement, or MVP scope reduction must be chosen before Phase 1 if the direct OpenCode path fails this gate.
 
 ## Follow-Up Questions
 
  - What exact OpenCode interface will be used: library API, JSON RPC server, CLI subprocess protocol, filesystem state, or fork?
  - Can every tool call be intercepted before execution?
  - Can OpenCode stream structured events without terminal scraping?
- - How does OpenCode persist sessions?
+ - Can OpenCode cancel active model streams and terminate app-supervised child processes while preserving app-owned session records and partial assistant output status?
+ - How does OpenCode persist sessions, and how are runtime references mapped to app-owned session records?
+ - Does OpenCode automatically load root or nested instruction files, and can the app observe, disclose, or disable that behavior?
  - Can multiple runtime instances run safely in parallel?
 
 ## ADR Recommendation
 
-Keep this ADR open until a runtime-control matrix proves or rejects OpenCode as a controllable headless runtime.
-
+Keep this ADR open until a runtime-control matrix proves or rejects OpenCode as a controllable headless runtime with reliable pre-execution interception for MVP-risky actions.

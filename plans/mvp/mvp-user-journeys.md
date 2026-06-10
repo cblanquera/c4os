@@ -94,7 +94,7 @@ Goal: the user can control local-risk actions.
 
 Steps:
 
-1. Agent proposes a file write, shell command, or Git action.
+1. Agent proposes a file write, shell command, or Git state change.
 2. App shows the action, target, risk type, and approval options.
 3. User chooses allow once, allow for session, or deny.
 4. App records the approval decision.
@@ -201,4 +201,3 @@ Excluded from this journey:
  - Advanced diagnostics.
 
 Validation goal: failures are understandable enough for early validation users.
-

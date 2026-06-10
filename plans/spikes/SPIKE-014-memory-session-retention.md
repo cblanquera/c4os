@@ -1,37 +1,34 @@
 # Objective
 
-Define safe session persistence, summary, memory, and retention behavior for MVP and later phases.
+Document MVP retention behavior and define post-MVP memory/cleanup questions.
 
 # Context
 
-Specs include session persistence, summaries, compaction, handoff, and durable memory patterns. Reviews warn that memory can retain sensitive data and stale assumptions.
+MVP retains app-owned sessions, messages, tool calls, approvals, local diagnostics, logs, and MVP artifacts locally and indefinitely by default. MVP has no session delete, long-term memory, cross-session memory, automatic summaries, compaction, handoff, quotas, export/import, or automatic cleanup. Reviews warn that retained history and future memory can accumulate sensitive data and stale assumptions.
 
 # Questions To Answer
 
- - What session data is durable by default?
- - Are summaries created in MVP?
- - Is any memory stored beyond session history?
- - Can users inspect, edit, and delete stored session context?
+ - What exact MVP records are retained indefinitely by default?
+ - What inspect, edit, and delete controls are required before post-MVP memory?
  - How are sessions migrated across runtime or model changes?
- - What retention policy applies to transcripts, logs, summaries, and artifacts?
+ - What quotas, cleanup, export/import, and retention controls are required after MVP?
 
 # Hypothesis
 
-MVP should persist transcripts and tool records only, with no cross-session memory and no automatic durable memory writes.
+MVP should persist sessions, messages, tool records, approvals, local diagnostics, logs, and MVP artifacts indefinitely by default, with no session delete, no cross-session memory, no automatic summaries, and no automatic durable memory writes.
 
 # Investigation Plan
 
  - Inventory session data from specs and data model.
  - Classify data by sensitivity and retention need.
- - Define MVP persistence minimum.
- - Identify deletion and export expectations.
- - Document summary and memory features to defer.
+ - Document MVP retained record classes.
+ - Document session delete, cleanup, quota, export/import, summary, and memory features to defer.
 
 # Success Criteria
 
  - MVP persistence scope is defined.
  - Memory is classified as MVP, V1, or later.
- - Delete/inspect controls are defined at a research level.
+ - Session delete, cleanup, quota, and export/import controls are classified as V1 or later.
  - Retention risks are documented.
 
 # Decisions Unlocked
@@ -43,4 +40,3 @@ MVP should persist transcripts and tool records only, with no cross-session memo
 # Estimated Effort
 
 1 to 3 architecture/product days.
-
