@@ -1,6 +1,7 @@
 # ADR-010: Filesystem And Shell Access Defaults
 
-Status: Finalized for MVP file boundaries, shell execution account, and shell network baseline. Shell safety details remain unresolved.
+Status: Finalized for MVP file boundaries, shell execution account, shell
+network baseline, and shell safety policy.
 
 ## Context
 
@@ -18,19 +19,51 @@ For MVP, shell commands run as the current OS user from the selected project roo
 
 Approved MVP shell commands may use normal network access. MVP does not enforce network blocking for shell commands, and approval prompts must disclose that approved commands may access the network.
 
-The file boundary, secret-deny behavior, shell execution account, shell network baseline, symlink boundary behavior, filtered shell environment baseline, destructive-command approval behavior, manual recovery posture, and bounded shell output persistence are finalized for MVP. Detailed redaction implementation remains unresolved.
+The file boundary, secret-deny behavior, shell execution account, shell network
+baseline, symlink boundary behavior, filtered shell environment baseline,
+destructive-command approval behavior, manual recovery posture, and bounded
+shell output persistence are finalized for MVP. Exact shell environment,
+redaction, truncation, destructive classification, and unclassifiable-command
+rules are defined in
+`plans/validation/FINDING-003-shell-security-policy.md`.
 
 For MVP, every file path is canonicalized before boundary checks. Traversal segments and symlinks are resolved before determining whether access is inside the selected project root. Symlinks are allowed only when the final resolved target remains inside the selected project root. Reads and writes through symlinks that resolve outside the selected project root are blocked, even when the symlink itself is inside the repository.
 
 For MVP, likely secret files are blocked for agent reads and writes even when they are inside the selected project root. Secret-deny files have no approval override in MVP. The built-in deny patterns include `.env` files, private keys, token files, credential files, and common cloud or package-manager credential locations. The file browser may show that these files exist, but it must not preview contents.
 
-For MVP, approved shell commands inherit a minimal backend-filtered environment, not the full interactive user shell environment. Safe basics such as `PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `LC_*`, and `TERM` may be kept. Toolchain variables may be kept only when needed for common local build and test workflows. Obvious credentials and secret-bearing variables, including `*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, cloud credentials, GitHub tokens, npm tokens, and provider API keys, are stripped. Approval prompts must disclose that commands run with a filtered environment, and logs must redact known secret values and secret-shaped environment values.
+For MVP, approved shell commands inherit a minimal backend-filtered
+environment, not the full interactive user shell environment. The exact
+always-keep, conditionally-keep, and always-strip environment variable policy
+is defined in `plans/validation/FINDING-003-shell-security-policy.md`.
+Approval prompts must disclose that commands run with a filtered environment,
+and logs must redact known secret values and secret-shaped environment values.
 
-For MVP, obviously destructive shell commands are classified as high-risk and require fresh one-time approval every time, even if the user has granted session allow for ordinary shell commands. Examples include `rm -rf`, recursive deletion, `chmod -R`, `chown -R`, `dd`, disk formatting, force Git cleanup/reset, package-manager uninstall/prune commands, and commands targeting broad paths such as `/`, `$HOME`, or the project root. MVP uses conservative pattern detection and warning, not perfect shell-expression understanding.
+For MVP, obviously destructive shell commands are classified as high-risk and
+require fresh one-time approval every time, even if the user has granted
+session allow for ordinary shell commands. The destructive-command categories,
+non-examples, and unclassifiable command handling are defined in
+`plans/validation/FINDING-003-shell-security-policy.md`. MVP uses conservative
+pattern detection and warning, not perfect shell-expression understanding.
 
 For MVP, there is no automatic rollback for bad approved local actions. The app provides prevention and review through approval prompts, tool logs, changed-file lists, Git diffs, and stop controls. Recovery is manual through Git or user action. Automatic rollback, snapshots, restore points, and undo stacks are post-MVP because arbitrary shell commands, generated files, package installs, and local toolchains are difficult to reverse reliably.
 
-For MVP, shell output persistence is bounded. The app persists command metadata, exit status, timestamps, working directory, approval decision, affected-file summary, and redacted/truncated stdout/stderr summaries. Live terminal output may be visible while a command is running or while the live terminal buffer remains open, and an open drawer may remain temporarily visible after completion in the same app session when labeled live/ephemeral. Live buffers are not retained after navigation away, reload, app close, or session restore. App-owned persisted records remain bounded summaries. If a safe summary cannot be produced, the app persists command metadata and an explicit output-omitted marker instead of raw stdout/stderr. Safe reason labels such as `truncated_by_size`, `redacted_secret_pattern`, and `output_omitted_safe_summary_failed` are allowed, but redacted substrings, sensitive raw byte counts, offsets, hashes, and reconstruction hints are not. Normal OS text selection/copy of visible summaries is acceptable. It does not persist unlimited raw stdout/stderr by default and does not provide dedicated raw-output copy or export controls. Full raw output capture and export are post-MVP because logs can contain secrets and grow quickly.
+For MVP, shell output persistence is bounded. The app persists command
+metadata, exit status, timestamps, working directory, approval decision,
+affected-file summary, and redacted/truncated stdout/stderr summaries. The
+exact byte, line, line-length, metadata, safe-label, and output-omission limits
+are defined in `plans/validation/FINDING-003-shell-security-policy.md`. Live
+terminal output may be visible while a command is running or while the live
+terminal buffer remains open, and an open drawer may remain temporarily visible
+after completion in the same app session when labeled live/ephemeral. Live
+buffers are not retained after navigation away, reload, app close, or session
+restore. App-owned persisted records remain bounded summaries. If a safe
+summary cannot be produced, the app persists command metadata and an explicit
+output-omitted marker instead of raw stdout/stderr. Redacted substrings,
+sensitive raw byte counts, offsets, hashes, and reconstruction hints are not
+persisted. Normal OS text selection/copy of visible summaries is acceptable.
+It does not persist unlimited raw stdout/stderr by default and does not provide
+dedicated raw-output copy or export controls. Full raw output capture and
+export are post-MVP because logs can contain secrets and grow quickly.
 
 For MVP, session allow is available only for matching non-destructive shell commands inside the selected project root or approved project subpath. Session allow never covers destructive shell commands, outside-root paths, secret-deny files, or Git state changes.
 
@@ -82,10 +115,8 @@ Allowing normal network access preserves common test, build, package-manager, an
  - The product must not claim shell network isolation in MVP.
  - Network egress controls must be revisited before remote tools and plugin scripts are safe.
 
-## Follow-Up Questions
-
- - What exact redaction matcher and truncation limits are sufficient for MVP shell output summaries?
-
 ## ADR Recommendation
 
-Resolve before implementation planning because this is core to local trust.
+Implementation planning must include tests for the exact shell policy in
+`plans/validation/FINDING-003-shell-security-policy.md` because this is core to
+local trust.

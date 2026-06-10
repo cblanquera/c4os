@@ -1,77 +1,129 @@
 # Objective
 
-Determine whether OpenCode can serve as the controllable runtime for the desktop workspace without fragile terminal scraping or unsupported internal coupling.
+Determine whether direct OpenCode integration can satisfy the MVP runtime-control gate without UI-only approvals, terminal scraping, post-execution audit, hidden model/provider overrides, or invisible instruction loading.
 
 # Context
 
-The preferred architecture depends on OpenCode as the runtime. Reviews identify this as a make-or-break assumption because the app needs structured events, session control, and pre-execution tool interception.
+The MVP architecture depends on `AI GUI -> OpenCode Runtime -> OpenRouter`. The final readiness review marks this as the primary blocker because the app's trust model requires structured runtime events, pre-execution interception, reliable stop behavior, app-owned session mapping, provider/model control, and instruction-loading observability.
+
+The Tauri/Rust backend is intended to own filesystem access, process supervision, secret storage, approvals, and persistence. OpenCode can remain the execution engine only if protected actions cannot bypass the backend Approval Gateway.
+
+# Related Findings
+
+ - FINDING-001 OpenCode Runtime Control Is An Unproven MVP Gate.
+ - FINDING-002 Backend Approval Gateway Depends On Runtime Cooperation.
+ - FINDING-004 OpenRouter-Only Model Routing Needs Runtime-Level Verification.
+ - FINDING-005 Runtime-Native Instruction Loading Can Contradict AGENTS.md Display-Only Scope.
+ - FINDING-014 What Is The Accepted Runtime Path If Direct OpenCode Fails?
 
 # Questions To Answer
 
- - What stable integration surface does OpenCode expose: library API, JSON RPC, CLI protocol, filesystem state, fork, or other?
- - Can the runtime stream structured model, session, tool-call, and tool-result events?
- - Can file, shell, Git, and MCP tool calls be intercepted before execution?
- - Can the app stop, resume, and recover runtime sessions?
- - Can the app cancel an active model stream and terminate app-supervised child processes without deleting app-owned session records or losing partial assistant output status?
- - How are OpenCode runtime session IDs, logs, or persistence files mapped to app-owned canonical session records?
- - Can multiple runtime instances run safely in parallel?
- - Can provider routing and model metadata be surfaced through the runtime?
- - Can OpenCode config override provider or model routing, and can the app detect or prevent it?
- - Does OpenCode automatically load root or nested `AGENTS.md` or other instruction files, and can that behavior be observed, disabled, or disclosed?
+ - What supported OpenCode integration surface is available for MVP: library API, server protocol, CLI subprocess protocol, filesystem state, fork, or another path?
+ - Can OpenCode emit structured events for sessions, assistant output, model calls, tool proposals, tool results, approvals, denials, errors, and stop/interruption state?
+ - Can file writes, shell commands, and runtime-proposed Git state changes be intercepted before execution?
+ - Can denied or blocked actions be returned to OpenCode as structured denial results without being reported as success or silent failure?
+ - Can OpenCode be launched with app-owned session, project, provider, model, and credential-reference settings that override ambient user config?
+ - Can the runtime effective model and provider path be observed at session start and during active runs?
+ - Can existing OpenCode config override provider, model, tool, permission, instruction, or session behavior without detection?
+ - Can OpenCode stop active model streams and terminate app-supervised child processes while preserving app-owned records and partial assistant output status?
+ - How are OpenCode-native session IDs, logs, and persistence files mapped to app-owned canonical session records?
+ - Does OpenCode automatically load root or nested `AGENTS.md` files or other instruction sources?
+ - If runtime-native instruction loading exists, can it be disabled, observed, or clearly disclosed?
 
-# Hypothesis
+# Assumptions Being Validated
 
-OpenCode can be used for MVP only if it exposes structured events and reliable pre-execution tool interception through a stable interface.
+ - OpenCode can be treated as a subordinate runtime behind the app-owned Approval Gateway.
+ - Direct OpenCode integration can provide structured events without fragile terminal scraping.
+ - Protected local actions can be blocked until the backend approves them.
+ - OpenCode-native config and instruction behavior can be constrained or surfaced enough for MVP honesty.
+ - The app can own canonical session, message, tool, approval, artifact, provider, and model records while treating OpenCode state as adapter metadata.
 
 # Investigation Plan
 
- - Review OpenCode public documentation and source for runtime, server, CLI, event, and permission APIs.
- - Identify supported integration modes and their stability guarantees.
- - Map MVP-required events and controls to available OpenCode surfaces.
- - Define the runtime-reference mapping for app-owned sessions and tool calls.
- - Test stop behavior for active model streaming, partial assistant output, and app-supervised child processes.
- - Verify the runtime effective model matches the app-owned selected OpenRouter model.
- - Run a minimal proof of structured event capture if documentation is insufficient.
- - Document gaps where the app would need scraping, monkey-patching, or a fork.
- - Document any OpenCode-native instruction loading separately from app-owned root `AGENTS.md` display.
- - Test whether invisible runtime-native instruction loading can be disabled or surfaced to the UI.
+ - Review OpenCode documentation and source for stable headless, event, tool, permission, provider, config, stop, and session-control surfaces.
+ - Review Odysseus as an external proof-of-concept reference for an OpenCode-backed self-hosted AI workspace, strictly to identify possible integration patterns and not as a product or architecture template.
+ - Produce a runtime-control matrix covering each MVP-required event, action class, enforcement point, and stop/recovery behavior.
+ - Run minimal throwaway probes only where documentation is insufficient to confirm event ordering, pre-execution interception, denial handling, stop semantics, effective model selection, and instruction-loading behavior.
+ - Identify every path where OpenCode can execute file writes, shell commands, Git state changes, provider calls, or instruction loading outside app-owned control.
+ - Record whether each control is supported, unsupported, unstable, undocumented, or requires a wrapper, proxy, fork, runtime replacement, or MVP scope reduction.
+ - Document evidence with command transcripts, config snippets, observed event payloads, or source references sufficient for architecture review.
+
+# External Proof-Of-Concept References
+
+## Odysseus
+
+Repository: https://github.com/pewdiepie-archdaemon/odysseus
+
+Purpose in this spike: use Odysseus only as a research reference showing that another self-hosted AI workspace has attempted an OpenCode-backed agent integration with local tools.
+
+What it may help validate:
+
+ - Whether OpenCode has been embedded or wrapped by another web/workspace-style product.
+ - What integration seams, tool dispatch patterns, or security boundaries that project used.
+ - Which OpenCode runtime assumptions are worth inspecting first.
+ - Which failure modes are likely when mixing OpenCode, shell, files, MCP, skills, memory, and a web UI.
+
+What it does not prove:
+
+ - It does not prove that OpenCode satisfies this product's pre-execution Approval Gateway requirement.
+ - It does not prove that file writes, shell commands, or Git state changes can be intercepted before execution.
+ - It does not prove that structured events are available without terminal scraping or post-execution inference.
+ - It does not prove that OpenRouter-only routing, credential references, or instruction loading can be constrained for this MVP.
+ - It does not define this product's architecture, user experience, permission model, deployment model, or security posture.
+
+Reason for boundary:
+
+Odysseus describes itself as a self-hosted AI workspace with an agent built on OpenCode, MCP, web, files, shell, skills, and memory. Its threat model frames privileged local access as intentional for trusted/admin users. This is materially different from this MVP, where the app-owned backend Approval Gateway must be authoritative before protected actions execute.
+
+Research handling:
+
+ - Treat Odysseus as an external PoC only.
+ - Do not copy its architecture into this MVP.
+ - Do not use its existence as evidence that FINDING-001 is resolved.
+ - Use it to generate inspection questions and possible probe targets for the OpenCode runtime-control matrix.
+ - If Odysseus contains a concrete pre-execution tool-control mechanism, record that mechanism as evidence to investigate directly against OpenCode, not as inherited proof.
 
 # Success Criteria
 
- - A runtime-control matrix exists for every MVP-required event and control.
- - Pre-execution tool interception is confirmed or ruled out.
- - File writes, shell commands, and Git state changes cannot execute before the app-owned Approval Gateway allows or denies them.
- - Session resume and stop behavior are confirmed or ruled out.
- - Stop cancels active runtime/model streaming and terminates app-supervised child processes while preserving app-owned transcript, partial assistant output status, tool history, approvals, and artifacts.
- - Runtime references can be mapped to app-owned session and tool records without making OpenCode the user-facing source of truth.
- - Provider/model overrides from OpenCode config are detected and prevented, or ruled out.
- - OpenCode-native `AGENTS.md` or instruction-file loading behavior is confirmed or ruled out.
- - Any runtime-native instruction loading is observable and disclosed, or disabled.
- - The team can decide whether OpenCode is viable, needs a fork, or should be replaced.
+ - The runtime-control matrix has explicit pass/fail evidence for all mandatory MVP gates.
+ - File writes, shell commands, and runtime-proposed Git state changes are proven to wait for backend approval before execution, or direct OpenCode is rejected.
+ - Structured runtime events are available without terminal scraping for user-visible activity and app-owned ledger records.
+ - Stop behavior is proven to cancel active runtime/model work, terminate app-supervised child processes, and preserve app-owned records.
+ - Existing OpenCode config cannot silently override app-owned provider/model/tool/instruction behavior, or the override path is detected and blocked.
+ - Runtime-native instruction loading is disabled, observable, or disclosed in a way that does not contradict the MVP `AGENTS.md` display-only boundary.
+ - The team has enough evidence to keep direct OpenCode, require an adapter/proxy/fork, replace the runtime, or reduce MVP scope.
 
-# MVP Gate
+# Deliverables
 
-If reliable pre-execution interception is unavailable for MVP file writes, shell commands, and Git state changes, OpenCode is not viable as the direct MVP runtime. The project must choose one of these paths before continuing into implementation:
+ - Runtime-control matrix with evidence links or excerpts.
+ - OpenCode integration-surface recommendation.
+ - Pre-execution interception and denial-behavior evidence.
+ - Stop/recovery behavior evidence.
+ - App-owned record mapping notes.
+ - Config, provider/model, and instruction-loading behavior notes.
+ - Go/no-go recommendation for direct OpenCode as the MVP runtime.
 
- - Build a wrapper, proxy, or fork that can enforce the Approval Gateway before execution.
- - Replace the runtime strategy.
- - Reduce the MVP to exclude the affected executable capability.
+# ADRs Impacted
 
-UI-only approval prompts, post-execution audit logs, terminal scraping, or best-effort observation do not satisfy this gate.
-
-If OpenCode invisibly loads root or nested instruction files and the app cannot observe, disclose, or disable that behavior, OpenCode is not viable as the direct MVP runtime. Invisible instruction injection contradicts the accepted app-owned root `AGENTS.md` display-only boundary.
-
-If OpenCode config can override provider or model routing and the app cannot detect or prevent that override, OpenCode is not viable as the direct MVP runtime. The app must not show one selected OpenRouter model while the runtime uses another provider or model.
-
-If OpenCode cannot reliably cancel an active run and terminate app-supervised child processes while preserving app-owned session records and partial assistant output status, OpenCode is not viable as the direct MVP runtime until an adapter, wrapper, fork, runtime replacement, or scope reduction resolves stop behavior.
+ - ADR-003 Agent Runtime Strategy.
+ - ADR-004 Policy Enforcement Authority.
+ - ADR-008 Unified Tool Invocation And Ledger.
+ - ADR-009 Permission And Approval Model.
+ - ADR-019 Model Provider Strategy.
 
 # Decisions Unlocked
 
- - ADR-003: Agent Runtime Strategy.
- - ADR-004: Policy Enforcement Authority.
- - ADR-008: Unified Tool Invocation And Ledger.
- - MVP runtime feasibility.
+ - Whether direct OpenCode is viable for MVP.
+ - Whether the backend Approval Gateway can remain authoritative with OpenCode.
+ - Whether an adapter, proxy, fork, runtime replacement, or MVP scope reduction is required.
+ - Whether Phase 1 implementation planning can begin.
 
-# Estimated Effort
+# Failure Conditions
 
-3 to 5 engineering days.
+ - Any protected local action can execute before backend approval.
+ - Required runtime activity is visible only through terminal scraping, log tailing, or post-execution inference.
+ - Denied or blocked actions cannot be represented as structured runtime results.
+ - Stop cannot reliably cancel active work or leaves app-supervised child processes running.
+ - Existing OpenCode config can silently change provider, model, tool, permission, session, or instruction behavior.
+ - Runtime-native instruction loading is invisible and cannot be disabled or disclosed.
+ - Evidence is insufficient to distinguish supported integration from unsupported coupling.

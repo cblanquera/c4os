@@ -1,0 +1,12 @@
+{
+  "name": "c4os",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.17.1",
+    "opencode-ai": "^1.17.1"
+  }
+}

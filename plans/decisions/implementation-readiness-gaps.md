@@ -1,6 +1,13 @@
 # Implementation Readiness Gaps
 
-This document lists information still missing before implementation should begin. It consolidates unresolved items from the specifications, ADRs, architecture review, and ADR architecture review report.
+This historical document lists information that was missing before
+implementation could begin. It consolidates unresolved items from the
+specifications, ADRs, architecture review, and ADR architecture review report.
+
+Status note, 2026-06-10: this file is superseded by
+`plans/decisions/finalized-decisions.md`,
+`plans/decisions/unresolved-decisions.md`, and the validation artifacts under
+`plans/validation/`. Do not use this file as the current readiness source.
 
 ## Hard Blockers
 
@@ -302,4 +309,3 @@ Implementation should not begin if any of these remain true:
  - Plugin scripts or hooks are enabled before sandboxing and source integrity exist.
  - Privacy and telemetry are deferred beyond provider and plugin decisions.
  - Standards compatibility is claimed without conformance levels.
-

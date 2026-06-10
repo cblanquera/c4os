@@ -1,68 +1,103 @@
 # Unresolved Decisions
 
-This document summarizes ADR decisions that remain open and must be resolved before detailed implementation planning.
+This document summarizes what remains unresolved after the Phase 0 validation
+loop on 2026-06-10.
 
-## ADR-003: OpenCode Runtime Viability
+Current readiness: READY FOR FREEZE-AND-PLAN.
 
-Summary: OpenCode is the preferred runtime target, but viability is not proven.
+Implementation planning may begin. Public release readiness is not claimed.
+The remaining work is either implementation-time validation, release/platform
+validation, or low-severity documentation cleanup.
 
-Status: Unresolved.
+`plans/reviews/finding-resolution.md` was requested as review input but is not
+present in this workspace.
 
-Rationale: MVP depends on structured events, session control, reliable pre-execution tool interception, and visible instruction behavior. If OpenCode cannot provide pre-execution interception for MVP file writes, shell commands, and Git state changes, it is not viable as the direct MVP runtime. If OpenCode invisibly loads root or nested instruction files and the app cannot observe, disclose, or disable that behavior, it is also not viable as the direct MVP runtime. UI-only approvals, post-execution audit logs, terminal scraping, best-effort observation, and invisible instruction injection do not satisfy the accepted MVP gates.
+## No Remaining Pre-Implementation Blockers
 
-Affected documents:
+The previous BLOCKER and HIGH findings are no longer unresolved
+pre-implementation gates:
 
- - `plans/adr/003-agent-runtime-strategy.md`
- - `plans/specs/architecture-specification.md`
- - `plans/reviews/architecture-review.md`
- - `plans/spikes/SPIKE-001-opencode-runtime-control.md`
+- FINDING-001 is resolved by selecting the hardened OpenCode adapter with
+  mandatory instruction/config disclosure. Direct, unconstrained OpenCode is
+  not the MVP path.
+- FINDING-002 is resolved for planning by live pre-execution interception and
+  structured denial evidence for file writes, shell commands, and
+  runtime-proposed Git state changes.
+- FINDING-003 is resolved for planning by the concrete shell security policy.
+  Implementation must still add code-level tests for the required rules.
+- FINDING-004 is resolved by runtime OpenRouter routing evidence plus a scope
+  change: strict hidden-context exclusion is replaced by disclosed bounded
+  context-source categories.
+- FINDING-005 is resolved by the instruction-loading disclosure decision.
+  OpenCode-backed sessions must not claim invisible display-only instruction
+  behavior.
+- FINDING-014 is resolved by the accepted fallback decision tree.
+- FINDING-015 is resolved by the macOS-first MVP platform matrix.
+- FINDING-011 is resolved by separating Phase 0 architecture gates from product
+  QA acceptance.
 
-Next action: Complete the OpenCode runtime control spike and produce a runtime-control matrix. If the gate fails, choose a wrapper, proxy, fork, runtime replacement, or MVP scope reduction before Phase 1.
+## Remaining Implementation-Time Validation
 
-## ADR-005: Post-MVP Standards Conformance Levels
+These items are required during implementation but do not block starting the
+implementation phase:
 
-Summary: MVP compatibility claims are finalized narrowly, but broader standards conformance levels are not defined.
+- Adapter tests for structured events, approval routing, denial mapping, stop
+  behavior, app-owned record mapping, and runtime-reference persistence.
+- Instruction-source inventory and disclosure tests, including `/config`
+  redaction and block-on-undisclosable-source behavior.
+- Shell-policy tests for environment filtering, redaction, truncation,
+  destructive classification, unclassifiable-command handling, and output
+  omission on redaction failure.
+- OpenRouter credential-reference tests that verify active sessions keep their
+  starting keychain reference and block update/revoke while running.
 
-Status: Unresolved.
+## Remaining Release Or Milestone Validation
 
-Rationale: MVP may claim only OpenRouter-backed model access, local Git project support, root `AGENTS.md` display, and app-owned text-like artifact records. OpenCode runtime settings are app-owned adapter plumbing only and do not imply config compatibility. Broader support for AGENTS.md, SKILL.md, MCP, Codex plugins, OpenCode config, import/export, and round-trip behavior can mean display, parse, execute, import, export, or round-trip, and needs an explicit matrix.
+These items require a built app or prototype:
 
-Affected documents:
+- FINDING-009 Tauri UI validation on the mandatory launch target.
+- Text-like artifact preview validation in the real Tauri shell.
+- End-to-end product QA for project open, session lifecycle, approvals, shell
+  execution, file writes, Git diffs, credential setup, restart persistence, and
+  instruction-source disclosure.
+- Windows 11 x64 compatibility validation before public MVP release.
 
- - `plans/adr/005-standards-first-interoperability.md`
- - `plans/research/industry-standards-research.md`
- - `plans/spikes/SPIKE-006-standards-conformance-matrix.md`
+## Remaining Low-Severity Documentation Cleanup
 
-Next action: Create the standards conformance matrix before making broader compatibility claims.
+### FINDING-012: Preplan Brief Still Says To Create Plans Even Though Corpus Exists
 
-## ADR-010: Remaining Shell Safety Details
+Status: unresolved, low severity.
 
-Summary: Project-root file boundaries, secret-deny behavior, symlink boundary behavior, current-user shell execution, normal network access, filtered shell environment behavior, destructive-command approval behavior, manual recovery posture, and bounded shell output persistence are finalized for MVP, but shell output redaction limits remain unresolved.
+Resolution path: mark `plans/preplan-brief.md` historical or add a note that
+later MVP documents supersede it where they conflict.
 
-Status: Unresolved.
+### FINDING-013: ADR Numbering And Rollup Naming Are Hard To Follow
 
-Rationale: Shell execution remains high-risk when commands run as the current OS user and shell output redaction is weak.
+Status: partially resolved, low severity.
 
-Affected documents:
+Resolution path: add standalone ADR files or update ADR indexes/statuses for
+rollup-only decisions if the corpus needs cleaner navigation.
 
- - `plans/adr/010-filesystem-and-shell-access-defaults.md`
- - `plans/specs/security-specification.md`
- - `plans/spikes/SPIKE-003-local-execution-sandboxing.md`
+## Current Readiness Summary
 
-Next action: Complete the local execution sandboxing spike and define detailed redaction matchers and truncation limits for shell output summaries.
+Remaining BLOCKER: none.
 
-## ADR-014: Plugin Format Compatibility
+Remaining HIGH: none as pre-implementation gates.
 
-Summary: Codex-compatible plugin layout is the preferred compatibility target, but stability and conformance are unresolved.
+Remaining MEDIUM before implementation: none.
 
-Status: Unresolved.
+Remaining implementation/release gates:
 
-Rationale: Codex plugin fields may drift or be implementation-specific. Plugin execution is excluded from MVP, but future compatibility still needs a clear matrix.
+- FINDING-009 app-build UI validation.
+- Code-level adapter, shell-policy, credential, and disclosure tests.
+- Product QA journeys after implementation.
 
-Affected documents:
+Remaining low/documentation cleanup:
 
- - `plans/adr/014-plugin-system-compatibility.md`
- - `plans/specs/plugin-system-specification.md`
- - `plans/spikes/SPIKE-005-plugin-format-and-trust.md`
+- FINDING-012.
+- FINDING-013.
 
-Next action: Define plugin parse/display/execute conformance and identify stable fields.
+## Next Step
+
+Proceed to freeze-and-plan. The implementation backlog should explicitly carry
+the deferred validation items as engineering tasks and release gates.

@@ -1,6 +1,7 @@
 # ADR-002: Desktop Application Shell
 
-Status: Finalized for MVP. Post-MVP Chromium strategy remains deferred.
+Status: Finalized for MVP with macOS-first platform matrix. Post-MVP Chromium
+strategy remains deferred.
 
 ## Context
 
@@ -15,6 +16,17 @@ Accepted MVP scope excludes browser automation, browser panels, screenshots, DOM
 Use Tauri for MVP. Tauri WebView is sufficient for the MVP app UI and text-like artifact previews unless Phase 0 proves it cannot support basic app rendering.
 
 Chromium, Electron, or an external controlled Chromium surface are post-MVP options for browser-heavy or rich-preview features.
+
+MVP platform matrix:
+
+ - Mandatory launch validation: macOS Apple Silicon on macOS 13 Ventura or
+   newer.
+ - Required before public MVP release: Windows 11 x64 with WebView2 Evergreen.
+ - Optional before public MVP release: macOS Intel on macOS 13 Ventura or
+   newer, when hardware is available.
+ - Deferred: Linux x64 until post-MVP or explicit beta scope because WebKitGTK
+   and distro packaging variability add support burden before the core desktop
+   control-center thesis is validated.
 
 ## Alternatives Considered
 
@@ -41,15 +53,19 @@ Native platform stacks provide strong OS integration, but increase cross-platfor
 ## Consequences
 
  - Backend service boundaries should remain portable enough to avoid trapping the product in Tauri-specific assumptions.
- - MVP UI and text-like artifact preview rendering must be validated early.
+ - MVP UI and text-like artifact preview rendering must be validated on macOS
+   Apple Silicon before implementation is considered ready for release
+   planning.
+ - Windows 11 x64 compatibility validation must pass before public MVP
+   release.
  - Browser and rich artifact rendering are post-MVP decision points.
  - Tauri capabilities should be used for frontend/backend boundary control if Tauri remains selected.
 
 ## Follow-Up Questions
 
- - Which launch platforms are required?
  - Can OpenCode be controlled cleanly from a Rust backend?
- - Does Tauri WebView support the basic app UI and text-like artifact previews on launch platforms?
+ - Does Tauri WebView support the basic app UI and text-like artifact previews
+   on macOS Apple Silicon once an app build exists?
  - Which post-MVP browser or rich-preview features would require Chromium consistency?
 
 ## ADR Recommendation

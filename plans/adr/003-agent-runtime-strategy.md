@@ -10,7 +10,15 @@ The review identifies this as a make-or-break assumption. A CLI/TUI-oriented run
 
 ## Decision
 
-Use OpenCode Runtime as the first runtime target through a narrow adapter, but do not treat the decision as final until headless control, structured events, and pre-execution Approval Gateway hooks are proven.
+Use OpenCode Runtime as the first runtime target through a narrow adapter, but
+do not use unconstrained direct OpenCode as the MVP runtime path.
+
+Phase 0 validation selected a hardened OpenCode adapter fallback after strict
+runtime config isolation failed. The MVP adapter must launch OpenCode with
+app-owned runtime settings, isolated local runtime directories, and mandatory
+instruction/config disclosure before session start. OpenCode-native project
+instructions may be used only when the app has enumerated, disclosed, and
+persisted the effective instruction sources in app-owned session records.
 
 MVP stop behavior requires canceling the active runtime/model stream and terminating app-supervised child processes while preserving app-owned transcript, tool history, approvals, and artifacts. Partial assistant output is persisted as stopped or interrupted and is not auto-regenerated, auto-deleted, or silently treated as complete. Stop is not session deletion and does not include partial-response editing, branch/regenerate controls, automatic continuation, pause/resume stream, background continuation, partial-response regeneration controls, or killing arbitrary external processes.
 
@@ -45,6 +53,10 @@ A runtime abstraction layer reduces lock-in but adds upfront architecture and ca
  - If reliable pre-execution interception for file writes, shell commands, and Git state changes is unavailable, OpenCode is not viable as the direct MVP runtime.
  - If OpenCode cannot cancel active runs and terminate app-supervised child processes without deleting app-owned session history or losing partial assistant output state, OpenCode is not viable as the direct MVP runtime.
  - If OpenCode invisibly loads root or nested instruction files and the app cannot observe, disclose, or disable that behavior, OpenCode is not viable as the direct MVP runtime.
+ - If OpenCode loads root or nested instruction files, the MVP may proceed only
+   through the hardened adapter fallback: preflight instruction inventory,
+   effective config capture, user-visible disclosure, and app-owned
+   context-source persistence.
  - UI-only approval prompts, post-execution audit logs, terminal scraping, or best-effort observation do not satisfy the MVP security model.
  - A wrapper, proxy, fork, runtime replacement, or MVP scope reduction must be chosen before Phase 1 if the direct OpenCode path fails this gate.
 
@@ -55,9 +67,13 @@ A runtime abstraction layer reduces lock-in but adds upfront architecture and ca
  - Can OpenCode stream structured events without terminal scraping?
  - Can OpenCode cancel active model streams and terminate app-supervised child processes while preserving app-owned session records and partial assistant output status?
  - How does OpenCode persist sessions, and how are runtime references mapped to app-owned session records?
- - Does OpenCode automatically load root or nested instruction files, and can the app observe, disclose, or disable that behavior?
+ - Which additional OpenCode instruction-bearing config fields must the
+   hardened adapter disclose before session start?
  - Can multiple runtime instances run safely in parallel?
 
 ## ADR Recommendation
 
-Keep this ADR open until a runtime-control matrix proves or rejects OpenCode as a controllable headless runtime with reliable pre-execution interception for MVP-risky actions.
+Keep this ADR open until the remaining pre-implementation gates pass. The
+runtime-control evidence no longer supports unconstrained direct OpenCode, but
+it does support a hardened OpenCode adapter with mandatory instruction/config
+disclosure as the selected MVP fallback path.

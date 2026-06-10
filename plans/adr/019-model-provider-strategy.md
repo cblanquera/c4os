@@ -24,7 +24,24 @@ App-owned provider and model settings are authoritative for MVP. The runtime eff
 
 Model metadata is best effort in MVP. The app may show OpenRouter or runtime-provided context limits, tool support, streaming support, pricing, route, source, and freshness timestamp when available. Stale, missing, or unknown pricing, capability, or route metadata is labeled but does not block session start when provider credentials and the selected model route are viable.
 
-MVP model context sent through OpenRouter is limited to the active session transcript, selected model/routing metadata, user-approved or policy-allowed tool results and summaries, and file contents explicitly read by the runtime inside the selected project root. Shell tool context uses only the persisted bounded redacted/truncated summary, explicit output-omitted marker, and safe output summary reason labels. Whole-repo indexing, hidden background file ingestion, app-owned automatic root `AGENTS.md` injection, implicit artifact ingestion, secret-deny file contents, live raw terminal buffers, omitted raw shell output, redacted substrings, sensitive raw byte counts, offsets, hashes, and reconstruction metadata are excluded.
+MVP model context sent through OpenRouter is bounded by disclosed
+context-source categories rather than raw prompt capture. For OpenCode-backed
+sessions, the app records selected model/routing metadata, active transcript
+summary, approved or policy-allowed tool result summaries, explicitly read file
+sources, runtime system/title-generation categories, and disclosed
+runtime-native instruction sources such as root or nested `AGENTS.md` when
+OpenCode loads them.
+
+The app does not add its own hidden root `AGENTS.md` injection layer. OpenCode
+runtime-native instruction loading is allowed only under the hardened adapter
+policy: preflight inventory, user-visible disclosure, effective config capture,
+and app-owned context-source persistence. Shell tool context uses only the
+persisted bounded redacted/truncated summary, explicit output-omitted marker,
+and safe output summary reason labels. Whole-repo indexing, hidden background
+file ingestion by the app, implicit artifact ingestion, secret-deny file
+contents, live raw terminal buffers, omitted raw shell output, redacted
+substrings, sensitive raw byte counts, offsets, hashes, and reconstruction
+metadata are excluded.
 
 MVP uses standing disclosure rather than per-call context approval. Provider setup discloses that prompts and bounded context leave through OpenRouter, and session activity records bounded context-source summaries for model calls. Raw prompt export, token-by-token context inspection, per-call approval modals, and editable context composers are post-MVP.
 
@@ -57,7 +74,9 @@ Direct providers reduce intermediary lock-in but increase credential, routing, p
  - SQLite stores only provider readiness state or keychain references, never raw OpenRouter keys.
  - Session start must capture a stable provider credential reference.
  - The Runtime Adapter must verify or enforce that the effective model matches the app-owned selected OpenRouter model.
- - The Runtime Adapter must make OpenRouter-bound context auditable enough to confirm the MVP context boundary.
+ - The Runtime Adapter must make OpenRouter-bound context auditable through
+   bounded source-category summaries and explicit disclosure of runtime-native
+   instruction sources.
  - Model-call records need context-source summaries, not full raw prompt payload storage.
  - Users need visibility into data leaving the machine.
  - Basic model cost and routing information should be surfaced when available and labeled with source or freshness.
@@ -68,7 +87,8 @@ Direct providers reduce intermediary lock-in but increase credential, routing, p
 
  - What OpenRouter routing and cost information is available through OpenCode?
  - Can OpenCode config override provider or model routing, and can the app detect or prevent it?
- - Can OpenCode expose or constrain model-call context enough to verify the MVP boundary?
+ - Which OpenCode runtime-native context categories must be disclosed for every
+   OpenRouter-routed model call?
  - Can OpenCode expose context-source categories without requiring raw prompt capture?
  - What data-retention disclosures are required for OpenRouter-routed model calls?
  - What provider/network errors should be normalized for retry UX?
