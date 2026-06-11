@@ -33,4 +33,4 @@
 | item-029 | implementation | verified | codex | Project-scoped session selection | Selection ownership tests and full local gates pass. |
 | item-030 | implementation | verified | codex | Session rename pin and archive foundation | Migration, metadata APIs, Rust tests, JS tests, web build, and native Tauri build pass. |
 | item-031 | implementation | verified | codex | Project selector state foundation | Selector tests, Rust tests, JS tests, web build, and native Tauri build pass. |
-| item-032 | planning | blocked | codex | V1 worktree lifecycle scope | Missing cleanup/product/architecture decisions block safe worktree implementation. |
+| item-032 | planning | blocked | codex | V1 worktree lifecycle scope | Missing cleanup/product/architecture decisions block safe worktree implementation; later V1 items also need pre-implementation decisions. |
