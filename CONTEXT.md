@@ -1,6 +1,13 @@
 # C4OS
 
-C4OS is a coding-first desktop AI workspace being planned around a narrow MVP validation loop before expanding into broader agent-assisted workflows.
+C4OS is a coding-first desktop AI workspace centered on a narrow MVP validation
+loop before expanding into broader agent-assisted workflows.
+
+Product scope, architecture intent, implementation sequencing, active progress,
+and verification evidence now live under `.agents/`. Use
+`.agents/specs/c4os-mvp/` for compact durable records, `.agents/progress/` for
+active execution state, and `.agents/archive/planning-corpus/` for detailed
+historical planning context.
 
 ## Language
 
