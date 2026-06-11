@@ -327,6 +327,25 @@ mod tests {
     }
 
     #[test]
+    fn registering_same_git_project_is_idempotent() {
+        let directory = tempdir().expect("tempdir");
+        init_git_repo(directory.path());
+        let store = AppStore::open_in_memory().expect("store opens");
+        let service = ProjectService::new(&store);
+
+        let first = service
+            .register_git_project(directory.path())
+            .expect("first registration");
+        let second = service
+            .register_git_project(directory.path())
+            .expect("second registration");
+        let projects = store.list_projects().expect("projects");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(projects.len(), 1);
+    }
+
+    #[test]
     fn rejects_non_git_directory() {
         let directory = tempdir().expect("tempdir");
         let store = AppStore::open_in_memory().expect("store opens");

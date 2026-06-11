@@ -178,6 +178,12 @@ impl AppStore {
                 updated_at
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                root_path = excluded.root_path,
+                default_model = excluded.default_model,
+                default_agent_ref = excluded.default_agent_ref,
+                updated_at = excluded.updated_at
             ",
             params![
                 project.id,

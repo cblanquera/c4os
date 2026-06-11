@@ -68,6 +68,8 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
   });
   assert.deepEqual(status.session, {
     active: false,
+    id: null,
+    title: null,
     runtimeState: 'stopped',
     runtimeStates: [
       'running',
@@ -79,6 +81,7 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
     transcriptAppendOnly: true,
     canStartNewRun: true,
     failureDisplay: null,
+    messages: [],
   });
   assert.deepEqual(status.approvals, {
     pendingCount: 0,
@@ -118,6 +121,84 @@ test('UI command client can invoke the backend boundary', async () => {
   const status = await client.getAppStatus();
 
   assert.equal(status.backendReady, true);
+});
+
+test('backend registry supports the MVP first-run workflow', async () => {
+  const registry = createBackendCommandRegistry();
+  const client = createAppCommandClient({ registry });
+
+  const provider = await client.configureOpenRouter({
+    apiKey: 'sk-or-valid-test-key',
+    selectedModel: 'openai/gpt-4.1',
+  });
+  const project = await client.registerProject({
+    rootPath: '/tmp/c4os-test-project',
+  });
+  const session = await client.submitPrompt({
+    prompt: 'Summarize this repository.',
+  });
+  const status = await client.getAppStatus();
+
+  assert.equal(provider.ready, true);
+  assert.equal(provider.selectedModel, 'openai/gpt-4.1');
+  assert.equal(project.active, true);
+  assert.equal(project.rootPath, '/tmp/c4os-test-project');
+  assert.equal(session.messages[0].content, 'Summarize this repository.');
+  assert.equal(status.provider.ready, true);
+  assert.equal(status.project.active, true);
+  assert.equal(status.session.active, false);
+  assert.equal(status.session.runtimeState, 'complete');
+  assert.equal(status.session.failureDisplay, null);
+  assert.match(status.session.messages[1].content, /desktop build runs OpenCode/);
+});
+
+test('first-run workflow fails closed without provider and project setup', async () => {
+  const registry = createBackendCommandRegistry();
+  const client = createAppCommandClient({ registry });
+
+  await assert.rejects(
+    () => client.configureOpenRouter({ apiKey: '', selectedModel: 'openai/gpt-4.1' }),
+    /OpenRouter key is required/,
+  );
+  await assert.rejects(
+    () => client.submitPrompt({ prompt: 'Try without setup.' }),
+    /Configure OpenRouter before starting a session/,
+  );
+});
+
+test('UI command client forwards commands through Tauri invoke when available', async () => {
+  const calls = [];
+  const client = createAppCommandClient({
+    invoke(commandName, payload) {
+      calls.push({ commandName, payload });
+
+      if (commandName === BACKEND_COMMANDS.getAppStatus) {
+        return Promise.resolve({ backendReady: true });
+      }
+
+      return Promise.resolve({ ok: true });
+    },
+  });
+
+  await client.configureOpenRouter({
+    apiKey: 'sk-or-valid-test-key',
+    selectedModel: 'openai/gpt-4.1',
+  });
+  await client.getAppStatus();
+
+  assert.deepEqual(calls, [
+    {
+      commandName: BACKEND_COMMANDS.configureOpenRouter,
+      payload: {
+        apiKey: 'sk-or-valid-test-key',
+        selectedModel: 'openai/gpt-4.1',
+      },
+    },
+    {
+      commandName: BACKEND_COMMANDS.getAppStatus,
+      payload: {},
+    },
+  ]);
 });
 
 test('unknown backend commands fail closed', async () => {

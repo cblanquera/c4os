@@ -10,7 +10,12 @@ Before implementation work:
 2. Read `plans/AGENTS.md` before editing anything under `plans/` or using planning documents to drive implementation.
 3. Read `plans/mvp/mvp-freeze.md`, the current implementation plan, the current sprint or task document, and relevant acceptance criteria.
 4. Do not silently promote future-scope features into MVP.
-5. Keep progress, blockers, and verification evidence in the relevant implementation, sprint, or task document.
+5. Use `.agents/specs/` for durable AI-readable planning records and
+   `.agents/progress/` for active execution state, item packets, logs, outputs,
+   blockers, and verification evidence.
+6. Do not add new updates to `.task-bank/`; it has been ported to `.agents/`
+   and is retained only as a deprecated historical source until deletion is
+   explicitly confirmed.
 
 ## Sprint Implementation Loops
 
