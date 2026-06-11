@@ -135,9 +135,10 @@ impl CodingRuntimeRunner for OpenCodeJsonRunner {
         ingest_opencode_json_events(app_store, &request.session_id, &output.stdout)?;
 
         if !output.status_success {
-            return Err(RuntimePromptError::ExecutionFailed(
-                bounded_process_error(&output.stderr, &output.stdout),
-            ));
+            return Err(RuntimePromptError::ExecutionFailed(bounded_process_error(
+                &output.stderr,
+                &output.stdout,
+            )));
         }
 
         let assistant_text = assistant_text_from_json_events(&output.stdout);
@@ -505,7 +506,9 @@ fn bounded_process_error(stderr: &[u8], stdout: &[u8]) -> String {
     }
 
     if let Some(summary) = last_json_event_summary(stdout) {
-        return format!("OpenCode exited before returning assistant output. Last event: {summary}.");
+        return format!(
+            "OpenCode exited before returning assistant output. Last event: {summary}."
+        );
     }
 
     let stdout = String::from_utf8_lossy(stdout);
@@ -582,10 +585,8 @@ fn bounded_json_event(event: &Value) -> String {
 }
 
 fn last_json_event_summary(stdout: &[u8]) -> Option<String> {
-    json_lines(stdout)
-        .into_iter()
-        .rev()
-        .find_map(|event| match event.get("type").and_then(Value::as_str)? {
+    json_lines(stdout).into_iter().rev().find_map(|event| {
+        match event.get("type").and_then(Value::as_str)? {
             "tool_use" => {
                 let tool = event.pointer("/part/tool").and_then(Value::as_str)?;
                 let status = event
@@ -597,7 +598,8 @@ fn last_json_event_summary(stdout: &[u8]) -> Option<String> {
             }
             "step_start" => Some("step started".into()),
             event_type => Some(event_type.replace('_', " ")),
-        })
+        }
+    })
 }
 
 #[cfg(test)]
@@ -662,10 +664,7 @@ mod tests {
 
     #[test]
     fn openrouter_config_uses_selected_model_as_model_key() {
-        let config = openrouter_runtime_config(
-            "openrouter/openai/gpt-4.1",
-            "openai/gpt-4.1",
-        );
+        let config = openrouter_runtime_config("openrouter/openai/gpt-4.1", "openai/gpt-4.1");
 
         assert_eq!(
             config
@@ -677,17 +676,32 @@ mod tests {
 
     #[test]
     fn openrouter_config_allows_passive_tools_and_denies_mutation_tools() {
-        let config = openrouter_runtime_config(
-            "openrouter/openai/gpt-4.1",
-            "openai/gpt-4.1",
-        );
+        let config = openrouter_runtime_config("openrouter/openai/gpt-4.1", "openai/gpt-4.1");
 
-        assert_eq!(config.pointer("/permission/read").and_then(Value::as_str), Some("allow"));
-        assert_eq!(config.pointer("/permission/list").and_then(Value::as_str), Some("allow"));
-        assert_eq!(config.pointer("/permission/grep").and_then(Value::as_str), Some("allow"));
-        assert_eq!(config.pointer("/permission/glob").and_then(Value::as_str), Some("allow"));
-        assert_eq!(config.pointer("/permission/bash").and_then(Value::as_str), Some("deny"));
-        assert_eq!(config.pointer("/permission/edit").and_then(Value::as_str), Some("deny"));
+        assert_eq!(
+            config.pointer("/permission/read").and_then(Value::as_str),
+            Some("allow")
+        );
+        assert_eq!(
+            config.pointer("/permission/list").and_then(Value::as_str),
+            Some("allow")
+        );
+        assert_eq!(
+            config.pointer("/permission/grep").and_then(Value::as_str),
+            Some("allow")
+        );
+        assert_eq!(
+            config.pointer("/permission/glob").and_then(Value::as_str),
+            Some("allow")
+        );
+        assert_eq!(
+            config.pointer("/permission/bash").and_then(Value::as_str),
+            Some("deny")
+        );
+        assert_eq!(
+            config.pointer("/permission/edit").and_then(Value::as_str),
+            Some("deny")
+        );
     }
 
     #[test]
@@ -718,7 +732,9 @@ mod tests {
             },
         );
 
-        assert!(matches!(result, Err(RuntimePromptError::ExecutionFailed(message)) if message.contains("timed out")));
+        assert!(
+            matches!(result, Err(RuntimePromptError::ExecutionFailed(message)) if message.contains("timed out"))
+        );
     }
 
     #[test]

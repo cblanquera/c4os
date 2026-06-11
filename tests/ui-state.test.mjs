@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   canSubmitPrompt,
   errorMessage,
+  skillCapabilityLabel,
+  mcpCapabilityLabel,
   sessionActivityMessage,
 } from '../src/ui/state.js';
 
@@ -38,5 +40,32 @@ test('sessionActivityMessage explains active backend runs after rerender', () =>
       session: { active: true, runtimeState: 'running' },
     }, null),
     'OpenCode is running through OpenRouter. Waiting for a response...',
+  );
+});
+
+test('skillCapabilityLabel reports explicit-only Agent Skills support', () => {
+  assert.equal(
+    skillCapabilityLabel({
+      skills: {
+        supportTier: 'explicit_discovery_and_invocation_only',
+        autoInvocationAvailable: false,
+        scriptExecutionAvailable: false,
+      },
+    }),
+    'Explicit skills only',
+  );
+});
+
+test('mcpCapabilityLabel reports local stdio explicit approval support', () => {
+  assert.equal(
+    mcpCapabilityLabel({
+      mcp: {
+        supportTier: 'local_stdio_explicit_approval_only',
+        localStdioAvailable: true,
+        remoteAvailable: false,
+        autoStartFromProjectFiles: false,
+      },
+    }),
+    'Local MCP approval only',
   );
 });

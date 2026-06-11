@@ -70,6 +70,24 @@ pub struct SessionMetadataRecord {
     pub archived: bool,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct DeletedSessionRecord {
+    pub session_id: String,
+    pub project_id: String,
+    pub fallback_session_id: Option<String>,
+    pub artifact_paths: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ArchivedSessionDeleteError {
+    MissingSession,
+    NotArchived,
+    Pinned,
+    ActiveSession,
+    LatestSession,
+    StoreFailed(String),
+}
+
 pub struct NewProject<'a> {
     pub id: &'a str,
     pub name: &'a str,
@@ -646,6 +664,186 @@ impl AppStore {
             .optional()
     }
 
+    pub fn delete_archived_session(
+        &self,
+        session_id: &str,
+    ) -> Result<DeletedSessionRecord, ArchivedSessionDeleteError> {
+        let session = self
+            .connection
+            .query_row(
+                "
+                SELECT id, project_id, status, pinned, archived
+                FROM sessions
+                WHERE id = ?1
+                ",
+                [session_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)? == 1,
+                        row.get::<_, i64>(4)? == 1,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(delete_store_failed)?
+            .ok_or(ArchivedSessionDeleteError::MissingSession)?;
+        let (_, project_id, status, pinned, archived) = session;
+
+        if !archived {
+            return Err(ArchivedSessionDeleteError::NotArchived);
+        }
+
+        if pinned {
+            return Err(ArchivedSessionDeleteError::Pinned);
+        }
+
+        if matches!(status.as_str(), "running" | "waiting_for_approval") {
+            return Err(ArchivedSessionDeleteError::ActiveSession);
+        }
+
+        let latest_session_id = self
+            .latest_session_for_project(&project_id)
+            .map_err(delete_store_failed)?
+            .map(|session| session.id);
+
+        if latest_session_id.as_deref() == Some(session_id) {
+            return Err(ArchivedSessionDeleteError::LatestSession);
+        }
+
+        let artifact_paths = self
+            .session_artifact_paths(session_id)
+            .map_err(delete_store_failed)?;
+
+        self.connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(delete_store_failed)?;
+        let result = self.delete_archived_session_rows(session_id);
+
+        match result {
+            Ok(()) => self
+                .connection
+                .execute_batch("COMMIT")
+                .map_err(delete_store_failed)?,
+            Err(error) => {
+                let _ = self.connection.execute_batch("ROLLBACK");
+
+                return Err(error);
+            }
+        }
+
+        let fallback_session_id = self
+            .latest_session_for_project(&project_id)
+            .map_err(delete_store_failed)?
+            .map(|session| session.id);
+
+        Ok(DeletedSessionRecord {
+            session_id: session_id.into(),
+            project_id,
+            fallback_session_id,
+            artifact_paths,
+        })
+    }
+
+    fn delete_archived_session_rows(
+        &self,
+        session_id: &str,
+    ) -> Result<(), ArchivedSessionDeleteError> {
+        self.connection
+            .execute(
+                "
+                DELETE FROM approvals
+                WHERE tool_call_id IN (
+                    SELECT id FROM tool_calls WHERE session_id = ?1
+                )
+                ",
+                [session_id],
+            )
+            .map_err(delete_store_failed)?;
+        self.connection
+            .execute(
+                "
+                DELETE FROM artifacts
+                WHERE session_id = ?1
+                    OR tool_call_id IN (
+                        SELECT id FROM tool_calls WHERE session_id = ?1
+                    )
+                ",
+                [session_id],
+            )
+            .map_err(delete_store_failed)?;
+        self.connection
+            .execute(
+                "DELETE FROM adapter_refs WHERE session_id = ?1",
+                [session_id],
+            )
+            .map_err(delete_store_failed)?;
+        self.connection
+            .execute("DELETE FROM tool_calls WHERE session_id = ?1", [session_id])
+            .map_err(delete_store_failed)?;
+        self.connection
+            .execute_batch("DROP TRIGGER messages_append_only_delete")
+            .map_err(delete_store_failed)?;
+        let message_delete_result = self
+            .connection
+            .execute("DELETE FROM messages WHERE session_id = ?1", [session_id]);
+        let trigger_restore_result = self.connection.execute_batch(
+            "
+            CREATE TRIGGER messages_append_only_delete
+            BEFORE DELETE ON messages
+            BEGIN
+                SELECT RAISE(ABORT, 'messages are append-only');
+            END;
+            ",
+        );
+
+        message_delete_result.map_err(delete_store_failed)?;
+        trigger_restore_result.map_err(delete_store_failed)?;
+        self.connection
+            .execute("DELETE FROM sessions WHERE id = ?1", [session_id])
+            .map_err(delete_store_failed)?;
+
+        Ok(())
+    }
+
+    fn session_artifact_paths(&self, session_id: &str) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT file_path, preview_path
+            FROM artifacts
+            WHERE session_id = ?1
+                OR tool_call_id IN (
+                    SELECT id FROM tool_calls WHERE session_id = ?1
+                )
+            ",
+        )?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })?;
+        let mut paths = Vec::new();
+
+        for row in rows {
+            let (file_path, preview_path) = row?;
+
+            if let Some(file_path) = file_path {
+                paths.push(file_path);
+            }
+
+            if let Some(preview_path) = preview_path {
+                if !paths.iter().any(|path| path == &preview_path) {
+                    paths.push(preview_path);
+                }
+            }
+        }
+
+        Ok(paths)
+    }
+
     pub fn mark_active_sessions_interrupted(&self) -> rusqlite::Result<usize> {
         self.connection.execute(
             "
@@ -1108,6 +1306,10 @@ impl AppStore {
     }
 }
 
+fn delete_store_failed(error: rusqlite::Error) -> ArchivedSessionDeleteError {
+    ArchivedSessionDeleteError::StoreFailed(error.to_string())
+}
+
 #[derive(Debug)]
 pub enum ProviderCredentialError {
     CredentialStore(CredentialError),
@@ -1506,6 +1708,185 @@ mod tests {
         assert_eq!(metadata.title, "First session");
         assert!(!metadata.pinned);
         assert!(!metadata.archived);
+    }
+
+    #[test]
+    fn deletes_archived_unpinned_session_records_only() {
+        let store = AppStore::open_in_memory().expect("store opens");
+
+        insert_project_and_session(&store);
+        store
+            .append_message(NewMessage {
+                id: "message-1",
+                session_id: "session-1",
+                role: "assistant",
+                content: "remove with session",
+                status: "complete",
+                metadata_json: "{}",
+            })
+            .expect("message inserted");
+        store
+            .record_tool_call(NewToolCall {
+                id: "tool-1",
+                session_id: "session-1",
+                message_id: Some("message-1"),
+                tool_source: "runtime",
+                tool_name: "shell",
+                arguments_json: "{}",
+                status: "complete",
+                runtime_call_ref: None,
+            })
+            .expect("tool inserted");
+        store
+            .record_approval(NewApproval {
+                id: "approval-1",
+                tool_call_id: "tool-1",
+                approval_source: "user",
+                decision: "allow_once",
+                scope: "one_time",
+                decided_by: "user",
+            })
+            .expect("approval inserted");
+        store
+            .record_artifact(NewArtifact {
+                id: "artifact-1",
+                project_id: "project-1",
+                session_id: Some("session-1"),
+                tool_call_id: Some("tool-1"),
+                artifact_type: "text",
+                title: "Session artifact",
+                mime_type: Some("text/plain"),
+                file_path: Some("/app/artifacts/project-1/artifact-1/original"),
+                preview_path: Some("/app/artifacts/project-1/artifact-1/preview"),
+                metadata_json: "{}",
+            })
+            .expect("artifact inserted");
+        store
+            .record_adapter_ref(
+                "session-1-provider",
+                Some("session-1"),
+                "openrouter",
+                "credential_reference",
+                "fake-keychain://openrouter/default",
+                "{}",
+            )
+            .expect("adapter ref inserted");
+        store
+            .set_session_archived("session-1", true)
+            .expect("session archived");
+        store
+            .create_session(NewSession {
+                id: "session-2",
+                project_id: "project-1",
+                title: "Fallback",
+                status: "complete",
+                mode: "agent",
+                agent_ref: None,
+                model_id: "openrouter/model",
+                runtime: "opencode",
+                runtime_session_ref: None,
+            })
+            .expect("fallback session inserted");
+        store
+            .append_message(NewMessage {
+                id: "message-2",
+                session_id: "session-2",
+                role: "assistant",
+                content: "must remain append-only",
+                status: "complete",
+                metadata_json: "{}",
+            })
+            .expect("fallback message inserted");
+
+        let deleted = store
+            .delete_archived_session("session-1")
+            .expect("archived session deleted");
+
+        assert_eq!(deleted.session_id, "session-1");
+        assert_eq!(deleted.project_id, "project-1");
+        assert_eq!(deleted.fallback_session_id, Some("session-2".into()));
+        assert_eq!(
+            deleted.artifact_paths,
+            vec![
+                "/app/artifacts/project-1/artifact-1/original".to_string(),
+                "/app/artifacts/project-1/artifact-1/preview".to_string(),
+            ]
+        );
+        assert!(store
+            .get_session("session-1")
+            .expect("session query")
+            .is_none());
+        assert_eq!(store.list_messages("session-1").expect("messages").len(), 0);
+        assert_eq!(store.tool_call_count("session-1").expect("tool count"), 0);
+        assert_eq!(store.approval_count().expect("approval count"), 0);
+        assert!(store
+            .get_artifact("artifact-1")
+            .expect("artifact query")
+            .is_none());
+        assert!(store
+            .session_credential_reference("session-1")
+            .expect("adapter ref query")
+            .is_none());
+        assert!(store
+            .get_session("session-2")
+            .expect("fallback query")
+            .is_some());
+
+        let direct_message_delete = store
+            .connection
+            .execute("DELETE FROM messages WHERE session_id = 'session-2'", []);
+        assert!(direct_message_delete.is_err());
+    }
+
+    #[test]
+    fn archived_session_delete_blocks_unaccepted_states() {
+        let store = AppStore::open_in_memory().expect("store opens");
+
+        insert_project_and_session(&store);
+        assert_eq!(
+            store.delete_archived_session("session-1"),
+            Err(ArchivedSessionDeleteError::NotArchived)
+        );
+
+        store
+            .set_session_archived("session-1", true)
+            .expect("session archived");
+        store
+            .set_session_pinned("session-1", true)
+            .expect("session pinned");
+        assert_eq!(
+            store.delete_archived_session("session-1"),
+            Err(ArchivedSessionDeleteError::Pinned)
+        );
+
+        store
+            .set_session_pinned("session-1", false)
+            .expect("session unpinned");
+        assert_eq!(
+            store.delete_archived_session("session-1"),
+            Err(ArchivedSessionDeleteError::LatestSession)
+        );
+
+        store
+            .create_session(NewSession {
+                id: "session-running",
+                project_id: "project-1",
+                title: "Running",
+                status: "running",
+                mode: "agent",
+                agent_ref: None,
+                model_id: "openrouter/model",
+                runtime: "opencode",
+                runtime_session_ref: None,
+            })
+            .expect("running session inserted");
+        store
+            .set_session_archived("session-running", true)
+            .expect("running session archived");
+        assert_eq!(
+            store.delete_archived_session("session-running"),
+            Err(ArchivedSessionDeleteError::ActiveSession)
+        );
     }
 
     #[test]

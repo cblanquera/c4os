@@ -3,6 +3,8 @@ import { createAppCommandClient } from './backend/tauri-adapter.js';
 import {
   canSubmitPrompt,
   errorMessage,
+  mcpCapabilityLabel,
+  skillCapabilityLabel,
   sessionActivityMessage,
 } from './ui/state.js';
 
@@ -54,12 +56,14 @@ async function renderAppShell() {
         ${statusTile('Project', appStatus.project.active ? appStatus.project.rootPath : 'Not selected')}
         ${statusTile('Project selector', selectorLabel(appStatus))}
         ${statusTile('Instructions', appStatus.project.instructionResolution.supportTier)}
+        ${statusTile('Skills', skillCapabilityLabel(appStatus))}
+        ${statusTile('MCP', mcpCapabilityLabel(appStatus))}
         ${statusTile('Tool ledger', appStatus.timeline.toolActivityVisible ? 'Visible' : 'Hidden')}
         ${statusTile('Session', appStatus.session.runtimeState)}
         ${statusTile('Approvals', `${appStatus.approvals.pendingCount} pending`)}
         ${statusTile('Recovery', appStatus.recovery.canRetry ? 'Retry ready' : 'Idle')}
         ${statusTile('Changes', `${appStatus.changes.changedFileCount} files`)}
-        ${statusTile('Artifacts', appStatus.artifacts.visibleRecords ? 'Text viewer' : 'Unavailable')}
+        ${statusTile('Artifacts', artifactLabel(appStatus))}
       </section>
     </section>
   `;
@@ -304,6 +308,21 @@ function statusTile(label, value) {
       <strong>${escapeHtml(value)}</strong>
     </div>
   `;
+}
+
+/**
+ * Summarizes the accepted artifact preview tier.
+ */
+function artifactLabel(status) {
+  if (!status.artifacts.visibleRecords) {
+    return 'Unavailable';
+  }
+
+  if (status.artifacts.supportTier === 'raster_image_preview_only') {
+    return 'Text + raster images';
+  }
+
+  return 'Text viewer';
 }
 
 /**

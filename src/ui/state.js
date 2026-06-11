@@ -47,3 +47,40 @@ export function sessionActivityMessage(status, workingAction) {
 
   return null;
 }
+
+/**
+ * Summarizes the accepted Agent Skills support tier for compact status UI.
+ */
+export function skillCapabilityLabel(status) {
+  if (status.skills?.supportTier !== 'explicit_discovery_and_invocation_only') {
+    return 'Unavailable';
+  }
+
+  if (
+    status.skills.autoInvocationAvailable
+      || status.skills.scriptExecutionAvailable
+  ) {
+    return 'Unsupported scope';
+  }
+
+  return 'Explicit skills only';
+}
+
+/**
+ * Summarizes the accepted local stdio MCP support tier for compact status UI.
+ */
+export function mcpCapabilityLabel(status) {
+  if (status.mcp?.supportTier !== 'local_stdio_explicit_approval_only') {
+    return 'Unavailable';
+  }
+
+  if (
+    !status.mcp.localStdioAvailable
+      || status.mcp.remoteAvailable
+      || status.mcp.autoStartFromProjectFiles
+  ) {
+    return 'Unsupported scope';
+  }
+
+  return 'Local MCP approval only';
+}

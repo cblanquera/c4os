@@ -261,11 +261,8 @@ mod tests {
         fs::write(directory.path().join("AGENTS.md"), "root").expect("root agents");
         fs::create_dir_all(directory.path().join("nested/deeper")).expect("nested dirs");
         fs::write(directory.path().join("nested/AGENTS.md"), "nested").expect("nested agents");
-        fs::write(
-            directory.path().join("nested/deeper/AGENTS.md"),
-            "deeper",
-        )
-        .expect("deeper agents");
+        fs::write(directory.path().join("nested/deeper/AGENTS.md"), "deeper")
+            .expect("deeper agents");
 
         let disclosure =
             InstructionPreflight::scan(directory.path(), "session-1").expect("preflight");

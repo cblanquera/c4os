@@ -27,6 +27,17 @@ pub struct TextArtifactRequest<'a> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub struct RasterImageArtifactRequest<'a> {
+    pub id: &'a str,
+    pub project_id: &'a str,
+    pub session_id: &'a str,
+    pub tool_call_id: Option<&'a str>,
+    pub title: &'a str,
+    pub mime_type: &'a str,
+    pub bytes: &'a [u8],
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct ArtifactListItem {
     pub id: String,
     pub title: String,
@@ -44,6 +55,9 @@ pub struct ArtifactViewer {
     pub title: String,
     pub artifact_type: String,
     pub content: Option<String>,
+    pub preview_kind: String,
+    pub image_preview_path: Option<PathBuf>,
+    pub mime_type: Option<String>,
     pub preview_unavailable_reason: Option<String>,
     pub active_rendering: bool,
     pub rich_preview: bool,
@@ -132,6 +146,64 @@ impl<'a> ArtifactService<'a> {
             .ok_or(ArtifactError::MissingArtifact)
     }
 
+    pub fn capture_raster_image_artifact(
+        &self,
+        request: RasterImageArtifactRequest<'_>,
+    ) -> Result<ArtifactRecord, ArtifactError> {
+        if request.session_id.trim().is_empty() {
+            return Err(ArtifactError::MissingProvenance);
+        }
+
+        if !is_supported_raster_image(request.mime_type, request.bytes) {
+            return Err(ArtifactError::UnsupportedType);
+        }
+
+        let artifact_directory = self
+            .artifacts_root
+            .join(request.project_id)
+            .join(request.id);
+        fs::create_dir_all(&artifact_directory).map_err(ArtifactError::IoFailed)?;
+
+        let original_path = artifact_directory.join("original");
+        let preview_path = artifact_directory.join("preview");
+        let metadata_path = artifact_directory.join("metadata.json");
+        fs::write(&original_path, request.bytes).map_err(ArtifactError::IoFailed)?;
+        fs::write(&preview_path, request.bytes).map_err(ArtifactError::IoFailed)?;
+        fs::write(
+            metadata_path,
+            format!(
+                r#"{{"projectId":"{}","sessionId":"{}","toolCallId":{},"activeRendering":false,"previewKind":"raster_image"}}"#,
+                request.project_id,
+                request.session_id,
+                request
+                    .tool_call_id
+                    .map(|id| format!(r#""{id}""#))
+                    .unwrap_or_else(|| "null".into())
+            ),
+        )
+        .map_err(ArtifactError::IoFailed)?;
+
+        self.app_store
+            .record_artifact(NewArtifact {
+                id: request.id,
+                project_id: request.project_id,
+                session_id: Some(request.session_id),
+                tool_call_id: request.tool_call_id,
+                artifact_type: "raster_image",
+                title: request.title,
+                mime_type: Some(request.mime_type),
+                file_path: Some(&original_path.to_string_lossy()),
+                preview_path: Some(&preview_path.to_string_lossy()),
+                metadata_json: r#"{"rasterImage":true,"activeRendering":false}"#,
+            })
+            .map_err(ArtifactError::StoreFailed)?;
+
+        self.app_store
+            .get_artifact(request.id)
+            .map_err(ArtifactError::StoreFailed)?
+            .ok_or(ArtifactError::MissingArtifact)
+    }
+
     pub fn list_project_artifacts(
         &self,
         project_id: &str,
@@ -160,6 +232,29 @@ impl<'a> ArtifactService<'a> {
             return Err(ArtifactError::PreviewTooLarge);
         }
 
+        if record.artifact_type == "raster_image" {
+            return Ok(ArtifactViewer {
+                id: record.id,
+                title: record.title,
+                artifact_type: record.artifact_type,
+                content: None,
+                preview_kind: "raster_image".into(),
+                image_preview_path: Some(PathBuf::from(preview_path)),
+                mime_type: record.mime_type,
+                preview_unavailable_reason: None,
+                active_rendering: false,
+                rich_preview: true,
+                export_available: false,
+                search_available: false,
+                include_in_model_context_by_default: false,
+                provenance: ArtifactProvenance {
+                    project_id: record.project_id,
+                    session_id: record.session_id,
+                    tool_call_id: record.tool_call_id,
+                },
+            });
+        }
+
         let content = fs::read_to_string(preview_path).map_err(ArtifactError::IoFailed)?;
 
         Ok(ArtifactViewer {
@@ -167,6 +262,9 @@ impl<'a> ArtifactService<'a> {
             title: record.title,
             artifact_type: record.artifact_type,
             content: Some(content),
+            preview_kind: "text".into(),
+            image_preview_path: None,
+            mime_type: record.mime_type,
             preview_unavailable_reason: None,
             active_rendering: false,
             rich_preview: false,
@@ -201,6 +299,9 @@ fn project_unavailable_viewer(record: ArtifactRecord, reason: &str) -> ArtifactV
         title: record.title,
         artifact_type: record.artifact_type,
         content: None,
+        preview_kind: "unavailable".into(),
+        image_preview_path: None,
+        mime_type: record.mime_type,
         preview_unavailable_reason: Some(reason.into()),
         active_rendering: false,
         rich_preview: false,
@@ -220,6 +321,16 @@ fn is_supported_text_type(artifact_type: &str) -> bool {
         artifact_type,
         "text" | "markdown" | "log" | "diff" | "source" | "config"
     )
+}
+
+fn is_supported_raster_image(mime_type: &str, bytes: &[u8]) -> bool {
+    match mime_type {
+        "image/png" => bytes.starts_with(&[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']),
+        "image/jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/webp" => bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP",
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        _ => false,
+    }
 }
 
 fn redact_artifact_content(content: &str) -> String {
@@ -363,6 +474,70 @@ mod tests {
         let viewer = service.open_artifact("artifact-1").expect("artifact opens");
 
         assert!(!viewer.include_in_model_context_by_default);
+    }
+
+    #[test]
+    fn raster_image_artifact_opens_as_passive_local_preview() {
+        let directory = tempdir().expect("tempdir");
+        let store = AppStore::open_in_memory().expect("store opens");
+        prepared_records(&store);
+        let service = ArtifactService::new(&store, directory.path());
+
+        service
+            .capture_raster_image_artifact(RasterImageArtifactRequest {
+                id: "artifact-1",
+                project_id: "project-1",
+                session_id: "session-1",
+                tool_call_id: Some("tool-1"),
+                title: "chart.png",
+                mime_type: "image/png",
+                bytes: &[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'],
+            })
+            .expect("image captured");
+
+        let viewer = service.open_artifact("artifact-1").expect("artifact opens");
+
+        assert_eq!(viewer.preview_kind, "raster_image");
+        assert_eq!(viewer.mime_type, Some("image/png".into()));
+        assert!(viewer.content.is_none());
+        assert!(viewer.image_preview_path.is_some());
+        assert_eq!(viewer.provenance.session_id, Some("session-1".into()));
+        assert_eq!(viewer.provenance.tool_call_id, Some("tool-1".into()));
+        assert!(!viewer.active_rendering);
+        assert!(viewer.rich_preview);
+        assert!(!viewer.search_available);
+        assert!(!viewer.export_available);
+        assert!(!viewer.include_in_model_context_by_default);
+    }
+
+    #[test]
+    fn raster_image_artifacts_reject_svg_html_and_remote_url_inputs() {
+        let directory = tempdir().expect("tempdir");
+        let store = AppStore::open_in_memory().expect("store opens");
+        prepared_records(&store);
+        let service = ArtifactService::new(&store, directory.path());
+
+        for (title, mime_type, bytes) in [
+            ("icon.svg", "image/svg+xml", b"<svg></svg>".as_slice()),
+            ("page.html", "text/html", b"<img src=x>".as_slice()),
+            (
+                "remote.png",
+                "text/uri-list",
+                b"https://example.com/image.png".as_slice(),
+            ),
+        ] {
+            let result = service.capture_raster_image_artifact(RasterImageArtifactRequest {
+                id: "artifact-1",
+                project_id: "project-1",
+                session_id: "session-1",
+                tool_call_id: Some("tool-1"),
+                title,
+                mime_type,
+                bytes,
+            });
+
+            assert!(matches!(result, Err(ArtifactError::UnsupportedType)));
+        }
     }
 
     fn prepared_records(store: &AppStore) {

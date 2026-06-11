@@ -21,6 +21,27 @@ export function createAppCommandClient(options = {}) {
       registerProject(payload) {
         return invoke(BACKEND_COMMANDS.registerProject, payload);
       },
+      listProjectSkills() {
+        return invoke(BACKEND_COMMANDS.listProjectSkills, {});
+      },
+      invokeProjectSkill(payload) {
+        return invoke(BACKEND_COMMANDS.invokeProjectSkill, payload);
+      },
+      listMcpServers() {
+        return invoke(BACKEND_COMMANDS.listMcpServers, {});
+      },
+      registerLocalStdioMcpServer(payload) {
+        return invoke(BACKEND_COMMANDS.registerLocalStdioMcpServer, payload);
+      },
+      proposeMcpServerLaunch(payload) {
+        return invoke(BACKEND_COMMANDS.proposeMcpServerLaunch, payload);
+      },
+      exportProjectJson() {
+        return invoke(BACKEND_COMMANDS.exportProjectJson, {});
+      },
+      deleteArchivedSession(payload) {
+        return invoke(BACKEND_COMMANDS.deleteArchivedSession, payload);
+      },
       submitPrompt(payload) {
         return invoke(BACKEND_COMMANDS.submitPrompt, payload);
       },
@@ -38,6 +59,27 @@ export function createAppCommandClient(options = {}) {
     },
     registerProject(payload) {
       return registry.invoke(BACKEND_COMMANDS.registerProject, payload);
+    },
+    listProjectSkills() {
+      return registry.invoke(BACKEND_COMMANDS.listProjectSkills);
+    },
+    invokeProjectSkill(payload) {
+      return registry.invoke(BACKEND_COMMANDS.invokeProjectSkill, payload);
+    },
+    listMcpServers() {
+      return registry.invoke(BACKEND_COMMANDS.listMcpServers);
+    },
+    registerLocalStdioMcpServer(payload) {
+      return registry.invoke(BACKEND_COMMANDS.registerLocalStdioMcpServer, payload);
+    },
+    proposeMcpServerLaunch(payload) {
+      return registry.invoke(BACKEND_COMMANDS.proposeMcpServerLaunch, payload);
+    },
+    exportProjectJson() {
+      return registry.invoke(BACKEND_COMMANDS.exportProjectJson);
+    },
+    deleteArchivedSession(payload) {
+      return registry.invoke(BACKEND_COMMANDS.deleteArchivedSession, payload);
     },
     submitPrompt(payload) {
       return registry.invoke(BACKEND_COMMANDS.submitPrompt, payload);
