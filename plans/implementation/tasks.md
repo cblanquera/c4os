@@ -1458,17 +1458,16 @@ before implementing Git worktree creation or cleanup.
 
 ### Deliverables
 
-- Product decision for whether worktrees are V1 now, V1 later, or still
-  deferred.
-- Architecture decision for ownership, persistence, cleanup, dirty worktree
-  handling, and Git edge cases.
-- Acceptance criteria for create, select, inspect, cleanup, failure, and
-  out-of-scope behavior.
+- Product decision deferring worktrees beyond current V1.
+- Roadmap update moving worktree creation and cleanup out of current V1.
+- Decision and acceptance updates confirming worktree management remains out of
+  scope.
 
 ### Acceptance Criteria
 
-New or updated worktree acceptance criteria are required before code
-implementation.
+No code implementation proceeds for worktrees in current V1. Git acceptance
+criteria explicitly keep worktree management out of scope until a future product
+and architecture decision defines lifecycle behavior.
 
 ### Dependencies
 
@@ -1483,10 +1482,13 @@ High.
 ### Completion Criteria
 
 - Worktree lifecycle scope is no longer contradictory or missing.
-- Cleanup and dirty-state behavior are defined.
+- Cleanup and dirty-state behavior are deferred beyond current V1 instead of
+  inferred by implementation.
 - Edge cases for branch reuse, submodules, Git LFS, nested repos, and failed
-  cleanup are classified.
-- Implementation can proceed without inventing product behavior from code.
+  cleanup are explicitly out of scope until a future worktree lifecycle
+  decision.
+- Current V1 implementation can proceed without inventing worktree product
+  behavior from code.
 
 ### Verification
 
@@ -1494,4 +1496,118 @@ High.
 
 ### Status
 
-Blocked pending user/product decision.
+Complete as defer decision.
+
+## TASK-032: Expose Project Selector Capability Status
+
+### Epic
+
+V1: Polished Multi-Project Workflows.
+
+### Objective
+
+Expose project-selector capability state through the app status surface so the
+UI can distinguish the accepted one-active-project workflow from postponed full
+project-management behavior.
+
+### Inputs
+
+- `plans/acceptance/project-management.md`
+- `plans/implementation/sprint-plan.md`
+- `CONTEXT.md`
+
+### Deliverables
+
+- App status fields for project-selector availability.
+- Status fields for one-active-project behavior.
+- Status fields proving postponed project-management controls remain
+  unavailable.
+- Shell display of the selector state.
+
+### Acceptance Criteria
+
+- `plans/acceptance/project-management.md`
+
+### Dependencies
+
+- TASK-030.
+- TASK-031.
+
+### Complexity
+
+Low.
+
+### Completion Criteria
+
+- Status reports registered-project listing and exactly-one-active-project
+  selection as available.
+- Status reports multiple active projects, search, grouping, archive, delete,
+  favorites, metadata editing, cross-project views, non-Git projects, and
+  worktree management as unavailable.
+- App shell shows the selector state without adding full project-management UI.
+
+### Verification
+
+- JS status command tests.
+- Static build.
+
+## TASK-033: Resolve V1 Nested AGENTS Resolution Scope
+
+### Epic
+
+V1: Nested AGENTS.md Resolution.
+
+### Objective
+
+Resolve the standards, product, permission, and UX decisions required before
+implementing nested `AGENTS.md` resolution beyond MVP instruction-source
+disclosure.
+
+### Inputs
+
+- `plans/decisions/deferred-decisions.md`
+- `plans/decisions/implementation-readiness-gaps.md`
+- `plans/spikes/SPIKE-006-standards-conformance-matrix.md`
+- `plans/validation/FINDING-001-instruction-loading-observability.md`
+- `plans/acceptance/file-access.md`
+
+### Deliverables
+
+- Product decision for whether nested `AGENTS.md` resolution is current V1,
+  later V1, or deferred.
+- Standards conformance decision for AGENTS.md support tier.
+- UX decision for effective-instruction display and conflict diagnostics.
+- Acceptance criteria for resolution, precedence, disclosure, permissions, and
+  out-of-scope behavior.
+
+### Acceptance Criteria
+
+New or updated nested `AGENTS.md` acceptance criteria are required before code
+implementation.
+
+### Dependencies
+
+- TASK-011.
+- TASK-032.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Nested `AGENTS.md` scope is no longer missing or ambiguous.
+- AGENTS.md conformance tier is defined.
+- Effective-instruction UI and conflict diagnostics are defined.
+- Implementation can proceed without inventing instruction precedence or
+  permission behavior from code.
+
+### Verification
+
+- Planning review against deferred decisions, readiness gaps, standards
+  conformance spike, instruction-loading validation, and file-access
+  acceptance.
+
+### Status
+
+Blocked pending standards and UX decisions.

@@ -46,6 +46,10 @@ async function renderAppShell() {
           <strong>${status.project.active ? status.project.rootPath : 'Not selected'}</strong>
         </div>
         <div>
+          <span class="label">Project selector</span>
+          <strong>${status.project.selector.selectExactlyOneActive ? 'One active project' : 'Unavailable'}</strong>
+        </div>
+        <div>
           <span class="label">Tool ledger</span>
           <strong>${status.timeline.toolActivityVisible ? 'Visible' : 'Hidden'}</strong>
         </div>

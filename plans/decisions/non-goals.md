@@ -469,7 +469,12 @@ Worktrees are useful for parallel coding work but not required for validating on
 
 # Conditions Under Which It May Be Reconsidered
 
-After users need parallel sessions or safer isolated edits.
+After users need parallel sessions or safer isolated edits. Sprint 9 resolved
+that worktree creation and cleanup are not part of current V1 because lifecycle,
+dirty-state, cleanup, branch, submodule, Git LFS, nested repository, and failed
+cleanup behavior remain intentionally unspecified. Reconsideration requires a
+fresh product and architecture decision plus acceptance criteria before any
+implementation.
 
 ## 22. Non-Git Project Workflows
 
@@ -713,4 +718,3 @@ The MVP is a validation product for local technical workflows.
 # Conditions Under Which It May Be Reconsidered
 
 After core product value and extension trust are validated.
-

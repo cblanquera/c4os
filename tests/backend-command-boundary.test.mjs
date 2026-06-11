@@ -36,6 +36,22 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
     changedFileCount: 0,
     browserMode: 'read-only',
     rootAgentsDisplay: 'passive',
+    selector: {
+      available: true,
+      listRegisteredProjects: true,
+      selectExactlyOneActive: true,
+      registeredProjectCount: 0,
+      multipleActiveProjectsAllowed: false,
+      searchAvailable: false,
+      groupingAvailable: false,
+      archiveAvailable: false,
+      deleteAvailable: false,
+      favoritesAvailable: false,
+      metadataEditingAvailable: false,
+      crossProjectViewsAvailable: false,
+      nonGitProjectsAllowed: false,
+      worktreeManagementAvailable: false,
+    },
   });
   assert.deepEqual(status.timeline, {
     toolActivityVisible: true,

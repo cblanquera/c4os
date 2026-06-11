@@ -2,7 +2,7 @@
 
 ## Status
 
-blocked
+verified
 
 ## Objective
 
@@ -17,25 +17,25 @@ before implementing Git worktree creation or cleanup.
 
 ## Blocker
 
-Worktree implementation is not safe to infer from current repository context.
-The roadmap lists worktree creation and cleanup as V1, but the current
-decisions and acceptance files still leave the lifecycle undefined.
+Resolved by deferring worktree creation and cleanup beyond current V1.
+Implementation remains unsafe to infer from repository context, so current V1
+will not implement worktree lifecycle behavior.
 
 ## Evidence
 
-- `plans/decisions/implementation-readiness-gaps.md` lists worktree cleanup
-  policy as missing information.
-- `plans/decisions/non-goals.md` says worktrees may be reconsidered after users
-  need parallel sessions or safer isolated edits.
-- `plans/acceptance/git-integration.md` keeps worktree management out of scope.
-- Current acceptance files do not define create, select, dirty-state, cleanup,
-  branch, submodule, LFS, nested repo, or failure behavior.
+- `plans/roadmap/implementation-roadmap.md` moves worktree creation and cleanup
+  beyond current V1.
+- `plans/decisions/non-goals.md` records the Sprint 9 defer decision.
+- `plans/decisions/implementation-readiness-gaps.md` resolves the cleanup
+  policy gap by deferral.
+- `plans/acceptance/git-integration.md` keeps worktree management out of scope,
+  including lifecycle and Git edge-case behavior.
 
 ## Remaining V1 Audit
 
 Checked on 2026-06-11 after Sprint 8 verification:
 
-- Worktree creation and cleanup remains blocked by this item.
+- Worktree creation and cleanup is deferred beyond current V1 by this item.
 - Nested `AGENTS.md` resolution remains deferred until standards conformance
   and effective-instruction UI decisions are made.
 - Explicit skill discovery and invocation remains deferred until skill
@@ -49,13 +49,14 @@ Checked on 2026-06-11 after Sprint 8 verification:
   absolute-path handling, secret exclusion, artifact-type behavior, and
   round-trip compatibility are specified.
 
-No later V1 roadmap item currently has enough accepted scope and acceptance
-criteria to implement safely while Sprint 9 is blocked.
+Later V1 roadmap items still need their own accepted scope and acceptance
+criteria before implementation.
 
-## Exact User Action Needed
+## Decision
 
-Decide whether V1 should implement worktrees now. If yes, provide or approve
-acceptance criteria for:
+Current V1 will not implement worktree creation or cleanup. Worktrees may be
+reconsidered after recurring parallel-session or isolated-edit demand is
+validated and a fresh product, architecture, and acceptance decision defines:
 
 - Worktree creation source and branch behavior.
 - Worktree selection relationship to selected project and sessions.
@@ -65,5 +66,6 @@ acceptance criteria for:
 
 ## Resume Prompt
 
-Resolve TASK-031 with the approved V1 worktree lifecycle scope, update
-acceptance criteria, then implement the narrowest Sprint 9 worktree slice.
+Continue the sprint loop after Sprint 9. Treat worktree creation and cleanup as
+deferred beyond current V1 and select the next unblocked documented roadmap
+item with accepted scope and acceptance criteria.

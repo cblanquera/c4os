@@ -137,7 +137,7 @@ Exit criteria:
 
 ## Sprint 9: V1 Worktree Scope Decision
 
-Status: blocked pending product and architecture decisions.
+Status: complete as a defer decision.
 
 Goal: decide whether V1 worktree creation and cleanup can be implemented after
 the single-active-project and multi-session foundations, or whether the roadmap
@@ -147,20 +147,67 @@ Tasks:
 
 - TASK-031: Resolve V1 Worktree Lifecycle Scope.
 
-Blocked by:
+Decision:
 
-- Worktree cleanup policy is listed as missing information in
-  `plans/decisions/implementation-readiness-gaps.md`.
-- `plans/decisions/non-goals.md` says worktrees may be reconsidered only after
-  users need parallel sessions or safer isolated edits.
-- Current acceptance files keep worktree management out of scope and do not
-  define create, select, dirty-state, cleanup, branch, submodule, LFS, nested
-  repo, or failure behavior.
+- Worktree creation and cleanup are deferred beyond current V1.
+- Current V1 continues with multiple sessions, project selection, session
+  metadata, and other documented roadmap items that do not require worktree
+  lifecycle behavior.
+- Worktrees may be reconsidered after recurring parallel-session or
+  isolated-edit demand is validated and a fresh product, architecture, and
+  acceptance decision defines the lifecycle.
 
 Exit criteria:
 
-- Product decision states whether worktrees are V1 now, V1 later, or still
-  deferred.
-- Architecture decision defines ownership, persistence, cleanup, dirty
-  worktree handling, and Git edge cases.
+- Product decision defers worktrees beyond current V1.
+- Roadmap, non-goals, readiness gaps, and Git acceptance agree that worktree
+  management remains out of scope.
+- No code implementation is required for Sprint 9.
+
+## Sprint 10: Multi-Project Status Surface
+
+Goal: expose the accepted project-selector capability state through the app
+status surface without adding full project-management behavior.
+
+Tasks:
+
+- TASK-032: Expose Project Selector Capability Status.
+
+Exit criteria:
+
+- App status reports that the project selector can list registered projects and
+  select exactly one active project.
+- App status reports postponed controls as unavailable: multiple active
+  projects, search, grouping, archive, delete, favorites, metadata editing,
+  cross-project views, non-Git projects, and worktree management.
+- The app shell surfaces the one-active-project selector state.
+
+## Sprint 11: V1 Nested AGENTS Scope Decision
+
+Status: blocked pending standards and UX decisions.
+
+Goal: decide whether current V1 should implement nested `AGENTS.md` resolution
+beyond the existing MVP instruction-source disclosure inventory.
+
+Tasks:
+
+- TASK-033: Resolve V1 Nested AGENTS Resolution Scope.
+
+Blocked by:
+
+- `plans/decisions/deferred-decisions.md` defers nested `AGENTS.md` precedence
+  and conflict diagnostics to V1.
+- `plans/decisions/implementation-readiness-gaps.md` still lists effective
+  instruction stack UI and whether `AGENTS.md` can influence permissions as
+  missing information.
+- `plans/spikes/SPIKE-006-standards-conformance-matrix.md` still requires
+  conformance tiers for AGENTS.md display, parse, guidance, nested resolution,
+  and export before broader compatibility claims.
+
+Exit criteria:
+
+- Product decision states whether nested `AGENTS.md` resolution is current V1,
+  later V1, or deferred.
+- Standards decision defines the supported AGENTS.md conformance tier.
+- UX decision defines effective-instruction display and conflict diagnostics.
 - Acceptance criteria exist before implementation starts.

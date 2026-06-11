@@ -215,7 +215,13 @@ Missing information:
  - What happens when multiple agents edit the same non-Git folder.
  - Handling of monorepos, nested repos, submodules, Git LFS, symlinks, generated folders, and vendor folders.
  - Behavior for network-mounted or cloud-synced folders.
- - Worktree cleanup policy.
+
+Resolved post-MVP decision:
+
+ - Worktree cleanup policy is not required for current V1 because Sprint 9
+   deferred worktree creation and cleanup until recurring parallel-session or
+   isolated-edit demand is validated and lifecycle acceptance criteria are
+   written.
 
 ### Artifact And Preview Model
 

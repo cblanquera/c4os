@@ -67,7 +67,6 @@ These systems remain important after MVP validation, but are not on the private-
  - Multiple sessions per project.
  - Polished multi-project workflows.
  - Session rename, archive, pin, and delete.
- - Worktree creation and cleanup.
  - Nested `AGENTS.md` resolution.
  - Explicit skill discovery and invocation.
  - Local stdio MCP server support.
@@ -76,6 +75,8 @@ These systems remain important after MVP validation, but are not on the private-
 
 ### V2 And Later
 
+ - Worktree creation and cleanup, after recurring parallel-session or
+   isolated-edit demand is validated and lifecycle behavior is specified.
  - Multiple concurrent agents.
  - Runtime abstraction across multiple agent runtimes.
  - Plugin installation and permission review.

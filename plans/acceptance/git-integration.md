@@ -73,6 +73,8 @@ Then the app shows changed files and diffs for manual recovery.
  - Commit creation.
  - Pull request creation.
  - Branch management.
- - Worktree management.
+ - Worktree management, including creation, selection, inspection, dirty-state
+   cleanup, failed cleanup recovery, branch reuse handling, submodule handling,
+   Git LFS handling, and nested repository handling.
  - Merge conflict resolution.
  - Automatic rollback, snapshots, restore points, and undo stacks.
