@@ -1385,3 +1385,113 @@ Medium.
 - Rename/pin/archive tests.
 - Regression test that message records remain append-only after session
   metadata updates.
+
+## TASK-030: Build Project Selector State Foundation
+
+### Epic
+
+Epic 1: Local Foundation.
+
+### Objective
+
+Provide a backend projection for listing registered local Git projects and
+persisting exactly one selected active project.
+
+### Inputs
+
+- `plans/acceptance/project-management.md`
+- `plans/specs/functional-specification.md`
+- `CONTEXT.md`
+
+### Deliverables
+
+- Registered-project list API.
+- Selected-project persistence API.
+- Project selector projection with exactly one active project marker.
+- Tests proving postponed project-management controls stay unavailable.
+
+### Acceptance Criteria
+
+- `plans/acceptance/project-management.md`
+
+### Dependencies
+
+- TASK-006.
+- TASK-025.
+
+### Complexity
+
+Medium.
+
+### Completion Criteria
+
+- Registered projects are returned for selector UI.
+- Selecting a known project marks exactly one active project.
+- Missing project selection fails closed.
+- Selection does not introduce multiple active projects, project search,
+  grouping, archive, delete, favorites, metadata editing, cross-project views,
+  non-Git project workflows, or worktree management.
+
+### Verification
+
+- Unit tests for registered-project listing, selected-project persistence,
+  missing-project rejection, and excluded project-management controls.
+
+## TASK-031: Resolve V1 Worktree Lifecycle Scope
+
+### Epic
+
+V1: Worktree Creation And Cleanup.
+
+### Objective
+
+Resolve the missing product, architecture, cleanup, and acceptance decisions
+before implementing Git worktree creation or cleanup.
+
+### Inputs
+
+- `plans/roadmap/implementation-roadmap.md`
+- `plans/decisions/deferred-decisions.md`
+- `plans/decisions/implementation-readiness-gaps.md`
+- `plans/decisions/non-goals.md`
+- `plans/acceptance/git-integration.md`
+
+### Deliverables
+
+- Product decision for whether worktrees are V1 now, V1 later, or still
+  deferred.
+- Architecture decision for ownership, persistence, cleanup, dirty worktree
+  handling, and Git edge cases.
+- Acceptance criteria for create, select, inspect, cleanup, failure, and
+  out-of-scope behavior.
+
+### Acceptance Criteria
+
+New or updated worktree acceptance criteria are required before code
+implementation.
+
+### Dependencies
+
+- TASK-027.
+- TASK-028.
+- TASK-030.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Worktree lifecycle scope is no longer contradictory or missing.
+- Cleanup and dirty-state behavior are defined.
+- Edge cases for branch reuse, submodules, Git LFS, nested repos, and failed
+  cleanup are classified.
+- Implementation can proceed without inventing product behavior from code.
+
+### Verification
+
+- Planning review against roadmap, decisions, non-goals, and Git acceptance.
+
+### Status
+
+Blocked pending user/product decision.

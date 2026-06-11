@@ -115,3 +115,52 @@ Exit criteria:
   deletion.
 - Delete remains deferred until retention/delete semantics are explicitly
   specified.
+
+## Sprint 8: Project Selector Foundation
+
+Goal: close the documented project-management acceptance gap for listing
+registered local Git projects and selecting exactly one active project without
+promoting full project-management or worktree workflows.
+
+Tasks:
+
+- TASK-030: Build Project Selector State Foundation.
+
+Exit criteria:
+
+- Registered projects can be listed for selector UI.
+- Selecting a project persists exactly one active project.
+- Missing project selections fail closed.
+- Selector state does not expose search, grouping, archive, delete, favorites,
+  metadata editing, cross-project views, non-Git project workflows, or
+  worktree management.
+
+## Sprint 9: V1 Worktree Scope Decision
+
+Status: blocked pending product and architecture decisions.
+
+Goal: decide whether V1 worktree creation and cleanup can be implemented after
+the single-active-project and multi-session foundations, or whether the roadmap
+must defer worktrees until parallel-session demand is validated.
+
+Tasks:
+
+- TASK-031: Resolve V1 Worktree Lifecycle Scope.
+
+Blocked by:
+
+- Worktree cleanup policy is listed as missing information in
+  `plans/decisions/implementation-readiness-gaps.md`.
+- `plans/decisions/non-goals.md` says worktrees may be reconsidered only after
+  users need parallel sessions or safer isolated edits.
+- Current acceptance files keep worktree management out of scope and do not
+  define create, select, dirty-state, cleanup, branch, submodule, LFS, nested
+  repo, or failure behavior.
+
+Exit criteria:
+
+- Product decision states whether worktrees are V1 now, V1 later, or still
+  deferred.
+- Architecture decision defines ownership, persistence, cleanup, dirty
+  worktree handling, and Git edge cases.
+- Acceptance criteria exist before implementation starts.

@@ -11,6 +11,7 @@ pub mod file_tools;
 pub mod instruction_preflight;
 pub mod path_resolver;
 pub mod project;
+pub mod project_selector;
 pub mod provider;
 pub mod recovery_view;
 pub mod runtime;

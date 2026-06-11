@@ -214,6 +214,44 @@ impl AppStore {
             .optional()
     }
 
+    pub fn list_projects(&self) -> rusqlite::Result<Vec<ProjectRecord>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT id, name, root_path, default_model, default_agent_ref
+            FROM projects
+            ORDER BY updated_at DESC, created_at DESC, rowid DESC
+            ",
+        )?;
+
+        let projects = statement
+            .query_map([], |row| {
+                Ok(ProjectRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    root_path: row.get(2)?,
+                    default_model: row.get(3)?,
+                    default_agent_ref: row.get(4)?,
+                })
+            })?
+            .collect();
+
+        projects
+    }
+
+    pub fn set_selected_project(&self, project_id: &str) -> rusqlite::Result<()> {
+        if self.get_project(project_id)?.is_none() {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+
+        self.set_setting("project.selected_project_id", &json_string(project_id))
+    }
+
+    pub fn selected_project_id(&self) -> rusqlite::Result<Option<String>> {
+        Ok(self
+            .read_setting("project.selected_project_id")?
+            .map(|value| strip_json_string(&value)))
+    }
+
     pub fn create_session(&self, session: NewSession<'_>) -> rusqlite::Result<()> {
         let now = timestamp();
 
@@ -1098,6 +1136,10 @@ fn strip_json_string(value: &str) -> String {
         .trim_end_matches('"')
         .replace("\\\"", "\"")
         .replace("\\\\", "\\")
+}
+
+fn json_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn timestamp() -> i64 {
