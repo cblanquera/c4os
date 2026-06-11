@@ -119,6 +119,29 @@ The current implementation folder is valid because blocker/high readiness findin
 - Do not create `implementation/` epics or tasks before `plans/mvp/mvp-freeze.md` exists.
 - Do not treat implementation readiness as release readiness. App-build validation, code-level tests, product QA, and public-release platform gates must still be tracked after implementation begins.
 
+## Sprint Implementation Loop
+
+When the user asks to run a sprint implementation loop, continue working through the current sprint plan until all documented app goals and acceptance gates for that sprint are met, or until progress is blocked by an issue that requires user action.
+
+For each loop:
+
+1. Read `CONTEXT.md`, this file, `plans/mvp/mvp-freeze.md`, the current sprint or task plan, and the relevant acceptance criteria.
+2. Pick the highest-priority unblocked task.
+3. Implement the narrowest change that satisfies the task.
+4. Run relevant verification for the changed behavior.
+5. Update the current sprint or task document with status, verification evidence, remaining work, and blockers.
+6. Continue to the next unblocked task.
+
+Pause only when blocked by a missing user decision, denied approval, unavailable credential, contradictory documentation, failing external dependency, or an issue that cannot be safely resolved from repository context.
+
+When pausing for a blocker, report:
+
+- Blocker.
+- What was tried.
+- Why progress cannot continue safely.
+- Exact user action needed.
+- Resume prompt.
+
 ## Unclear Areas To Clarify
 
 - The boundary between `adr/` and `decisions/` should stay disciplined: `adr/` holds individual decision records, while `decisions/` holds rollups and cross-ADR status. Some current files overlap, so future edits should avoid duplicating full ADR content in rollups.
