@@ -35,4 +35,4 @@
 | item-031 | implementation | verified | codex | Project selector state foundation | Selector tests, Rust tests, JS tests, web build, and native Tauri build pass. |
 | item-032 | planning | verified | codex | V1 worktree lifecycle scope | Sprint 9 deferred worktree creation and cleanup beyond current V1; later V1 items still need their own accepted scope and acceptance criteria. |
 | item-033 | implementation | verified | codex | Project selector status surface | JS tests, Rust tests, web build, and native Tauri build pass. |
-| item-034 | planning | blocked | codex | V1 nested AGENTS resolution scope | Standards conformance, effective-instruction UI, and permission behavior decisions are missing. |
+| item-034 | implementation | verified | codex | V1 nested AGENTS resolution scope | Ordered display-guidance tier implemented; Rust tests, JS tests, web build, and native Tauri build pass. |

@@ -64,6 +64,10 @@ Given a root `AGENTS.md` edit is approved and applied
 When the session continues
 Then the app does not automatically reload it into model context, permission state, or instruction precedence rules.
 
+Given a nested `AGENTS.md` edit is approved and applied
+When the session continues
+Then the app does not automatically reload it into model context or permission state; updated ordered guidance appears only after the next instruction preflight.
+
 Given the user denies a file write
 When the session continues
 Then the denied write is recorded and the target file remains unchanged.

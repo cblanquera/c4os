@@ -39,6 +39,21 @@ The app should use an app-owned canonical model and treat external standards as 
  - Unsupported or partial support is explicitly labeled.
  - MVP docs do not imply full AGENTS.md, Agent Skills, MCP, Codex plugin, OpenCode config, import/export, or round-trip compatibility.
 
+# V1 AGENTS.md Tier Decision
+
+Current V1 supports `AGENTS.md` at `display_guidance_order_only` tier:
+
+ - Root and nested `AGENTS.md` files may be inventoried and disclosed.
+ - The effective display stack is ordered root first, then nested files by
+   path depth and path name.
+ - Nested entries disclose the path subtree they apply to.
+ - Conflict diagnostics are source-order only; the app does not parse,
+   semantically merge, rewrite, execute, export, or round-trip guidance.
+ - `AGENTS.md` files have no permission effect.
+ - App-owned model context does not include `AGENTS.md` contents unless the
+   runtime explicitly reads the file under normal project-root file-read rules.
+ - Runtime-native instruction loading remains separately disclosed by preflight.
+
 # Decisions Unlocked
 
  - ADR-005: Standards-First Interoperability.

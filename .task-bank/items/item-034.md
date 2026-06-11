@@ -2,54 +2,58 @@
 
 ## Status
 
-blocked
+verified
 
 ## Objective
 
-Resolve the standards, product, permission, and UX decisions required before
-implementing nested `AGENTS.md` resolution beyond MVP instruction-source
-disclosure.
+Implement the approved current V1 nested `AGENTS.md` slice as ordered display
+guidance beyond MVP instruction-source disclosure.
 
 ## Dependencies
 
 - item-011
 - item-033
 
-## Blocker
+## Scope Decision
 
-Nested `AGENTS.md` resolution is not safe to infer from current repository
-context. The app already inventories root and nested instruction sources for
-MVP disclosure, but V1 resolution requires precedence, conflict diagnostics,
-effective-instruction UI, and permission behavior decisions.
+Current V1 supports `display_guidance_order_only`.
+
+- Root and nested `AGENTS.md` files are disclosed in an ordered guidance stack.
+- Root guidance appears first, then nested files by path depth and path name.
+- Nested entries disclose the path subtree they apply to.
+- Conflict diagnostics are limited to ordered source disclosure.
+- The app does not parse, semantically merge, rewrite, execute, export, or
+  round-trip guidance.
+- `AGENTS.md` files have no permission effect and are not added to app-owned
+  model context unless explicitly read under normal project-root rules.
 
 ## Evidence
 
-- `plans/decisions/deferred-decisions.md` defers nested `AGENTS.md` precedence
-  and conflict diagnostics to V1.
-- `plans/decisions/implementation-readiness-gaps.md` lists effective
-  instruction stack UI and whether `AGENTS.md` can influence permissions as
-  missing information.
-- `plans/spikes/SPIKE-006-standards-conformance-matrix.md` requires AGENTS.md
-  conformance tiers before broader compatibility claims.
-- `plans/acceptance/file-access.md` currently keeps root `AGENTS.md` reads and
-  writes under normal project-root file rules, without precedence or permission
-  behavior.
+- `plans/spikes/SPIKE-006-standards-conformance-matrix.md` now records the
+  `display_guidance_order_only` tier.
+- `plans/acceptance/project-management.md` and
+  `plans/acceptance/file-access.md` now define nested `AGENTS.md` disclosure,
+  no semantic merge, no permission effect, and next-preflight reload behavior.
+- `plans/decisions/deferred-decisions.md` now keeps full AGENTS.md
+  compatibility deferred while allowing the V1 ordered disclosure slice.
 
-## Exact User Action Needed
+## Deliverables
 
-Decide whether current V1 should implement nested `AGENTS.md` resolution. If
-yes, provide or approve acceptance criteria for:
+- Instruction preflight records ordered nested `AGENTS.md` guidance.
+- App status reports the supported tier and no permission or automatic model
+  context effect.
+- Planning documents and task bank reflect the resolved scope.
 
-- AGENTS.md support tier: display, parse, guidance, nested resolution, export,
-  or compatibility claim.
-- Precedence between root, nested, OpenCode-native, and app-owned instruction
-  sources.
-- Effective-instruction UI and conflict diagnostics.
-- Whether AGENTS.md can ever affect permissions.
-- Behavior after an approved edit to root or nested `AGENTS.md`.
+## Verification
 
-## Resume Prompt
+- `cargo test --manifest-path src-tauri/Cargo.toml instruction_preflight`
+  passed.
+- `npm test` passed.
+- `npm run build` passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml` passed.
+- `npm run tauri -- build` passed.
 
-Resolve TASK-033 with approved nested `AGENTS.md` resolution scope, update
-acceptance criteria, then implement the narrowest Sprint 11 instruction
-resolution slice.
+## Handoff
+
+TASK-033 is complete. Continue to the next documented sprint/task only after
+checking the current sprint plan and task list for newly unblocked work.

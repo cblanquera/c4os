@@ -1559,9 +1559,8 @@ V1: Nested AGENTS.md Resolution.
 
 ### Objective
 
-Resolve the standards, product, permission, and UX decisions required before
-implementing nested `AGENTS.md` resolution beyond MVP instruction-source
-disclosure.
+Implement the approved current V1 nested `AGENTS.md` slice as ordered display
+guidance beyond MVP instruction-source disclosure.
 
 ### Inputs
 
@@ -1573,17 +1572,19 @@ disclosure.
 
 ### Deliverables
 
-- Product decision for whether nested `AGENTS.md` resolution is current V1,
-  later V1, or deferred.
-- Standards conformance decision for AGENTS.md support tier.
-- UX decision for effective-instruction display and conflict diagnostics.
-- Acceptance criteria for resolution, precedence, disclosure, permissions, and
-  out-of-scope behavior.
+- Product decision: current V1 supports ordered display guidance only.
+- Standards conformance tier: `display_guidance_order_only`.
+- Instruction preflight disclosure records an ordered root-to-nested guidance
+  stack.
+- Status surface reports the supported tier and no permission or automatic
+  model-context effect.
+- Acceptance criteria for resolution, disclosure, permissions, and out-of-scope
+  behavior.
 
 ### Acceptance Criteria
 
-New or updated nested `AGENTS.md` acceptance criteria are required before code
-implementation.
+- `plans/acceptance/project-management.md`
+- `plans/acceptance/file-access.md`
 
 ### Dependencies
 
@@ -1598,16 +1599,26 @@ High.
 
 - Nested `AGENTS.md` scope is no longer missing or ambiguous.
 - AGENTS.md conformance tier is defined.
-- Effective-instruction UI and conflict diagnostics are defined.
-- Implementation can proceed without inventing instruction precedence or
-  permission behavior from code.
+- Effective-instruction behavior is ordered-source disclosure only.
+- Instruction preflight records ordered root and nested `AGENTS.md` guidance.
+- Implementation does not give `AGENTS.md` permission effects or automatic
+  app-owned model-context inclusion.
 
 ### Verification
 
-- Planning review against deferred decisions, readiness gaps, standards
-  conformance spike, instruction-loading validation, and file-access
-  acceptance.
+- Rust instruction preflight tests.
+- JS status command tests.
+- Static build.
 
 ### Status
 
-Blocked pending standards and UX decisions.
+Verified.
+
+### Verification Evidence
+
+- `cargo test --manifest-path src-tauri/Cargo.toml instruction_preflight`
+  passed.
+- `npm test` passed.
+- `npm run build` passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml` passed.
+- `npm run tauri -- build` passed.

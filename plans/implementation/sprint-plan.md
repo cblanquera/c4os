@@ -184,30 +184,40 @@ Exit criteria:
 
 ## Sprint 11: V1 Nested AGENTS Scope Decision
 
-Status: blocked pending standards and UX decisions.
+Status: complete.
 
-Goal: decide whether current V1 should implement nested `AGENTS.md` resolution
-beyond the existing MVP instruction-source disclosure inventory.
+Goal: implement the approved current V1 nested `AGENTS.md` slice as ordered
+display guidance beyond the existing MVP instruction-source disclosure
+inventory.
 
 Tasks:
 
 - TASK-033: Resolve V1 Nested AGENTS Resolution Scope.
 
-Blocked by:
+Decision:
 
-- `plans/decisions/deferred-decisions.md` defers nested `AGENTS.md` precedence
-  and conflict diagnostics to V1.
-- `plans/decisions/implementation-readiness-gaps.md` still lists effective
-  instruction stack UI and whether `AGENTS.md` can influence permissions as
-  missing information.
-- `plans/spikes/SPIKE-006-standards-conformance-matrix.md` still requires
-  conformance tiers for AGENTS.md display, parse, guidance, nested resolution,
-  and export before broader compatibility claims.
+- Current V1 supports `display_guidance_order_only`.
+- Root and nested `AGENTS.md` files are disclosed in an ordered guidance stack.
+- Root guidance appears first, then nested files by path depth and path name.
+- Nested entries disclose the path subtree they apply to.
+- Conflict diagnostics are limited to source order; the app does not parse,
+  semantically merge, rewrite, execute, export, or round-trip guidance.
+- `AGENTS.md` files have no permission effect and are not added to app-owned
+  model context unless explicitly read under normal project-root rules.
 
 Exit criteria:
 
-- Product decision states whether nested `AGENTS.md` resolution is current V1,
-  later V1, or deferred.
+- Product decision states current V1 supports ordered display guidance only.
 - Standards decision defines the supported AGENTS.md conformance tier.
-- UX decision defines effective-instruction display and conflict diagnostics.
-- Acceptance criteria exist before implementation starts.
+- UX behavior defines ordered-source conflict diagnostics.
+- Acceptance criteria exist and implementation records the ordered guidance
+  stack in instruction preflight disclosure.
+
+Verification:
+
+- `cargo test --manifest-path src-tauri/Cargo.toml instruction_preflight`
+  passed.
+- `npm test` passed.
+- `npm run build` passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml` passed.
+- `npm run tauri -- build` passed.

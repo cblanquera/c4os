@@ -35,6 +35,22 @@ Given a project has a root `AGENTS.md`
 When the user approves an agent-proposed edit to it
 Then the app treats the edit as a normal project-root file write, not as instruction or permission reconfiguration.
 
+Given a project has nested `AGENTS.md` files
+When instruction preflight runs
+Then the app discloses an ordered guidance stack with root guidance first and deeper nested guidance after its parent path.
+
+Given nested `AGENTS.md` files contain overlapping guidance
+When the app displays instruction resolution
+Then conflict diagnostics are limited to ordered source disclosure and do not semantically merge, rewrite, or enforce guidance.
+
+Given a nested `AGENTS.md` file is disclosed
+When permissions or approvals are evaluated
+Then the nested instruction file has no permission effect.
+
+Given nested `AGENTS.md` files are disclosed
+When OpenRouter-bound app-owned model context is assembled
+Then the files are not included unless explicitly read under normal project-root file-read rules or runtime-native instruction loading is separately disclosed.
+
 Given OpenCode has runtime-native instruction loading behavior
 When the runtime control spike evaluates it
 Then the app can observe and disclose the loaded instruction files, or disable that behavior.
@@ -79,6 +95,7 @@ Then the root path and Git state are visible without opening settings.
  - Git state is missing or stale after project registration.
  - Root `AGENTS.md` changes permissions or approval behavior.
  - Editing root `AGENTS.md` automatically reloads model context, permission state, or instruction precedence.
+ - Nested `AGENTS.md` changes permissions, approvals, or app-owned model context without explicit read or runtime-native disclosure.
  - OpenCode invisibly injects instruction files into model context without app visibility or disclosure.
  - The Project Selector exposes project search, grouping, archive, delete, favorites, metadata editing, cross-project views, or multi-project operations in MVP.
 
@@ -90,4 +107,5 @@ Then the root path and Git state are visible without opening settings.
  - Cross-project views and multi-project operations.
  - Non-Git project workflows.
  - Worktree management.
+ - Full AGENTS.md compatibility, semantic conflict resolution, export, or standards round-trip behavior.
  - Cloud-synced workspace handling.

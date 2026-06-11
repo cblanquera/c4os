@@ -253,8 +253,10 @@ Missing information:
  - Skill version conflict resolution.
  - Whether skill scripts are allowed separately from plugin scripts.
  - Where app-specific skill metadata lives.
- - Effective instruction stack UI for AGENTS.md and other instruction files.
- - Whether AGENTS.md can ever influence permissions.
+ - Full effective instruction stack UI for AGENTS.md and other instruction files.
+   Current V1 supports ordered source disclosure only.
+ - Whether future full AGENTS.md compatibility can ever influence permissions.
+   Current V1 explicitly gives AGENTS.md no permission effect.
 
 ### Session And Memory
 

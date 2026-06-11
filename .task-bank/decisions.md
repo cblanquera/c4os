@@ -37,3 +37,24 @@ that future sessions can update without loading the full planning corpus.
 Applies To:
 
 - all items
+
+## DEC-003: Nested AGENTS.md V1 Tier
+
+Date: 2026-06-11
+Status: active
+
+Decision:
+
+Current V1 supports nested `AGENTS.md` at
+`display_guidance_order_only` tier. The app discloses an ordered guidance stack
+with root guidance first and nested files ordered by path depth and name.
+
+Reason:
+
+This resolves TASK-033 without promoting full AGENTS.md compatibility. It gives
+users visible instruction-source context while preserving the established
+permission and model-context boundaries.
+
+Applies To:
+
+- item-034

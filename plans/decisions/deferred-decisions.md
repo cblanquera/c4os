@@ -52,11 +52,17 @@ Next action: Define skill conformance and trust model before V1.
 
 ## ADR-013: Nested AGENTS.md Resolution
 
-Summary: Nested AGENTS.md precedence and conflict diagnostics are deferred.
+Summary: Full nested AGENTS.md compatibility remains deferred; V1 supports
+ordered display guidance only.
 
-Status: Deferred to V1.
+Status: Partially resolved for V1.
 
-Rationale: Root AGENTS.md display is enough for MVP. Nested resolution increases complexity and can confuse users without clear effective-instruction UI.
+Rationale: Root AGENTS.md display was enough for MVP. Current V1 may disclose
+nested instruction sources as an ordered guidance stack so users can see which
+files exist and which path each applies to. The app does not parse,
+semantically merge, export, or enforce nested guidance, and `AGENTS.md` files
+cannot affect permissions or app-owned model context without explicit reads or
+separately disclosed runtime-native instruction loading.
 
 Affected documents:
 
@@ -64,7 +70,8 @@ Affected documents:
  - `plans/mvp/mvp-scope.md`
  - `plans/spikes/SPIKE-006-standards-conformance-matrix.md`
 
-Next action: Revisit with standards conformance and instruction-stack UI design.
+Next action: Revisit full compatibility only after standards conformance,
+semantic conflict behavior, export, and instruction-stack UX are specified.
 
 ## ADR-015: Marketplace Model
 

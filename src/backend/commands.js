@@ -38,6 +38,14 @@ export function createBackendCommandRegistry(options = {}) {
           changedFileCount: 0,
           browserMode: 'read-only',
           rootAgentsDisplay: 'passive',
+          instructionResolution: {
+            nestedAgentsSupported: true,
+            supportTier: 'display_guidance_order_only',
+            permissionEffect: 'none',
+            modelContextEffect: 'none_without_explicit_runtime_read',
+            editReloadBehavior: 'next_preflight_only',
+            conflictDiagnostics: 'ordered_sources_no_semantic_merge',
+          },
           selector: {
             available: true,
             listRegisteredProjects: true,
