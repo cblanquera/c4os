@@ -36,4 +36,17 @@
 | item-032 | planning | verified | codex | V1 worktree lifecycle scope | Sprint 9 deferred worktree creation and cleanup beyond current V1; later V1 items still need their own accepted scope and acceptance criteria. |
 | item-033 | implementation | verified | codex | Project selector status surface | JS tests, Rust tests, web build, and native Tauri build pass. |
 | item-034 | implementation | verified | codex | V1 nested AGENTS resolution scope | Ordered display-guidance tier implemented; Rust tests, JS tests, web build, and native Tauri build pass. |
-
+| item-035 | planning | verified | codex | V1 Agent Skills discovery and invocation scope | Explicit discovery/invocation-only tier accepted on 2026-06-12. |
+| item-036 | implementation | verified | codex | Explicit project-local skill discovery and invocation | Rust tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-037 | planning | verified | codex | V1 local stdio MCP scope | Local-stdio explicit-approval-only tier accepted on 2026-06-12. |
+| item-038 | implementation | verified | codex | Local stdio MCP explicit approval surface | Rust MCP tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-039 | planning | verified | codex | V1 rich artifact preview scope | `raster_image_preview_only` accepted on 2026-06-12. |
+| item-040 | implementation | verified | codex | Passive raster image artifact previews | Artifact tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-041 | implementation | verified | codex | Project JSON export with import deferred | Export tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-042 | planning | verified | codex | V1 retention and session delete scope | `archived_session_delete_only` accepted on 2026-06-12. |
+| item-043 | implementation | verified | codex | Archived session delete | Rust tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-044 | planning | verified | codex | V1 long-term memory scope | `no_durable_memory_v1` accepted on 2026-06-12. |
+| item-045 | planning | verified | codex | V1 broader compatibility claims scope | Compatibility status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-046 | planning | verified | codex | V1 provider expansion scope | Provider expansion status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-047 | planning | verified | codex | V1 browser and web-viewing scope | Browser/web status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-048 | planning | verified | codex | V1 plugin and marketplace scope | Plugin/marketplace status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |

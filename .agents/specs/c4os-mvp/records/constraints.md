@@ -54,5 +54,6 @@ Related:
 ### Statement
 
 `.task-bank/` must not receive new progress updates after migration to
-`.agents/`.
-
+`.agents/`. `.agent/` must not receive new C4OS planning or progress updates;
+it is a deprecated compatibility redirect for reusable skills that still
+mention `.agent/`.

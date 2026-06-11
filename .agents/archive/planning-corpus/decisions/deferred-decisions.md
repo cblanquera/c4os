@@ -20,9 +20,12 @@ Next action: Revisit after the MVP proves users value the single-session workspa
 
 ## ADR-011: MCP Integration
 
-Summary: MCP is deferred, with local stdio MCP as a likely first reconsideration point.
+Summary: MCP is deferred, with local stdio MCP scoped for a narrow V1 decision;
+remote MCP, authorization flows, automatic project-file startup, automatic
+resource context ingestion, automatic prompt use, unapproved tool invocation,
+and unapproved sampling remain deferred.
 
-Status: Deferred to V1 or later.
+Status: Partially resolved for V1.
 
 Rationale: MCP is important for extensibility but not necessary for MVP validation and creates security and policy complexity.
 
@@ -32,13 +35,16 @@ Affected documents:
  - `.agents/archive/planning-corpus/mvp/mvp-scope.md`
  - `.agents/archive/planning-corpus/spikes/SPIKE-004-mcp-scope-and-threat-model.md`
 
-Next action: Decide V1 MCP scope after policy authority is resolved.
+Next action: Implement the accepted `local_stdio_explicit_approval_only`
+conformance tier.
 
 ## ADR-012: Agent Skills Support
 
-Summary: Skill discovery and explicit skill invocation are deferred.
+Summary: Skill discovery and explicit skill invocation are scoped for a narrow
+V1 decision; auto-invocation, scripts, assets, references, global catalogs,
+plugin-provided skills, and full Agent Skills compatibility remain deferred.
 
-Status: Deferred to V1.
+Status: Partially resolved for V1.
 
 Rationale: Skills are useful, but MVP can validate the core workspace without skill loading, script execution, or version conflict handling.
 
@@ -48,7 +54,8 @@ Affected documents:
  - `.agents/archive/planning-corpus/mvp/mvp-scope.md`
  - `.agents/archive/planning-corpus/spikes/SPIKE-006-standards-conformance-matrix.md`
 
-Next action: Define skill conformance and trust model before V1.
+Next action: Implement the accepted
+`explicit_discovery_and_invocation_only` conformance tier.
 
 ## ADR-013: Nested AGENTS.md Resolution
 
@@ -157,7 +164,8 @@ Next action: Revisit if validation users reject OpenRouter-only setup.
 
 Summary: Long-term memory and cross-session memory are deferred.
 
-Status: Deferred to V2.
+Status: Deferred to V2. V1 retention/delete scope is proposed separately as
+`archived_session_delete_only`.
 
 Rationale: Memory increases privacy and correctness risk. MVP only needs session persistence.
 
@@ -167,7 +175,8 @@ Affected documents:
  - `.agents/archive/planning-corpus/mvp/mvp-scope.md`
  - `.agents/archive/planning-corpus/spikes/SPIKE-014-memory-session-retention.md`
 
-Next action: Define inspect/delete/review controls before adding durable memory.
+Next action: Resolve whether V1 accepts `archived_session_delete_only` before
+adding durable memory or broader cleanup behavior.
 
 ## ADR-021: Broader UX Modes
 

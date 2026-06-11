@@ -22,6 +22,8 @@
 
 ## Reviews
 
+- `reviews/readiness-review.md`
+- `reviews/findings.md`
 - `generated/source-retirement-review.md`
 
 ## Optional Generated Views
@@ -30,5 +32,4 @@
 
 ## Current Open Questions
 
-- None blocking the `.task-bank/` migration.
-
+- None recorded.

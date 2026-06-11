@@ -54,6 +54,26 @@ Current V1 supports `AGENTS.md` at `display_guidance_order_only` tier:
    runtime explicitly reads the file under normal project-root file-read rules.
  - Runtime-native instruction loading remains separately disclosed by preflight.
 
+# V1 SKILL.md Tier Decision
+
+Current V1 support for `SKILL.md` is
+`explicit_discovery_and_invocation_only`, accepted on 2026-06-12:
+
+ - Project-local `SKILL.md` files may be inventoried and displayed.
+ - Displayed metadata is limited to skill name, description, source path, and
+   support status.
+ - A skill may affect a session only after explicit user selection.
+ - Skill text may enter app-owned model context only as an explicit
+   user-directed context addition or explicit project-root file read.
+ - Skills are not auto-invoked.
+ - Skill scripts are not executed.
+ - Skill references and assets are not automatically loaded or trusted.
+ - Skills have no permission effect and cannot alter file, shell, Git, model,
+   or approval policy.
+ - Global skill catalogs, plugin-provided skills, version conflict resolution,
+   marketplace distribution, export, import, and round-trip compatibility
+   remain unsupported.
+
 # Decisions Unlocked
 
  - ADR-005: Standards-First Interoperability.

@@ -1614,11 +1614,829 @@ High.
 
 Verified.
 
+## TASK-034: Resolve V1 Agent Skills Discovery And Invocation Scope
+
+### Epic
+
+V1: Explicit Skill Discovery And Invocation.
+
+### Objective
+
+Resolve the Agent Skills conformance and trust model before exposing any skill
+catalog or invocation behavior in the app.
+
+### Inputs
+
+- `.agents/archive/planning-corpus/roadmap/implementation-roadmap.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-006-standards-conformance-matrix.md`
+- `.agents/archive/planning-corpus/acceptance/skills.md`
+- `.agents/archive/planning-corpus/specs/security-specification.md`
+
+### Deliverables
+
+- Product decision for the V1 skill conformance tier.
+- Standards conformance tier for `SKILL.md`.
+- Acceptance criteria for explicit skill discovery and invocation.
+- Out-of-scope boundaries for auto-invocation, scripts, references, assets,
+  permissions, and model-context effects.
+- Progress item and handoff for the implementation task that follows acceptance.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/skills.md`
+
+### Dependencies
+
+- TASK-033.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Skill scope is no longer missing or ambiguous.
+- The app's supported skill behavior is explicit-only and testable.
+- Skill discovery cannot imply script execution, plugin installation, broader
+  prompt editing, or full Agent Skills compatibility.
+- Skills do not affect permissions, approval decisions, file access, shell
+  access, Git access, model routing, or automatic app-owned model context.
+- Implementation does not begin until the proposed V1 tier is accepted.
+
+### Verification
+
+- Planning review against roadmap, deferred decisions, standards matrix,
+  security specification, and skills acceptance criteria.
+
+### Status
+
+Accepted.
+
 ### Verification Evidence
 
-- `cargo test --manifest-path src-tauri/Cargo.toml instruction_preflight`
-  passed.
-- `npm test` passed.
-- `npm run build` passed.
-- `cargo test --manifest-path src-tauri/Cargo.toml` passed.
-- `npm run tauri -- build` passed.
+- User accepted `explicit_discovery_and_invocation_only` on 2026-06-12.
+
+## TASK-035: Build Explicit Project-Local Skill Discovery And Invocation
+
+### Epic
+
+V1: Explicit Skill Discovery And Invocation.
+
+### Objective
+
+Implement the accepted `explicit_discovery_and_invocation_only` Agent Skills
+surface for project-local `SKILL.md` files.
+
+### Inputs
+
+- `.agents/archive/planning-corpus/acceptance/skills.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-006-standards-conformance-matrix.md`
+- `.agents/archive/planning-corpus/specs/security-specification.md`
+- `.agents/progress/items/item-035.md`
+
+### Deliverables
+
+- Backend discovery for project-local `SKILL.md` files under the selected
+  project root.
+- Skill metadata projection with name, description, source path, and
+  unsupported-capability warnings.
+- Explicit invocation path that can include selected skill text in the current
+  session only through user action.
+- Guardrails preventing auto-invocation, script execution, trusted
+  asset/reference loading, permission effects, and global or plugin-provided
+  skill discovery.
+- UI/status surface for the accepted capability and unavailable behaviors.
+- Tests for discovery, invocation, containment, secret-deny blocking, and
+  excluded behavior.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/skills.md`
+
+### Dependencies
+
+- TASK-034.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Project-local `SKILL.md` files are discoverable only inside the selected
+  project root.
+- Discovery displays bounded metadata and support status without executing or
+  loading scripts, references, or assets.
+- Invocation requires explicit user selection.
+- Invoked skill text enters the current session only through explicit user
+  action or normal project-root file-read behavior.
+- Skills do not affect permissions, approvals, file access, shell access, Git
+  access, model routing, or automatic app-owned model context.
+- The app does not claim full Agent Skills compatibility.
+
+### Verification
+
+- Rust tests for discovery, containment, secret-deny blocking, and invocation
+  policy.
+- JS tests for capability/status projection and UI unavailable-behavior labels.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Native Tauri build.
+
+### Status
+
+Verified.
+
+## TASK-036: Resolve V1 Local Stdio MCP Scope
+
+### Epic
+
+V1: Local Stdio MCP Server Support.
+
+### Objective
+
+Resolve the V1 local stdio MCP conformance, transport, root, approval, and
+trust model before exposing any MCP server configuration or launch behavior.
+
+### Inputs
+
+- `.agents/archive/planning-corpus/roadmap/implementation-roadmap.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/adr/011-mcp-integration-strategy.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-004-mcp-scope-and-threat-model.md`
+- `.agents/archive/planning-corpus/acceptance/mcp-integration.md`
+- Official MCP specification version `2025-11-25` at
+  `https://modelcontextprotocol.io/specification/2025-11-25`
+
+### Deliverables
+
+- Product decision for the V1 local stdio MCP conformance tier.
+- Acceptance criteria for local server registration, launch, roots, tools,
+  resources, prompts, sampling, elicitation, approval routing, failure states,
+  and out-of-scope behavior.
+- Explicit deferral of remote MCP and automatic project-file MCP startup.
+- Progress item and handoff for implementation if the proposed tier is
+  accepted.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/mcp-integration.md`
+
+### Dependencies
+
+- TASK-035.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- MCP scope is no longer missing or ambiguous for current V1.
+- Local stdio MCP behavior is explicit-only and testable.
+- Local stdio server launch cannot bypass the Approval Gateway.
+- MCP roots, tools, resources, prompts, sampling, and elicitation have
+  documented allow/deny behavior.
+- Remote MCP remains explicitly unavailable.
+- Implementation does not begin until the proposed V1 tier is accepted.
+
+### Verification
+
+- Planning review against roadmap, deferred decisions, ADR-011, MCP threat
+  model, official MCP spec, security specification, and MCP acceptance
+  criteria.
+
+### Status
+
+Accepted.
+
+### Verification Evidence
+
+- User accepted `local_stdio_explicit_approval_only` on 2026-06-12.
+
+## TASK-037: Build Local Stdio MCP Explicit Approval Surface
+
+### Epic
+
+V1: Local Stdio MCP Server Support.
+
+### Objective
+
+Implement the accepted `local_stdio_explicit_approval_only` MCP setup surface
+for explicit local stdio server registration and approval-gated launch
+proposal.
+
+### Inputs
+
+- `.agents/archive/planning-corpus/acceptance/mcp-integration.md`
+- `.agents/archive/planning-corpus/adr/011-mcp-integration-strategy.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-004-mcp-scope-and-threat-model.md`
+- `.agents/archive/planning-corpus/specs/security-specification.md`
+- `.agents/progress/items/item-037.md`
+
+### Deliverables
+
+- App status fields for the accepted MCP tier and unavailable remote,
+  automatic, and full-compatibility behaviors.
+- Backend registration for explicit local stdio MCP server definitions.
+- Backend launch proposal for local stdio MCP commands that routes through
+  approval-gated local process semantics rather than starting a server.
+- Root scope projection limited to the selected project root.
+- Tests proving project files are not auto-imported or auto-started.
+- Tests proving remote MCP, automatic resource/prompt context ingestion,
+  unapproved tool invocation, sampling, and elicitation remain unavailable.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/mcp-integration.md`
+
+### Dependencies
+
+- TASK-036.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Local stdio MCP support is explicit-only and testable.
+- No MCP server starts automatically.
+- No remote MCP connection is possible through the V1 surface.
+- Launch requests produce an approval-gated command proposal, not process
+  execution.
+- Roots are limited to the selected project root.
+- Tools, resources, prompts, sampling, and elicitation cannot bypass current
+  app policy or model-context rules.
+- The app does not claim full MCP compatibility.
+
+### Verification
+
+- `cargo test --manifest-path src-tauri/Cargo.toml mcp`.
+- `npm test -- tests/backend-command-boundary.test.mjs tests/ui-state.test.mjs`.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- `npm run tauri -- build`.
+
+### Status
+
+Verified.
+
+## TASK-038: Scope V1 Rich Artifact Preview Support
+
+### Epic
+
+V1: Artifact Preview Expansion.
+
+### Objective
+
+Choose and document the next accepted V1 artifact preview support tier before
+implementation.
+
+### Inputs
+
+- `.agents/archive/planning-corpus/acceptance/artifacts.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-013-artifact-browser-preview-security.md`
+- `.agents/archive/planning-corpus/specs/security-specification.md`
+- `.agents/archive/planning-corpus/specs/architecture-specification.md`
+- `.agents/progress/items/item-032.md`
+
+### Deliverables
+
+- Accepted or deferred V1 support tier for richer artifact previews.
+- Updated artifact acceptance criteria.
+- Updated deferred-decision and standards-conformance notes.
+- Follow-on implementation item only if a narrow tier is accepted.
+
+### Acceptance Criteria
+
+- Accepted tier:
+  `.agents/archive/planning-corpus/acceptance/artifacts.md`
+  `raster_image_preview_only`.
+
+### Dependencies
+
+- TASK-037.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Candidate preview types are ranked by user value and risk.
+- Active HTML and executable artifact policy is explicit.
+- Renderer sandboxing and WebView/Chromium requirements are explicit.
+- Browser-content ingestion and model-context behavior are explicit.
+- Artifact provenance, storage, and unsupported behavior are explicit.
+- Implementation remains blocked until a narrow tier is accepted.
+
+### Proposed Tier
+
+`raster_image_preview_only`: passive local PNG, JPEG, WebP, and GIF previews
+only. SVG, HTML, PDF, documents, spreadsheets, browser rendering, remote URLs,
+execution, export, duplicate workflows, search, and automatic model-context
+ingestion remain out of scope.
+
+### Verification
+
+- Planning review confirms no active renderer, browser content ingestion, or
+  Chromium dependency is silently promoted into V1.
+- Acceptance criteria are explicit enough to drive tests.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `raster_image_preview_only` on 2026-06-12.
+
+## TASK-039: Build Passive Raster Image Artifact Previews
+
+### Epic
+
+V1: Artifact Preview Expansion.
+
+### Objective
+
+Implement the accepted `raster_image_preview_only` artifact preview tier.
+
+### Inputs
+
+- `.agents/progress/items/item-039.md`
+- `.agents/archive/planning-corpus/acceptance/artifacts.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-013-artifact-browser-preview-security.md`
+
+### Deliverables
+
+- Passive local PNG, JPEG, WebP, and GIF artifact preview support.
+- App status fields for the accepted tier and unsupported preview types.
+- Tests for accepted raster image preview behavior and excluded SVG, HTML, and
+  remote URL inputs.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/artifacts.md`
+
+### Dependencies
+
+- TASK-038.
+
+### Complexity
+
+Medium.
+
+### Completion Criteria
+
+- Raster image artifact previews are passive and local.
+- Active HTML, SVG, PDF, document, spreadsheet, browser, remote URL, execution,
+  export, duplicate, search, OCR, image analysis, and automatic model-context
+  behavior remain unavailable.
+- Artifact provenance remains visible.
+
+### Verification
+
+- `cargo test --manifest-path src-tauri/Cargo.toml artifact`.
+- `npm test -- tests/backend-command-boundary.test.mjs`.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- `npm run tauri -- build`.
+
+### Status
+
+Verified.
+
+## TASK-040: Scope V1 Session And Artifact Export Import
+
+### Epic
+
+V1: Portability And Retention Controls.
+
+### Objective
+
+Choose and document whether V1 should support any session or artifact
+export/import behavior before implementation.
+
+### Inputs
+
+- `.agents/progress/items/item-032.md`
+- `.agents/archive/planning-corpus/specs/data-model-specification.md`
+- `.agents/archive/planning-corpus/specs/security-specification.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-008-storage-audit-portability.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-014-memory-session-retention.md`
+- `.agents/archive/planning-corpus/adr/005-standards-first-interoperability.md`
+- `.agents/archive/planning-corpus/adr/007-local-first-storage-model.md`
+
+### Deliverables
+
+- Accepted or deferred V1 support tier for session and artifact export/import.
+- Updated acceptance criteria for export/import behavior.
+- Updated deferred-decision and compatibility notes.
+- Follow-on implementation item only if a narrow tier is accepted.
+
+### Acceptance Criteria
+
+- `.agents/archive/planning-corpus/acceptance/export-import.md`
+
+### Dependencies
+
+- TASK-039.
+
+### Complexity
+
+High.
+
+### Completion Criteria
+
+- Export format is a selected-project JSON manifest.
+- Absolute local paths are excluded from exported payloads.
+- Secret exclusion and provider-secret exclusion are explicit.
+- Artifact metadata is exported; artifact binary payloads are not.
+- Raw shell stdout/stderr export remains excluded.
+- Import and round-trip compatibility remain deferred.
+
+### Verification
+
+- `cargo test --manifest-path src-tauri/Cargo.toml export`.
+- `npm test -- tests/backend-command-boundary.test.mjs`.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- `npm run tauri -- build`.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted import deferred while export is scoped on 2026-06-12.
+- Accepted tier is `project_json_export_only`.
+
+## TASK-041: Resolve V1 Retention And Session Delete Scope
+
+### Epic
+
+V1: Portability And Retention Controls.
+
+### Objective
+
+Choose and document whether V1 should support narrow retention/delete controls
+before implementation.
+
+### Inputs
+
+- `.agents/progress/items/item-030.md`
+- `.agents/archive/planning-corpus/acceptance/sessions.md`
+- `.agents/archive/planning-corpus/acceptance/retention-cleanup.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-014-memory-session-retention.md`
+- `.agents/archive/planning-corpus/specs/data-model-specification.md`
+- `.agents/archive/planning-corpus/reviews/final-implementation-readiness-review.md`
+
+### Deliverables
+
+- Accepted, revised, or deferred V1 retention/delete support tier.
+- Updated acceptance criteria for the selected tier.
+- Follow-on implementation item only if a narrow tier is accepted.
+
+### Proposed Completion Criteria
+
+- `archived_session_delete_only` is accepted or revised.
+- Delete is limited to archived, unpinned sessions.
+- Active, latest, running, pending-approval, and pinned sessions are protected.
+- Automatic cleanup, quotas, message-level delete/redaction, memory, import,
+  and round-trip compatibility remain out of scope unless separately accepted.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `archived_session_delete_only` on 2026-06-12.
+- Follow-on implementation is tracked as `TASK-042` / `item-043`.
+
+## TASK-042: Build Archived Session Delete
+
+### Epic
+
+V1: Portability And Retention Controls.
+
+### Objective
+
+Implement the accepted `archived_session_delete_only` tier.
+
+### Inputs
+
+- `.agents/progress/items/item-043.md`
+- `.agents/archive/planning-corpus/acceptance/retention-cleanup.md`
+- `.agents/archive/planning-corpus/acceptance/sessions.md`
+- `.agents/archive/planning-corpus/specs/data-model-specification.md`
+
+### Deliverables
+
+- Storage-level archived-session delete operation.
+- Tauri command boundary for explicit archived-session deletion.
+- Browser-smoke command boundary and app status surface.
+- Tests for successful delete and blocked protected sessions.
+
+### Completion Criteria
+
+- Archived, unpinned sessions can be deleted explicitly.
+- Active, latest, running, pending-approval, and pinned sessions cannot be
+  deleted.
+- App-managed artifact files linked only to the deleted session are removed.
+- Project files, provider credentials, automatic cleanup, quotas, memory,
+  import, and round-trip compatibility remain out of scope.
+
+### Verification
+
+- `cargo test --manifest-path src-tauri/Cargo.toml archived_session`.
+- `cargo test --manifest-path src-tauri/Cargo.toml deletes_archived_unpinned_session_records_only`.
+- `npm test -- tests/backend-command-boundary.test.mjs`.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- `npm run tauri -- build`.
+
+### Status
+
+Verified.
+
+## TASK-043: Resolve V1 Long-Term Memory Scope
+
+### Epic
+
+V1: Portability And Retention Controls.
+
+### Objective
+
+Choose and document whether V1 should support any durable long-term memory
+after retention/delete controls are defined.
+
+### Inputs
+
+- `.agents/progress/items/item-044.md`
+- `.agents/archive/planning-corpus/acceptance/memory.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-014-memory-session-retention.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/specs/data-model-specification.md`
+
+### Deliverables
+
+- Accepted V1 memory support tier.
+- App status surface that explicitly reports durable memory is unavailable.
+- Tests proving the no-memory status surface.
+
+### Completion Criteria
+
+- `no_durable_memory_v1` is accepted.
+- Cross-session memory behavior is explicit.
+- Automatic summaries, embeddings, learned preferences, memory write prompts,
+  and memory inspect/edit/delete UI are unavailable.
+- Deleted sessions cannot leave separate app-owned memory records because V1
+  does not create durable memory records.
+
+### Verification
+
+- `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_no_durable_memory_tier`.
+- `npm test -- tests/backend-command-boundary.test.mjs`.
+- `npm test`.
+- `npm run build`.
+- `cargo test --manifest-path src-tauri/Cargo.toml`.
+- `npm run tauri -- build`.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `no_durable_memory_v1` on 2026-06-12.
+- App status exposes `no_durable_memory_v1` with durable memory, cross-session
+  memory, learned preferences, automatic summaries, embeddings, memory write
+  prompts, memory inspect/edit/delete UI, provider-side memory claims, memory
+  import/export, and model-context auto-injection unavailable.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_no_durable_memory_tier`.
+- Verification passed: `npm test -- tests/backend-command-boundary.test.mjs`.
+- Verification passed: `npm test`.
+- Verification passed: `npm run build`.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Verification passed: `npm run tauri -- build`.
+
+## TASK-044: Resolve V1 Broader Compatibility Claims Scope
+
+### Epic
+
+V1: Standards And Compatibility Claims.
+
+### Objective
+
+Choose and document whether V1 should make any broader compatibility claims
+after explicit skills, local stdio MCP, raster artifact previews, project JSON
+export, archived-session delete, and no durable memory have been scoped.
+
+### Inputs
+
+- `CONTEXT.md`
+- `.agents/progress/items/item-045.md`
+- `.agents/archive/planning-corpus/acceptance/compatibility.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/decisions/non-goals.md`
+- `.agents/archive/planning-corpus/reviews/final-implementation-readiness-review.md`
+
+### Deliverables
+
+- Accepted, revised, or rejected V1 compatibility-claim tier.
+- Updated acceptance criteria for allowed and forbidden compatibility claims.
+- Follow-on implementation item only if product-facing status or docs need
+  code/docs changes after acceptance.
+
+### Completion Criteria
+
+- `no_broader_compatibility_claims_v1` is accepted.
+- V1 allowed compatibility claims are explicit and feature-level.
+- Full AGENTS.md, Agent Skills, MCP, Codex plugin, OpenCode config, import,
+  round-trip, browser, and durable-memory compatibility claims remain deferred
+  unless separately accepted.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `no_broader_compatibility_claims_v1` on 2026-06-12.
+- App status exposes the accepted tier with feature-level claims only and full
+  AGENTS.md, Agent Skills, MCP, Codex plugin, OpenCode config, import,
+  round-trip, browser, and durable-memory compatibility claims unavailable.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_no_broader_compatibility_claims_tier`.
+- Verification passed: `npm test -- tests/backend-command-boundary.test.mjs`.
+- Verification passed: `npm test`.
+- Verification passed: `npm run build`.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Verification passed: `npm run tauri -- build`.
+
+## TASK-045: Resolve V1 Provider Expansion Scope
+
+### Epic
+
+V1: Provider Scope And Model Routing.
+
+### Objective
+
+Choose and document whether V1 should expand beyond the existing
+OpenRouter-only provider path into direct providers, local model providers, or
+fallback routing.
+
+### Inputs
+
+- `CONTEXT.md`
+- `.agents/progress/items/item-046.md`
+- `.agents/archive/planning-corpus/acceptance/model-providers.md`
+- `.agents/archive/planning-corpus/acceptance/openrouter-integration.md`
+- `.agents/archive/planning-corpus/acceptance/provider-expansion.md`
+- `.agents/archive/planning-corpus/adr/019-model-provider-strategy.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-009-provider-privacy-cost.md`
+
+### Deliverables
+
+- Accepted, revised, or rejected V1 provider expansion tier.
+- Updated acceptance criteria for allowed and forbidden provider paths.
+- Follow-on implementation item only if V1 provider status or UI needs code
+  changes after acceptance.
+
+### Completion Criteria
+
+- `openrouter_only_v1_no_direct_or_local_provider_expansion` is accepted.
+- OpenRouter-only remains accepted.
+- Direct providers, local models, offline fallback, provider fallback routing,
+  automatic switching, and multi-provider settings are deferred.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `openrouter_only_v1_no_direct_or_local_provider_expansion` on
+  2026-06-12.
+- App status exposes the accepted OpenRouter-only V1 provider expansion tier.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_openrouter_only_provider_expansion_tier`.
+- Verification passed: `npm test -- tests/backend-command-boundary.test.mjs`.
+- Verification passed: `npm test`.
+- Verification passed: `npm run build`.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Verification passed: `npm run tauri -- build`.
+
+## TASK-046: Resolve V1 Browser And Web Viewing Scope
+
+### Epic
+
+V1: Browser And Web Viewing Scope.
+
+### Objective
+
+Choose and document whether V1 should add browser or web-viewing features now
+that raster artifact previews, provider scope, and compatibility claims have
+been bounded.
+
+### Inputs
+
+- `CONTEXT.md`
+- `.agents/progress/items/item-047.md`
+- `.agents/archive/planning-corpus/acceptance/browser-web-viewing.md`
+- `.agents/archive/planning-corpus/acceptance/artifacts.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/decisions/non-goals.md`
+- `.agents/archive/planning-corpus/spikes/SPIKE-013-artifact-browser-preview-security.md`
+
+### Deliverables
+
+- Accepted, revised, or rejected V1 browser/web-viewing support tier.
+- Updated acceptance criteria for browser surfaces, web content ingestion, and
+  active rendering.
+- Follow-on implementation item only if V1 app status or UI needs code changes
+  after acceptance.
+
+### Completion Criteria
+
+- `no_browser_or_web_viewing_v1` is accepted.
+- Browser panels, remote URL viewing, DOM extraction, screenshots, browser
+  testing, browser automation, and browser-content ingestion are deferred.
+- Chromium-backed rendering and generated HTML execution are deferred.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `no_browser_or_web_viewing_v1` on 2026-06-12.
+- App status exposes the accepted no-browser/no-web-viewing V1 tier.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_no_browser_or_web_viewing_tier`.
+- Verification passed: `npm test -- tests/backend-command-boundary.test.mjs`.
+- Verification passed: `npm test`.
+- Verification passed: `npm run build`.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Verification passed: `npm run tauri -- build`.
+
+## TASK-047: Resolve V1 Plugin And Marketplace Scope
+
+### Epic
+
+V1: Plugin And Marketplace Scope.
+
+### Objective
+
+Choose and document whether V1 should add plugin or marketplace workflows now
+that skills, local stdio MCP, compatibility claims, provider scope, and browser
+scope have been bounded.
+
+### Inputs
+
+- `CONTEXT.md`
+- `.agents/progress/items/item-048.md`
+- `.agents/archive/planning-corpus/acceptance/plugin-marketplace.md`
+- `.agents/archive/planning-corpus/acceptance/plugin-system.md`
+- `.agents/archive/planning-corpus/acceptance/marketplace.md`
+- `.agents/archive/planning-corpus/decisions/deferred-decisions.md`
+- `.agents/archive/planning-corpus/decisions/non-goals.md`
+
+### Deliverables
+
+- Accepted, revised, or rejected V1 plugin and marketplace support tier.
+- Updated acceptance criteria for plugin execution, trust, permissions, and
+  marketplace acquisition.
+- Follow-on implementation item only if V1 app status or UI needs code changes
+  after acceptance.
+
+### Completion Criteria
+
+- `no_plugin_or_marketplace_v1` is accepted.
+- Plugin install, enable, execution, scripts, hooks, permissions, trusted
+  assets, and plugin-provided MCP servers are explicitly accepted or deferred.
+- Marketplace browsing, remote manifests, plugin search/install/update, and
+  curation workflows are explicitly accepted or deferred.
+
+### Status
+
+Verified.
+
+### Verification Evidence
+
+- User accepted `no_plugin_or_marketplace_v1` on 2026-06-12.
+- App status exposes the accepted no-plugin/no-marketplace V1 tier.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml app_status_reports_no_plugin_or_marketplace_tier`.
+- Verification passed: `npm test -- tests/backend-command-boundary.test.mjs`.
+- Verification passed: `npm test`.
+- Verification passed: `npm run build`.
+- Verification passed: `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Verification passed: `npm run tauri -- build`.

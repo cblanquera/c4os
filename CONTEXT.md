@@ -9,6 +9,10 @@ and verification evidence now live under `.agents/`. Use
 active execution state, and `.agents/archive/planning-corpus/` for detailed
 historical planning context.
 
+The singular `.agent/` path is deprecated in this repository. Some reusable
+ChrisAI skills still mention `.agent/` as their default path, but C4OS uses
+`.agents/` as the canonical planning and progress layer.
+
 ## Language
 
 **MVP**:

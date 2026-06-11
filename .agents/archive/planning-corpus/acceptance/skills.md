@@ -57,3 +57,78 @@ Expected Result: Users cannot mistake unavailable skill features for broken beha
  - Skill invocation.
  - Skill version conflict resolution.
  - Skill scripts, references, and assets.
+
+# V1 Acceptance Criteria
+
+Status: accepted.
+
+V1 may add `explicit_discovery_and_invocation_only` support.
+
+## V1 Functional Acceptance Criteria
+
+Given a selected local Git project contains project-local `SKILL.md` files
+When the user opens the skills surface
+Then the app may list skill name, description, source path, and support status.
+
+Given a skill is listed
+When the user selects it explicitly
+Then the app may include the selected skill text in the current session only as
+an explicit user-directed context addition or explicit project-root file read.
+
+Given a skill exists in the project
+When a session starts or a prompt is submitted
+Then the app does not auto-invoke the skill, auto-load the skill, or silently
+alter agent behavior.
+
+## V1 Security Acceptance Criteria
+
+Given a skill declares scripts, references, or assets
+When the app discovers or displays the skill
+Then the app does not execute scripts, run install steps, load references as
+trusted context, render assets as trusted content, or grant additional
+permissions.
+
+Given a skill is selected
+When the runtime requests file, shell, Git, or model-provider actions
+Then the existing Approval Gateway and project-root rules still apply without
+skill-based overrides.
+
+Given a skill file is outside the selected project root or matches a
+secret-deny path
+When discovery or invocation is attempted
+Then the app blocks the file under normal project-root and secret-deny rules.
+
+## V1 User Experience Acceptance Criteria
+
+Requirement: Users must not mistake V1 support for full Agent Skills
+compatibility.
+Expected Result: Skill UI labels unsupported capabilities such as scripts,
+references, assets, auto-invocation, global skill catalogs, version conflict
+resolution, plugin installation, and marketplace distribution as unavailable.
+
+Requirement: Invocation is deliberate.
+Expected Result: The user must explicitly choose a listed skill before its
+content can be considered for the current session.
+
+## V1 Failure Conditions
+
+- A skill changes agent behavior without explicit user selection.
+- A skill script executes.
+- A skill changes permissions or approval behavior.
+- A skill outside the selected project root is discovered or loaded.
+- A skill file matching secret-deny rules is previewed or loaded.
+- The app claims full Agent Skills compatibility.
+
+## V1 Out Of Scope
+
+- Auto-invocation.
+- Global skill catalogs.
+- User home skill discovery.
+- Plugin-provided skills.
+- Skill script execution.
+- Skill dependency installation.
+- Trusted rendering of skill assets.
+- Automatic loading of skill references.
+- Skill version conflict resolution.
+- Skill marketplace workflows.
+- Skill export, import, or round-trip compatibility.

@@ -18,6 +18,7 @@ source until the user explicitly confirms deletion.
 | `.task-bank/` | Legacy progress bank | `.agents/progress/`; `.agents/specs/c4os-mvp/records/evidence.md`; `.agents/specs/c4os-mvp/records/decisions.md` | Historical source and unreviewed local changes may remain useful until the user confirms removal. | archive |
 | `.agents/progress/` | Active progress bank | current active source | None; this is the replacement source. | keep |
 | `.agents/specs/c4os-mvp/` | Durable AI-readable spec layer | current active source | None; this is the replacement source. | keep |
+| `.agent/` | Accidental singular-path agent spec import caused by reusable skills with `.agent` defaults | Unique review artifacts copied to `.agents/specs/c4os-mvp/reviews/`; canonical records remain under `.agents/specs/c4os-mvp/` | Stale duplicate records may confuse future agents if treated as source of truth. | deprecated-redirect |
 
 ## Retirement Decision
 
@@ -28,3 +29,7 @@ confirmation because a verified archive now exists under
 
 `.task-bank/` remains deprecated, not deleted. Use `.agents/progress/` for new
 progress updates and `.agents/specs/c4os-mvp/` for durable planning records.
+
+`.agent/` remains deprecated, not deleted. It is a compatibility redirect only;
+do not write new C4OS planning or progress state there. Use `.agents/` as the
+source of truth.

@@ -23,6 +23,9 @@ Before implementation work:
 8. Use `.agents/specs/` for durable AI-readable planning records and
    `.agents/progress/` for active execution state, item packets, logs, outputs,
    blockers, and verification evidence.
+9. Do not write new planning or progress state under `.agent/`. That path is a
+   deprecated compatibility redirect for skills that still mention `.agent`;
+   use `.agents/` for all repository work.
 
 ## Sprint Implementation Loops
 
