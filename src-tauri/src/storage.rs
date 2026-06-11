@@ -3,8 +3,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LATEST_SCHEMA_VERSION: i64 = 1;
-
 #[derive(Debug, PartialEq)]
 pub struct ProjectRecord {
     pub id: String,
@@ -62,6 +60,14 @@ pub struct ArtifactRecord {
     pub file_path: Option<String>,
     pub preview_path: Option<String>,
     pub metadata_json: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SessionMetadataRecord {
+    pub id: String,
+    pub title: String,
+    pub pinned: bool,
+    pub archived: bool,
 }
 
 pub struct NewProject<'a> {
@@ -320,6 +326,47 @@ impl AppStore {
             .optional()
     }
 
+    pub fn list_sessions_for_project(
+        &self,
+        project_id: &str,
+    ) -> rusqlite::Result<Vec<SessionRecord>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT
+                id,
+                project_id,
+                title,
+                status,
+                mode,
+                agent_ref,
+                model_id,
+                runtime,
+                runtime_session_ref
+            FROM sessions
+            WHERE project_id = ?1
+            ORDER BY updated_at DESC, created_at DESC, rowid DESC
+            ",
+        )?;
+
+        let sessions = statement
+            .query_map([project_id], |row| {
+                Ok(SessionRecord {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    title: row.get(2)?,
+                    status: row.get(3)?,
+                    mode: row.get(4)?,
+                    agent_ref: row.get(5)?,
+                    model_id: row.get(6)?,
+                    runtime: row.get(7)?,
+                    runtime_session_ref: row.get(8)?,
+                })
+            })?
+            .collect();
+
+        sessions
+    }
+
     pub fn active_session(&self) -> rusqlite::Result<Option<SessionRecord>> {
         self.connection
             .query_row(
@@ -487,6 +534,72 @@ impl AppStore {
         )?;
 
         Ok(())
+    }
+
+    pub fn rename_session(&self, session_id: &str, title: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "
+            UPDATE sessions
+            SET title = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            ",
+            params![session_id, title, timestamp()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn set_session_pinned(&self, session_id: &str, pinned: bool) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "
+            UPDATE sessions
+            SET pinned = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            ",
+            params![session_id, if pinned { 1 } else { 0 }, timestamp()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn set_session_archived(&self, session_id: &str, archived: bool) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "
+            UPDATE sessions
+            SET archived = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            ",
+            params![session_id, if archived { 1 } else { 0 }, timestamp()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn get_session_metadata(
+        &self,
+        session_id: &str,
+    ) -> rusqlite::Result<Option<SessionMetadataRecord>> {
+        self.connection
+            .query_row(
+                "
+                SELECT id, title, pinned, archived
+                FROM sessions
+                WHERE id = ?1
+                ",
+                [session_id],
+                |row| {
+                    Ok(SessionMetadataRecord {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        pinned: row.get::<_, i64>(2)? == 1,
+                        archived: row.get::<_, i64>(3)? == 1,
+                    })
+                },
+            )
+            .optional()
     }
 
     pub fn mark_active_sessions_interrupted(&self) -> rusqlite::Result<usize> {
@@ -911,6 +1024,10 @@ impl AppStore {
             self.apply_migration_001()?;
         }
 
+        if current_version < 2 {
+            self.apply_migration_002()?;
+        }
+
         Ok(())
     }
 
@@ -923,7 +1040,23 @@ impl AppStore {
             INSERT INTO schema_migrations (version, name, applied_at)
             VALUES (?1, ?2, ?3)
             ",
-            params![LATEST_SCHEMA_VERSION, "mvp_core_tables", timestamp()],
+            params![1, "mvp_core_tables", timestamp()],
+        )?;
+        transaction.commit()?;
+
+        Ok(())
+    }
+
+    fn apply_migration_002(&self) -> rusqlite::Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+
+        transaction.execute_batch(MIGRATION_002)?;
+        transaction.execute(
+            "
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?1, ?2, ?3)
+            ",
+            params![2, "session_metadata_management", timestamp()],
         )?;
         transaction.commit()?;
 
@@ -1139,6 +1272,16 @@ CREATE INDEX idx_diagnostics_created_at ON diagnostics(created_at);
 CREATE INDEX idx_adapter_refs_session_id ON adapter_refs(session_id);
 ";
 
+const MIGRATION_002: &str = "
+ALTER TABLE sessions
+ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1));
+
+ALTER TABLE sessions
+ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));
+
+CREATE INDEX idx_sessions_project_archived_pinned ON sessions(project_id, archived, pinned);
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1149,9 +1292,11 @@ mod tests {
     fn initializes_schema_from_clean_profile() {
         let store = AppStore::open_in_memory().expect("store opens");
 
-        assert_eq!(store.schema_version().expect("schema version"), 1);
+        assert_eq!(store.schema_version().expect("schema version"), 2);
         assert!(table_exists(&store.connection, "projects"));
         assert!(table_exists(&store.connection, "adapter_refs"));
+        assert!(column_exists(&store.connection, "sessions", "pinned"));
+        assert!(column_exists(&store.connection, "sessions", "archived"));
     }
 
     #[test]
@@ -1242,6 +1387,116 @@ mod tests {
 
         assert!(update_result.is_err());
         assert!(delete_result.is_err());
+    }
+
+    #[test]
+    fn session_metadata_updates_do_not_mutate_messages() {
+        let store = AppStore::open_in_memory().expect("store opens");
+
+        insert_project_and_session(&store);
+        store
+            .append_message(NewMessage {
+                id: "message-1",
+                session_id: "session-1",
+                role: "assistant",
+                content: "persist me",
+                status: "complete",
+                metadata_json: "{}",
+            })
+            .expect("message inserted");
+
+        store
+            .rename_session("session-1", "Renamed")
+            .expect("session renamed");
+        store
+            .set_session_pinned("session-1", true)
+            .expect("session pinned");
+        store
+            .set_session_archived("session-1", true)
+            .expect("session archived");
+
+        let metadata = store
+            .get_session_metadata("session-1")
+            .expect("metadata query")
+            .expect("metadata exists");
+        let messages = store.list_messages("session-1").expect("messages");
+        let update_result = store.connection.execute(
+            "UPDATE messages SET content = 'changed' WHERE id = 'message-1'",
+            [],
+        );
+
+        assert_eq!(
+            metadata,
+            SessionMetadataRecord {
+                id: "session-1".into(),
+                title: "Renamed".into(),
+                pinned: true,
+                archived: true,
+            }
+        );
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "persist me");
+        assert!(update_result.is_err());
+    }
+
+    #[test]
+    fn session_metadata_defaults_survive_reopen() {
+        let directory = tempdir().expect("tempdir");
+        let database_path = directory.path().join("c4os.sqlite");
+
+        {
+            let store = AppStore::open(&database_path).expect("store opens");
+            insert_project_and_session(&store);
+        }
+
+        let reopened = AppStore::open(&database_path).expect("store reopens");
+        let metadata = reopened
+            .get_session_metadata("session-1")
+            .expect("metadata query")
+            .expect("metadata exists");
+
+        assert_eq!(metadata.title, "First session");
+        assert!(!metadata.pinned);
+        assert!(!metadata.archived);
+    }
+
+    #[test]
+    fn migrates_existing_v1_database_to_session_metadata_schema() {
+        let directory = tempdir().expect("tempdir");
+        let database_path = directory.path().join("c4os.sqlite");
+
+        {
+            let connection = Connection::open(&database_path).expect("connection opens");
+            connection
+                .execute_batch(
+                    "
+                    CREATE TABLE schema_migrations (
+                        version INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        applied_at INTEGER NOT NULL
+                    );
+                    ",
+                )
+                .expect("migration table created");
+            connection
+                .execute_batch(MIGRATION_001)
+                .expect("v1 schema applied");
+            connection
+                .execute(
+                    "
+                    INSERT INTO schema_migrations (version, name, applied_at)
+                    VALUES (1, 'mvp_core_tables', 1)
+                    ",
+                    [],
+                )
+                .expect("v1 migration recorded");
+        }
+
+        let migrated = AppStore::open(&database_path).expect("store migrates");
+
+        assert_eq!(migrated.schema_version().expect("schema version"), 2);
+        assert!(column_exists(&migrated.connection, "sessions", "pinned"));
+        assert!(column_exists(&migrated.connection, "sessions", "archived"));
     }
 
     #[test]
@@ -1363,6 +1618,19 @@ mod tests {
             .optional()
             .expect("table query")
             .is_some()
+    }
+
+    fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> bool {
+        let mut statement = connection
+            .prepare(&format!("PRAGMA table_info({table_name})"))
+            .expect("pragma prepares");
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("columns query")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("columns collect");
+
+        columns.iter().any(|column| column == column_name)
     }
 
     fn database_contains(connection: &Connection, needle: &str) -> bool {

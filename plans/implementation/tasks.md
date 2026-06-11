@@ -1230,3 +1230,158 @@ High.
 
 - Manual and automated QA results recorded in `plans/validation/` or a release
   validation report.
+
+## TASK-027: Build Project Session Catalog Foundation
+
+### Epic
+
+V1: Multiple Sessions Per Project.
+
+### Objective
+
+Provide a backend projection for listing multiple durable sessions attached to
+one project while preserving the one-active-run invariant.
+
+### Inputs
+
+- `plans/roadmap/implementation-roadmap.md`
+- `plans/acceptance/sessions.md`
+- `CONTEXT.md`
+
+### Deliverables
+
+- Project-scoped session list API.
+- Session catalog projection with latest-session marker.
+- Active-run guard carried into catalog state.
+- Tests proving multiple sessions can be listed without allowing multiple
+  active runs.
+
+### Acceptance Criteria
+
+- `plans/acceptance/sessions.md`
+
+### Dependencies
+
+- TASK-020.
+- TASK-025.
+
+### Complexity
+
+Medium.
+
+### Completion Criteria
+
+- Multiple sessions for one project are returned in newest-first order.
+- Exactly one latest session is identifiable when sessions exist.
+- A running or waiting session blocks starting another active run.
+- The catalog does not introduce search, archive, delete, or concurrent active
+  session behavior.
+
+### Verification
+
+- Unit tests for multi-session listing, latest marker, active-run guard, and
+  empty project state.
+
+## TASK-028: Build Project-Scoped Session Selection
+
+### Epic
+
+V1: Multiple Sessions Per Project.
+
+### Objective
+
+Allow a caller to open a selected session only when it belongs to the selected
+project, returning transcript state through the existing session screen
+projection.
+
+### Inputs
+
+- `plans/acceptance/sessions.md`
+- `plans/specs/functional-specification.md`
+- `CONTEXT.md`
+
+### Deliverables
+
+- Project-scoped session selection API.
+- Cross-project session rejection.
+- Latest-session fallback when no explicit session is selected.
+- Tests for owned selection, cross-project rejection, and missing sessions.
+
+### Acceptance Criteria
+
+- `plans/acceptance/sessions.md`
+
+### Dependencies
+
+- TASK-027.
+- TASK-020.
+
+### Complexity
+
+Medium.
+
+### Completion Criteria
+
+- Opening a session validates the session's project ownership.
+- Missing sessions fail closed.
+- Omitted session selection opens the latest session for the selected project.
+- Selection does not create archive, delete, search, or concurrent session
+  behavior.
+
+### Verification
+
+- Unit tests for selected session ownership, latest fallback, missing session,
+  and cross-project rejection.
+
+## TASK-029: Build Session Rename Pin And Archive Foundation
+
+### Epic
+
+V1: Session Rename, Archive, Pin, And Delete.
+
+### Objective
+
+Add durable session metadata controls for rename, pin, and archive while
+preserving transcript append-only semantics and deferring hard delete until
+retention/delete semantics are specified.
+
+### Inputs
+
+- `plans/roadmap/implementation-roadmap.md`
+- `plans/specs/data-model-specification.md`
+- `plans/decisions/non-goals.md`
+
+### Deliverables
+
+- Migration for session pin/archive metadata.
+- Rename session title API.
+- Pin/unpin session API.
+- Archive/unarchive session API.
+- Tests proving metadata changes do not edit/delete messages.
+
+### Acceptance Criteria
+
+- `plans/acceptance/sessions.md`
+
+### Dependencies
+
+- TASK-027.
+
+### Complexity
+
+Medium.
+
+### Completion Criteria
+
+- Existing databases migrate to session pin/archive metadata.
+- Session title updates change only session metadata.
+- Pin/archive updates change only session metadata.
+- Message append-only triggers remain intact.
+- Hard delete is not implemented in this task.
+
+### Verification
+
+- Migration tests.
+- Rename/pin/archive tests.
+- Regression test that message records remain append-only after session
+  metadata updates.

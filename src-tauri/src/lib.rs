@@ -16,6 +16,7 @@ pub mod recovery_view;
 pub mod runtime;
 pub mod runtime_control;
 pub mod session_allow;
+pub mod session_catalog;
 pub mod session_view;
 pub mod shell_executor;
 pub mod shell_summary;

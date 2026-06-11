@@ -77,3 +77,41 @@ Exit criteria:
 - macOS Apple Silicon app-build validation passes.
 - Release gates are documented, including Windows 11 x64 validation before
   public MVP release.
+
+## Sprint 6: V1 Session Catalog Foundation
+
+Goal: start the documented V1 path for multiple sessions per project without
+changing the MVP one-active-run safety invariant.
+
+Tasks:
+
+- TASK-027: Build Project Session Catalog Foundation.
+- TASK-028: Build Project-Scoped Session Selection.
+
+Exit criteria:
+
+- A project can list multiple durable sessions.
+- The latest session remains identifiable.
+- One active run remains enforced globally.
+- Session catalog records expose enough state for a future UI selector without
+  adding transcript search, archive, delete, or concurrent-agent behavior.
+- Selecting a session validates project ownership before opening transcript
+  state.
+
+## Sprint 7: V1 Session Metadata Management
+
+Goal: add safe session-management metadata for the documented V1 session
+workflow without introducing hard delete before retention semantics are defined.
+
+Tasks:
+
+- TASK-029: Build Session Rename Pin And Archive Foundation.
+
+Exit criteria:
+
+- Sessions can be renamed without mutating transcript records.
+- Sessions can be pinned or unpinned.
+- Sessions can be archived or unarchived through metadata rather than record
+  deletion.
+- Delete remains deferred until retention/delete semantics are explicitly
+  specified.

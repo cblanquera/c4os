@@ -29,3 +29,6 @@
 | item-025 | verification | verified | codex | MVP technical test suite | Full local automated suite passes. |
 | item-026 | verification | verified | codex | App-build and product QA gates | macOS Apple Silicon local gates pass; Windows 11 x64 validation explicitly re-scoped out of public MVP release. |
 | item-027 | stabilization | verified | codex | Stabilization and release prep | README, dev-server regression coverage, release checklist, and full gates pass. |
+| item-028 | implementation | verified | codex | Project session catalog foundation | Session catalog tests and full local gates pass. |
+| item-029 | implementation | verified | codex | Project-scoped session selection | Selection ownership tests and full local gates pass. |
+| item-030 | implementation | verified | codex | Session rename pin and archive foundation | Migration, metadata APIs, Rust tests, JS tests, web build, and native Tauri build pass. |
