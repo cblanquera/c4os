@@ -57,6 +57,7 @@ impl<'a> ProjectExportService<'a> {
                 Ok(json!({
                     "id": session.id,
                     "title": redact_export_text(&session.title),
+                    "workflowPurpose": session.workflow_purpose,
                     "status": session.status,
                     "mode": session.mode,
                     "modelId": session.model_id,
@@ -98,6 +99,7 @@ impl<'a> ProjectExportService<'a> {
             "project": {
                 "id": project.id,
                 "name": redact_export_text(&project.name),
+                "workflowPurpose": project.workflow_purpose,
                 "rootPath": Value::Null,
                 "rootPathPolicy": "excluded_absolute_local_path",
                 "defaultModel": project.default_model,
@@ -198,8 +200,10 @@ mod tests {
         assert_eq!(export["roundTripCompatibility"], false);
         assert_eq!(export["project"]["id"], "project-1");
         assert_eq!(export["project"]["name"], "Example");
+        assert_eq!(export["project"]["workflowPurpose"], "research");
         assert_eq!(export["project"]["rootPath"], Value::Null);
         assert_eq!(export["sessions"][0]["id"], "session-1");
+        assert_eq!(export["sessions"][0]["workflowPurpose"], "writing");
         assert_eq!(export["sessions"][0]["messages"][0]["content"], "hello");
         assert_eq!(export["sessions"][0]["toolCalls"][0]["outputSummary"], "ok");
         assert_eq!(export["artifacts"][0]["title"], "notes.txt");
@@ -261,6 +265,9 @@ mod tests {
             })
             .expect("project inserted");
         store
+            .set_project_workflow_purpose("project-1", Some("research"))
+            .expect("project workflow purpose set");
+        store
             .create_session(NewSession {
                 id: "session-1",
                 project_id: "project-1",
@@ -273,6 +280,9 @@ mod tests {
                 runtime_session_ref: Some("runtime-secret-ref"),
             })
             .expect("session inserted");
+        store
+            .set_session_workflow_purpose("session-1", Some("writing"))
+            .expect("session workflow purpose set");
         store
             .append_message(NewMessage {
                 id: "message-1",

@@ -6,7 +6,11 @@ import {
   errorMessage,
   skillCapabilityLabel,
   mcpCapabilityLabel,
+  resumableSessionLabel,
   sessionActivityMessage,
+  workflowContextLabel,
+  workflowPurposeOptions,
+  workspaceNavigationLabel,
 } from '../src/ui/state.js';
 
 test('errorMessage renders Tauri string rejections', () => {
@@ -67,5 +71,61 @@ test('mcpCapabilityLabel reports local stdio explicit approval support', () => {
       },
     }),
     'Local MCP approval only',
+  );
+});
+
+test('workflowPurposeOptions exposes only bounded foundation workflows', () => {
+  assert.deepEqual(
+    workflowPurposeOptions({
+      workflowOrganization: {
+        allowedPurposes: ['research', 'writing', 'coding', 'documentation', 'analysis'],
+      },
+    }),
+    ['research', 'writing', 'documentation', 'analysis'],
+  );
+});
+
+test('workspaceNavigationLabel reports promoted project and session filters', () => {
+  assert.equal(
+    workspaceNavigationLabel({
+      project: {
+        selector: {
+          searchAvailable: true,
+          workflowPurposeFilterAvailable: true,
+        },
+      },
+      session: {
+        catalog: {
+          searchAvailable: true,
+          workflowPurposeFilterAvailable: true,
+        },
+      },
+    }),
+    'Project and session filters',
+  );
+});
+
+test('workflowContextLabel preserves no-hidden-context semantics', () => {
+  assert.equal(
+    workflowContextLabel({
+      workflowOrganization: {
+        modelContextEffect: 'none',
+        autoContextInjection: false,
+      },
+    }),
+    'Labels only',
+  );
+});
+
+test('resumableSessionLabel reports latest local session state', () => {
+  assert.equal(
+    resumableSessionLabel({
+      session: {
+        id: 'session-1',
+        active: false,
+        runtimeState: 'complete',
+      },
+    }),
+    'complete',
   );
 });

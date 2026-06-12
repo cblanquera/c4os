@@ -84,3 +84,75 @@ export function mcpCapabilityLabel(status) {
 
   return 'Local MCP approval only';
 }
+
+/**
+ * Returns the bounded workflow purposes accepted for the foundation slice.
+ */
+export function workflowPurposeOptions(status) {
+  const purposes = status.workflowOrganization?.allowedPurposes;
+
+  if (!Array.isArray(purposes)) {
+    return [];
+  }
+
+  return purposes.filter((purpose) => (
+    purpose === 'research'
+      || purpose === 'writing'
+      || purpose === 'documentation'
+      || purpose === 'analysis'
+  ));
+}
+
+/**
+ * Summarizes promoted project/session navigation without broader claims.
+ */
+export function workspaceNavigationLabel(status) {
+  const projectSearch = Boolean(status.project?.selector?.searchAvailable);
+  const projectWorkflow = Boolean(
+    status.project?.selector?.workflowPurposeFilterAvailable,
+  );
+  const sessionSearch = Boolean(status.session?.catalog?.searchAvailable);
+  const sessionWorkflow = Boolean(
+    status.session?.catalog?.workflowPurposeFilterAvailable,
+  );
+
+  if (projectSearch && projectWorkflow && sessionSearch && sessionWorkflow) {
+    return 'Project and session filters';
+  }
+
+  if (projectSearch || sessionSearch) {
+    return 'Partial filters';
+  }
+
+  return 'Unavailable';
+}
+
+/**
+ * Summarizes workflow labels while preserving no-hidden-context semantics.
+ */
+export function workflowContextLabel(status) {
+  if (status.workflowOrganization?.modelContextEffect !== 'none') {
+    return 'Review context behavior';
+  }
+
+  if (status.workflowOrganization?.autoContextInjection) {
+    return 'Review context behavior';
+  }
+
+  return 'Labels only';
+}
+
+/**
+ * Summarizes session resume state for compact workspace overview copy.
+ */
+export function resumableSessionLabel(status) {
+  if (status.session?.active) {
+    return status.session.runtimeState;
+  }
+
+  if (status.session?.id) {
+    return status.session.runtimeState;
+  }
+
+  return 'No session';
+}

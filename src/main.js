@@ -4,8 +4,12 @@ import {
   canSubmitPrompt,
   errorMessage,
   mcpCapabilityLabel,
+  resumableSessionLabel,
   skillCapabilityLabel,
   sessionActivityMessage,
+  workflowContextLabel,
+  workflowPurposeOptions,
+  workspaceNavigationLabel,
 } from './ui/state.js';
 
 const commandClient = createAppCommandClient();
@@ -41,6 +45,8 @@ async function renderAppShell() {
 
       ${noticeMarkup()}
 
+      ${workspaceOverview()}
+
       <section class="workflow-grid" aria-label="MVP first-run workflow">
         ${providerPanel()}
         ${projectPanel()}
@@ -55,6 +61,8 @@ async function renderAppShell() {
         ${statusTile('Data flow', appStatus.provider.disclosure)}
         ${statusTile('Project', appStatus.project.active ? appStatus.project.rootPath : 'Not selected')}
         ${statusTile('Project selector', selectorLabel(appStatus))}
+        ${statusTile('Workspace nav', workspaceNavigationLabel(appStatus))}
+        ${statusTile('Workflow labels', workflowContextLabel(appStatus))}
         ${statusTile('Instructions', appStatus.project.instructionResolution.supportTier)}
         ${statusTile('Skills', skillCapabilityLabel(appStatus))}
         ${statusTile('MCP', mcpCapabilityLabel(appStatus))}
@@ -70,6 +78,57 @@ async function renderAppShell() {
 
   bindFormHandlers();
   updateStatusPolling();
+}
+
+/**
+ * Renders the work-focused workspace overview.
+ */
+function workspaceOverview() {
+  const disabled = workingAction ? 'disabled' : '';
+  const workflowOptions = workflowPurposeOptions(appStatus);
+
+  return `
+    <section class="workspace-overview" aria-label="Workspace overview">
+      <div class="overview-controls">
+        <label>
+          <span>Project search</span>
+          <input
+            ${disabled}
+            name="projectSearch"
+            placeholder="Search registered projects"
+            type="search"
+          />
+        </label>
+        <label>
+          <span>Workflow</span>
+          <select ${disabled} name="workflowPurpose">
+            <option value="">Any workflow</option>
+            ${workflowOptions
+              .map((purpose) => `
+                <option value="${escapeHtml(purpose)}">${workflowName(purpose)}</option>
+              `)
+              .join('')}
+          </select>
+        </label>
+        <label>
+          <span>Session search</span>
+          <input
+            ${disabled}
+            name="sessionSearch"
+            placeholder="Search sessions"
+            type="search"
+          />
+        </label>
+      </div>
+
+      <div class="overview-status" aria-label="Workspace capability status">
+        ${statusTile('Navigation', workspaceNavigationLabel(appStatus))}
+        ${statusTile('Resume', resumableSessionLabel(appStatus))}
+        ${statusTile('Context', workflowContextLabel(appStatus))}
+        ${statusTile('Scope', appStatus.session.catalog.concurrentActiveSessions ? 'Concurrent' : 'Single active run')}
+      </div>
+    </section>
+  `;
 }
 
 /**
@@ -394,9 +453,26 @@ function sessionDescription(status) {
  * Describes project selector capability.
  */
 function selectorLabel(status) {
+  if (
+    status.project.selector.searchAvailable
+      && status.project.selector.workflowPurposeFilterAvailable
+  ) {
+    return 'Search + workflow filter';
+  }
+
   return status.project.selector.selectExactlyOneActive
     ? 'One active project'
     : 'Unavailable';
+}
+
+/**
+ * Formats a bounded workflow purpose for display.
+ */
+function workflowName(purpose) {
+  return purpose
+    .split('-')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 }
 
 /**

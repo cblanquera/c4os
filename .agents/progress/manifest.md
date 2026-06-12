@@ -50,3 +50,12 @@
 | item-046 | planning | verified | codex | V1 provider expansion scope | Provider expansion status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
 | item-047 | planning | verified | codex | V1 browser and web-viewing scope | Browser/web status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
 | item-048 | planning | verified | codex | V1 plugin and marketplace scope | Plugin/marketplace status tests, JS tests, web build, full Rust tests, and native Tauri build pass. |
+| item-049 | planning | verified | codex | Post-V1 standards refresh | Shallow dated standards refresh complete; next recommended action is a TASK-001 feature spec. |
+| item-050 | planning | verified | codex | Foundation brownfield data-model review | Workflow labels should be nullable bounded metadata on projects and sessions; next define acceptance examples/home shape. |
+| item-051 | planning | verified | codex | Foundation workflow examples and home shape | Workflow examples, home shape, and status copy boundary defined; feature spec ready to freeze. |
+| item-052 | planning | verified | codex | Freeze general workspace foundation spec | Frozen packets item-053 through item-057 preserve accepted foundation scope and deferred boundaries. |
+| item-053 | implementation | verified | codex | Foundation workflow label data model and status | Workflow-purpose schema/storage/export/status support implemented; cargo test, npm test, and npm run build pass. |
+| item-054 | implementation | verified | codex | Foundation project navigation search and workflow filtering | Project selector search and workflow-purpose filtering implemented; cargo test, npm test, and npm run build pass. |
+| item-055 | implementation | verified | codex | Foundation session navigation search filtering and grouping | Selected-project session search/filtering and workflow-purpose grouping implemented; cargo test, npm test, and npm run build pass. |
+| item-056 | implementation | verified | codex | Foundation workspace overview UI and status copy | Work-focused overview and capability-level status copy implemented; npm test, cargo test, build, and browser smoke pass. |
+| item-057 | verification | verified | codex | Foundation verification and release gate | Final foundation gate passed; cargo test, npm test, web build, native Tauri build, browser smoke, and scope audit pass. |

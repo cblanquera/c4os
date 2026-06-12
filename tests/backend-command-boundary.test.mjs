@@ -46,9 +46,22 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
     oneModelPerSession: true,
     midSessionModelSwitching: false,
   });
+  assert.deepEqual(status.workflowOrganization, {
+    supportTier: 'workflow_purpose_labels_only',
+    allowedPurposes: ['research', 'writing', 'documentation', 'analysis'],
+    projectLabelsAvailable: true,
+    sessionLabelsAvailable: true,
+    unsetAllowed: true,
+    modelContextEffect: 'none',
+    autoContextInjection: false,
+    hiddenFileIngestion: false,
+    templatesAvailable: false,
+    nonGitProjectsAllowed: false,
+  });
   assert.deepEqual(status.project, {
     active: false,
     rootPath: null,
+    workflowPurpose: null,
     branch: null,
     dirty: false,
     changedFileCount: 0,
@@ -68,7 +81,8 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
       selectExactlyOneActive: true,
       registeredProjectCount: 0,
       multipleActiveProjectsAllowed: false,
-      searchAvailable: false,
+      searchAvailable: true,
+      workflowPurposeFilterAvailable: true,
       groupingAvailable: false,
       archiveAvailable: false,
       deleteAvailable: false,
@@ -100,6 +114,15 @@ test('backend status command exposes local-only diagnostics and no telemetry', a
     canStartNewRun: true,
     failureDisplay: null,
     messages: [],
+    catalog: {
+      searchAvailable: true,
+      workflowPurposeFilterAvailable: true,
+      workflowPurposeGroupingAvailable: true,
+      projectScopedOnly: true,
+      crossProjectSearchAvailable: false,
+      concurrentActiveSessions: false,
+      deleteSupportTier: 'archived_session_delete_only',
+    },
   });
   assert.deepEqual(status.retention, {
     supportTier: 'archived_session_delete_only',
@@ -279,6 +302,7 @@ test('backend registry exports selected project JSON without import support', as
   assert.equal(exported.importAvailable, false);
   assert.equal(exported.roundTripCompatibility, false);
   assert.equal(exported.project.rootPath, null);
+  assert.equal(exported.project.workflowPurpose, null);
   assert.equal(exported.security.rawSecretsIncluded, false);
   assert.equal(exported.security.rawShellOutputIncluded, false);
   assert.equal(exported.security.providerKeysIncluded, false);

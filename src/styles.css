@@ -60,9 +60,39 @@ h1 {
 }
 
 .workflow-grid,
+.workspace-overview,
 .status-grid {
   margin: 0 auto;
   max-width: 1040px;
+}
+
+.workspace-overview {
+  background: #ffffff;
+  border: 1px solid #d8e0e5;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.overview-controls {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1.2fr 0.8fr 1fr;
+  padding: 18px;
+}
+
+.overview-status {
+  border-top: 1px solid #e2e8ec;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.overview-status > div {
+  background: #fbfcfd;
+  min-height: 86px;
+  min-width: 0;
+  padding: 18px;
 }
 
 .workflow-grid {
@@ -308,6 +338,8 @@ button:disabled {
   }
 
   .workflow-grid,
+  .overview-controls,
+  .overview-status,
   .status-grid {
     grid-template-columns: 1fr;
   }
@@ -315,6 +347,8 @@ button:disabled {
 
 @media (min-width: 721px) and (max-width: 1040px) {
   .workflow-grid,
+  .overview-controls,
+  .overview-status,
   .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

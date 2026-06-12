@@ -629,9 +629,11 @@ fn app_status(store: &AppStore) -> rusqlite::Result<Value> {
         },
         "provider": provider_state(store)?,
         "providerExpansion": provider_expansion_status(),
+        "workflowOrganization": workflow_organization_status(),
         "project": {
             "active": active_project.is_some(),
             "rootPath": active_project.as_ref().map(|project| project.root_path.clone()),
+            "workflowPurpose": active_project.as_ref().and_then(|project| project.workflow_purpose.clone()),
             "branch": null,
             "dirty": false,
             "changedFileCount": 0,
@@ -651,7 +653,8 @@ fn app_status(store: &AppStore) -> rusqlite::Result<Value> {
                 "selectExactlyOneActive": true,
                 "registeredProjectCount": selector.projects.len(),
                 "multipleActiveProjectsAllowed": false,
-                "searchAvailable": false,
+                "searchAvailable": selector.search_available,
+                "workflowPurposeFilterAvailable": selector.workflow_purpose_filter_available,
                 "groupingAvailable": false,
                 "archiveAvailable": false,
                 "deleteAvailable": false,
@@ -748,6 +751,21 @@ fn mcp_capability_status() -> Value {
         "samplingAutoApproved": status.sampling_auto_approved,
         "elicitationAutoDisclosure": status.elicitation_auto_disclosure,
         "fullCompatibilityClaim": status.full_compatibility_claim,
+    })
+}
+
+fn workflow_organization_status() -> Value {
+    json!({
+        "supportTier": "workflow_purpose_labels_only",
+        "allowedPurposes": ["research", "writing", "documentation", "analysis"],
+        "projectLabelsAvailable": true,
+        "sessionLabelsAvailable": true,
+        "unsetAllowed": true,
+        "modelContextEffect": "none",
+        "autoContextInjection": false,
+        "hiddenFileIngestion": false,
+        "templatesAvailable": false,
+        "nonGitProjectsAllowed": false,
     })
 }
 
@@ -940,6 +958,7 @@ fn session_state(store: &AppStore) -> rusqlite::Result<Value> {
                     "status": message.status,
                 })
             }).collect::<Vec<_>>(),
+            "catalog": session_catalog_status(),
         }),
         None => json!({
             "active": false,
@@ -957,7 +976,20 @@ fn session_state(store: &AppStore) -> rusqlite::Result<Value> {
             "canStartNewRun": start_guard.can_start,
             "failureDisplay": null,
             "messages": [],
+            "catalog": session_catalog_status(),
         }),
+    })
+}
+
+fn session_catalog_status() -> Value {
+    json!({
+        "searchAvailable": true,
+        "workflowPurposeFilterAvailable": true,
+        "workflowPurposeGroupingAvailable": true,
+        "projectScopedOnly": true,
+        "crossProjectSearchAvailable": false,
+        "concurrentActiveSessions": false,
+        "deleteSupportTier": "archived_session_delete_only",
     })
 }
 
@@ -1501,6 +1533,80 @@ mod tests {
         assert_eq!(
             provider_expansion
                 .get("multiProviderConfiguration")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn app_status_reports_workflow_navigation_foundation_tier() {
+        let store = AppStore::open_in_memory().expect("store opens");
+        let status = app_status(&store).expect("status");
+        let workflow = status
+            .get("workflowOrganization")
+            .expect("workflow organization status");
+        let project_selector = status
+            .get("project")
+            .and_then(|project| project.get("selector"))
+            .expect("project selector status");
+        let session_catalog = status
+            .get("session")
+            .and_then(|session| session.get("catalog"))
+            .expect("session catalog status");
+
+        assert_eq!(
+            workflow.get("supportTier").and_then(Value::as_str),
+            Some("workflow_purpose_labels_only")
+        );
+        assert_eq!(
+            workflow.get("modelContextEffect").and_then(Value::as_str),
+            Some("none")
+        );
+        assert_eq!(
+            workflow
+                .get("autoContextInjection")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            workflow
+                .get("nonGitProjectsAllowed")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            project_selector
+                .get("searchAvailable")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            project_selector
+                .get("workflowPurposeFilterAvailable")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            project_selector
+                .get("crossProjectViewsAvailable")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            session_catalog
+                .get("searchAvailable")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            session_catalog
+                .get("workflowPurposeGroupingAvailable")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            session_catalog
+                .get("concurrentActiveSessions")
                 .and_then(Value::as_bool),
             Some(false)
         );

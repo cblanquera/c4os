@@ -10,6 +10,7 @@ pub struct ProjectRecord {
     pub root_path: String,
     pub default_model: Option<String>,
     pub default_agent_ref: Option<String>,
+    pub workflow_purpose: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -23,6 +24,7 @@ pub struct SessionRecord {
     pub model_id: String,
     pub runtime: String,
     pub runtime_session_ref: Option<String>,
+    pub workflow_purpose: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -220,7 +222,7 @@ impl AppStore {
         self.connection
             .query_row(
                 "
-                SELECT id, name, root_path, default_model, default_agent_ref
+                SELECT id, name, root_path, default_model, default_agent_ref, workflow_purpose
                 FROM projects
                 WHERE id = ?1
                 ",
@@ -232,6 +234,7 @@ impl AppStore {
                         root_path: row.get(2)?,
                         default_model: row.get(3)?,
                         default_agent_ref: row.get(4)?,
+                        workflow_purpose: row.get(5)?,
                     })
                 },
             )
@@ -241,7 +244,7 @@ impl AppStore {
     pub fn list_projects(&self) -> rusqlite::Result<Vec<ProjectRecord>> {
         let mut statement = self.connection.prepare(
             "
-            SELECT id, name, root_path, default_model, default_agent_ref
+            SELECT id, name, root_path, default_model, default_agent_ref, workflow_purpose
             FROM projects
             ORDER BY updated_at DESC, created_at DESC, rowid DESC
             ",
@@ -255,6 +258,7 @@ impl AppStore {
                     root_path: row.get(2)?,
                     default_model: row.get(3)?,
                     default_agent_ref: row.get(4)?,
+                    workflow_purpose: row.get(5)?,
                 })
             })?
             .collect();
@@ -313,6 +317,26 @@ impl AppStore {
         Ok(())
     }
 
+    pub fn set_project_workflow_purpose(
+        &self,
+        project_id: &str,
+        workflow_purpose: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        validate_workflow_purpose(workflow_purpose)?;
+
+        self.connection.execute(
+            "
+            UPDATE projects
+            SET workflow_purpose = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            ",
+            params![project_id, workflow_purpose, timestamp()],
+        )?;
+
+        Ok(())
+    }
+
     pub fn get_session(&self, id: &str) -> rusqlite::Result<Option<SessionRecord>> {
         self.connection
             .query_row(
@@ -326,7 +350,8 @@ impl AppStore {
                     agent_ref,
                     model_id,
                     runtime,
-                    runtime_session_ref
+                    runtime_session_ref,
+                    workflow_purpose
                 FROM sessions
                 WHERE id = ?1
                 ",
@@ -342,6 +367,7 @@ impl AppStore {
                         model_id: row.get(6)?,
                         runtime: row.get(7)?,
                         runtime_session_ref: row.get(8)?,
+                        workflow_purpose: row.get(9)?,
                     })
                 },
             )
@@ -364,7 +390,8 @@ impl AppStore {
                     agent_ref,
                     model_id,
                     runtime,
-                    runtime_session_ref
+                    runtime_session_ref,
+                    workflow_purpose
                 FROM sessions
                 WHERE project_id = ?1
                 ORDER BY updated_at DESC, created_at DESC, rowid DESC
@@ -382,6 +409,7 @@ impl AppStore {
                         model_id: row.get(6)?,
                         runtime: row.get(7)?,
                         runtime_session_ref: row.get(8)?,
+                        workflow_purpose: row.get(9)?,
                     })
                 },
             )
@@ -403,7 +431,8 @@ impl AppStore {
                 agent_ref,
                 model_id,
                 runtime,
-                runtime_session_ref
+                runtime_session_ref,
+                workflow_purpose
             FROM sessions
             WHERE project_id = ?1
             ORDER BY updated_at DESC, created_at DESC, rowid DESC
@@ -422,6 +451,7 @@ impl AppStore {
                     model_id: row.get(6)?,
                     runtime: row.get(7)?,
                     runtime_session_ref: row.get(8)?,
+                    workflow_purpose: row.get(9)?,
                 })
             })?
             .collect();
@@ -442,7 +472,8 @@ impl AppStore {
                     agent_ref,
                     model_id,
                     runtime,
-                    runtime_session_ref
+                    runtime_session_ref,
+                    workflow_purpose
                 FROM sessions
                 WHERE status IN ('running', 'waiting_for_approval')
                 ORDER BY updated_at DESC, created_at DESC, rowid DESC
@@ -460,6 +491,7 @@ impl AppStore {
                         model_id: row.get(6)?,
                         runtime: row.get(7)?,
                         runtime_session_ref: row.get(8)?,
+                        workflow_purpose: row.get(9)?,
                     })
                 },
             )
@@ -593,6 +625,26 @@ impl AppStore {
             WHERE id = ?1
             ",
             params![session_id, status, timestamp()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn set_session_workflow_purpose(
+        &self,
+        session_id: &str,
+        workflow_purpose: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        validate_workflow_purpose(workflow_purpose)?;
+
+        self.connection.execute(
+            "
+            UPDATE sessions
+            SET workflow_purpose = ?2,
+                updated_at = ?3
+            WHERE id = ?1
+            ",
+            params![session_id, workflow_purpose, timestamp()],
         )?;
 
         Ok(())
@@ -1270,6 +1322,10 @@ impl AppStore {
             self.apply_migration_002()?;
         }
 
+        if current_version < 3 {
+            self.apply_migration_003()?;
+        }
+
         Ok(())
     }
 
@@ -1299,6 +1355,22 @@ impl AppStore {
             VALUES (?1, ?2, ?3)
             ",
             params![2, "session_metadata_management", timestamp()],
+        )?;
+        transaction.commit()?;
+
+        Ok(())
+    }
+
+    fn apply_migration_003(&self) -> rusqlite::Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+
+        transaction.execute_batch(MIGRATION_003)?;
+        transaction.execute(
+            "
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?1, ?2, ?3)
+            ",
+            params![3, "workflow_purpose_labels", timestamp()],
         )?;
         transaction.commit()?;
 
@@ -1348,6 +1420,17 @@ fn strip_json_string(value: &str) -> String {
 
 fn json_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn validate_workflow_purpose(workflow_purpose: Option<&str>) -> rusqlite::Result<()> {
+    match workflow_purpose {
+        None | Some("research") | Some("writing") | Some("documentation") | Some("analysis") => {
+            Ok(())
+        }
+        Some(value) => Err(rusqlite::Error::InvalidParameterName(format!(
+            "unsupported workflow purpose: {value}"
+        ))),
+    }
 }
 
 fn timestamp() -> i64 {
@@ -1532,6 +1615,21 @@ ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));
 CREATE INDEX idx_sessions_project_archived_pinned ON sessions(project_id, archived, pinned);
 ";
 
+const MIGRATION_003: &str = "
+ALTER TABLE projects
+ADD COLUMN workflow_purpose TEXT CHECK (
+    workflow_purpose IS NULL OR workflow_purpose IN ('research', 'writing', 'documentation', 'analysis')
+);
+
+ALTER TABLE sessions
+ADD COLUMN workflow_purpose TEXT CHECK (
+    workflow_purpose IS NULL OR workflow_purpose IN ('research', 'writing', 'documentation', 'analysis')
+);
+
+CREATE INDEX idx_projects_workflow_purpose ON projects(workflow_purpose);
+CREATE INDEX idx_sessions_project_workflow_purpose ON sessions(project_id, workflow_purpose);
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1542,11 +1640,21 @@ mod tests {
     fn initializes_schema_from_clean_profile() {
         let store = AppStore::open_in_memory().expect("store opens");
 
-        assert_eq!(store.schema_version().expect("schema version"), 2);
+        assert_eq!(store.schema_version().expect("schema version"), 3);
         assert!(table_exists(&store.connection, "projects"));
         assert!(table_exists(&store.connection, "adapter_refs"));
         assert!(column_exists(&store.connection, "sessions", "pinned"));
         assert!(column_exists(&store.connection, "sessions", "archived"));
+        assert!(column_exists(
+            &store.connection,
+            "projects",
+            "workflow_purpose"
+        ));
+        assert!(column_exists(
+            &store.connection,
+            "sessions",
+            "workflow_purpose"
+        ));
     }
 
     #[test]
@@ -1603,12 +1711,69 @@ mod tests {
         let messages = reopened.list_messages("session-1").expect("messages query");
 
         assert_eq!(project.name, "Example");
+        assert_eq!(project.workflow_purpose, None);
         assert_eq!(
             session.runtime_session_ref,
             Some("runtime-session-1".into())
         );
+        assert_eq!(session.workflow_purpose, None);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn stores_bounded_workflow_purpose_labels_for_projects_and_sessions() {
+        let store = AppStore::open_in_memory().expect("store opens");
+
+        insert_project_and_session(&store);
+        store
+            .set_project_workflow_purpose("project-1", Some("research"))
+            .expect("project workflow purpose set");
+        store
+            .set_session_workflow_purpose("session-1", Some("documentation"))
+            .expect("session workflow purpose set");
+
+        let project = store
+            .get_project("project-1")
+            .expect("project query")
+            .expect("project exists");
+        let session = store
+            .get_session("session-1")
+            .expect("session query")
+            .expect("session exists");
+
+        assert_eq!(project.workflow_purpose, Some("research".into()));
+        assert_eq!(session.workflow_purpose, Some("documentation".into()));
+
+        let invalid_project = store.set_project_workflow_purpose("project-1", Some("coding"));
+        let invalid_session = store.set_session_workflow_purpose("session-1", Some("ops"));
+
+        assert!(invalid_project.is_err());
+        assert!(invalid_session.is_err());
+
+        store
+            .set_project_workflow_purpose("project-1", None)
+            .expect("project workflow purpose unset");
+        store
+            .set_session_workflow_purpose("session-1", None)
+            .expect("session workflow purpose unset");
+
+        assert_eq!(
+            store
+                .get_project("project-1")
+                .expect("project query")
+                .expect("project exists")
+                .workflow_purpose,
+            None
+        );
+        assert_eq!(
+            store
+                .get_session("session-1")
+                .expect("session query")
+                .expect("session exists")
+                .workflow_purpose,
+            None
+        );
     }
 
     #[test]
@@ -1890,7 +2055,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_existing_v1_database_to_session_metadata_schema() {
+    fn migrates_existing_v1_database_to_current_schema() {
         let directory = tempdir().expect("tempdir");
         let database_path = directory.path().join("c4os.sqlite");
 
@@ -1923,9 +2088,19 @@ mod tests {
 
         let migrated = AppStore::open(&database_path).expect("store migrates");
 
-        assert_eq!(migrated.schema_version().expect("schema version"), 2);
+        assert_eq!(migrated.schema_version().expect("schema version"), 3);
         assert!(column_exists(&migrated.connection, "sessions", "pinned"));
         assert!(column_exists(&migrated.connection, "sessions", "archived"));
+        assert!(column_exists(
+            &migrated.connection,
+            "projects",
+            "workflow_purpose"
+        ));
+        assert!(column_exists(
+            &migrated.connection,
+            "sessions",
+            "workflow_purpose"
+        ));
     }
 
     #[test]

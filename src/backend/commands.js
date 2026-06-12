@@ -34,6 +34,7 @@ export function createBackendCommandRegistry(options = {}) {
       active: false,
       id: null,
       rootPath: null,
+      workflowPurpose: null,
       branch: null,
       dirty: false,
       changedFileCount: 0,
@@ -60,9 +61,11 @@ export function createBackendCommandRegistry(options = {}) {
         diagnostics,
         provider: { ...state.provider },
         providerExpansion: providerExpansionStatus(),
+        workflowOrganization: workflowOrganizationStatus(),
         project: {
           active: state.project.active,
           rootPath: state.project.rootPath,
+          workflowPurpose: state.project.workflowPurpose,
           branch: state.project.branch,
           dirty: state.project.dirty,
           changedFileCount: state.project.changedFileCount,
@@ -82,7 +85,8 @@ export function createBackendCommandRegistry(options = {}) {
             selectExactlyOneActive: true,
             registeredProjectCount: state.project.active ? 1 : 0,
             multipleActiveProjectsAllowed: false,
-            searchAvailable: false,
+            searchAvailable: true,
+            workflowPurposeFilterAvailable: true,
             groupingAvailable: false,
             archiveAvailable: false,
             deleteAvailable: false,
@@ -114,6 +118,15 @@ export function createBackendCommandRegistry(options = {}) {
           canStartNewRun: !state.session.active,
           failureDisplay: state.session.failureDisplay ?? null,
           messages: [...state.session.messages],
+          catalog: {
+            searchAvailable: true,
+            workflowPurposeFilterAvailable: true,
+            workflowPurposeGroupingAvailable: true,
+            projectScopedOnly: true,
+            crossProjectSearchAvailable: false,
+            concurrentActiveSessions: false,
+            deleteSupportTier: 'archived_session_delete_only',
+          },
         },
         retention: retentionStatus(),
         memory: memoryStatus(),
@@ -212,6 +225,7 @@ export function createBackendCommandRegistry(options = {}) {
           active: true,
           id: `project-${stableHash(rootPath)}`,
           rootPath,
+          workflowPurpose: null,
           branch: 'unknown',
           dirty: false,
           changedFileCount: 0,
@@ -359,6 +373,7 @@ export function createBackendCommandRegistry(options = {}) {
           project: {
             id: state.project.id,
             name: state.project.rootPath.split('/').filter(Boolean).at(-1) ?? 'Project',
+            workflowPurpose: state.project.workflowPurpose,
             rootPath: null,
             rootPathPolicy: 'excluded_absolute_local_path',
             defaultModel: state.provider.selectedModel,
@@ -369,6 +384,7 @@ export function createBackendCommandRegistry(options = {}) {
                 {
                   id: state.session.id,
                   title: state.session.title,
+                  workflowPurpose: state.session.workflowPurpose ?? null,
                   status: state.session.runtimeState,
                   mode: 'agent',
                   modelId: state.provider.selectedModel,
@@ -436,6 +452,7 @@ export function createBackendCommandRegistry(options = {}) {
           active: false,
           id: `session-${Date.now()}`,
           title: firstLine(prompt),
+          workflowPurpose: null,
           runtimeState: 'complete',
           failureDisplay: null,
           archived: false,
@@ -475,6 +492,24 @@ export function createBackendCommandRegistry(options = {}) {
 
       return handler(payload);
     },
+  };
+}
+
+/**
+ * Describes the accepted lightweight workflow-organization tier.
+ */
+function workflowOrganizationStatus() {
+  return {
+    supportTier: 'workflow_purpose_labels_only',
+    allowedPurposes: ['research', 'writing', 'documentation', 'analysis'],
+    projectLabelsAvailable: true,
+    sessionLabelsAvailable: true,
+    unsetAllowed: true,
+    modelContextEffect: 'none',
+    autoContextInjection: false,
+    hiddenFileIngestion: false,
+    templatesAvailable: false,
+    nonGitProjectsAllowed: false,
   };
 }
 
