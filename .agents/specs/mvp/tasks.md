@@ -18,13 +18,13 @@ Status: proposed
 Confidence: imported
 MVP: yes
 Phase: poc
-Source: `.agents/specs/mvp/questions.md`
+Source: `.agents/specs/mvp/questions.md`, `.agents/specs/mvp/poc/brief.md`
 Related:
 - ASM-001
 - Q-001
 - RISK-001
 
-Prove whether OpenCode Runtime, Pi Runtime, or a thin adapter can satisfy session control, streaming, tool, permission, and configuration needs.
+Prove whether OpenCode Runtime, Pi Runtime, or a thin adapter can satisfy session control, streaming, tool, permission, and configuration needs. Use the shared adapter contract and proof tracks in `.agents/specs/mvp/poc/brief.md`.
 
 ## TASK-003: Validate Browser Isolation
 

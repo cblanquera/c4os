@@ -1,0 +1,18 @@
+{
+  "name": "c4os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tests/support/browser-harness/dev-server.js",
+    "test": "node --test tests/*.test.js",
+    "acceptance:mvp": "node scripts/mvp-acceptance.js",
+    "acceptance:desktop-wrapper": "node scripts/create-desktop-app-wrapper.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

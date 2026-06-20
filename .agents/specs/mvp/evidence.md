@@ -29,3 +29,18 @@ Phase: mvp
 Source: `plans/pegs/*.png`
 
 The PNG pegs provide visual references for app start, new session, chat session, provider/model popovers, settings screens, file explorer/editor, and terminal.
+
+## EVD-004: Runtime Adapter POC Plan
+
+Status: proposed
+Confidence: proposed
+MVP: yes
+Phase: poc
+Source: `.agents/specs/mvp/poc/brief.md`
+Related:
+- Q-001
+- ASM-001
+- RISK-001
+- TASK-002
+
+The planned runtime adapter proof compares OpenCode Runtime and Pi Runtime through the same minimal adapter contract, with runnable implementations expected under `proofs/opencode-runtime/` and `proofs/pi-runtime/`.
