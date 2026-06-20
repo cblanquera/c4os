@@ -45,3 +45,5 @@ Before freeze, accepted wireframe behavior should be promoted into `.agents/spec
 | Revision | Path | Status | Notes |
 | --- | --- | --- | --- |
 | r01-functional-wireframes | `r01-functional-wireframes/index.html` | ready-for-review | HTML/CSS/JS grayscale draft covering the peg-backed shell, session, right-panel, popover, and settings screens. |
+| r02-functional-interface-draft | `r02-functional-interface-draft/index.html` | ready-for-review | HTML/CSS/JS desktop interface draft with scalable CSS tokens, peg-backed screen coverage, distinct app-start state, and review-only simulated interactions. |
+| r03-functional-frontend-architecture | `r03-functional-frontend-architecture/index.html` | ready-for-review | Fresh HTML/CSS/JS desktop interface draft with route-level screen declarations, component-style DOM helpers, layered CSS, trust-spine state treatment, and review-only simulated interactions. |
