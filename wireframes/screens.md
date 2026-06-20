@@ -40,6 +40,8 @@ Source:
 
 Before freeze, accepted wireframe behavior should be promoted into `.agents/specs/mvp/requirements.md` and `.agents/specs/mvp/acceptance.md`.
 
+The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
+
 ## Functional Drafts
 
 | Revision | Path | Status | Notes |

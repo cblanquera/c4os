@@ -12,6 +12,7 @@ This folder contains reusable C4OS product context. Check this index before answ
 | Decisions | `decisions.md` | Accepted restart-level decisions from the imported plans. | 2026-06-18 |
 | Terms | `terms.md` | Core product terms used by specs and workflows. | 2026-06-18 |
 | Feature goals | `feature-goals.md` | High-level future feature goals and post-MVP expansion inputs. | 2026-06-18 |
+| UI handoff | `ui-handoff.md` | Pointer and compact durable facts for the wireframe-to-implementation handoff. | 2026-06-20 |
 
 ## Source Plans
 
