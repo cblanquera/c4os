@@ -28,6 +28,7 @@ Read the workflow that matches the task:
 - `plans/pegs/*.png` are the visual peg sources for the UI direction.
 - `.agents/context/` contains shared product understanding future specs should read first.
 - `.agents/specs/mvp/` contains the current imported MVP planning records. It is planning input until reviewed or frozen.
+- `proofs/` contains repo-level POC implementation artifacts. Put runnable proof code, harnesses, fixtures, and proof-specific evidence files there instead of burying implementation code inside `.agents/`.
 - `wireframes/` contains wireframe routing notes and links back to the visual pegs.
 - `.agents/development/progress/` should exist only after implementation or active execution tracking begins.
 
@@ -39,10 +40,12 @@ Read the workflow that matches the task:
 - Do not invent completed implementation, verification, runtime behavior, or user decisions.
 - Treat imported plan content as product intent unless a later review, validation result, or user decision changes it.
 - Promote only final accepted reusable findings into `.agents/context/`.
+- Keep `.agents/specs/<spec-id>/poc/` focused on proof questions, expected proof, results, links, and promotion decisions. Link to `proofs/<proof-name>/` for the implementation artifact.
 
 ## Boundaries
 
 - Keep generated `.agents/**/*.md` files under 500 lines.
 - Put long rationale, research, source excerpts, screenshots, QA notes, and detailed evidence under `.agents/references/` when needed.
+- Keep POC implementations under `proofs/<proof-name>/` with proof-local source, harnesses, fixtures, README/evidence notes, and ignored build output. Do not commit generated build directories such as `target/`, `node_modules/`, caches, or other bulky artifacts.
 - Do not retire or delete source planning docs without `workflows/source-retirement.md`.
 - Do not start implementation unless the user explicitly asks for active execution.
