@@ -1,0 +1,55 @@
+{
+  "title": "C4OS Grill Question 008: First MVP Workflow",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question closes the first customer-usable workflow after the major scope decisions. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "first_workflow",
+      "label": "Which first MVP workflow should freeze as the primary implementation slice?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Open trusted folder, configure provider, start chat, agent answers with visible thinking/status",
+        "Open trusted folder, configure provider, agent reviews project files and proposes/executes code changes",
+        "Open trusted folder, configure provider, agent runs local app, uses Browser, and iterates with file/terminal changes",
+        "Open trusted folder, configure provider, install/connect extensions, then agent uses tagged extensions in chat"
+      ],
+      "help": "Recommended neutral baseline: freeze one primary workflow and treat the others as required supporting surfaces only if they are necessary to complete that workflow."
+    },
+    {
+      "id": "done_output",
+      "label": "What result proves the workflow worked?",
+      "type": "textarea",
+      "required": true,
+      "help": "Name the end state a user can verify. Example: changed file plus command output plus browser preview plus resumable session record."
+    },
+    {
+      "id": "must_include_surfaces",
+      "label": "Which surfaces must be included in that workflow?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Provider setup",
+        "OpenCode runtime",
+        "Concurrent sessions",
+        "File read/write",
+        "Agent-owned command terminal",
+        "User terminal",
+        "Browser with project profile",
+        "Plugin install/connect",
+        "Skill install/connect",
+        "MCP install/connect",
+        "Extension prompt tags"
+      ],
+      "help": "Select only surfaces required for the first customer-usable workflow, not everything that exists in MVP settings."
+    },
+    {
+      "id": "workflow_notes",
+      "label": "Clarifications or non-goals",
+      "type": "textarea",
+      "required": false,
+      "help": "Call out anything that must not be part of the first workflow even if it remains in MVP scope."
+    }
+  ]
+}

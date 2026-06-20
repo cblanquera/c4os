@@ -1,0 +1,48 @@
+{
+  "title": "C4OS Grill Question 007: Runtime Backend",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question finalizes which runtime backend starts behind the thin C4OS adapter. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "runtime_backend",
+      "label": "Which runtime backend should the first implementation use?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "OpenCode first behind a thin C4OS adapter",
+        "Pi first behind a thin C4OS adapter",
+        "Support both OpenCode and Pi from the start",
+        "Keep backend undecided until implementation"
+      ],
+      "help": "Your intake selected OpenCode first. The POCs found OpenCode stronger for server-backed sessions/events and Pi stronger for in-process approval interception."
+    },
+    {
+      "id": "runtime_reason",
+      "label": "Why this backend first?",
+      "type": "textarea",
+      "required": true,
+      "help": "Give the deciding product or implementation reason, especially considering concurrent runs, Browser/Terminal authority, and extension execution."
+    },
+    {
+      "id": "pi_role",
+      "label": "What role should Pi have after choosing OpenCode or another backend?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Keep Pi as a later adapter target only",
+        "Use Pi for approval/tool-interception ideas but not runtime",
+        "Support Pi as a secondary runtime in MVP",
+        "Drop Pi entirely"
+      ],
+      "help": "This prevents the product model from accidentally depending on both runtimes without a deliberate decision."
+    },
+    {
+      "id": "runtime_notes",
+      "label": "Clarifications or constraints",
+      "type": "textarea",
+      "required": false,
+      "help": "Add any requirements about server mode, event streams, provider config, extension hooks, cancellation, or local state isolation."
+    }
+  ]
+}

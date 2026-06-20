@@ -1,0 +1,54 @@
+{
+  "title": "C4OS Grill Question 002d: Browser Trust Claim",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question resolves whether C4OS keeps trusted-root containment as a product promise or introduces an explicitly unsafe Browser mode. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "browser_trust_claim",
+      "label": "How should C4OS describe Browser trust in MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "C4OS keeps trusted-root containment; Browser must not allow arbitrary file:// or any-page automation",
+        "C4OS adds an explicit Unsafe Browser mode that can access arbitrary file:// and approved-domain automation",
+        "C4OS weakens the overall product trust claim and allows Browser to escape trusted-root containment by default",
+        "Browser is removed from MVP until this can be made trusted-root-safe"
+      ],
+      "help": "Recommended answer: add an explicit Unsafe Browser mode only if this capability is truly required. Do not silently weaken the whole product trust claim."
+    },
+    {
+      "id": "unsafe_browser_labeling",
+      "label": "If unsafe Browser exists, what user consent is required?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Per workspace opt-in with persistent warning and audit record",
+        "Per domain approval only",
+        "Per navigation approval for file:// and unknown domains",
+        "No special consent beyond opening Browser"
+      ],
+      "help": "Recommended answer: per workspace opt-in plus per-domain automation approval. Arbitrary file:// should be a separate explicit action."
+    },
+    {
+      "id": "browser_adr",
+      "label": "Should this become an ADR before freeze?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, Browser trust exception needs an ADR",
+        "No, keep it only in research notes",
+        "Defer ADR until implementation",
+        "Unsure"
+      ],
+      "help": "Recommended answer: yes. This is hard to reverse, surprising, and a real trade-off against the trust model."
+    },
+    {
+      "id": "browser_trust_notes",
+      "label": "Clarifications or exact product copy",
+      "type": "textarea",
+      "required": false,
+      "help": "State how the product should explain this to users, especially if Browser can access arbitrary local files or automate arbitrary domains."
+    }
+  ]
+}

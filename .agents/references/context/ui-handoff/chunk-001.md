@@ -49,7 +49,7 @@ Normative requirements:
 - Trust boundaries and simulation boundaries.
 - Accessibility expectations.
 - Required product surfaces, such as Browser, Files, Terminal, Providers,
-  Models, Configuration, Plugins, Skills, and MCP Servers.
+  Models, Runtimes, Configuration, Plugins, Skills, and MCP Servers.
 
 Illustrative-only content:
 
@@ -85,8 +85,8 @@ The handoff is derived from:
 - `wireframes/screens.md`
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
-- `.agents/specs/mvp/requirements.md`
-- `.agents/specs/mvp/acceptance.md`
+- `.agents/specs/research/requirements.md`
+- `.agents/specs/research/acceptance.md`
 
 The r04 prototype is the latest review target. Earlier revisions remain useful
 as design history, but r04 is the current handoff baseline.
@@ -134,6 +134,7 @@ The route list is:
 | `#settings-providers` | Settings Providers |
 | `#settings-add-provider` | Add Provider form |
 | `#settings-models` | Settings Models |
+| `#settings-runtimes` | Settings Runtimes |
 | `#settings-configuration` | Settings Configuration |
 | `#settings-plugins` | Settings Plugins |
 | `#settings-skills` | Settings Skills |

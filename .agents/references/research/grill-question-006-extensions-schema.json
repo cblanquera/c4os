@@ -1,0 +1,57 @@
+{
+  "title": "C4OS Grill Question 006: Extension Install and Connect",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question defines what install/connect extension flows mean for MVP. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "extension_mvp_scope",
+      "label": "Which extension install/connect flows are required in MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Provider connections only; plugins/skills/MCP inventory remains read-only",
+        "Install/connect plugins only",
+        "Install/connect MCP servers only",
+        "Install/connect plugins, skills, and MCP servers"
+      ],
+      "help": "Your intake said install/connect flows are required. This asks which surfaces are actually part of the first usable workflow."
+    },
+    {
+      "id": "extension_execution",
+      "label": "Can installed extensions affect agent execution in MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "No, install/connect only; execution disabled until post-MVP",
+        "Yes, but only after explicit per-extension enablement",
+        "Yes, enabled by default after install/connect",
+        "Only provider-like connectors may affect execution"
+      ],
+      "help": "Research currently says extensions should be disabled before they affect runtime execution, model context, tools, hooks, or app-owned state."
+    },
+    {
+      "id": "extension_authority",
+      "label": "What permission record is required for extensions?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Source/provenance",
+        "Granted scopes",
+        "Workspace/project scope",
+        "Data shared",
+        "Runtime/tool access",
+        "Enabled/disabled state",
+        "Audit log of extension actions"
+      ],
+      "help": "Select what must be visible before or after connecting an extension."
+    },
+    {
+      "id": "extension_first_workflow",
+      "label": "Why does the first MVP need this extension scope?",
+      "type": "textarea",
+      "required": true,
+      "help": "Give the customer workflow that breaks without install/connect. If it is mainly a settings UX expectation, say that."
+    }
+  ]
+}

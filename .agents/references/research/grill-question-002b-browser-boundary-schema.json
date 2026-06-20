@@ -1,0 +1,69 @@
+{
+  "title": "C4OS Grill Question 002b: Browser Trust Boundary",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This follow-up resolves the trust boundary created by full browsing, cookies/login sessions, and file:// access. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "browser_context_model",
+      "label": "Which Browser context model should MVP use?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "One isolated Browser profile per trusted project folder",
+        "One global Browser profile shared across all workspaces",
+        "Ephemeral Browser profile per session with no persistence",
+        "Separate modes: persistent web profile for web URLs, ephemeral isolated preview for local/file content"
+      ],
+      "help": "Recommended answer: separate modes. Persistent web browsing and local/file artifact preview should not share the same trust context."
+    },
+    {
+      "id": "file_url_policy",
+      "label": "What should file:// opening allow?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Only generated artifact files explicitly created by C4OS",
+        "Only files inside trusted project roots",
+        "Any local file the user chooses",
+        "Any file URL the Browser page tries to navigate to"
+      ],
+      "help": "Recommended answer: only generated artifacts and trusted-root files, with explicit user action. Browser page content should not be able to navigate arbitrary local files."
+    },
+    {
+      "id": "agent_browser_control",
+      "label": "Can the agent control the Browser in MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "User-only Browser; agent can suggest URLs but not drive the Browser",
+        "Agent can inspect local app previews only after user approval",
+        "Agent can use Browser automation for any page in the Browser",
+        "Agent Browser control is post-MVP"
+      ],
+      "help": "Your example mentions Playwright-like inspection. This needs a policy boundary separate from user browsing."
+    },
+    {
+      "id": "browser_security_floor",
+      "label": "Minimum security floor you accept",
+      "type": "checkbox",
+      "required": true,
+      "options": [
+        "No privileged C4OS bridge exposed to page content",
+        "No provider credentials exposed to page content",
+        "No workspace files exposed unless trusted-root or generated artifact policy allows it",
+        "No shell state exposed to page content",
+        "Downloads disabled in MVP",
+        "Cookies/login sessions isolated by project or mode"
+      ],
+      "help": "Select every rule that must be true for Browser to remain in MVP."
+    },
+    {
+      "id": "browser_boundary_notes",
+      "label": "Clarifications or constraints",
+      "type": "textarea",
+      "required": false,
+      "help": "Add any details about localhost previews, external links, session persistence, artifact rendering, or user approval."
+    }
+  ]
+}

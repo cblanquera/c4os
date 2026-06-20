@@ -27,7 +27,7 @@ Read the workflow that matches the task:
 - `plans/product-brief.md` and `plans/product-interface.md` are the imported human planning sources for this restart.
 - `plans/pegs/*.png` are the visual peg sources for the UI direction.
 - `.agents/context/` contains shared product understanding future specs should read first.
-- `.agents/specs/mvp/` contains the current imported MVP planning records. It is planning input until reviewed or frozen.
+- `.agents/specs/research/` contains the current imported research, MVP-scope analysis, wireframe acceptance, and POC validation records. It is planning input until a freeze record creates an implementation contract.
 - `proofs/` contains repo-level POC implementation artifacts. Put runnable proof code, harnesses, fixtures, and proof-specific evidence files there instead of burying implementation code inside `.agents/`.
 - `wireframes/` contains wireframe routing notes and links back to the visual pegs.
 - `.agents/development/progress/` should exist only after implementation or active execution tracking begins.

@@ -1,7 +1,7 @@
-# MVP Spec Index
+# Research Spec Index
 
-Status: ready-for-review
-Updated: 2026-06-18
+Status: ready-for-freeze-review
+Updated: 2026-06-20
 
 ## Record Files
 
@@ -19,7 +19,10 @@ Updated: 2026-06-18
 - `tasks.md`
 - `traceability.md`
 - `by-mvp.md`
-- `mvp-viability-gaps.md`
+- `viability-gaps.md`
+- `checkpoints.md`
+- `mvp-freeze.md`
+- `implementation-checkpoint-plan.md`
 
 ## Design Inputs
 

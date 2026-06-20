@@ -1,9 +1,9 @@
 # UI Handoff - Chunk 003
 
 Parent: `index.md`
-Focus: Sections 20-22: plugins, skills, MCP servers, and their dialogs.
+Focus: Sections 21-23: plugins, skills, MCP servers, and their dialogs.
 
-### 20. Settings Plugins
+### 21. Settings Plugins
 
 Route: `#settings-plugins`
 
@@ -35,7 +35,7 @@ Illustrative plugin cards:
 Plugin names and descriptions are placeholders for catalog shape. Each card
 shows a logo mark, plugin name, description, and Add button.
 
-#### 20.1. Plugin Connect Dialog
+#### 21.1. Plugin Connect Dialog
 
 Clicking Add opens a plugin connection dialog. The dialog content changes to
 the selected plugin.
@@ -51,7 +51,7 @@ Dialog surfaces:
 
 The wireframe does not authenticate, install, or persist plugin connection.
 
-#### 20.2. Marketplace Dialog
+#### 21.2. Marketplace Dialog
 
 The marketplace dialog is opened from `+ Add Marketplace`.
 
@@ -68,7 +68,7 @@ Actions:
 
 This is a simulated review form.
 
-### 21. Settings Skills
+### 22. Settings Skills
 
 Route: `#settings-skills`
 
@@ -108,7 +108,7 @@ Skill detail dialog surfaces:
 Skill names, descriptions, scopes, and details are placeholders. The wireframe
 does not execute skills, uninstall skills, or persist skill availability.
 
-### 22. Settings MCP Servers
+### 23. Settings MCP Servers
 
 Route: `#settings-mcp`
 
@@ -133,7 +133,7 @@ Each row has:
 - Settings button.
 - Enabled switch.
 
-#### 22.1. Custom MCP Dialog
+#### 23.1. Custom MCP Dialog
 
 Clicking Add server opens `Connect to a custom MCP`.
 

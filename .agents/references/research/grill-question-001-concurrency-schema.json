@@ -1,0 +1,28 @@
+{
+  "title": "C4OS Grill Question 001: Concurrent Runs",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "Answer this one grill question locally, submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "concurrency_model",
+      "label": "What does multiple concurrent runs mean in the first MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Multiple chat sessions can exist, but only one agent run may be active at a time",
+        "Multiple agent runs may be active, but only within one trusted project folder",
+        "Multiple agent runs may be active across different trusted project folders",
+        "Multiple agents may work on the same files at the same time"
+      ],
+      "help": "Recommended answer: multiple agent runs may be active, but only within one trusted project folder, with isolated approval state, runtime session ID, tool events, artifacts, and cancellation. Same-file mutation should still be serialized or approval-gated."
+    },
+    {
+      "id": "concurrency_notes",
+      "label": "Clarifications or constraints",
+      "type": "textarea",
+      "required": false,
+      "help": "Add anything that changes the recommended answer, such as cross-project runs, same-file edits, UI expectations, or approval behavior."
+    }
+  ]
+}

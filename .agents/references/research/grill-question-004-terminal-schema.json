@@ -1,0 +1,70 @@
+{
+  "title": "C4OS Grill Question 004: Terminal Scope",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question defines what full interactive Terminal means for the first MVP. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "terminal_owner",
+      "label": "Who can type into the Terminal in MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "User only",
+        "Agent only through approved command proposals",
+        "Both user and agent can write to the same terminal session",
+        "Separate terminals: user terminal and agent-owned command terminal"
+      ],
+      "help": "Current proof supports backend-owned lifecycle. The important product choice is whether user input and agent command execution share one PTY or remain separate."
+    },
+    {
+      "id": "terminal_command_policy",
+      "label": "What terminal commands can the agent run by default?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Commands inside active project when implied by the user's request",
+        "Any command inside active project after per-command approval",
+        "Any command on the machine after permission",
+        "No agent terminal commands in MVP"
+      ],
+      "help": "This should align with the agent file authority decision."
+    },
+    {
+      "id": "terminal_outside_project",
+      "label": "How should commands outside the active project work?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Blocked",
+        "Allowed with explicit permission",
+        "Allowed if user previously granted matching permission in chat",
+        "Allowed without extra permission"
+      ],
+      "help": "This covers cwd outside the trusted project, commands that target outside paths, and shell operations with broader machine impact."
+    },
+    {
+      "id": "terminal_audit",
+      "label": "What should C4OS record for terminal activity?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Command text",
+        "Working directory",
+        "Permission decisions",
+        "Exit status",
+        "Output summary",
+        "Full terminal transcript",
+        "No audit beyond chat transcript"
+      ],
+      "help": "Select what future users should be able to inspect after a run."
+    },
+    {
+      "id": "terminal_notes",
+      "label": "Clarifications or constraints",
+      "type": "textarea",
+      "required": false,
+      "help": "Add anything about user shell ownership, agent shell ownership, cancellation, secrets, environment variables, or non-macOS support."
+    }
+  ]
+}

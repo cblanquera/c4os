@@ -1,7 +1,7 @@
 # UI Handoff - Chunk 002
 
 Parent: `index.md`
-Focus: Sections 10-19: provider and model selection, chat session, Browser, Files, Terminal, and settings through configuration.
+Focus: Sections 10-20: provider and model selection, chat session, Browser, Files, Terminal, and settings through Runtimes and Configuration.
 
 ### 10. Provider And Model Selection
 
@@ -231,6 +231,7 @@ The left rail contains:
 - Kicker: Settings.
 - Providers.
 - Models.
+- Runtimes.
 - Configuration.
 - Divider.
 - Plugins.
@@ -310,11 +311,41 @@ Illustrative model rows:
 Model names and provider labels are placeholders. Each row has an enable
 switch. The wireframe does not include a separate Manage button for models.
 
-### 19. Settings Configuration
+### 19. Settings Runtimes
+
+Route: `#settings-runtimes`
+
+The Runtimes screen chooses the execution runtime used for agent work in the
+current workspace. It appears directly under Models in the settings navigation
+because the runtime choice is adjacent to model selection but is not itself a
+model provider or model list.
+
+Header:
+
+- Title: Runtimes.
+- Summary: `Choose the runtime used to execute agent work in this workspace.`
+
+Runtime options:
+
+- OpenCode: links to `https://opencode.ai/`.
+- Pi: links to `https://pi.dev/`.
+
+Selection behavior:
+
+- Exactly one runtime can be selected at a time.
+- The r04 wireframe marks OpenCode as the selected illustrative state.
+- Runtime names and external URLs are normative option labels for this section.
+- The selected-state example is illustrative; production state should come from
+  workspace or user configuration.
+- The screen does not include add, remove, edit, authentication, or advanced
+  runtime configuration controls.
+- External runtime links are informational references. They are not app routes.
+
+### 20. Settings Configuration
 
 Route: `#settings-configuration`
 
-The Configuration screen exposes runtime control areas.
+The Configuration screen exposes approval and sandbox control areas.
 
 Header summary:
 

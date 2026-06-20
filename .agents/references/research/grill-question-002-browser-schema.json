@@ -1,0 +1,51 @@
+{
+  "title": "C4OS Grill Question 002: Native Browser Scope",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "Answer this one grill question locally, submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "browser_definition",
+      "label": "What does full native Browser mean for the first MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Local preview surface with URL bar, reload, stop, and open-external controls only",
+        "Native Browser can navigate arbitrary web URLs, but no login persistence, downloads, cookies, or privileged bridge",
+        "Full web browsing with cookies/login sessions/downloads, still isolated from C4OS secrets and privileged APIs",
+        "Browser automation and agent-controlled browsing are required in MVP"
+      ],
+      "help": "Current proof risk: direct Tauri WebviewWindow exposed Tauri internals to page content. Recommended answer: arbitrary URL navigation only if implemented with an isolated surface that has no privileged bridge, no downloads, and no persistent logged-in session behavior in MVP."
+    },
+    {
+      "id": "browser_mvp_reason",
+      "label": "Why is this Browser scope required in the first MVP?",
+      "type": "textarea",
+      "required": true,
+      "help": "Give the customer workflow that breaks if Browser is only a constrained local preview or if Browser is deferred.",
+      "placeholder": "Example: The agent must run a local app and the user must inspect it in-app without switching to Chrome."
+    },
+    {
+      "id": "browser_risk_acceptance",
+      "label": "Which Browser risks are acceptable for MVP?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "No persistent cookies or logged-in sessions",
+        "No downloads",
+        "No browser automation",
+        "No privileged C4OS bridge in page content",
+        "Open unknown URLs externally instead of in-app",
+        "All of these constraints are too restrictive"
+      ],
+      "help": "Select the constraints you can accept in exchange for shipping Browser in MVP."
+    },
+    {
+      "id": "browser_notes",
+      "label": "Clarifications or constraints",
+      "type": "textarea",
+      "required": false,
+      "help": "Add any URL policy, localhost behavior, tab behavior, external browser handoff, or isolation requirement you want recorded."
+    }
+  ]
+}

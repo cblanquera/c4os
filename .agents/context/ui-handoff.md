@@ -21,17 +21,17 @@ The chunked reference index is
 - C4OS uses a three-panel desktop shell: project/session navigation, center
   workbench, and workspace tools.
 - The right workspace tool tab order is Browser, Files, Terminal.
-- Settings navigation is Providers, Models, Configuration, Plugins, Skills,
-  MCP Servers.
+- Settings navigation is Providers, Models, Runtimes, Configuration, Plugins,
+  Skills, MCP Servers.
 
 ## Chunked Context
 
 | Chunk | Focus |
 | --- | --- |
 | `.agents/references/context/ui-handoff/chunk-001.md` | Sections 1-9: usage, normative versus illustrative content, sources, product frame, artifact contract, global layout, App Start, New Session, and composer behavior. |
-| `.agents/references/context/ui-handoff/chunk-002.md` | Sections 10-19: provider/model selection, chat session, Browser, Files, Terminal, and core settings screens. |
-| `.agents/references/context/ui-handoff/chunk-003.md` | Sections 20-22: Plugins, Skills, and MCP Servers settings surfaces. |
-| `.agents/references/context/ui-handoff/chunk-004.md` | Sections 23-28: visual system, interaction boundaries, accessibility, acceptance notes, reconciliation, and open questions. |
+| `.agents/references/context/ui-handoff/chunk-002.md` | Sections 10-20: provider/model selection, chat session, Browser, Files, Terminal, Runtimes, and Configuration. |
+| `.agents/references/context/ui-handoff/chunk-003.md` | Sections 21-23: Plugins, Skills, and MCP Servers settings surfaces. |
+| `.agents/references/context/ui-handoff/chunk-004.md` | Sections 24-29: visual system, interaction boundaries, accessibility, acceptance notes, reconciliation, and open questions. |
 
 ## Project Implications
 
@@ -39,13 +39,13 @@ The chunked reference index is
   alone; it should read the chunked handoff context first.
 - Example data in r04 is illustrative unless promoted into requirements,
   configuration, or final product copy.
-- Accepted wireframe behavior must be reconciled into MVP requirements,
-  acceptance, and traceability before freeze.
+- Accepted wireframe behavior has been reconciled into MVP requirements,
+  acceptance, and traceability.
 - Simulated r04 behavior must not be mistaken for completed product behavior.
 
 ## Related Context
 
 - `.agents/context/index.md`
 - `wireframes/screens.md`
-- `.agents/specs/mvp/requirements.md`
-- `.agents/specs/mvp/acceptance.md`
+- `.agents/specs/research/requirements.md`
+- `.agents/specs/research/acceptance.md`

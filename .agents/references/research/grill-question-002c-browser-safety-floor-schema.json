@@ -1,0 +1,67 @@
+{
+  "title": "C4OS Grill Question 002c: Browser Safety Floor",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This follow-up resolves a contradiction in the Browser answer. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "browser_safety_position",
+      "label": "Which Browser safety position should govern MVP?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Browser stays in MVP only with hard isolation: no privileged bridge, no credentials, trusted-root or generated-artifact file policy, no shell state, downloads disabled",
+        "Browser stays in MVP with arbitrary file:// and any-page automation, accepting that this is not a trusted-root-safe design",
+        "Browser is deferred until full native Browser isolation can be proven",
+        "Split Browser into two MVP surfaces: user Browser with restricted file policy, and agent preview/automation only for approved localhost or generated artifacts"
+      ],
+      "help": "Recommended answer: split Browser into user Browser and agent preview/automation surfaces. Do not allow arbitrary file:// navigation or any-page automation in the same trust context."
+    },
+    {
+      "id": "file_url_revision",
+      "label": "Revise the file:// policy",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Only generated artifacts and trusted-root files opened by explicit user action",
+        "Only trusted-root files, whether user or agent navigated",
+        "Any local file the user explicitly chooses through an open-file dialog",
+        "Any file URL the page or agent tries to navigate to"
+      ],
+      "help": "Recommended answer: generated artifacts and trusted-root files by explicit user action. Page-originated arbitrary file navigation should be blocked."
+    },
+    {
+      "id": "agent_automation_revision",
+      "label": "Revise the agent Browser automation policy",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Agent automation only for approved localhost previews and generated artifacts",
+        "Agent automation for any page, but only after user approval per domain",
+        "Agent automation for any page without additional approval",
+        "No agent Browser automation in MVP"
+      ],
+      "help": "Recommended answer: approved localhost previews and generated artifacts only. General web automation is a separate product surface."
+    },
+    {
+      "id": "cookies_revision",
+      "label": "Revise cookies/login persistence",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "No persistence in MVP; ephemeral per Browser session",
+        "Persistent per trusted project folder",
+        "Persistent global Browser profile",
+        "Mode split: ephemeral for preview/automation, persistent for user browsing only"
+      ],
+      "help": "Recommended answer: mode split if full user browsing is truly MVP; otherwise ephemeral per session."
+    },
+    {
+      "id": "browser_safety_notes",
+      "label": "Clarifications or non-negotiables",
+      "type": "textarea",
+      "required": false,
+      "help": "State anything you refuse to constrain. If you keep arbitrary file:// or any-page automation, explain what user value justifies the risk."
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "title": "C4OS Research Grill Intake",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "Answer these locally, submit the form, then paste the generated response back into chat. This intake seeds the grill session; we will still challenge the answers one decision at a time.",
+  "questions": [
+    {
+      "id": "first_mvp_workflow",
+      "label": "First MVP workflow",
+      "type": "textarea",
+      "required": true,
+      "help": "Describe the smallest customer-usable workflow C4OS must prove first. Keep it concrete: who opens what, asks what, approves what, and sees what result.",
+      "placeholder": "Example: A developer opens one trusted repo, starts one session, asks for a small code change, reviews a proposed file edit/command, and resumes the session later."
+    },
+    {
+      "id": "concurrency_scope",
+      "label": "Concurrent runs in first MVP",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Single active run only; defer concurrent runs",
+        "Multiple sessions visible, but only one active run at a time",
+        "Multiple concurrent runs are required in MVP",
+        "Unsure; challenge this during grill"
+      ],
+      "help": "Research currently flags concurrent runs as unresolved. The recommended default is one active run until approval/output isolation is proven."
+    },
+    {
+      "id": "runtime_backend",
+      "label": "Runtime backend for first implementation",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Pi first behind a thin C4OS adapter",
+        "OpenCode first behind a thin C4OS adapter",
+        "Keep both as proof backends behind one adapter",
+        "Unsure; decide during grill"
+      ],
+      "help": "POCs found both viable behind a C4OS-owned adapter. Pi proved in-process approval interception; OpenCode proved server-backed session/event control."
+    },
+    {
+      "id": "browser_scope",
+      "label": "Browser scope for first MVP",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Constrained local preview only",
+        "Raw-Wry-style isolated native surface",
+        "Defer Browser entirely",
+        "Full native Browser is required despite current proof risk"
+      ],
+      "help": "Research currently rejects direct Tauri WebviewWindow for untrusted Browser content because page content saw Tauri internals."
+    },
+    {
+      "id": "terminal_scope",
+      "label": "Terminal scope for first MVP",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Approved command/output surface only",
+        "Narrow backend-owned terminal lifecycle",
+        "Defer Terminal entirely",
+        "Full interactive Terminal is required despite current gating"
+      ],
+      "help": "Terminal proofs support backend ownership on macOS; full interactive behavior is still gated on bridge scoping, audit/backpressure, and non-macOS validation."
+    },
+    {
+      "id": "extension_inventory_scope",
+      "label": "Extension inventory in first MVP",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Post-MVP only",
+        "Read-only inventory in settings only",
+        "Install/connect flows are required in MVP",
+        "Unsure; challenge this during grill"
+      ],
+      "help": "Research currently treats extension execution as post-MVP unless the first workflow truly needs inventory visibility."
+    },
+    {
+      "id": "freeze_blockers",
+      "label": "Known blockers or objections",
+      "type": "textarea",
+      "required": false,
+      "help": "List anything you already know would block freezing the MVP after the grill: missing proof, wrong scope, terminology confusion, UI concern, or business requirement."
+    },
+    {
+      "id": "context_promotions",
+      "label": "Context promotions you expect",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Promote runtime adapter decision",
+        "Promote Browser constrained-preview boundary",
+        "Promote Terminal backend-owned boundary",
+        "Promote r04 behavioral handoff decision",
+        "Do not promote anything until after grill"
+      ],
+      "help": "This does not perform promotion automatically. It tells me what you expect to become reusable context after decisions crystallize."
+    }
+  ]
+}

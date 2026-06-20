@@ -7,7 +7,7 @@ Source Note: Imported from `plans/product-brief.md`.
 
 ## Summary
 
-C4OS is a local-first desktop command center for AI-assisted work. It lets users open trusted project folders, run persistent agent sessions, manage providers and approvals, inspect artifacts, edit files, and use safe browser and terminal surfaces from an app-owned workspace.
+C4OS is a local-first desktop command center for AI-assisted work. It lets users open trusted project folders, run persistent agent sessions, manage providers and approvals, inspect artifacts, edit files, browse with project-scoped Browser profiles, and use separate user and agent-owned terminal surfaces from an app-owned workspace.
 
 ## Target Users
 

@@ -1,0 +1,82 @@
+{
+  "title": "C4OS Grill Question 003: Agent Authority",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question defines the authority model objectively: what users can do freely, what agents can do by default, and what requires permission. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "project_file_authority",
+      "label": "What can an agent do with files inside the active project folder?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Read only by default; writes require approval",
+        "Read and write freely when the user's request implies file work",
+        "Read freely; write freely only if Git/revert exists",
+        "Ask every time before reading or writing"
+      ],
+      "help": "This is about files inside the active trusted project. User browsing authority is separate."
+    },
+    {
+      "id": "outside_project_authority",
+      "label": "What can an agent do outside the active project folder?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "No access",
+        "Read only with explicit permission",
+        "Read and write with explicit permission",
+        "Use previously granted chat permission for matching paths/actions"
+      ],
+      "help": "Your prior answer says outside-project access should require permission unless previously allowed in chat."
+    },
+    {
+      "id": "public_web_authority",
+      "label": "What public web browsing can an agent do?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Any public website when it falls within the user's request",
+        "Any public website only after per-domain approval",
+        "Only localhost and documentation sites",
+        "No agent web browsing in MVP"
+      ],
+      "help": "This excludes private logged-in actions unless you explicitly include them in the notes."
+    },
+    {
+      "id": "logged_in_web_authority",
+      "label": "Can the agent use logged-in Browser sessions?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "No, user-only",
+        "Yes, if the user's request clearly requires it",
+        "Yes, but only after approval per site/session",
+        "Post-MVP only"
+      ],
+      "help": "This is separate from the user being able to log in and browse freely."
+    },
+    {
+      "id": "audit_expectation",
+      "label": "What should C4OS record for agent actions?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "File reads inside project",
+        "File writes inside project",
+        "Outside-project permission grants",
+        "Public websites visited by agent",
+        "Logged-in sites used by agent",
+        "No audit beyond chat transcript"
+      ],
+      "help": "Select the action records future users should be able to review."
+    },
+    {
+      "id": "authority_notes",
+      "label": "Clarifications or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Add any nuance about Git, revert responsibility, prior permission in chat, public vs private websites, or what counts as being within the user's request."
+    }
+  ]
+}

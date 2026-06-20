@@ -16,9 +16,9 @@ the prototype.
 | Chunk | Focus |
 | --- | --- |
 | `chunk-001.md` | Sections 1-9: usage, normative versus illustrative content, sources, product frame, artifact contract, global layout, App Start, New Session, and composer behavior. |
-| `chunk-002.md` | Sections 10-19: provider/model selection, chat session, Browser, Files, Terminal, and core settings screens. |
-| `chunk-003.md` | Sections 20-22: Plugins, Skills, and MCP Servers settings surfaces. |
-| `chunk-004.md` | Sections 23-28: visual system, interaction boundaries, accessibility, acceptance notes, reconciliation, and open questions. |
+| `chunk-002.md` | Sections 10-20: provider/model selection, chat session, Browser, Files, Terminal, Runtimes, and Configuration. |
+| `chunk-003.md` | Sections 21-23: Plugins, Skills, and MCP Servers settings surfaces. |
+| `chunk-004.md` | Sections 24-29: visual system, interaction boundaries, accessibility, acceptance notes, reconciliation, and open questions. |
 
 ## Lookup Notes
 

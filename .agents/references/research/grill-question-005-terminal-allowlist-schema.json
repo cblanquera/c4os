@@ -1,0 +1,62 @@
+{
+  "title": "C4OS Grill Question 005: Terminal Allowlist",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question pins down the config-backed read-only command allowlist for the agent-owned command terminal. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "allowlist_source",
+      "label": "Where should the default command allowlist live?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "App-bundled default config, overrideable by workspace config",
+        "Workspace config only",
+        "User global config only",
+        "Hardcoded in app code for MVP"
+      ],
+      "help": "Recommended neutral baseline: app-bundled defaults with workspace override, so MVP has safe defaults while project-specific tools can be added."
+    },
+    {
+      "id": "read_only_definition",
+      "label": "How should C4OS decide a command is read-only?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Only exact allowlisted command patterns count as read-only",
+        "Infer read-only from command names and flags",
+        "Ask the runtime/model to classify read-only commands",
+        "All commands without shell redirection are read-only"
+      ],
+      "help": "This must be deterministic enough to enforce before execution."
+    },
+    {
+      "id": "default_allowlist",
+      "label": "Which commands belong in the MVP default allowlist?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "pwd",
+        "ls",
+        "find",
+        "rg",
+        "cat",
+        "sed -n",
+        "git status",
+        "git diff",
+        "git log",
+        "npm test / test runners",
+        "package-manager install commands",
+        "network commands such as curl"
+      ],
+      "help": "Select only commands that may run without approval when scoped to the active project."
+    },
+    {
+      "id": "allowlist_notes",
+      "label": "Clarifications or exclusions",
+      "type": "textarea",
+      "required": false,
+      "help": "Add rules for redirection, pipes, package installs, network access, test commands, git commands, or command output limits."
+    }
+  ]
+}

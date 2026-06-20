@@ -1,4 +1,4 @@
-# MVP Restart Brief
+# Research Restart Brief
 
 Status: ready-for-review
 Created: 2026-06-18

@@ -5,8 +5,8 @@ Use this to define, narrow, validate, or freeze the smallest customer-usable C4O
 ## Read First
 
 - `.agents/context/index.md`
-- `.agents/specs/mvp/index.md`
-- `.agents/specs/mvp/status.md`
+- `.agents/specs/research/index.md`
+- `.agents/specs/research/status.md`
 - `wireframes/screens.md`, when UI behavior matters
 
 ## Process
@@ -19,4 +19,4 @@ Use this to define, narrow, validate, or freeze the smallest customer-usable C4O
 
 ## Stop
 
-Stop when MVP records are reviewable, blockers are explicit, and the next step is review, validation, POC, freeze, or implementation planning.
+Stop when the research records make the MVP boundary reviewable, blockers are explicit, and the next step is review, validation, POC, freeze, or implementation planning.

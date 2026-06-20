@@ -1,9 +1,9 @@
-# MVP POC Brief
+# Research POC Brief
 
 Status: planned
 Updated: 2026-06-20
 
-This folder contains proof planning and results for MVP feasibility questions.
+This folder contains proof planning and results for research-stage MVP feasibility questions.
 Runnable proof implementations should live under `proofs/<proof-name>/` and
 link back here.
 
@@ -13,7 +13,7 @@ Status: planned
 Confidence: proposed
 MVP: yes
 Phase: poc
-Source: `.agents/specs/mvp/questions.md`
+Source: `.agents/specs/research/questions.md`
 Related:
 - Q-001
 - ASM-001

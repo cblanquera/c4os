@@ -1,0 +1,63 @@
+{
+  "title": "C4OS Grill Question 008b: Workflow Proof Boundary",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This follow-up resolves a mismatch between the selected first workflow and the proof result. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "workflow_boundary",
+      "label": "Which workflow should freeze as the actual first MVP slice?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Chat/status only: agent answers with visible thinking/status, no required file change or Browser proof",
+        "Project-change workflow: agent changes a file, runs command, shows Browser preview, and saves resumable session",
+        "Two-step freeze: chat/status is first milestone, project-change workflow is MVP acceptance",
+        "Keep both as one MVP slice even if it is broader"
+      ],
+      "help": "Your previous answer selected chat/status, but the success proof requires project change, command output, Browser preview, and session resume."
+    },
+    {
+      "id": "minimum_acceptance",
+      "label": "Minimum acceptance for the first usable MVP",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Trusted folder opened",
+        "Provider configured",
+        "OpenCode session created",
+        "Agent status/thinking visible",
+        "Agent response persisted",
+        "File changed",
+        "Command run",
+        "Browser preview shown",
+        "Session resumable after app restart",
+        "Concurrent sessions demonstrated"
+      ],
+      "help": "Select only what must pass before the MVP can be called usable."
+    },
+    {
+      "id": "workflow_non_goals",
+      "label": "What should explicitly not block this MVP slice?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Extension install/connect",
+        "Logged-in Browser sessions",
+        "Agent web browsing",
+        "User terminal",
+        "Multiple projects running at once",
+        "Subagent spawning",
+        "Pi runtime support"
+      ],
+      "help": "These can remain in MVP scope or future scope, but this asks what should not block the first slice."
+    },
+    {
+      "id": "workflow_notes",
+      "label": "Clarifications",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether the first milestone and MVP acceptance are different things."
+    }
+  ]
+}

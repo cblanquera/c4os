@@ -1,4 +1,4 @@
-# MVP Constraints
+# Research Constraints
 
 ## CON-001: Local-First Storage
 
@@ -30,15 +30,15 @@ Source: `plans/product-brief.md`
 
 The first provider strategy uses OpenAI-compatible profiles before direct provider-native APIs.
 
-## CON-004: Extension Execution Deferred
+## CON-004: Extension Execution Requires Enablement
 
-Status: proposed
-Confidence: imported
-MVP: no
-Phase: feature-development
-Source: `plans/product-brief.md`
+Status: accepted
+Confidence: user-accepted
+MVP: yes
+Phase: mvp
+Source: `plans/product-brief.md`, `.agents/references/research/grill-session.md`
 
-Marketplace readiness and executable plugin/hook behavior are architecture goals, not MVP execution scope.
+Plugins, skills, and MCP servers may be installed or connected in MVP, but they cannot affect agent execution until explicitly enabled per extension. Skills and plugins may be invoked implicitly or explicitly after enablement. MCP servers require explicit invocation by the user.
 
 ## CON-005: Neutral Utility UI
 

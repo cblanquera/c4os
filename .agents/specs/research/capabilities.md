@@ -1,4 +1,4 @@
-# MVP Capabilities
+# Research Capabilities
 
 ## CAP-001: Folder-First Workspace
 
@@ -62,30 +62,30 @@ Generated outputs are first-class artifacts with project/session identity and sa
 
 ## CAP-007: Browser Surface
 
-Status: proposed
-Confidence: imported
-MVP: unknown
+Status: accepted
+Confidence: user-accepted
+MVP: yes
 Phase: mvp
-Source: `plans/product-brief.md`
+Source: `plans/product-brief.md`, `.agents/references/research/grill-session.md`
 
-A Browser tab should eventually support local preview and web URLs, but native browser work needs isolation proof before MVP promotion.
+A Browser tab supports user-owned desktop browsing with project-scoped Browser profile, public web access, local file browsing, request-scoped agent browsing, logged-in session use when required by the user's request, and audit records for agent Browser actions.
 
 ## CAP-008: Terminal Surface
 
-Status: proposed
-Confidence: imported
-MVP: unknown
+Status: accepted
+Confidence: user-accepted
+MVP: yes
 Phase: mvp
-Source: `plans/product-brief.md`
+Source: `plans/product-brief.md`, `.agents/references/research/grill-session.md`
 
-A Terminal tab should be backend-owned with trusted-root cwd validation, approved launch plans, sanitized environment, PTY lifecycle, and audit records.
+A Terminal tab provides separate user terminal and agent-owned command terminal surfaces, with backend-owned lifecycle, deterministic command allowlist, approvals, sanitized environment, PTY lifecycle, and audit records.
 
-## CAP-009: Extension Inventory
+## CAP-009: Extension Install And Connect
 
-Status: proposed
-Confidence: imported
-MVP: no
-Phase: feature-development
-Source: `plans/product-brief.md`
+Status: accepted
+Confidence: user-accepted
+MVP: yes
+Phase: mvp
+Source: `plans/product-brief.md`, `.agents/references/research/grill-session.md`
 
-Post-MVP inventory for MCP servers, skills, plugins, hooks, agents, and runtime customizations should show provenance, trust, permissions, enabled state, and scope.
+Users can install or connect plugins, skills, and MCP servers. Each extension record shows provenance, granted scopes, workspace/project scope, data shared, runtime/tool access, enabled state, and action audit. Extensions can affect agent execution only after explicit per-extension enablement.

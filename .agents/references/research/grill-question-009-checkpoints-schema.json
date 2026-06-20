@@ -1,0 +1,55 @@
+{
+  "title": "C4OS Grill Question 009: Implementation Checkpoints",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "The MVP boundary is now the full documented/r04 scope. This question defines checkpoint phases without shrinking the MVP. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "checkpoint_strategy",
+      "label": "How should implementation checkpoints be structured?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Thin vertical slices that each prove end-to-end product value",
+        "Layered platform first, then UI/product surfaces",
+        "UI shell first, then backend/runtime capability",
+        "Risk-first order: runtime, permissions, Browser/Terminal, extensions, then polish"
+      ],
+      "help": "This does not change MVP scope. It only determines how progress is reviewed."
+    },
+    {
+      "id": "first_checkpoint",
+      "label": "What should checkpoint 1 prove?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Folder trust, provider setup, OpenCode session, visible agent response, persisted session",
+        "File change plus command output plus session persistence",
+        "Browser preview plus terminal command plus file change",
+        "Full r04 shell navigation with mocked backend"
+      ],
+      "help": "Choose the first progress review gate, not the MVP boundary."
+    },
+    {
+      "id": "checkpoint_must_not_mean",
+      "label": "What must checkpoint language avoid?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Calling checkpoint 1 the MVP",
+        "Moving documented r04 features to post-MVP",
+        "Treating security-only progress as product viability",
+        "Treating mocked UI as product-complete",
+        "Freezing implementation before all documented features are planned"
+      ],
+      "help": "Select the misunderstandings future agents should avoid."
+    },
+    {
+      "id": "checkpoint_notes",
+      "label": "Clarifications or preferred names",
+      "type": "textarea",
+      "required": false,
+      "help": "Suggest names like Checkpoint 1, Alpha Slice, Foundation Slice, etc., or define how many checkpoints you expect."
+    }
+  ]
+}

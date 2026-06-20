@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 011: Closeout",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This final question confirms whether the grill is complete and artifacts should be produced next. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "closeout_decision",
+      "label": "Is the grill session complete enough to produce freeze artifacts?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, stop grilling and produce the selected artifacts next",
+        "No, continue grilling Browser implementation risk",
+        "No, continue grilling extension execution risk",
+        "No, continue grilling checkpoint sequencing"
+      ],
+      "help": "Selected artifacts are MVP freeze document, checkpoint plan, Browser/agent authority ADR, extension enablement/tag ADR, and context promotion."
+    },
+    {
+      "id": "artifact_location",
+      "label": "Where should freeze artifacts live?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        ".agents/specs/research/ for freeze and checkpoint docs; docs/adr/ for ADRs",
+        ".agents/specs/freeze/ for freeze docs; docs/adr/ for ADRs",
+        "plans/ for human docs; .agents/ only for traceability",
+        "Decide automatically from existing repo conventions"
+      ],
+      "help": "Recommended: keep freeze/checkpoint docs in .agents/specs/research/ for now and ADRs in docs/adr/ per grill-with-docs convention."
+    },
+    {
+      "id": "closeout_notes",
+      "label": "Anything else before artifact creation?",
+      "type": "textarea",
+      "required": false,
+      "help": "Add final constraints, naming preferences, or anything that should not be written yet."
+    }
+  ]
+}

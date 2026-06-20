@@ -1,0 +1,59 @@
+{
+  "title": "C4OS Grill Question 010: Freeze Artifacts",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "risk-first MVP freeze review",
+  "description": "This question decides what documentation should be created after the grill before implementation planning starts. Submit the form, then paste the generated response back into chat.",
+  "questions": [
+    {
+      "id": "freeze_artifacts",
+      "label": "Which artifacts should be produced after this grill?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "MVP freeze document",
+        "Implementation checkpoint plan",
+        "ADR for Browser and agent authority",
+        "ADR for extension enablement and prompt tags",
+        "Context promotion update",
+        "No new artifacts; update existing research records only"
+      ],
+      "help": "Select the docs that should exist before implementation planning begins."
+    },
+    {
+      "id": "browser_adr_need",
+      "label": "Does Browser and agent authority need an ADR before implementation?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, create ADR before implementation planning",
+        "No, research decisions are enough",
+        "Defer ADR until implementation discovers a concrete trade-off",
+        "Only create ADR if Browser implementation conflicts with Tauri/Wry proof evidence"
+      ],
+      "help": "This asks neutrally whether the Browser/agent authority trade-off needs a durable decision record."
+    },
+    {
+      "id": "context_promotions",
+      "label": "Which context promotions should happen now?",
+      "type": "checkbox",
+      "required": false,
+      "options": [
+        "Promote full documented/r04 scope is MVP",
+        "Promote OpenCode-first runtime decision",
+        "Promote agent authority model",
+        "Promote Browser project profile and request-scoped agent browsing",
+        "Promote Terminal allowlist and split terminal model",
+        "Promote extension enablement and prompt tags",
+        "Do not promote more context until after freeze document"
+      ],
+      "help": "These would update .agents/context so future specs do not need to read the whole grill session."
+    },
+    {
+      "id": "freeze_notes",
+      "label": "Clarifications",
+      "type": "textarea",
+      "required": false,
+      "help": "Add any preference about naming, where freeze artifacts should live, or what should not be written yet."
+    }
+  ]
+}
