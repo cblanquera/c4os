@@ -31,6 +31,7 @@ What is clickable:
 - Right panel Browser, Files, and Terminal tabs.
 - File explorer rows and breadcrumbs.
 - Settings navigation and provider form actions.
+- Runtime selection between OpenCode and Pi.
 - Show More / Show Less in the chat session.
 - Plugin, marketplace, skill, and MCP modal controls.
 
@@ -39,6 +40,7 @@ What is simulated:
 - Folder opening, cloning, and workspace-file opening.
 - Prompt submission.
 - Provider/model persistence.
+- Runtime persistence.
 - Browser rendering.
 - File editing and saving.
 - Terminal execution.

@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const startedAt = new Date().toISOString();
+const today = startedAt.slice(0, 10);
 const repoRoot = new URL('../../', import.meta.url).pathname.replace(/\/$/, '');
-const evidencePath = join(repoRoot, '.agents/poc/native-browser-plugin-evidence-2026-06-15.md');
+const proofRoot = new URL('./', import.meta.url).pathname.replace(/\/$/, '');
+const evidencePath = join(proofRoot, `native-browser-plugin-evidence-${today}.md`);
 
 const localPreview = await startFixtureServer('local-preview');
 const remotePreview = await startFixtureServer('remote-preview');
@@ -287,7 +289,7 @@ function shellPage() {
 
 async function writeEvidence(nextResult) {
   const lines = [
-    '# Native Browser Plugin POC Evidence: 2026-06-15',
+    `# Native Browser Plugin POC Evidence: ${today}`,
     '',
     `Status: ${nextResult.summary.status}`,
     `Started: ${nextResult.startedAt}`,

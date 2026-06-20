@@ -31,6 +31,7 @@ Route behavior:
 - Settings providers: `index.html#settings-providers`
 - Add provider: `index.html#settings-add-provider`
 - Settings models: `index.html#settings-models`
+- Settings runtimes: `index.html#settings-runtimes`
 - Settings configuration: `index.html#settings-configuration`
 - Settings plugins: `index.html#settings-plugins`
 - Settings skills: `index.html#settings-skills`

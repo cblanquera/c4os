@@ -23,7 +23,8 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EVIDENCE_PATH = REPO_ROOT / "poc/native-terminal-plugin/native-terminal-plugin-evidence-2026-06-15.md"
+TODAY = time.strftime("%Y-%m-%d", time.gmtime())
+EVIDENCE_PATH = Path(__file__).resolve().parent / f"native-terminal-plugin-evidence-{TODAY}.md"
 TRUSTED_ROOT = REPO_ROOT
 DISALLOWED_ROOT = Path("/tmp").resolve()
 
@@ -361,7 +362,7 @@ def iso_now() -> str:
 def write_evidence(result: dict[str, Any]) -> None:
     summary = result.get("summary") or summarize(result["checks"])
     lines = [
-        "# Native Terminal Plugin POC Evidence: 2026-06-15",
+        f"# Native Terminal Plugin POC Evidence: {TODAY}",
         "",
         f"Status: {summary['status']}",
         f"Started: {result['startedAt']}",

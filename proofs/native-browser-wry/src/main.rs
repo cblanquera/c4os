@@ -618,7 +618,7 @@ fn write_evidence(
         "promotionDecision": promotion_decision
     });
     let body = format!(
-        "# Raw Wry Native Browser Isolation POC Evidence: 2026-06-16\n\n\
+        "# Raw Wry Native Browser Isolation POC Evidence: 2026-06-20\n\n\
 Status: {status}\n\
 Started: {started_at}\n\
 Finished: {finished_at}\n\n\
@@ -659,12 +659,8 @@ remain out of scope.\n\n\
 }
 
 fn evidence_path() -> PathBuf {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("poc crate lives under repo/poc/native-browser-wry")
-        .to_path_buf();
-    repo_root.join(".agents/poc/native-browser-wry-evidence-2026-06-16.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("native-browser-wry-evidence-2026-06-20.md")
 }
 
 enum PageKind {

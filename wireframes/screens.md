@@ -1,7 +1,7 @@
 # Wireframe Screens
 
 Status: active
-Updated: 2026-06-18
+Updated: 2026-06-20
 Source:
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
@@ -21,6 +21,7 @@ Source:
 | Settings providers | `plans/pegs/C4OS-Settings-Providers-Wireframe.png` |
 | Add provider | `plans/pegs/C4OS-Settings-Add-Provider-Wireframe.png` |
 | Settings models | `plans/pegs/C4OS-Settings-Models-Wireframe.png` |
+| Settings runtimes | `wireframes/r04-single-page-app/` r04 addition; no peg image |
 | Settings configuration | `plans/pegs/C4OS-Settings-Configuration-Wireframe.png` |
 
 ## Imported UI Rules
@@ -33,12 +34,12 @@ Source:
 - User messages align right and agent messages align left.
 - File explorer begins directly with folders/files under the active project.
 - Code view fills the right-panel body and should not look like a floating card.
-- Settings navigation order is Providers, Models, Configuration, Skills, MCP Servers, Hooks.
+- Settings navigation order is Providers, Models, Runtimes, Configuration, Plugins, Skills, MCP Servers.
 - MVP interface should remain neutral and utilitarian, use lucide icons, and avoid dark theme or brand styling unless a later design phase approves it.
 
 ## Promotion Notes
 
-Before freeze, accepted wireframe behavior should be promoted into `.agents/specs/mvp/requirements.md` and `.agents/specs/mvp/acceptance.md`.
+Before freeze, accepted wireframe behavior should be promoted into `.agents/specs/research/requirements.md` and `.agents/specs/research/acceptance.md`.
 
 The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
 

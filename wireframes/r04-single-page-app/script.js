@@ -14,6 +14,7 @@ const routes = [
   ["Settings Providers", "./settings-providers.html", "Provider connection list."],
   ["Add Provider", "./settings-add-provider.html", "Provider form with key below base URL."],
   ["Settings Models", "./settings-models.html", "Fetched models grouped by provider labels."],
+  ["Settings Runtimes", "./settings-runtimes.html", "Runtime selector for OpenCode or Pi."],
   ["Settings Configuration", "./settings-configuration.html", "Approval policy, sandbox settings, and config access."],
   ["Settings Plugins", "./settings-plugins.html", "Installed plugin controls grouped below configuration."],
   ["Settings Skills", "./settings-skills.html", "Installed skill controls and detail state."],
@@ -139,6 +140,9 @@ const labels = [
   ["settings.modelsSummary", "Models are fetched from enabled provider connections when available."],
   ["settings.modelCurrent", "Current"],
   ["settings.modelEnabled", "Enabled"],
+  ["settings.runtimesSummary", "Choose the runtime used to execute agent work in this workspace."],
+  ["settings.runtimeSelected", "Selected"],
+  ["settings.runtimeChoose", "Choose runtime"],
   ["settings.configurationSummary", "Configure approval policy and sandbox settings."],
   ["settings.openConfig", "Open config.toml externally"],
   ["settings.pluginsSummary", "Manage installed plugins and extension surfaces."]
@@ -225,6 +229,7 @@ const terminalPreview = {
 const settingsNavItems = [
   { label: "Providers", key: "providers", href: "./settings-providers.html", icon: "key" },
   { label: "Models", key: "models", href: "./settings-models.html", icon: "bot" },
+  { label: "Runtimes", key: "runtimes", href: "./settings-runtimes.html", icon: "terminal" },
   { label: "Configuration", key: "configuration", href: "./settings-configuration.html", icon: "settings" },
   { label: "Plugins", key: "plugins", href: "./settings-plugins.html", icon: "plug", dividerBefore: true },
   { label: "Skills", key: "skills", href: "./settings-skills.html", icon: "file" },
@@ -243,6 +248,11 @@ const providerFormFields = [
 const configCards = [
   { title: "Approval Policy", text: "Choose when the app asks before high-impact actions.", action: "On request" },
   { title: "Sandbox Settings", text: "Choose how much agents can do when running commands.", action: "Workspace write" }
+];
+
+const runtimes = [
+  { label: "OpenCode", url: "https://opencode.ai/", selected: true },
+  { label: "Pi", url: "https://pi.dev/", selected: false }
 ];
 
 const pluginCatalog = [
@@ -720,6 +730,7 @@ function settingsNav(active) {
 function settingsBody(active) {
   if (active === "add-provider") return providerForm();
   if (active === "models") return modelsSettings();
+  if (active === "runtimes") return runtimesSettings();
   if (active === "configuration") return configurationSettings();
   if (active === "plugins") return pluginsSettings();
   if (active === "skills") return skillsSettings();
@@ -782,16 +793,32 @@ function modelsSettings() {
   ]);
 }
 
+function runtimesSettings() {
+  return h("section", {}, [
+    settingsTitle(settingsNavItems[2].label, copy["settings.runtimesSummary"]),
+    h("div", { class: "data-list" }, runtimes.map((runtime) =>
+      h("article", { class: "data-row runtime-row" }, [
+        h("div", {}, [
+          h("strong", { text: runtime.label }),
+          h("a", { href: runtime.url, target: "_blank", rel: "noreferrer", text: runtime.url })
+        ]),
+        h("span", { class: "status-pill", text: runtime.selected ? copy["settings.runtimeSelected"] : copy["settings.runtimeChoose"] }),
+        h("input", { type: "radio", name: "runtime", value: runtime.label.toLowerCase(), checked: runtime.selected ? "checked" : null, "aria-label": `${runtime.label} runtime` })
+      ])
+    ))
+  ]);
+}
+
 function configurationSettings() {
   return h("section", {}, [
-    settingsTitle(settingsNavItems[2].label, copy["settings.configurationSummary"], button("button secondary", copy["settings.openConfig"], "file")),
+    settingsTitle(settingsNavItems[3].label, copy["settings.configurationSummary"], button("button secondary", copy["settings.openConfig"], "file")),
     h("div", { class: "config-grid" }, configCards.map((card) => configCard(card.title, card.text, card.action)))
   ]);
 }
 
 function pluginsSettings() {
   return h("section", {}, [
-    settingsTitle(settingsNavItems[3].label, copy["settings.pluginsSummary"]),
+    settingsTitle(settingsNavItems[4].label, copy["settings.pluginsSummary"]),
     h("div", { class: "plugin-store", "aria-label": "Plugin catalog" }, [
       h("div", { class: "plugin-toolbar" }, [
         h("label", { class: "plugin-search" }, [
@@ -818,7 +845,7 @@ function pluginsSettings() {
 
 function skillsSettings() {
   return h("section", {}, [
-    settingsTitle(settingsNavItems[4].label, "Manage installed skills and per-project availability."),
+    settingsTitle(settingsNavItems[5].label, "Manage installed skills and per-project availability."),
     h("div", { class: "skills-panel", "aria-label": "Skills" }, [
       h("label", { class: "skills-search" }, [
         svgIcon("search"),

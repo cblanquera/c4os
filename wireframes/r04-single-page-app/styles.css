@@ -1202,6 +1202,23 @@ svg {
   margin-top: 3px;
 }
 
+.runtime-row a {
+  color: var(--ink-soft);
+  display: block;
+  margin-top: 3px;
+  min-width: 0;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-row input[type="radio"] {
+  accent-color: var(--ink);
+  height: 22px;
+  width: 22px;
+}
+
 .switch {
   background: var(--field);
   border: 1px solid var(--line-strong);

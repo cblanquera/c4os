@@ -527,7 +527,7 @@ fn write_evidence(
         "promotionDecision": promotion_decision
     });
     let body = format!(
-        "# Tauri Native Browser Isolation POC Evidence: 2026-06-15\n\n\
+        "# Tauri Native Browser Isolation POC Evidence: 2026-06-20\n\n\
 Status: {status}\n\
 Started: {started_at}\n\
 Finished: {finished_at}\n\n\
@@ -568,12 +568,8 @@ remain out of scope.\n\n\
 }
 
 fn evidence_path() -> PathBuf {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("poc crate lives under repo/poc/native-browser-tauri")
-        .to_path_buf();
-    repo_root.join(".agents/poc/native-browser-tauri-evidence-2026-06-15.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("native-browser-tauri-evidence-2026-06-20.md")
 }
 
 enum PageKind {

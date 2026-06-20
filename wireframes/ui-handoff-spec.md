@@ -44,7 +44,7 @@ Normative requirements:
 - Trust boundaries and simulation boundaries.
 - Accessibility expectations.
 - Required product surfaces, such as Browser, Files, Terminal, Providers,
-  Models, Configuration, Plugins, Skills, and MCP Servers.
+  Models, Runtimes, Configuration, Plugins, Skills, and MCP Servers.
 
 Illustrative-only content:
 
@@ -80,8 +80,8 @@ The handoff is derived from:
 - `wireframes/screens.md`
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
-- `.agents/specs/mvp/requirements.md`
-- `.agents/specs/mvp/acceptance.md`
+- `.agents/specs/research/requirements.md`
+- `.agents/specs/research/acceptance.md`
 
 The r04 prototype is the latest review target. Earlier revisions remain useful
 as design history, but r04 is the current handoff baseline.
@@ -129,6 +129,7 @@ The route list is:
 | `#settings-providers` | Settings Providers |
 | `#settings-add-provider` | Add Provider form |
 | `#settings-models` | Settings Models |
+| `#settings-runtimes` | Settings Runtimes |
 | `#settings-configuration` | Settings Configuration |
 | `#settings-plugins` | Settings Plugins |
 | `#settings-skills` | Settings Skills |
@@ -654,6 +655,7 @@ The left rail contains:
 - Kicker: Settings.
 - Providers.
 - Models.
+- Runtimes.
 - Configuration.
 - Divider.
 - Plugins.
@@ -733,11 +735,41 @@ Illustrative model rows:
 Model names and provider labels are placeholders. Each row has an enable
 switch. The wireframe does not include a separate Manage button for models.
 
-## 19. Settings Configuration
+## 19. Settings Runtimes
+
+Route: `#settings-runtimes`
+
+The Runtimes screen chooses the execution runtime used for agent work in the
+current workspace. It appears directly under Models in the settings navigation
+because the runtime choice is adjacent to model selection but is not itself a
+model provider or model list.
+
+Header:
+
+- Title: Runtimes.
+- Summary: `Choose the runtime used to execute agent work in this workspace.`
+
+Runtime options:
+
+- OpenCode: links to `https://opencode.ai/`.
+- Pi: links to `https://pi.dev/`.
+
+Selection behavior:
+
+- Exactly one runtime can be selected at a time.
+- The r04 wireframe marks OpenCode as the selected illustrative state.
+- Runtime names and external URLs are normative option labels for this section.
+- The selected-state example is illustrative; production state should come from
+  workspace or user configuration.
+- The screen does not include add, remove, edit, authentication, or advanced
+  runtime configuration controls.
+- External runtime links are informational references. They are not app routes.
+
+## 20. Settings Configuration
 
 Route: `#settings-configuration`
 
-The Configuration screen exposes runtime control areas.
+The Configuration screen exposes approval and sandbox control areas.
 
 Header summary:
 
@@ -756,7 +788,7 @@ Cards:
 
 The wireframe intentionally avoids a redundant config-source row.
 
-## 20. Settings Plugins
+## 21. Settings Plugins
 
 Route: `#settings-plugins`
 
@@ -788,7 +820,7 @@ Illustrative plugin cards:
 Plugin names and descriptions are placeholders for catalog shape. Each card
 shows a logo mark, plugin name, description, and Add button.
 
-### 20.1. Plugin Connect Dialog
+### 21.1. Plugin Connect Dialog
 
 Clicking Add opens a plugin connection dialog. The dialog content changes to
 the selected plugin.
@@ -804,7 +836,7 @@ Dialog surfaces:
 
 The wireframe does not authenticate, install, or persist plugin connection.
 
-### 20.2. Marketplace Dialog
+### 21.2. Marketplace Dialog
 
 The marketplace dialog is opened from `+ Add Marketplace`.
 
@@ -821,7 +853,7 @@ Actions:
 
 This is a simulated review form.
 
-## 21. Settings Skills
+## 22. Settings Skills
 
 Route: `#settings-skills`
 
@@ -861,7 +893,7 @@ Skill detail dialog surfaces:
 Skill names, descriptions, scopes, and details are placeholders. The wireframe
 does not execute skills, uninstall skills, or persist skill availability.
 
-## 22. Settings MCP Servers
+## 23. Settings MCP Servers
 
 Route: `#settings-mcp`
 
@@ -886,7 +918,7 @@ Each row has:
 - Settings button.
 - Enabled switch.
 
-### 22.1. Custom MCP Dialog
+### 23.1. Custom MCP Dialog
 
 Clicking Add server opens `Connect to a custom MCP`.
 
@@ -924,7 +956,7 @@ Footer actions:
 Server names are placeholders. The wireframe does not connect to or validate
 MCP servers.
 
-## 23. Visual System
+## 24. Visual System
 
 The r04 visual system is intentionally restrained:
 
@@ -946,7 +978,7 @@ Implementation rules:
   settings, plugin, skill, and MCP controls.
 - Preserve accessible labels for icon-only buttons.
 
-## 24. Interaction Boundaries
+## 25. Interaction Boundaries
 
 The prototype demonstrates interactions but does not own production behavior.
 
@@ -980,7 +1012,7 @@ Simulated or out of scope:
 - Skill execution/uninstall.
 - MCP validation/persistence.
 
-## 25. Accessibility Expectations
+## 26. Accessibility Expectations
 
 The wireframe expresses these accessibility expectations:
 
@@ -993,7 +1025,7 @@ The wireframe expresses these accessibility expectations:
   switch styling.
 - Text must remain legible and must not overlap controls.
 
-## 26. Implementation Acceptance Notes
+## 27. Implementation Acceptance Notes
 
 Accepted implementation should preserve:
 
@@ -1007,13 +1039,15 @@ Accepted implementation should preserve:
 - Messenger-style user/agent ownership.
 - Approval boundary surfaced as structured activity.
 - Provider/model settings separation.
+- Runtime selection as a distinct settings surface under Models.
 - Plugins, Skills, and MCP Servers as distinct settings surfaces.
 
 Do not treat r04 placeholder data as production fixtures. Do not hardcode
 example project names, session names, file paths, provider names, model names,
-plugin names, skill names, MCP server names, branch names, URLs, code snippets,
-terminal output, badges, statuses, or sample copy unless a separate product
-record explicitly promotes them into requirements, configuration, or final copy.
+plugin names, skill names, MCP server names, branch names, non-runtime URLs,
+code snippets, terminal output, badges, statuses, or sample copy unless a
+separate product record explicitly promotes them into requirements,
+configuration, or final copy.
 Use sample data only to understand layout, hierarchy, and state behavior.
 
 When implementing frontend code from this handoff, the expected instruction is:
@@ -1023,23 +1057,24 @@ copy, and the accepted design system. If any of those production sources are
 missing, leave a clear implementation note or follow-up rather than hardcoding
 the r04 examples.
 
-## 27. Required Reconciliation Before Freeze
+## 28. Required Reconciliation Before Freeze
 
 Before MVP freeze, accepted UI behavior should be reconciled into:
 
-- `.agents/specs/mvp/requirements.md`
-- `.agents/specs/mvp/acceptance.md`
-- `.agents/specs/mvp/traceability.md`
+- `.agents/specs/research/requirements.md`
+- `.agents/specs/research/acceptance.md`
+- `.agents/specs/research/traceability.md`
 
 Reconcile as product behavior, not as prototype implementation detail.
 
-## 28. Open Questions
+## 29. Open Questions
 
 These are not settled by r04:
 
 - Final product copy.
 - Mobile or responsive behavior beyond narrow desktop overflow.
-- Production persistence for provider, model, plugin, skill, and MCP settings.
+- Production persistence for provider, model, runtime, plugin, skill, and MCP
+  settings.
 - Exact backend contract for file explorer and editor state.
 - Exact terminal execution and approval policy integration.
 - Whether Hooks returns to settings navigation after MVP scope changes.
