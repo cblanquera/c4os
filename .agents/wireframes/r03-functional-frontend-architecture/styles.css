@@ -19,6 +19,7 @@
   --shadow: none;
   --left-panel: clamp(250px, 12.3vw, 380px);
   --right-panel: clamp(300px, 14.75vw, 446px);
+  --workbench-min: 520px;
   --topbar: 56px;
   --radius: 8px;
   --radius-sm: 5px;
@@ -354,21 +355,22 @@ svg {
 /* Layer 6: Desktop Shell */
 .app-shell {
   display: grid;
-  grid-template-columns: var(--left-panel) 7px minmax(520px, 1fr) 7px var(--right-panel);
+  grid-template-columns: var(--left-panel) 7px minmax(var(--workbench-min), 1fr) 7px var(--right-panel);
   height: 100%;
   overflow: hidden;
 }
 
 .app-shell.is-left-collapsed {
-  grid-template-columns: 0 0 minmax(520px, 1fr) 7px var(--right-panel);
+  grid-template-columns: 0 0 minmax(var(--workbench-min), 1fr) 7px var(--right-panel);
 }
 
 .app-shell.is-right-collapsed {
-  grid-template-columns: var(--left-panel) 7px minmax(520px, 1fr) 0 0;
+  grid-template-columns: var(--left-panel) 7px minmax(var(--workbench-min), 1fr) 0 0;
 }
 
 .app-shell.is-left-collapsed.is-right-collapsed {
-  grid-template-columns: 0 0 minmax(520px, 1fr) 0 0;
+  grid-template-columns: 0 0 minmax(0, 1fr) 0 0;
+  min-width: 0;
 }
 
 .app-shell.is-resizing {
@@ -388,7 +390,7 @@ svg {
   display: grid;
   gap: 10px;
   grid-column: 1;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
   padding: 12px 10px;
 }
 
@@ -475,7 +477,6 @@ svg {
   width: 100%;
 }
 
-.plugin-line,
 .project-row,
 .session-row,
 .settings-entry,
@@ -488,11 +489,6 @@ svg {
   min-height: 36px;
   min-width: 0;
   padding: 0 8px;
-}
-
-.plugin-line {
-  color: var(--ink-soft);
-  grid-template-columns: 22px minmax(0, 1fr) auto;
 }
 
 .nav-section {
@@ -550,8 +546,7 @@ svg {
 .project-row span,
 .session-row span,
 .settings-entry span,
-.settings-link span,
-.plugin-line span {
+.settings-link span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -575,6 +570,7 @@ svg {
   font-size: 38px;
   font-weight: 500;
   margin-bottom: 30px;
+  text-align: center;
 }
 
 .composer {
@@ -586,6 +582,65 @@ svg {
   min-width: 0;
   position: relative;
   width: min(700px, 100%);
+}
+
+.attachment-input {
+  display: none;
+}
+
+.attachment-preview {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.attachment-preview[hidden] {
+  display: none;
+}
+
+.attachment-chip {
+  align-items: center;
+  background: var(--rail);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.attachment-chip span {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip small {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.attachment-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+  margin-right: -4px;
+  width: 24px;
+}
+
+.attachment-remove:hover {
+  color: var(--ink);
 }
 
 .prompt-box {
@@ -611,14 +666,20 @@ svg {
 
 .context-strip {
   background: var(--rail);
+  justify-content: space-between;
   min-height: 50px;
 }
 
-.context-strip .chip {
+.context-strip .chip,
+.readonly-chip {
   background: transparent;
   border-color: transparent;
   color: var(--ink-soft);
-  padding: 0;
+  padding: 0 8px;
+}
+
+.readonly-chip {
+  cursor: default;
 }
 
 .send-button {
@@ -675,6 +736,55 @@ svg {
 .popover-row:hover,
 .popover-row.is-selected {
   background: var(--rail);
+}
+
+.composer-popover {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  position: absolute;
+  width: 260px;
+  z-index: 10;
+}
+
+.composer-popover[hidden] {
+  display: none;
+}
+
+.composer-popover .popover-row {
+  background: var(--field);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 650;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 0 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.composer-popover .popover-row:hover,
+.composer-popover .popover-row:focus-visible {
+  background: var(--rail);
+}
+
+.branch-popover .popover-row:last-child {
+  color: var(--ink-soft);
+  font-weight: 800;
+}
+
+.approval-popover {
+  bottom: 104px;
+  left: 66px;
+}
+
+.branch-popover {
+  bottom: 52px;
+  left: 18px;
 }
 
 .popover-row:last-child {
@@ -804,10 +914,6 @@ svg {
 
 .composer-dock .prompt-box {
   min-height: 72px;
-}
-
-.composer-dock .context-strip {
-  display: none;
 }
 
 /* Layer 8: Right Tool Panel */
@@ -971,7 +1077,6 @@ svg {
   white-space: nowrap;
 }
 
-.code-pane,
 .terminal-output {
   background: var(--code);
   color: var(--code-ink);
@@ -984,14 +1089,63 @@ svg {
   padding: 14px;
 }
 
+.code-pane {
+  background: var(--code);
+  color: var(--code-ink);
+  font-family: var(--font-code);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.65;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 0;
+}
+
+.code-line {
+  display: grid;
+  grid-template-columns: 48px max-content;
+  min-width: max-content;
+}
+
+.line-number {
+  background: var(--code);
+  color: var(--ink);
+  left: 0;
+  padding: 0 14px;
+  position: sticky;
+  text-align: right;
+  z-index: 1;
+}
+
+.line-code {
+  display: block;
+  padding: 0 28px 0 18px;
+  white-space: pre;
+}
+
 .terminal-tool {
-  grid-template-rows: 1fr 220px;
+  --terminal-bottom: 220px;
+  grid-template-rows: minmax(0, 1fr) 7px var(--terminal-bottom);
+}
+
+.vertical-resize-handle {
+  background: var(--line);
+  cursor: row-resize;
+  min-height: 7px;
+  touch-action: none;
+}
+
+.vertical-resize-handle:hover,
+.vertical-resize-handle:focus-visible,
+.terminal-tool.is-resizing .vertical-resize-handle {
+  background: var(--line-strong);
 }
 
 .terminal-bottom {
   background: var(--rail);
-  border-top: 7px solid var(--line);
   color: var(--ink);
+  min-height: 0;
+  overflow: auto;
   padding: 16px;
 }
 
@@ -1010,12 +1164,21 @@ svg {
   background: var(--rail);
   border-right: 1px solid var(--line);
   overflow: auto;
-  padding: 24px 12px;
+  padding: 12px 12px 24px;
 }
 
 .settings-back,
 .settings-link {
   grid-template-columns: 22px minmax(0, 1fr);
+}
+
+.settings-back {
+  padding-left: 0;
+}
+
+.settings-divider {
+  border-top: 1px solid var(--line);
+  margin: 12px 8px;
 }
 
 .settings-main {
@@ -1155,7 +1318,8 @@ svg {
   .app-shell {
     --left-panel: 240px;
     --right-panel: 280px;
-    grid-template-columns: var(--left-panel) 7px minmax(430px, 1fr) 7px var(--right-panel);
+    --workbench-min: 430px;
+    grid-template-columns: var(--left-panel) 7px minmax(var(--workbench-min), 1fr) 7px var(--right-panel);
   }
 }
 
@@ -1175,8 +1339,14 @@ svg {
   .app-shell {
     --left-panel: 220px;
     --right-panel: 280px;
-    grid-template-columns: var(--left-panel) 7px minmax(420px, 1fr) 7px var(--right-panel);
+    --workbench-min: 420px;
+    grid-template-columns: var(--left-panel) 7px minmax(var(--workbench-min), 1fr) 7px var(--right-panel);
     min-width: 920px;
+  }
+
+  .app-shell.is-left-collapsed.is-right-collapsed {
+    grid-template-columns: 0 0 minmax(0, 1fr) 0 0;
+    min-width: 0;
   }
 
   .settings-shell {

@@ -13,7 +13,8 @@ const routes = [
   ["Settings Providers", "./settings-providers.html", "Provider connection list."],
   ["Add Provider", "./settings-add-provider.html", "Provider form with key below base URL."],
   ["Settings Models", "./settings-models.html", "Fetched models grouped by provider labels."],
-  ["Settings Configuration", "./settings-configuration.html", "Approval policy, sandbox settings, and config access."]
+  ["Settings Configuration", "./settings-configuration.html", "Approval policy, sandbox settings, and config access."],
+  ["Settings Plugins", "./settings-plugins.html", "Installed plugin controls grouped below configuration."]
 ];
 
 const projects = [
@@ -83,8 +84,6 @@ const labels = [
   ["start.actions", "Project entry actions"],
   ["start.recentTitle", "Recent Folder-Backed Workspaces"],
   ["sidebar.search", "Search projects"],
-  ["sidebar.plugins", "Plugins"],
-  ["sidebar.pluginPlaceholder", "Placeholder"],
   ["sidebar.projects", "Projects"],
   ["sidebar.addProject", "Add Project"],
   ["sidebar.settings", "Settings"],
@@ -94,14 +93,21 @@ const labels = [
   ["topbar.collapseRight", "Collapse right panel"],
   ["panel.resizeLeft", "Resize left panel"],
   ["panel.resizeRight", "Resize right panel"],
+  ["panel.resizeTerminal", "Resize terminal results panel"],
   ["empty.title", "What should we build in c4os2?"],
   ["composer.label", "Prompt composer"],
   ["composer.promptLabel", "Prompt"],
   ["composer.emptyPlaceholder", "Do anything"],
   ["composer.threadPlaceholder", "Ask for follow-up changes"],
   ["composer.attach", "Attach File"],
+  ["composer.attachments", "Attached files"],
+  ["composer.removeAttachment", "Remove attachment"],
   ["composer.approvalAria", "Approval policy: Approve for me"],
   ["composer.approvalLabel", "Approve for me"],
+  ["composer.approvalAsk", "Ask for approval"],
+  ["composer.branchAria", "Branch: main"],
+  ["composer.branchReadonly", "Branch locked for this chat"],
+  ["composer.modelReadonly", "Model locked for this chat"],
   ["composer.microphone", "Use Microphone"],
   ["composer.send", "Send Prompt"],
   ["popover.providerSelector", "Provider selector"],
@@ -134,7 +140,8 @@ const labels = [
   ["settings.modelCurrent", "Current"],
   ["settings.modelEnabled", "Enabled"],
   ["settings.configurationSummary", "Configure approval policy and sandbox settings."],
-  ["settings.openConfig", "Open config.toml externally"]
+  ["settings.openConfig", "Open config.toml externally"],
+  ["settings.pluginsSummary", "Manage installed plugins and extension surfaces."]
 ];
 
 const copy = Object.fromEntries(labels);
@@ -166,6 +173,17 @@ const composerModelChip = {
   href: "./models-popover.html"
 };
 
+const approvalOptions = [
+  { label: "Ask for approval", value: "ask" },
+  { label: "Approve for me", value: "auto" }
+];
+
+const branchOptions = [
+  { label: "main", value: "main" },
+  { label: "feature/trust-shell", value: "feature/trust-shell" },
+  { label: "+ Create branch", value: "create" }
+];
+
 const providerChoices = ["OpenRouter", "OpenAI", "LiteLLM Local"];
 
 const toolTabs = [
@@ -180,7 +198,16 @@ const browserPreview = {
 
 const editorPreview = {
   breadcrumbs: ["c4os2", "frontend", "main.js"],
-  code: `1  import { startWorkspace } from "./runtime";\n2\n3  const project = "c4os2";\n4  const trustedRoot = true;\n5\n6  startWorkspace({ project, trustedRoot });\n7\n8  // Code view fills the full tool body.`
+  lines: [
+    'import { startWorkspace } from "./runtime";',
+    "",
+    'const project = "c4os2";',
+    "const trustedRoot = true;",
+    "",
+    "startWorkspace({ project, trustedRoot });",
+    "",
+    "// Code view fills the full tool body."
+  ]
 };
 
 const fileRows = [
@@ -199,6 +226,7 @@ const settingsNavItems = [
   { label: "Providers", key: "providers", href: "./settings-providers.html", icon: "key" },
   { label: "Models", key: "models", href: "./settings-models.html", icon: "bot" },
   { label: "Configuration", key: "configuration", href: "./settings-configuration.html", icon: "settings" },
+  { label: "Plugins", key: "plugins", href: "./settings-plugins.html", icon: "plug", dividerBefore: true },
   { label: "Skills", key: "skills", href: "./settings-providers.html", icon: "file" },
   { label: "MCP Servers", key: "mcp", href: "./settings-providers.html", icon: "server" },
   { label: "Hooks", key: "hooks", href: "./settings-providers.html", icon: "webhook" }
@@ -230,7 +258,7 @@ const icons = {
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
   globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-20a15 15 0 0 1 0 20m0-20a15 15 0 0 0 0 20M2 12h20",
   gitBranch: "M6 3v12m0 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0a9 9 0 0 1-9 9",
-  key: "M2 18v3h3l9-9m-1-4a6 6 0 1 0 12 0 6 6 0 0 0-12 0Z",
+  key: "M7 14a5 5 0 1 1 3.5-8.5A5 5 0 0 1 7 14Zm7-4 7-7m-3 3 3 3m-6 0 3 3",
   mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm7 8v2a7 7 0 0 1-14 0v-2m7 9v3",
   paperclip: "m21 11-9 9a6 6 0 0 1-8-8l9-9a4 4 0 0 1 6 6l-9 9a2 2 0 0 1-3-3l8-8",
   pencil: "M21 6 7 20H3v-4L17 2a3 3 0 0 1 4 4Z",
@@ -244,7 +272,7 @@ const icons = {
   shield: "M12 3c3 2 5 3 8 3v6c0 5-3 8-8 10-5-2-8-5-8-10V6c3 0 5-1 8-3Z",
   terminal: "m4 17 6-5-6-5m8 10h8",
   trash: "M3 6h18M8 6V4h8v2m3 0v14H5V6m5 5v6m4-6v6",
-  webhook: "M18 16h-6a4 4 0 0 1-4-4m-2 4 3-3-3-3m0-2h6a4 4 0 0 1 4 4m2-4-3 3 3 3"
+  webhook: "M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4M6 9l-3-3m3 3 3-3m9 9 3 3m-3-3-3 3"
 };
 
 function h(tag, props = {}, children = []) {
@@ -359,6 +387,8 @@ function renderShell(screen) {
   );
   bindShowMore();
   bindPanelControls();
+  bindTerminalResize();
+  bindComposerControls();
 }
 
 function resizeHandle(side) {
@@ -384,7 +414,6 @@ function renderSidebar(activeSession) {
       h("span", { class: "sr-only", text: copy["sidebar.search"] }),
       h("input", { type: "search", name: "project-search", autocomplete: "off", placeholder: copy["sidebar.search"] })
     ]),
-    h("div", { class: "plugin-line" }, [svgIcon("plug"), h("span", { text: copy["sidebar.plugins"] }), h("span", { text: copy["sidebar.pluginPlaceholder"] })]),
     h("div", { class: "nav-section" }, [
       h("div", { class: "section-head" }, [h("span", { text: copy["sidebar.projects"] }), iconButton(copy["sidebar.addProject"], "add")]),
       ...rows
@@ -418,24 +447,53 @@ function renderEmptyWorkspace(screen) {
   const popover = screen === "providers-popover" ? providerPopover() : screen === "models-popover" ? modelPopover() : null;
   return h("main", { class: "empty-workspace" }, [
     h("h1", { text: copy["empty.title"] }),
-    composer(copy["composer.emptyPlaceholder"], popover)
+    composer(copy["composer.emptyPlaceholder"], { popover })
   ]);
 }
 
-function composer(placeholder, popover) {
+function composer(placeholder, options = {}) {
+  const readonlyContext = Boolean(options.readonlyContext);
   return h("section", { class: "composer", "aria-label": copy["composer.label"] }, [
+    h("input", { class: "attachment-input", type: "file", multiple: "true", tabindex: "-1", "aria-hidden": "true" }),
+    h("div", { class: "attachment-preview", "data-attachments": "", "aria-label": copy["composer.attachments"], hidden: "true" }),
     h("div", { class: "prompt-box", role: "textbox", "aria-label": copy["composer.promptLabel"], "aria-multiline": "true", contenteditable: "true", spellcheck: "true", "data-placeholder": placeholder }),
     h("div", { class: "composer-controls" }, [
-      iconButton(copy["composer.attach"], "paperclip"),
-      h("button", { class: "chip", type: "button", "aria-label": copy["composer.approvalAria"] }, [svgIcon("shield"), h("span", { text: copy["composer.approvalLabel"] })]),
+      iconButton(copy["composer.attach"], "paperclip", "", { "data-attach-button": "" }),
+      h("button", { class: "chip", type: "button", "aria-label": copy["composer.approvalAria"], "data-popover-trigger": "approval" }, [svgIcon("shield"), h("span", { text: copy["composer.approvalLabel"] })]),
       h("span", { class: "spacer" }),
-      chip(composerModelChip.label, composerModelChip.icon, composerModelChip.href),
       iconButton(copy["composer.microphone"], "mic"),
       iconButton(copy["composer.send"], "send", "send-button")
     ]),
-    h("div", { class: "context-strip" }, composerContextChips.map((item) => chip(item.label, item.icon))),
-    popover
+    h("div", { class: "context-strip" }, [
+      branchChip(readonlyContext),
+      h("span", { class: "spacer" }),
+      modelChip(readonlyContext)
+    ]),
+    composerPopover("approval", approvalOptions),
+    readonlyContext ? null : composerPopover("branch", branchOptions),
+    options.popover
   ]);
+}
+
+function branchChip(readonlyContext) {
+  const label = composerContextChips[0].label;
+  const children = [svgIcon(composerContextChips[0].icon), h("span", { text: label })];
+  return readonlyContext
+    ? h("span", { class: "chip readonly-chip", "aria-label": copy["composer.branchReadonly"] }, children)
+    : h("button", { class: "chip", type: "button", "aria-label": copy["composer.branchAria"], "data-popover-trigger": "branch" }, children);
+}
+
+function modelChip(readonlyContext) {
+  const children = [svgIcon(composerModelChip.icon), h("span", { text: composerModelChip.label })];
+  return readonlyContext
+    ? h("span", { class: "chip readonly-chip", "aria-label": copy["composer.modelReadonly"] }, children)
+    : link("chip", composerModelChip.href, children);
+}
+
+function composerPopover(kind, options) {
+  return h("div", { class: `composer-popover ${kind}-popover`, hidden: "true", "data-popover": kind }, options.map((option) =>
+    h("button", { class: "popover-row", type: "button", "data-popover-option": option.value }, [h("span", { text: option.label })])
+  ));
 }
 
 function providerPopover() {
@@ -462,7 +520,7 @@ function modelPopover() {
 function renderThread() {
   return h("main", { class: "thread-view" }, [
     h("div", { class: "thread-list", "aria-label": copy["thread.list"] }, threadItems.map(renderThreadItem)),
-    h("div", { class: "composer-dock" }, [composer(copy["composer.threadPlaceholder"])])
+    h("div", { class: "composer-dock" }, [composer(copy["composer.threadPlaceholder"], { readonlyContext: true })])
   ]);
 }
 
@@ -531,7 +589,12 @@ function filesTool(editorOpen) {
           ? [link("", "./file-explorer.html", [crumb]), h("span", { text: ">" })]
           : [h("span", { text: crumb })]
       )),
-      h("pre", { class: "code-pane", text: editorPreview.code })
+      h("div", { class: "code-pane", role: "region", tabindex: "0", "aria-label": copy["files.breadcrumbs"] }, editorPreview.lines.map((line, index) =>
+        h("div", { class: "code-line" }, [
+          h("span", { class: "line-number", text: String(index + 1) }),
+          h("code", { class: "line-code", text: line })
+        ])
+      ))
     ]);
   }
   return h("section", { class: "tool-body file-tool" }, [
@@ -545,6 +608,14 @@ function filesTool(editorOpen) {
 function terminalTool() {
   return h("section", { class: "tool-body terminal-tool" }, [
     h("pre", { class: "terminal-output", text: terminalPreview.output }),
+    h("div", {
+      class: "vertical-resize-handle",
+      role: "separator",
+      tabindex: "0",
+      "aria-label": copy["panel.resizeTerminal"],
+      "aria-orientation": "horizontal",
+      "data-resize-stack": "terminal"
+    }),
     h("div", { class: "terminal-bottom" }, [
       h("strong", { text: copy["terminal.resultTitle"] }),
       h("p", { text: copy["terminal.resultText"] })
@@ -566,9 +637,10 @@ function settingsNav(active) {
   return h("aside", { class: "settings-nav", "aria-label": copy["settings.navLabel"] }, [
     link("settings-back", "./new-session.html", [svgIcon("arrowLeft"), h("span", { text: copy["settings.back"] })]),
     h("p", { class: "kicker", text: copy["settings.kicker"] }),
-    ...settingsNavItems.map((item) =>
+    ...settingsNavItems.flatMap((item) => [
+      item.dividerBefore ? h("div", { class: "settings-divider", role: "separator" }) : null,
       link(`settings-link${active === item.key ? " is-active" : ""}`, item.href, [svgIcon(item.icon), h("span", { text: item.label })], { "aria-current": active === item.key ? "page" : null })
-    )
+    ])
   ]);
 }
 
@@ -576,6 +648,7 @@ function settingsBody(active) {
   if (active === "add-provider") return providerForm();
   if (active === "models") return modelsSettings();
   if (active === "configuration") return configurationSettings();
+  if (active === "plugins") return pluginsSettings();
   return providersSettings();
 }
 
@@ -641,6 +714,19 @@ function configurationSettings() {
   ]);
 }
 
+function pluginsSettings() {
+  return h("section", {}, [
+    settingsTitle(settingsNavItems[3].label, copy["settings.pluginsSummary"]),
+    h("div", { class: "data-list" }, [
+      h("article", { class: "data-row" }, [
+        h("div", {}, [h("strong", { text: "GitHub" }), h("span", { text: "Repository, issue, and pull request tools" })]),
+        h("span", { class: "status-pill", text: copy["settings.modelEnabled"] }),
+        h("button", { class: "switch is-on", type: "button", "aria-label": `GitHub ${copy["settings.enabledSuffix"]}` }, [h("span")])
+      ])
+    ])
+  ]);
+}
+
 function configCard(title, text, action) {
   return h("article", { class: "config-card" }, [
     h("div", {}, [h("h2", { text: title }), h("p", { text })]),
@@ -679,7 +765,18 @@ function bindPanelControls() {
       const panel = side === "left" ? shell.querySelector(".sidebar") : shell.querySelector(".tool-panel");
       const startX = event.clientX;
       const startWidth = panel.getBoundingClientRect().width;
-      const limits = side === "left" ? { min: 220, max: 460, prop: "--left-panel" } : { min: 280, max: 560, prop: "--right-panel" };
+      const shellWidth = shell.getBoundingClientRect().width;
+      const leftWidth = shell.querySelector(".sidebar")?.getBoundingClientRect().width || 0;
+      const rightWidth = shell.querySelector(".tool-panel")?.getBoundingClientRect().width || 0;
+      const handleWidth = Array.from(shell.querySelectorAll(".resize-handle"))
+        .filter((node) => getComputedStyle(node).display !== "none")
+        .reduce((total, node) => total + node.getBoundingClientRect().width, 0);
+      const minWorkbench = parseFloat(getComputedStyle(shell).getPropertyValue("--workbench-min")) || 520;
+      const availableMax = side === "left"
+        ? shellWidth - rightWidth - handleWidth - minWorkbench
+        : shellWidth - leftWidth - handleWidth - minWorkbench;
+      const configured = side === "left" ? { min: 220, max: 460, prop: "--left-panel" } : { min: 280, max: 560, prop: "--right-panel" };
+      const limits = { ...configured, max: Math.max(configured.min, Math.min(configured.max, availableMax)) };
 
       handle.setPointerCapture(event.pointerId);
       shell.classList.add("is-resizing");
@@ -702,6 +799,106 @@ function bindPanelControls() {
       handle.addEventListener("pointercancel", onPointerUp);
     });
   });
+}
+
+function bindTerminalResize() {
+  document.querySelectorAll("[data-resize-stack='terminal']").forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      const panel = handle.closest(".terminal-tool");
+      const bottom = panel.querySelector(".terminal-bottom");
+      const startY = event.clientY;
+      const startHeight = bottom.getBoundingClientRect().height;
+      const limits = { min: 120, max: 420 };
+
+      handle.setPointerCapture(event.pointerId);
+      panel.classList.add("is-resizing");
+
+      const onPointerMove = (moveEvent) => {
+        const delta = startY - moveEvent.clientY;
+        const height = Math.min(limits.max, Math.max(limits.min, startHeight + delta));
+        panel.style.setProperty("--terminal-bottom", `${Math.round(height)}px`);
+      };
+
+      const onPointerUp = () => {
+        panel.classList.remove("is-resizing");
+        handle.removeEventListener("pointermove", onPointerMove);
+        handle.removeEventListener("pointerup", onPointerUp);
+        handle.removeEventListener("pointercancel", onPointerUp);
+      };
+
+      handle.addEventListener("pointermove", onPointerMove);
+      handle.addEventListener("pointerup", onPointerUp);
+      handle.addEventListener("pointercancel", onPointerUp);
+    });
+  });
+}
+
+function bindComposerControls() {
+  document.querySelectorAll(".composer").forEach((composerNode) => {
+    const input = composerNode.querySelector(".attachment-input");
+    const preview = composerNode.querySelector("[data-attachments]");
+    const attachButton = composerNode.querySelector("[data-attach-button]");
+    let attachments = [];
+
+    attachButton?.addEventListener("click", () => input.click());
+    input?.addEventListener("change", () => {
+      const files = Array.from(input.files || []);
+      attachments = attachments.concat(files);
+      input.value = "";
+      renderAttachments();
+    });
+
+    const renderAttachments = () => {
+      preview.hidden = attachments.length === 0;
+      preview.replaceChildren(...attachments.map((file, index) =>
+        h("span", { class: "attachment-chip" }, [
+          svgIcon("file"),
+          h("span", { text: file.name }),
+          h("small", { text: formatBytes(file.size) }),
+          h("button", { class: "attachment-remove", type: "button", "aria-label": `${copy["composer.removeAttachment"]}: ${file.name}`, "data-remove-attachment": String(index) }, ["x"])
+        ])
+      ));
+      preview.querySelectorAll("[data-remove-attachment]").forEach((remove) => {
+        remove.addEventListener("click", () => {
+          attachments.splice(Number(remove.dataset.removeAttachment), 1);
+          renderAttachments();
+        });
+      });
+    };
+
+    composerNode.querySelectorAll("[data-popover-trigger]").forEach((trigger) => {
+      trigger.addEventListener("click", () => {
+        const target = composerNode.querySelector(`[data-popover='${trigger.dataset.popoverTrigger}']`);
+        composerNode.querySelectorAll("[data-popover]").forEach((popover) => {
+          if (popover !== target) popover.hidden = true;
+        });
+        if (target) target.hidden = !target.hidden;
+      });
+    });
+
+    composerNode.querySelectorAll("[data-popover-option]").forEach((option) => {
+      option.addEventListener("click", () => {
+        const popover = option.closest("[data-popover]");
+        const kind = popover.dataset.popover;
+        const label = option.textContent.trim();
+        if (kind === "approval") {
+          const approval = composerNode.querySelector("[data-popover-trigger='approval'] span");
+          if (approval) approval.textContent = label;
+        }
+        if (kind === "branch" && option.dataset.popoverOption !== "create") {
+          const branch = composerNode.querySelector("[data-popover-trigger='branch'] span");
+          if (branch) branch.textContent = label;
+        }
+        popover.hidden = true;
+      });
+    });
+  });
+}
+
+function formatBytes(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 if (route === "hub") renderHub();
