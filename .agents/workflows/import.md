@@ -15,7 +15,7 @@ Use this when existing planning material should become compact `.agents` records
 3. Extract requirements, capabilities, constraints, decisions, assumptions, risks, acceptance criteria, evidence, and proposed tasks into grouped spec records.
 4. Mark imported confidence as `imported` unless validation upgrades or conflicts exist.
 5. Mark ambiguous, stale, duplicated, or conflicting content explicitly.
-6. Preserve visual peg routing in `.agents/wireframes/` when UI sources exist.
+6. Preserve visual peg routing in `wireframes/` when UI sources exist.
 
 ## Stop
 

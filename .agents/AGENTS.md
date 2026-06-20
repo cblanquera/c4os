@@ -28,7 +28,7 @@ Read the workflow that matches the task:
 - `plans/pegs/*.png` are the visual peg sources for the UI direction.
 - `.agents/context/` contains shared product understanding future specs should read first.
 - `.agents/specs/mvp/` contains the current imported MVP planning records. It is planning input until reviewed or frozen.
-- `.agents/wireframes/` contains wireframe routing notes and links back to the visual pegs.
+- `wireframes/` contains wireframe routing notes and links back to the visual pegs.
 - `.agents/development/progress/` should exist only after implementation or active execution tracking begins.
 
 ## Record Rules

@@ -20,4 +20,4 @@
 | --- | --- |
 | `plans/product-brief.md` | CAP-001 through CAP-009, REQ-001 through REQ-008, CON-001 through CON-004, DEC-001 through DEC-005, risks, assumptions, questions, acceptance |
 | `plans/product-interface.md` | REQ-009, CON-005, AC-009, EVD-002 |
-| `plans/pegs/*.png` | EVD-003, `.agents/wireframes/screens.md` |
+| `plans/pegs/*.png` | EVD-003, `wireframes/screens.md` |

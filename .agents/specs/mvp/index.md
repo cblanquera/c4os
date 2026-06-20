@@ -23,6 +23,6 @@ Updated: 2026-06-18
 
 ## Design Inputs
 
-- `.agents/wireframes/screens.md`
+- `wireframes/screens.md`
 - `plans/product-interface.md`
 - `plans/pegs/*.png`

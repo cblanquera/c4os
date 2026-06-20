@@ -9,7 +9,7 @@ Status: ready for review
 - Created a fresh major revision without copying `r01` or `r02` source files.
 - Rebuilt the screen renderer around route state, data arrays, DOM helpers, and small component functions.
 - Rebuilt the CSS as layered frontend architecture instead of a visual patch over old selectors.
-- Preserved the peg-backed screen coverage from `.agents/wireframes/screens.md`.
+- Preserved the peg-backed screen coverage from `wireframes/screens.md`.
 - Added the trust spine visual concept to connect selected/trusted states with local-authority boundaries.
 - Kept the artifact portable with document-relative links and no build tooling.
 

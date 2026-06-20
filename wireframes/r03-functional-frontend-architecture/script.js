@@ -14,7 +14,9 @@ const routes = [
   ["Add Provider", "./settings-add-provider.html", "Provider form with key below base URL."],
   ["Settings Models", "./settings-models.html", "Fetched models grouped by provider labels."],
   ["Settings Configuration", "./settings-configuration.html", "Approval policy, sandbox settings, and config access."],
-  ["Settings Plugins", "./settings-plugins.html", "Installed plugin controls grouped below configuration."]
+  ["Settings Plugins", "./settings-plugins.html", "Installed plugin controls grouped below configuration."],
+  ["Settings Skills", "./settings-skills.html", "Installed skill controls and detail state."],
+  ["Settings MCP Servers", "./settings-mcp.html", "MCP server connections and custom server form."]
 ];
 
 const projects = [
@@ -227,9 +229,8 @@ const settingsNavItems = [
   { label: "Models", key: "models", href: "./settings-models.html", icon: "bot" },
   { label: "Configuration", key: "configuration", href: "./settings-configuration.html", icon: "settings" },
   { label: "Plugins", key: "plugins", href: "./settings-plugins.html", icon: "plug", dividerBefore: true },
-  { label: "Skills", key: "skills", href: "./settings-providers.html", icon: "file" },
-  { label: "MCP Servers", key: "mcp", href: "./settings-providers.html", icon: "server" },
-  { label: "Hooks", key: "hooks", href: "./settings-providers.html", icon: "webhook" }
+  { label: "Skills", key: "skills", href: "./settings-skills.html", icon: "file" },
+  { label: "MCP Servers", key: "mcp", href: "./settings-mcp.html", icon: "server" }
 ];
 
 const providerFormFields = [
@@ -246,6 +247,34 @@ const configCards = [
   { title: "Sandbox Settings", text: "Choose how much agents can do when running commands.", action: "Workspace write" }
 ];
 
+const pluginCatalog = [
+  { name: "GitHub", description: "Triage PRs, issues, CI, and publish flows", logo: "GH", tone: "github" },
+  { name: "Slack", description: "Read and manage Slack", logo: "S", tone: "slack" },
+  { name: "Notion", description: "Notion workflows for specs, research,...", logo: "N", tone: "notion" },
+  { name: "Linear", description: "Find and reference issues and projects.", logo: "L", tone: "linear" },
+  { name: "Gmail", description: "Read and manage Gmail", logo: "M", tone: "gmail" },
+  { name: "Google Calendar", description: "Manage Google Calendar events and...", logo: "31", tone: "calendar" },
+  { name: "Google Drive", description: "Work across Drive, Docs, Sheets, and...", logo: "D", tone: "drive" },
+  { name: "Figma", description: "Design-to-code workflows powered by th...", logo: "F", tone: "figma" },
+  { name: "Vercel", description: "Vercel ecosystem guidance for Codex", logo: "V", tone: "vercel" }
+];
+
+const skillCatalog = [
+  { name: "Ab Testing", scope: "Personal", description: "When the user wants to plan, design, or implement an A/B test or experiment, or optimize a test plan.", detail: "Use this skill when a product, page, onboarding step, pricing flow, or campaign needs a clear experiment design. It helps define hypotheses, variants, success metrics, guardrails, and rollout decisions." },
+  { name: "Ad Creative", scope: "Personal", description: "When the user wants to generate, iterate, or scale ad creative - headlines, hooks, variants, and angles.", detail: "Use this skill to turn campaign goals into compact creative directions, message variants, visual concepts, and testable ad copy." },
+  { name: "Ads", scope: "Personal", description: "When the user wants help with paid advertising campaigns on Google Ads, Meta, or other acquisition channels.", detail: "Use this skill for campaign structure, targeting, bidding, budget allocation, and diagnosing paid acquisition performance." },
+  { name: "Ai Seo", scope: "Personal", description: "When the user wants to optimize content for AI search engines, get cited by LLMs, and improve answer visibility.", detail: "Use this skill for answer-engine positioning, citation-worthy content, schema alignment, and source clarity." },
+  { name: "Analytics", scope: "Personal", description: "When the user wants to set up, improve, or audit analytics tracking and measurement quality.", detail: "Use this skill to define events, funnels, attribution needs, dashboards, and data quality checks." },
+  { name: "Aso", scope: "Personal", description: "When the user wants to audit or optimize an App Store or Google Play listing. Also useful for keyword and conversion work.", detail: "Use this skill for app listing positioning, screenshots, keywords, ratings strategy, and conversion review." },
+  { name: "ChrisAI Agents", scope: "Project", description: "Set up project-local .agents workflows", detail: "Use this skill to set up or repair a project-local .agents/ operating surface. The deliverable is the folder contract itself: .agents/AGENTS.md, local workflow files, and only the files or records needed for the current setup or repair. Future agents should be able to work from .agents/AGENTS.md and .agents/workflows/ without loading this skill.\n\nCore Jobs\n- Initialize or repair .agents/AGENTS.md.\n- Generate or repair local .agents/workflows/*.md files, including context-ingestion.md for future knowledge-base intake.\n- Establish the .agents folder contract without creating empty folders or placeholder files before they are needed.\n- Seed only the minimal .agents/context/, research, spec, progress, or handoff records needed for the current setup or repair task.\n\nTask Routing\nRead only the references needed for the task." }
+];
+
+const mcpServers = [
+  "node_repl",
+  "openaiDeveloperDocs",
+  "stackpress_blog_mcp"
+];
+
 const icons = {
   add: "M12 5v14M5 12h14",
   arrowLeft: "M19 12H5m7 7-7-7 7-7",
@@ -254,6 +283,7 @@ const icons = {
   chevronDown: "m6 9 6 6 6-6",
   chevronLeft: "m15 18-6-6 6-6",
   chevronRight: "m9 18 6-6-6-6",
+  external: "M7 17 17 7m0 0h-7m7 0v7",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
   globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-20a15 15 0 0 1 0 20m0-20a15 15 0 0 0 0 20M2 12h20",
@@ -272,7 +302,8 @@ const icons = {
   shield: "M12 3c3 2 5 3 8 3v6c0 5-3 8-8 10-5-2-8-5-8-10V6c3 0 5-1 8-3Z",
   terminal: "m4 17 6-5-6-5m8 10h8",
   trash: "M3 6h18M8 6V4h8v2m3 0v14H5V6m5 5v6m4-6v6",
-  webhook: "M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4M6 9l-3-3m3 3 3-3m9 9 3 3m-3-3-3 3"
+  webhook: "M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4M6 9l-3-3m3 3 3-3m9 9 3 3m-3-3-3 3",
+  x: "M18 6 6 18M6 6l12 12"
 };
 
 function h(tag, props = {}, children = []) {
@@ -631,6 +662,10 @@ function renderSettings(screen) {
       h("main", { id: "main", class: "settings-main", tabindex: "-1" }, [settingsBody(section)])
     ])
   );
+  bindPluginConnect();
+  bindMarketplaceControls();
+  bindSkillDetails();
+  bindMcpControls();
 }
 
 function settingsNav(active) {
@@ -649,6 +684,8 @@ function settingsBody(active) {
   if (active === "models") return modelsSettings();
   if (active === "configuration") return configurationSettings();
   if (active === "plugins") return pluginsSettings();
+  if (active === "skills") return skillsSettings();
+  if (active === "mcp") return mcpSettings();
   return providersSettings();
 }
 
@@ -717,14 +754,246 @@ function configurationSettings() {
 function pluginsSettings() {
   return h("section", {}, [
     settingsTitle(settingsNavItems[3].label, copy["settings.pluginsSummary"]),
-    h("div", { class: "data-list" }, [
-      h("article", { class: "data-row" }, [
-        h("div", {}, [h("strong", { text: "GitHub" }), h("span", { text: "Repository, issue, and pull request tools" })]),
-        h("span", { class: "status-pill", text: copy["settings.modelEnabled"] }),
-        h("button", { class: "switch is-on", type: "button", "aria-label": `GitHub ${copy["settings.enabledSuffix"]}` }, [h("span")])
+    h("div", { class: "plugin-store", "aria-label": "Plugin catalog" }, [
+      h("div", { class: "plugin-toolbar" }, [
+        h("label", { class: "plugin-search" }, [
+          svgIcon("search"),
+          h("span", { class: "sr-only", text: "Search plugins" }),
+          h("input", { type: "search", name: "plugin-search", autocomplete: "off", placeholder: "Search plugins" })
+        ]),
+        h("div", { class: "plugin-filter-wrap" }, [
+          h("button", { class: "plugin-filter", type: "button", "aria-expanded": "false", "data-marketplace-menu-trigger": "true" }, [
+            h("span", { text: "Built by C4OS" }),
+            svgIcon("chevronDown")
+          ]),
+          h("div", { class: "plugin-filter-menu", hidden: true, "data-marketplace-menu": "true" }, [
+            h("button", { type: "button", "data-marketplace-open": "true" }, [h("span", { text: "+ Add Marketplace" })])
+          ])
+        ])
+      ]),
+      h("div", { class: "plugin-grid" }, pluginCatalog.map(pluginCard))
+    ]),
+    pluginConnectDialog(pluginCatalog[0]),
+    marketplaceDialog()
+  ]);
+}
+
+function skillsSettings() {
+  return h("section", {}, [
+    settingsTitle(settingsNavItems[4].label, "Manage installed skills and per-project availability."),
+    h("div", { class: "skills-panel", "aria-label": "Skills" }, [
+      h("label", { class: "skills-search" }, [
+        svgIcon("search"),
+        h("span", { class: "sr-only", text: "Search skills" }),
+        h("input", { type: "search", name: "skill-search", autocomplete: "off", placeholder: "Search skills" })
+      ]),
+      h("div", { class: "skills-list" }, skillCatalog.map(skillRow))
+    ]),
+    skillDetailDialog(skillCatalog[6])
+  ]);
+}
+
+function mcpSettings() {
+  return h("section", {}, [
+    h("header", { class: "mcp-head" }, [
+      h("div", {}, [
+        h("h1", { text: "MCP Servers" }),
+        h("p", {}, [
+          "Connect external tools and data sources. ",
+          h("button", { class: "marketplace-inline-link", type: "button" }, ["Learn more."])
+        ])
+      ]),
+      h("button", { class: "button primary", type: "button", "data-mcp-add": "true" }, [svgIcon("add"), h("span", { text: "Add server" })])
+    ]),
+    h("section", { class: "mcp-section", "aria-labelledby": "mcp-servers-title" }, [
+      h("h2", { id: "mcp-servers-title", text: "Servers" }),
+      h("div", { class: "mcp-list" }, mcpServers.map((name) => mcpRow(name)))
+    ]),
+    mcpDialog()
+  ]);
+}
+
+function mcpRow(name) {
+  return h("article", { class: "mcp-row" }, [
+    h("strong", { text: name }),
+    iconButton(`${name} settings`, "settings", "mcp-row-settings"),
+    h("button", { class: "skill-switch is-on", type: "button", "aria-label": `${name} enabled` }, [h("span")])
+  ]);
+}
+
+function mcpDialog() {
+  return h("div", { class: "plugin-modal mcp-modal", hidden: true, "data-mcp-modal": "true" }, [
+    h("div", { class: "mcp-panel", role: "dialog", "aria-modal": "true", "aria-labelledby": "mcp-dialog-title" }, [
+      iconButton("Close MCP server form", "x", "plugin-modal-close", { "data-mcp-close": "true" }),
+      h("header", { class: "mcp-dialog-head" }, [
+        h("h2", { id: "mcp-dialog-title", text: "Connect to a custom MCP" }),
+        h("button", { class: "marketplace-inline-link", type: "button" }, ["Docs"])
+      ]),
+      h("form", { class: "mcp-form" }, [
+        mcpFormField("Name", "mcp-name", "MCP server name"),
+        h("div", { class: "mcp-segment", role: "tablist", "aria-label": "MCP transport" }, [
+          h("button", { class: "is-active", type: "button", role: "tab", "aria-selected": "true", "data-mcp-mode": "stdio" }, ["STDIO"]),
+          h("button", { type: "button", role: "tab", "aria-selected": "false", "data-mcp-mode": "http" }, ["Streamable HTTP"])
+        ]),
+        h("div", { class: "mcp-mode-fields", "data-mcp-fields": "stdio" }, [
+          mcpFormField("Command to launch", "mcp-command", "openai-dev-mcp serve-sqlite"),
+          mcpInputGroup("Arguments", [[""]], "Add argument"),
+          mcpInputGroup("Environment variables", [["Key", "Value"]], "Add environment variable", true),
+          mcpInputGroup("Environment variable passthrough", [[""]], "Add variable"),
+          mcpFormField("Working directory", "mcp-working-directory", "~/code")
+        ]),
+        h("div", { class: "mcp-mode-fields", hidden: true, "data-mcp-fields": "http" }, [
+          mcpFormField("URL", "mcp-url", "https://mcp.example.com/mcp"),
+          mcpFormField("Bearer token env var", "mcp-bearer", "MCP_BEARER_TOKEN"),
+          mcpInputGroup("Headers", [["Key", "Value"]], "Add header", true),
+          mcpInputGroup("Headers from environment variables", [["Key", "Value"]], "Add variable", true)
+        ]),
+        h("footer", { class: "mcp-actions" }, [
+          h("button", { class: "button secondary", type: "button", "data-mcp-close": "true" }, ["Cancel"]),
+          h("button", { class: "button primary", type: "button", "data-mcp-close": "true" }, ["Save"])
+        ])
       ])
     ])
   ]);
+}
+
+function mcpFormField(label, id, placeholder) {
+  return h("label", { class: "mcp-field", for: id }, [
+    h("span", { text: label }),
+    h("input", { id, name: id, type: "text", placeholder, autocomplete: "off", spellcheck: "false" })
+  ]);
+}
+
+function mcpInputGroup(title, placeholders, addLabel, twoColumn = false) {
+  return h("section", { class: "mcp-group" }, [
+    h("h3", { text: title }),
+    h("div", { class: twoColumn ? "mcp-pair-row" : "mcp-single-row" }, [
+      ...placeholders[0].map((placeholder, index) =>
+        h("input", { type: "text", placeholder, "aria-label": `${title} ${index + 1}`, autocomplete: "off", spellcheck: "false" })
+      ),
+      iconButton(`Remove ${title}`, "trash", "mcp-trash")
+    ]),
+    h("button", { class: "mcp-add-line", type: "button" }, [h("span", { text: `+ ${addLabel}` })])
+  ]);
+}
+
+function skillRow(skill) {
+  return h("article", { class: "skill-row" }, [
+    h("button", { class: "skill-open", type: "button", "data-skill-open": skill.name }, [
+      h("span", { class: "skill-mark", "aria-hidden": "true" }, [svgIcon("file")]),
+      h("span", { class: "skill-copy" }, [
+        h("strong", { text: skill.name }),
+        h("span", { text: skill.description })
+      ])
+    ]),
+    h("span", { class: "skill-scope", text: skill.scope }),
+    h("button", { class: "skill-switch is-on", type: "button", "aria-label": `${skill.name} enabled` }, [h("span")])
+  ]);
+}
+
+function skillDetailDialog(skill) {
+  return h("div", { class: "plugin-modal skill-modal", hidden: true, "data-skill-modal": "true" }, [
+    h("div", { class: "skill-modal-panel", role: "dialog", "aria-modal": "true", "aria-labelledby": "skill-modal-title" }, [
+      iconButton("Close skill details", "x", "plugin-modal-close", { "data-skill-close": "true" }),
+      h("header", { class: "skill-modal-head" }, [
+        h("span", { class: "skill-modal-icon", "aria-hidden": "true" }, [svgIcon("file")]),
+        h("div", { class: "skill-modal-title-row" }, [
+          h("h2", { id: "skill-modal-title", "data-skill-title": "true", text: skill.name }),
+          h("span", { text: "Skill" })
+        ]),
+        h("p", { "data-skill-summary": "true", text: skill.description })
+      ]),
+      h("div", { class: "skill-modal-controls" }, [
+        h("button", { class: "skill-switch is-on", type: "button", "aria-label": "Skill enabled" }, [h("span")]),
+        iconButton("More skill actions", "settings", "skill-more")
+      ]),
+      h("div", { class: "skill-detail-copy", "data-skill-detail": "true" }, renderSkillDetail(skill.detail)),
+      h("footer", { class: "skill-modal-actions" }, [
+        h("button", { class: "button secondary danger-action", type: "button", "data-skill-close": "true" }, ["Uninstall"]),
+        h("button", { class: "button primary", type: "button", "data-skill-close": "true" }, ["Try in chat"])
+      ])
+    ])
+  ]);
+}
+
+function renderSkillDetail(detail) {
+  return detail.split("\n").map((line) => {
+    if (!line.trim()) return h("div", { class: "skill-detail-gap" });
+    if (line.startsWith("- ")) return h("p", { class: "skill-detail-bullet", text: line });
+    if (!line.includes(".") && line.length < 40) return h("h3", { text: line });
+    return h("p", { text: line });
+  });
+}
+
+function pluginCard(plugin) {
+  return h("article", { class: "plugin-card" }, [
+    h("div", { class: `plugin-logo plugin-logo-${plugin.tone}`, "aria-hidden": "true" }, [h("span", { text: plugin.logo })]),
+    h("div", { class: "plugin-copy" }, [
+      h("strong", { text: plugin.name }),
+      h("span", { text: plugin.description })
+    ]),
+    iconButton(`Add ${plugin.name}`, "add", "plugin-add-button", { "data-plugin-connect": plugin.name })
+  ]);
+}
+
+function pluginConnectDialog(plugin) {
+  return h("div", { class: "plugin-modal", hidden: true, "data-plugin-modal": "connect" }, [
+    h("div", { class: "plugin-modal-panel", role: "dialog", "aria-modal": "true", "aria-labelledby": "plugin-connect-title" }, [
+      iconButton("Close plugin connection", "x", "plugin-modal-close", { "data-plugin-close": "true" }),
+      h("div", { class: "plugin-modal-brand" }, [
+        h("div", { class: "plugin-modal-app plugin-modal-source" }, [h("span", { text: "AI" })]),
+        h("div", { class: "plugin-modal-dots", "aria-hidden": "true" }, [h("span"), h("span"), h("span")]),
+        h("div", { class: `plugin-logo plugin-modal-app plugin-logo-${plugin.tone}`, "data-plugin-modal-logo": "true", "aria-hidden": "true" }, [h("span", { text: plugin.logo })])
+      ]),
+      h("h2", { id: "plugin-connect-title", "data-plugin-modal-title": "true", text: `Connect ${plugin.name}` }),
+      h("div", { class: "plugin-modal-status" }, [svgIcon("check"), h("span", { text: "Approved by your admin" })]),
+      h("div", { class: "plugin-modal-copy" }, [
+        modalCopyBlock("You're in control", "C4OS respects your project preferences and limits this plugin to permissions you explicitly set."),
+        modalCopyBlock("Plugins may introduce elevated risk", "Plugins can access scoped project context. Review permissions before connecting a workflow to your workspace."),
+        modalCopyBlock("Data shared with this plugin", "Adding this plugin allows access to basic workspace context and recent intent needed to respond to your request.")
+      ]),
+      h("button", { class: "plugin-modal-continue", type: "button", "data-plugin-continue": "true" }, [
+        h("span", { "data-plugin-modal-action": "true", text: `Continue to ${plugin.name}` }),
+        svgIcon("external")
+      ]),
+      h("button", { class: "plugin-modal-advanced", type: "button" }, ["Advanced settings"])
+    ])
+  ]);
+}
+
+function modalCopyBlock(title, text) {
+  return h("section", {}, [h("h3", { text: title }), h("p", { text })]);
+}
+
+function marketplaceDialog() {
+  return h("div", { class: "plugin-modal marketplace-modal", hidden: true, "data-marketplace-modal": "true" }, [
+    h("div", { class: "marketplace-panel", role: "dialog", "aria-modal": "true", "aria-labelledby": "marketplace-title" }, [
+      iconButton("Close marketplace dialog", "x", "plugin-modal-close", { "data-marketplace-close": "true" }),
+      h("header", { class: "marketplace-head" }, [
+        h("h2", { id: "marketplace-title", text: "Add plugin marketplace" }),
+        h("p", {}, [
+          "Add from a GitHub repo, Git URL, or local folder. ",
+          h("button", { class: "marketplace-inline-link", type: "button" }, ["Learn more"])
+        ])
+      ]),
+      h("div", { class: "marketplace-form" }, [
+        marketplaceField("Source", "marketplace-source", "openai/plugins or git@github.com:org/repo.git"),
+        marketplaceField("Git ref", "marketplace-ref", "main"),
+        marketplaceField("Sparse paths", "marketplace-paths", "plugins/codex", true)
+      ]),
+      h("div", { class: "marketplace-actions" }, [
+        h("button", { class: "button secondary", type: "button", "data-marketplace-close": "true" }, ["Cancel"]),
+        h("button", { class: "button primary", type: "button", "data-marketplace-close": "true" }, ["Add marketplace"])
+      ])
+    ])
+  ]);
+}
+
+function marketplaceField(label, id, placeholder, multiline = false) {
+  const control = multiline
+    ? h("textarea", { id, name: id, rows: "3", placeholder, autocomplete: "off", spellcheck: "false" })
+    : h("input", { id, name: id, type: "text", placeholder, autocomplete: "off", spellcheck: "false" });
+  return h("div", { class: "marketplace-field" }, [h("label", { for: id, text: label }), control]);
 }
 
 function configCard(title, text, action) {
@@ -742,6 +1011,187 @@ function bindShowMore() {
       control.setAttribute("aria-expanded", String(expanded));
       control.textContent = expanded ? control.dataset.expandedLabel : control.dataset.collapsedLabel;
     });
+  });
+}
+
+function bindPluginConnect() {
+  const modal = document.querySelector("[data-plugin-modal='connect']");
+  if (!modal) return;
+  const title = modal.querySelector("[data-plugin-modal-title]");
+  const action = modal.querySelector("[data-plugin-modal-action]");
+  const logo = modal.querySelector("[data-plugin-modal-logo]");
+  const logoText = logo?.querySelector("span");
+  let lastTrigger = null;
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.removeEventListener("keydown", onKeydown);
+    lastTrigger?.focus();
+  };
+
+  const onKeydown = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+
+  document.querySelectorAll("[data-plugin-connect]").forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      const plugin = pluginCatalog.find((item) => item.name === trigger.dataset.pluginConnect) || pluginCatalog[0];
+      lastTrigger = trigger;
+      title.textContent = `Connect ${plugin.name}`;
+      action.textContent = `Continue to ${plugin.name}`;
+      logo.className = `plugin-logo plugin-modal-app plugin-logo-${plugin.tone}`;
+      logoText.textContent = plugin.logo;
+      modal.hidden = false;
+      modal.querySelector("[data-plugin-close]")?.focus();
+      document.addEventListener("keydown", onKeydown);
+    });
+  });
+
+  modal.querySelectorAll("[data-plugin-close], [data-plugin-continue]").forEach((control) => {
+    control.addEventListener("click", closeModal);
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  });
+}
+
+function bindMarketplaceControls() {
+  const menu = document.querySelector("[data-marketplace-menu]");
+  const trigger = document.querySelector("[data-marketplace-menu-trigger]");
+  const modal = document.querySelector("[data-marketplace-modal]");
+  if (!menu || !trigger || !modal) return;
+  let lastTrigger = null;
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+  };
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.removeEventListener("keydown", onKeydown);
+    lastTrigger?.focus();
+  };
+
+  const onKeydown = (event) => {
+    if (event.key === "Escape") {
+      closeMenu();
+      if (!modal.hidden) closeModal();
+    }
+  };
+
+  trigger.addEventListener("click", () => {
+    const expanded = menu.hidden;
+    menu.hidden = !expanded;
+    trigger.setAttribute("aria-expanded", String(expanded));
+    document.addEventListener("keydown", onKeydown);
+  });
+
+  document.querySelector("[data-marketplace-open]")?.addEventListener("click", () => {
+    lastTrigger = trigger;
+    closeMenu();
+    modal.hidden = false;
+    modal.querySelector("[data-marketplace-close]")?.focus();
+    document.addEventListener("keydown", onKeydown);
+  });
+
+  modal.querySelectorAll("[data-marketplace-close]").forEach((control) => {
+    control.addEventListener("click", closeModal);
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".plugin-filter-wrap")) closeMenu();
+  });
+}
+
+function bindSkillDetails() {
+  const modal = document.querySelector("[data-skill-modal]");
+  if (!modal) return;
+  const title = modal.querySelector("[data-skill-title]");
+  const summary = modal.querySelector("[data-skill-summary]");
+  const detail = modal.querySelector("[data-skill-detail]");
+  let lastTrigger = null;
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.removeEventListener("keydown", onKeydown);
+    lastTrigger?.focus();
+  };
+
+  const onKeydown = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+
+  document.querySelectorAll("[data-skill-open]").forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      const skill = skillCatalog.find((item) => item.name === trigger.dataset.skillOpen) || skillCatalog[0];
+      lastTrigger = trigger;
+      title.textContent = skill.name;
+      summary.textContent = skill.description;
+      detail.replaceChildren(...renderSkillDetail(skill.detail));
+      modal.hidden = false;
+      modal.querySelector("[data-skill-close]")?.focus();
+      document.addEventListener("keydown", onKeydown);
+    });
+  });
+
+  modal.querySelectorAll("[data-skill-close]").forEach((control) => {
+    control.addEventListener("click", closeModal);
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  });
+}
+
+function bindMcpControls() {
+  const modal = document.querySelector("[data-mcp-modal]");
+  const trigger = document.querySelector("[data-mcp-add]");
+  if (!modal || !trigger) return;
+  let lastTrigger = null;
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.removeEventListener("keydown", onKeydown);
+    lastTrigger?.focus();
+  };
+
+  const onKeydown = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+
+  trigger.addEventListener("click", () => {
+    lastTrigger = trigger;
+    modal.hidden = false;
+    modal.querySelector("[data-mcp-close]")?.focus();
+    document.addEventListener("keydown", onKeydown);
+  });
+
+  modal.querySelectorAll("[data-mcp-close]").forEach((control) => {
+    control.addEventListener("click", closeModal);
+  });
+
+  modal.querySelectorAll("[data-mcp-mode]").forEach((control) => {
+    control.addEventListener("click", () => {
+      const mode = control.dataset.mcpMode;
+      modal.querySelectorAll("[data-mcp-mode]").forEach((item) => {
+        const active = item === control;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-selected", String(active));
+      });
+      modal.querySelectorAll("[data-mcp-fields]").forEach((fields) => {
+        fields.hidden = fields.dataset.mcpFields !== mode;
+      });
+    });
+  });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
   });
 }
 

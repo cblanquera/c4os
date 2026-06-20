@@ -1,6 +1,55 @@
 # QA Notes
 
-Date: 2026-06-19
+Date: 2026-06-20
+
+## r04 Single Page App Conversion
+
+Source revision:
+
+- `wireframes/r03-functional-frontend-architecture/`
+
+Changes made:
+
+- Created `r04-single-page-app` as a new sibling artifact.
+- Kept only one HTML entry point: `index.html`.
+- Removed the starting review menu from the default app flow.
+- Changed the default entry route to App Start.
+- Preserved r03's screen data, render functions, settings surfaces, and visual CSS.
+- Added hash-based routes for all generated internal links.
+- Added a client-side router that intercepts review navigation, swaps rendered screens in place, and supports direct hash entry.
+
+Route behavior:
+
+- App start: `index.html#app-start`
+- New session: `index.html#new-session`
+- Chat session: `index.html#chat-session`
+- Providers popover: `index.html#providers-popover`
+- Models popover: `index.html#models-popover`
+- File explorer: `index.html#file-explorer`
+- File editor: `index.html#file-editor`
+- Terminal: `index.html#terminal`
+- Settings providers: `index.html#settings-providers`
+- Add provider: `index.html#settings-add-provider`
+- Settings models: `index.html#settings-models`
+- Settings configuration: `index.html#settings-configuration`
+- Settings plugins: `index.html#settings-plugins`
+- Settings skills: `index.html#settings-skills`
+- Settings MCP servers: `index.html#settings-mcp`
+
+Verification:
+
+- `node --check wireframes/r04-single-page-app/script.js` passed.
+- `find wireframes/r04-single-page-app -maxdepth 1 -type f -name '*.html'` returns only `index.html`.
+- `git diff --check -- wireframes/r04-single-page-app` passed.
+- Static server returned `200 OK` for `/`, `/script.js`, and `/styles.css` at `http://127.0.0.1:4184/`.
+- After menu removal, Playwright loaded `http://127.0.0.1:4184/` directly into App Start with the `Open a folder to start working` heading and no review menu.
+- Playwright loaded the app with no console errors after adding the inline favicon.
+- Direct hashes remain supported for screen review.
+- Playwright direct hash loads for `#file-editor` and `#settings-mcp` rendered the expected screens.
+- Unused style cleanup removed the old hub/menu CSS and dead emitted class names: `browser-tool`, `marketplace-modal`, `mcp-modal`, `skill-modal`, and `is-on`.
+- Static class mismatch scan now only reports expected template fragments from dynamic class names.
+
+## r03 Source QA Notes
 
 Preview server:
 
@@ -11,7 +60,7 @@ Preview server:
 Compared against:
 
 - `plans/product-interface.md`
-- `.agents/wireframes/screens.md`
+- `wireframes/screens.md`
 - `plans/pegs/C4OS-App-Start-Wireframe.png`
 - `plans/pegs/C4OS-New-Session-Wireframe.png`
 - `plans/pegs/C4OS-Chat-Session-Wireframe.png`
@@ -120,7 +169,7 @@ Route checks:
 
 Code checks:
 
-- `node --check .agents/wireframes/r03-functional-frontend-architecture/script.js` passed.
+- `node --check wireframes/r03-functional-frontend-architecture/script.js` passed.
 - Static scan found no root-relative generated links.
 - Static scan found no `transition: all`.
 - Static scan found no disabled browser zoom settings.
@@ -169,6 +218,6 @@ Rendered evidence captured:
 
 Verification:
 
-- `node --check .agents/wireframes/r03-functional-frontend-architecture/script.js` passed.
+- `node --check wireframes/r03-functional-frontend-architecture/script.js` passed.
 - All 13 routes returned `200`.
 - Static guideline scan found no root-relative generated links, disabled zoom, `transition: all`, inline `onclick`, `innerHTML`, or paste blocking.

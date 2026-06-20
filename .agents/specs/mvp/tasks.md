@@ -59,7 +59,7 @@ Status: proposed
 Confidence: imported
 MVP: yes
 Phase: mvp
-Source: `.agents/wireframes/screens.md`
+Source: `wireframes/screens.md`
 Related:
 - AC-009
 

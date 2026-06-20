@@ -9,7 +9,7 @@ artifact source was written fresh.
 Source inputs:
 
 - `plans/product-interface.md`
-- `.agents/wireframes/screens.md`
+- `wireframes/screens.md`
 - `plans/pegs/*.png`
 
 Frontend strategy:

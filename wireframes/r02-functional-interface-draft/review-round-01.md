@@ -9,7 +9,7 @@ Status: ready for review
 - Created a new major revision folder instead of editing `r01-functional-wireframes`.
 - Added a distinct app-start screen that matches the no-trusted-folder peg.
 - Rebuilt the visual layer as a desktop workbench system with CSS variables, restrained neutral surfaces, graphite code/terminal panels, and amber approval/selection accents.
-- Kept the full peg-backed screen set from `.agents/wireframes/screens.md`.
+- Kept the full peg-backed screen set from `wireframes/screens.md`.
 - Tightened accessibility-oriented markup for settings fields, icon controls, focus states, reduced motion, and long text handling.
 - Preserved document-relative links throughout the static review artifact.
 

@@ -5,9 +5,9 @@ Draft stage: functional creative wireframe for desktop app review.
 Source inputs:
 
 - `plans/product-interface.md`
-- `.agents/wireframes/screens.md`
+- `wireframes/screens.md`
 - `plans/pegs/*.png`
-- `.agents/wireframes/r01-functional-wireframes/`
+- `wireframes/r01-functional-wireframes/`
 
 Design strategy:
 

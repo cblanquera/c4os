@@ -7,7 +7,7 @@ Use this to define, narrow, validate, or freeze the smallest customer-usable C4O
 - `.agents/context/index.md`
 - `.agents/specs/mvp/index.md`
 - `.agents/specs/mvp/status.md`
-- `.agents/wireframes/screens.md`, when UI behavior matters
+- `wireframes/screens.md`, when UI behavior matters
 
 ## Process
 
