@@ -5,37 +5,47 @@ Updated: 2026-06-20
 
 ## Summary
 
-The implementation-facing UI handoff lives at
-`wireframes/ui-handoff-spec.md`. It translates the current wireframes into
-layout, behavior, state, and implementation guidance without duplicating the
-full wireframe artifact inside `.agents/context/`.
+This context entry captures the r04 C4OS UI handoff for future specs and
+implementation planning. The full handoff is split into reference chunks
+because it is too detailed to keep directly in `.agents/context/`.
 
-## Durable Product Facts
+The chunked reference index is
+`.agents/references/context/ui-handoff/index.md`.
 
-- The latest review target is `wireframes/r04-single-page-app/index.html`.
-- The app starts on App Start, not on a wireframe menu.
-- C4OS uses a three-panel desktop shell: left project/session navigation,
-  center workbench, and right workspace tools.
+## Key Facts
+
+- r04 is the current wireframe handoff baseline.
+- The latest review artifact is `wireframes/r04-single-page-app/index.html`.
+- The app starts on App Start, not a review menu.
+- Prompting requires trusted workspace context.
+- C4OS uses a three-panel desktop shell: project/session navigation, center
+  workbench, and workspace tools.
 - The right workspace tool tab order is Browser, Files, Terminal.
-- Prompting requires trusted workspace context; folder-backed setup comes
-  before active chat use.
-- Chat uses messenger ownership: user messages right, agent messages left.
-- Settings navigation in the latest wireframe is Providers, Models,
-  Configuration, Plugins, Skills, MCP Servers.
-- Plugin, skill, and MCP management screens are functional review surfaces, but
-  persistence and external integrations are simulated in the wireframe.
+- Settings navigation is Providers, Models, Configuration, Plugins, Skills,
+  MCP Servers.
 
-## Context Boundary
+## Chunked Context
 
-Keep the detailed layout and interaction contract in
-`wireframes/ui-handoff-spec.md`. Keep `.agents/context/` limited to reusable
-product facts and pointers so future specs can find the handoff without
-duplicating it.
+| Chunk | Focus |
+| --- | --- |
+| `.agents/references/context/ui-handoff/chunk-001.md` | Sections 1-9: usage, normative versus illustrative content, sources, product frame, artifact contract, global layout, App Start, New Session, and composer behavior. |
+| `.agents/references/context/ui-handoff/chunk-002.md` | Sections 10-19: provider/model selection, chat session, Browser, Files, Terminal, and core settings screens. |
+| `.agents/references/context/ui-handoff/chunk-003.md` | Sections 20-22: Plugins, Skills, and MCP Servers settings surfaces. |
+| `.agents/references/context/ui-handoff/chunk-004.md` | Sections 23-28: visual system, interaction boundaries, accessibility, acceptance notes, reconciliation, and open questions. |
 
-## Next Reconciliation
+## Project Implications
 
-Before MVP freeze, accepted handoff behavior should be reconciled into:
+- Future implementation work should not infer UI behavior from screenshots
+  alone; it should read the chunked handoff context first.
+- Example data in r04 is illustrative unless promoted into requirements,
+  configuration, or final product copy.
+- Accepted wireframe behavior must be reconciled into MVP requirements,
+  acceptance, and traceability before freeze.
+- Simulated r04 behavior must not be mistaken for completed product behavior.
 
+## Related Context
+
+- `.agents/context/index.md`
+- `wireframes/screens.md`
 - `.agents/specs/mvp/requirements.md`
 - `.agents/specs/mvp/acceptance.md`
-- `.agents/specs/mvp/traceability.md`
