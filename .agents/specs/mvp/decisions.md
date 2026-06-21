@@ -1,6 +1,6 @@
 # MVP Decisions
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
 ## Decisions
@@ -93,4 +93,3 @@ Source: `.agents/AGENTS.md`, `.agents/specs/research/research-freeze.md`
 
 Production implementation belongs in `backend/`, `frontend/`, and
 `tests/server/`; `src-tauri/` is not used.
-

@@ -1,6 +1,6 @@
 # MVP Acceptance
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
 ## Acceptance Criteria
@@ -123,4 +123,3 @@ plugins, and `^mcp` invokes MCP servers; MCP servers are not invoked implicitly.
 Given implementation uses r04 wireframes, then sample names, data, statuses,
 URLs, output, copy, and grayscale styling are treated as illustrative unless
 separately promoted.
-

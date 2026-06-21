@@ -1,6 +1,6 @@
 # MVP Viability Gaps
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
 ## Gaps To Resolve During Implementation
@@ -64,4 +64,3 @@ state, real persistence, real policy checks, and real backend-owned boundaries.
 
 Resolution path: use r04 as behavioral acceptance input, not implementation
 evidence.
-

@@ -1,6 +1,6 @@
 # MVP Risks
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
 ## Risks
@@ -85,4 +85,3 @@ Source: `wireframes/ui-handoff-spec.md`
 r04 prototype behavior is a handoff, not product code. Acceptance requires real
 state, product records, and backend-owned boundaries rather than hardcoded
 sample data or simulated completion.
-

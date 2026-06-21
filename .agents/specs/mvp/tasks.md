@@ -1,11 +1,10 @@
 # MVP Proposed Tasks
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
-These tasks are proposed implementation tasks. They are not active work until
-the MVP spec is frozen for implementation and converted into
-`.agents/development/progress/` items.
+These tasks are accepted implementation tasks for the frozen MVP contract. They
+are not active work until converted into `.agents/development/progress/` items.
 
 ## Sequencing Rules
 
@@ -48,8 +47,10 @@ transition behavior, then return dummy data.
 
 This phase must clearly state what is mocked, including fake workspace trust,
 fake provider/model records, fake session creation, fake agent processing,
-fake files, fake Browser state, fake terminal output, fake extension records,
-fake approvals, and fake persistence.
+fake structured thread and run events, fake files, fake artifacts and previews,
+fake Browser state, fake terminal output, fake settings IA, fake extension
+records, fake approvals, fake local memory, fake action records, fake workspace
+descriptors, and fake persistence.
 
 Pause for user acceptance after this task.
 
@@ -86,10 +87,12 @@ the full documented/r04 MVP is feature complete. Each slice should replace mock
 behavior with real behavior, connect the result to the frontend, verify it, and
 state any remaining mocks before starting the next slice.
 
-Expected slices include provider/model setup, runtime adapter/session behavior,
-Files, Browser, Terminal, extensions, concurrency, restart/resume, artifacts,
-and audit records. The exact order can be adjusted during progress planning,
-but scope must not shrink.
+Expected slices include workspace/trust records, workspace descriptors,
+provider/model setup, runtime adapter/session behavior, structured thread/run
+events, Files, safe artifact/HTML preview, Browser, Terminal, settings IA,
+extensions, concurrency, restart/resume, local memory, action records, and audit
+records. The exact order can be adjusted during progress planning, but scope
+must not shrink.
 
 ### TASK-006: Pause At Feature Complete
 

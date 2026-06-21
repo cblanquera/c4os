@@ -1,6 +1,6 @@
 # MVP Evidence
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 
 ## Evidence Records
@@ -94,5 +94,4 @@ Source:
 - `.agents/specs/research/implementation-checkpoint-plan.md`
 
 Confirms research is frozen for MVP specification, the full documented/r04
-candidate scope remains included, and checkpoints are sequencing gates only.
-
+scope remains included, and checkpoints are sequencing gates only.

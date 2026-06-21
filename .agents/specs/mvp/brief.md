@@ -1,6 +1,6 @@
 # MVP Brief
 
-Status: ready-for-review
+Status: frozen-for-implementation
 Updated: 2026-06-21
 Sources:
 - `.agents/specs/research/research-freeze.md`
@@ -13,7 +13,7 @@ Sources:
 ## Purpose
 
 This spec defines the distributable C4OS desktop MVP from the frozen research
-records. It preserves the full documented/r04 candidate scope. Checkpoints are
+records. It preserves the full documented/r04 scope. Checkpoints are
 implementation progress gates only; they do not reduce MVP scope.
 
 ## Target Evaluator
@@ -83,4 +83,3 @@ MVP-spec decision explicitly moves an item out. Included scope covers:
 - Provider-native API integrations beyond OpenAI-compatible profiles.
 - Pi as the first runtime adapter.
 - Treating proof code or wireframe simulation as production behavior.
-
