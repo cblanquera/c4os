@@ -1,7 +1,7 @@
 # Research Viability Gaps
 
-Status: ready-for-freeze-review
-Updated: 2026-06-20
+Status: frozen-for-mvp-specification
+Updated: 2026-06-21
 
 ## Gaps
 
@@ -14,4 +14,4 @@ Updated: 2026-06-20
 
 ## Recommended Path
 
-Run a final freeze review that turns the full documented/r04 MVP scope into checkpointed implementation phases without shrinking the MVP boundary.
+Create `.agents/specs/mvp/` from the frozen research records. The MVP spec must define the customer-usable workflow, implementation paths, acceptance criteria, viability gaps, and proposed tasks before any progress item starts.

@@ -157,10 +157,11 @@ Settings sidebar includes:
 - Navigation order:
   - Providers
   - Models
+  - Runtimes
   - Configuration
-  - Skills placeholder
-  - MCP Servers placeholder
-  - Hooks placeholder
+  - Plugins
+  - Skills
+  - MCP Servers
 
 ### Providers
 

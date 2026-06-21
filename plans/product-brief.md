@@ -156,7 +156,7 @@ export paths.
 
 ### Power Features Need Safety Boundaries
 
-Browser, terminal, file editing, extensions, skills, hooks, MCP, and plugins are
+Browser, terminal, file editing, extensions, skills, MCP, and plugins are
 where agent products become useful and risky. These features must be designed
 around trust, containment, provenance, and auditability from the beginning.
 
@@ -525,8 +525,7 @@ Settings should give users control over:
 - configuration settings
 - skills
 - MCP servers
-- hooks
-- agents
+- plugins
 - runtime configuration
 - customizations
 
@@ -548,7 +547,7 @@ skill files, including:
 - `.agents/skills`
 
 The post-MVP extension system should provide a shared inventory for MCP
-Servers, Skills, Plugins, Hooks, Agents, and related scoped surfaces. The
+Servers, Skills, Plugins, and related scoped surfaces. The
 inventory should show:
 
 - provenance
@@ -561,9 +560,8 @@ inventory should show:
 - runtime impact
 
 Extensions should be disabled by default before they can affect runtime
-execution, model context, tools, hooks, or app-owned state. Harmless MCP
-connection should land before executable plugin loading or automatic hook
-behavior.
+execution, model context, tools, or app-owned state. Harmless MCP connection
+should land before executable plugin loading.
 
 Marketplace readiness is an architecture goal, not MVP scope. The app should
 not require a proprietary package format before local install, trust, signing,
@@ -576,7 +574,7 @@ It can include:
 
 - session summaries
 - pinned facts
-- retrieval hooks
+- retrieval cues
 - project preferences
 - recurring task context
 - user-approved durable notes
@@ -604,13 +602,13 @@ Browser surface must not expose privileged app APIs or secrets to page content.
 
 ### Extension Inventory
 
-Build a disabled-by-default inventory for MCP Servers, Skills, Plugins, Hooks,
-Agents, and runtime customizations. Start with harmless MCP connection before
-executable plugins or automatic hooks.
+Build a disabled-by-default inventory for MCP Servers, Skills, Plugins, and
+runtime customizations. Start with harmless MCP connection before executable
+plugins.
 
 ### Settings And Scoping
 
-Make provider, model, skill, MCP, hook, agent, runtime, and customization scopes
+Make provider, model, plugin, skill, MCP, runtime, and customization scopes
 visible and manageable.
 
 ### Prompt And Chat Polish
@@ -642,7 +640,6 @@ The greenfield product should model at least these entities:
 - Skill reference
 - MCP server reference
 - Plugin reference
-- Hook reference
 - Browser state record
 - Terminal session record
 - Audit log entry
@@ -721,7 +718,7 @@ provider-native APIs.
 
 ### Extension Risk
 
-Plugins, hooks, MCP servers, and skills have different execution models.
+Plugins, MCP servers, and skills have different execution models.
 Mitigation: use one inventory/trust/provenance model while keeping execution
 mechanisms separate.
 

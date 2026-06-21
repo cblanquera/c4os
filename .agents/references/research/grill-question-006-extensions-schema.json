@@ -28,7 +28,7 @@
         "Yes, enabled by default after install/connect",
         "Only provider-like connectors may affect execution"
       ],
-      "help": "Research currently says extensions should be disabled before they affect runtime execution, model context, tools, hooks, or app-owned state."
+      "help": "Research currently says extensions should be disabled before they affect runtime execution, model context, tools, or app-owned state."
     },
     {
       "id": "extension_authority",

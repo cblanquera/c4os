@@ -42,7 +42,7 @@
       "label": "Clarifications or constraints",
       "type": "textarea",
       "required": false,
-      "help": "Add any requirements about server mode, event streams, provider config, extension hooks, cancellation, or local state isolation."
+      "help": "Add any requirements about server mode, event streams, provider config, extension events, cancellation, or local state isolation."
     }
   ]
 }

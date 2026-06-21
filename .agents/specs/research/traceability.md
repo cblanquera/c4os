@@ -34,7 +34,7 @@
 | `wireframes/r04-single-page-app/README.md` | EVD-009, DEC-009, TASK-005 |
 | `wireframes/r04-single-page-app/qa/notes.md` | EVD-009, TASK-005 |
 | `.agents/references/research/grill-session.md` | Q-001 through Q-010, DEC-005, DEC-006, DEC-008, DEC-010, DEC-011, REQ-015, REQ-016, `checkpoints.md` |
-| `.agents/specs/research/mvp-freeze.md` | Frozen MVP scope, acceptance bar, non-goals |
+| `.agents/specs/research/research-freeze.md` | Frozen research findings, candidate MVP scope, required MVP-spec next step |
 | `.agents/specs/research/implementation-checkpoint-plan.md` | Implementation sequencing checkpoints |
 | `docs/adr/0001-browser-and-agent-authority.md` | Browser and agent authority decision |
 | `docs/adr/0002-extension-enablements-and-prompt-tags.md` | Extension enablement and prompt tag decision |

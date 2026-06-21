@@ -124,4 +124,3 @@ These are not settled by r04:
   settings.
 - Exact backend contract for file explorer and editor state.
 - Exact terminal execution and approval policy integration.
-- Whether Hooks returns to settings navigation after MVP scope changes.

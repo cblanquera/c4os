@@ -3,16 +3,17 @@
 Status: active
 Updated: 2026-06-21
 Source:
-- `.agents/specs/research/mvp-freeze.md`
+- `.agents/specs/research/research-freeze.md`
 - `.agents/specs/research/checkpoints.md`
 - `.agents/references/research/grill-session.md`
 
 ## Rules
 
-- Checkpoints are progress-review gates, not MVP scope boundaries.
-- The MVP remains the full documented/r04 feature set.
-- A checkpoint may use partial implementation, but it must not be described as
-  product-complete unless the full freeze scope is complete.
+- Checkpoints are sequencing examples for implementation planning.
+- They are not an implementation contract until `.agents/specs/mvp/` exists and
+  is frozen for implementation.
+- A checkpoint may use partial implementation after MVP freeze, but it must not
+  be described as product-complete unless the full frozen MVP scope is complete.
 
 ## Checkpoint 1: Shell And Session Proof
 

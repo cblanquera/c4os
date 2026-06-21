@@ -16,7 +16,9 @@ Use this when existing planning material should become compact `.agents` records
 4. Mark imported confidence as `imported` unless validation upgrades or conflicts exist.
 5. Mark ambiguous, stale, duplicated, or conflicting content explicitly.
 6. Preserve visual peg routing in `wireframes/` when UI sources exist.
+7. When imported material identifies MVP scope, route to `workflows/mvp.md` to create or repair `.agents/specs/mvp/`.
+8. Do not create active progress from imported research records.
 
 ## Stop
 
-Stop when durable facts are compact records, useful source value is linked, and the recommended next step is review, validation, freeze, POC, or no follow-up.
+Stop when durable facts are compact records, useful source value is linked, and the recommended next step is review, validation, MVP specification, POC, source retirement, or no follow-up.

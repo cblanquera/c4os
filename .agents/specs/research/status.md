@@ -1,6 +1,6 @@
 # Research Status
 
-Status: frozen-for-implementation-planning
+Status: frozen-for-mvp-specification
 Updated: 2026-06-20
 
 ## Classification
@@ -8,11 +8,11 @@ Updated: 2026-06-20
 - Setup mode: import
 - Source confidence: imported
 - Implementation state: not started in this repo
-- Freeze state: frozen for implementation planning
+- Freeze state: frozen for MVP specification
 
 ## Readiness
 
-The imported plans, POCs, r04 wireframes, and grill answers are frozen for implementation planning. The MVP is intentionally the full documented/r04 product scope, not a smaller checkpoint slice. Checkpoint phases may be used for implementation progress, but the product is not MVP until the documented features are complete.
+The imported plans, POCs, r04 wireframes, and grill answers are frozen as research input for a separate MVP specification. The candidate MVP is the full documented/r04 product scope, not a smaller checkpoint slice. Implementation must not start until `.agents/specs/mvp/` exists and is frozen for implementation.
 
 ## Frozen Decisions
 
@@ -22,4 +22,4 @@ The imported plans, POCs, r04 wireframes, and grill answers are frozen for imple
 - Concurrent sessions/runs across trusted project folders are MVP, with one main run per chat session.
 - Extension install/connect for plugins, skills, and MCP servers is MVP, with explicit per-extension enablement before runtime impact.
 - r04 wireframe behavior is MVP behavioral handoff; final visual design and product copy remain separate unless explicitly documented.
-- Freeze artifacts now exist in `mvp-freeze.md`, `implementation-checkpoint-plan.md`, and `docs/adr/`.
+- Research freeze artifacts now exist in `research-freeze.md`, `implementation-checkpoint-plan.md`, and `docs/adr/`.

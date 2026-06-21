@@ -48,7 +48,7 @@ MVP: yes
 Phase: mvp
 Source: `plans/product-brief.md`, `.agents/references/research/grill-session.md`
 
-MVP includes install/connect flows for plugins, skills, and MCP servers. Extensions can affect runtime execution, model context, tools, hooks, or app-owned state only after explicit per-extension enablement. Skills and plugins may be invoked implicitly through "use when" routing or explicitly by the user. MCP servers require explicit user invocation.
+MVP includes install/connect flows for plugins, skills, and MCP servers. Extensions can affect runtime execution, model context, tools, or app-owned state only after explicit per-extension enablement. Skills and plugins may be invoked implicitly through "use when" routing or explicitly by the user. MCP servers require explicit user invocation.
 
 ## DEC-006: Thin Runtime Adapter For MVP
 

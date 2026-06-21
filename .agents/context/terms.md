@@ -3,7 +3,7 @@
 Status: active
 Created: 2026-06-18
 Updated: 2026-06-18
-Source Note: Imported from `plans/product-brief.md`.
+Source Note: Imported from human planning sources.
 
 ## Terms
 
@@ -24,6 +24,6 @@ Source Note: Imported from `plans/product-brief.md`.
 - Provider profile: A configured OpenAI-compatible provider connection.
 - Model profile: A selectable model from a provider profile or manual entry.
 - Local memory record: App-owned scoped memory, separate from raw provider state or runtime-local storage.
-- Extension inventory item: A discovered MCP server, skill, plugin, hook, agent, or related scoped surface.
-- Extension enablement: The explicit per-extension decision that allows a connected plugin, skill, or MCP server to affect agent execution, model context, tools, hooks, or app-owned state.
+- Extension inventory item: A discovered MCP server, skill, plugin, or related scoped surface.
+- Extension enablement: The explicit per-extension decision that allows a connected plugin, skill, or MCP server to affect agent execution, model context, tools, or app-owned state.
 - Extension prompt tag: Chat syntax for explicit extension invocation: `$` for skills, `@` for plugins, and `^` for MCP servers.

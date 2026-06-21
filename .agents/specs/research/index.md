@@ -1,7 +1,7 @@
 # Research Spec Index
 
-Status: ready-for-freeze-review
-Updated: 2026-06-20
+Status: frozen-for-mvp-specification
+Updated: 2026-06-21
 
 ## Record Files
 
@@ -21,7 +21,7 @@ Updated: 2026-06-20
 - `by-mvp.md`
 - `viability-gaps.md`
 - `checkpoints.md`
-- `mvp-freeze.md`
+- `research-freeze.md`
 - `implementation-checkpoint-plan.md`
 
 ## Design Inputs

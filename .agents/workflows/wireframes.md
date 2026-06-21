@@ -15,6 +15,7 @@ Use this for low-fidelity screens, flows, layout notes, and interface review.
 2. Convert accepted UI behavior into requirements or acceptance criteria before freeze.
 3. Record mismatches as review findings, not implementation tasks, until accepted.
 4. Keep review notes in `wireframes/` unless they are long enough for `.agents/references/`.
+5. Promote accepted handoff decisions into `.agents/context/` and relevant specs before implementation depends on them.
 
 ## Stop
 
