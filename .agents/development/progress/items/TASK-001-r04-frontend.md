@@ -1,7 +1,7 @@
 # TASK-001 r04 Frontend
 
 Status: ready
-Updated: 2026-06-21
+Updated: 2026-06-22
 
 ## Source
 
@@ -28,6 +28,8 @@ REQ-016
 
 AC-001, AC-013, AC-014, AC-015, AC-016, AC-017, AC-018, AC-019, AC-020, AC-021
 
+Additional frontend foundation gates: AC-022, AC-023, AC-024
+
 ## Expected Files And Folders
 
 - `frontend/`
@@ -40,11 +42,26 @@ scaffold note for the next task.
 ## Work Instructions
 
 - Build from r04 wireframes and `wireframes/ui-handoff-spec.md`.
+- Treat `wireframes/r04-single-page-app/` as the functional baseline. Port r04
+  screen structure and working interactions first; do not redesign from
+  scratch.
 - Keep the frontend aligned with the accepted creative and product context.
 - Use visible states for trust, provider/model setup, files, structured thread,
   Browser, Terminal, settings IA, extensions, concurrency, resume, local memory,
   action records, audit records, and artifact preview where those surfaces are
   part of r04 or required by acceptance.
+- Preserve every r04 route and screen-specific settings layout. Providers, Add
+  Provider, Models, Runtimes, Configuration, Plugins, Skills, and MCP Servers
+  must not be replaced by generic cards, generic lists, or invented extension
+  metadata surfaces.
+- Preserve working r04 interactions: left/right panel collapse, left/right
+  panel resize, Terminal bottom-panel resize, attachment preview, approval and
+  branch popovers, provider/model popovers, message show/hide, plugin
+  marketplace and connection dialogs, skill detail dialog, MCP add-server
+  dialog, and MCP transport switching.
+- Do not add new visible controls or extra surfaces that were not in r04 or the
+  frozen MVP contract. Record proposed UI changes for review instead of
+  silently including them in TASK-001.
 - Keep data mocked or local to the frontend only as needed for visual and state
   completeness; do not claim real backend, runtime, filesystem, Browser,
   Terminal, extension, security, approval, or persistence behavior in this item.
@@ -59,6 +76,9 @@ scaffold note for the next task.
   persistence behavior.
 - Mock server harness.
 - `src-tauri/`.
+- Production redesign beyond r04 parity.
+- New controls, filters, metadata cards, settings abstractions, or alternate
+  route structures not present in r04 or the frozen MVP contract.
 
 ## Verification
 
@@ -66,9 +86,16 @@ Run these before marking this item `review`, `done`, or `verified`:
 
 - `git diff --check`
 - `npm run dev` for local browser review when a frontend dev surface exists.
-- `npm test` if frontend work touches existing test-covered behavior.
+- Browser automation that renders every r04 route and verifies structure,
+  control placement, and settings screen parity against
+  `wireframes/r04-single-page-app/`.
+- Browser automation that clicks every collapse control, opens every popover
+  and dialog listed in Work Instructions, toggles message/detail states, and
+  drags every resize handle far enough to prove dimensions change.
+- `npm test` with rendered behavior coverage. Source-string checks alone are
+  not sufficient.
 - `npm run acceptance:mvp` once the acceptance script can evaluate the frontend
-  surface.
+  surface and includes behavior-based checks for AC-022, AC-023, and AC-024.
 
 Record skipped commands with the reason in this file before marking the item
 `review`, `done`, or `verified`.

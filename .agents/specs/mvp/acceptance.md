@@ -1,7 +1,7 @@
 # MVP Acceptance
 
 Status: frozen-for-implementation
-Updated: 2026-06-21
+Updated: 2026-06-22
 
 ## Acceptance Criteria
 
@@ -123,3 +123,33 @@ plugins, and `^mcp` invokes MCP servers; MCP servers are not invoked implicitly.
 Given implementation uses r04 wireframes, then sample names, data, statuses,
 URLs, output, copy, and grayscale styling are treated as illustrative unless
 separately promoted.
+
+### AC-022: r04 Functional Parity
+
+Given TASK-001 implements the frontend from r04, then every r04 route renders
+the same screen-specific structure and control placement before any production
+styling or refactoring changes are accepted.
+
+Given r04 includes an interaction, when the implemented frontend is reviewed,
+then left and right panel collapse, left and right panel resize, Terminal
+bottom-panel resize, composer attachment preview, composer popovers,
+provider/model popovers, message show/hide, plugin dialogs, skill details, MCP
+dialog behavior, and MCP transport switching work in the browser.
+
+### AC-023: No Invented Frontend Surfaces
+
+Given frontend foundation work is in progress, then new controls, panels,
+cards, filters, settings abstractions, or metadata surfaces are not added unless
+they are present in r04 or explicitly required by the frozen MVP contract.
+
+Given an implementation pressure suggests changing r04 UI structure, then the
+change is recorded for review instead of being silently included in the active
+task.
+
+### AC-024: Behavior-Based Frontend Verification
+
+Given a frontend task is marked `review`, `done`, or `verified`, then browser
+automation or equivalent rendered checks have exercised route rendering,
+collapse, resize, popovers, dialogs, settings screen structures, and important
+state transitions. Source-string checks alone do not satisfy frontend
+acceptance.

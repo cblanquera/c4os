@@ -1,7 +1,7 @@
 # Progress Manifest
 
 Status: ready
-Updated: 2026-06-21
+Updated: 2026-06-22
 
 ## Active Stream
 
@@ -21,6 +21,9 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - Proposed task records remain in `.agents/specs/mvp/tasks.md`; active work
   lives in `.agents/development/progress/items/`.
 - Mock-backed phases must state exactly what is mocked before acceptance.
+- TASK-001 is a parity-first frontend task. Preserve r04 route structures,
+  working interactions, and settings screen shapes before any production
+  cleanup. Do not add invented UI or accept source-string-only verification.
 
 ## Next Step
 
