@@ -5,7 +5,8 @@ Use this when context, specs, wireframes, progress, releases, or derived views m
 ## Check
 
 - Links and source references are valid enough for local routing.
-- Context contains only shared reusable product truth.
+- Context contains only shared reusable product truth and starts routing from `.agents/context/product-brief.md`.
+- Context reference routing lets agents load only the context or reference needed for the task.
 - Context files link only to `.agents/context/` or `.agents/references/`; provenance for source paths, root artifacts, specs, progress, URLs, and local files belongs in `.agents/references/`.
 - Spec records contain detailed requirements, risks, evidence, tasks, and acceptance criteria.
 - Research freeze is named `.agents/specs/research/research-freeze.md`.
@@ -23,7 +24,7 @@ Use this when context, specs, wireframes, progress, releases, or derived views m
 
 ## Repair Rules
 
-- Repair routing, indexes, statuses, and stale references compactly.
+- Repair routing, statuses, and stale references compactly.
 - Do not change product scope while doing integrity repair.
 - Do not retire original planning sources without a source-retirement pass.
 

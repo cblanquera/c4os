@@ -5,13 +5,13 @@ Use this when existing planning material should become compact `.agents` records
 ## Read First
 
 - `.agents/AGENTS.md`
-- `.agents/context/index.md`, if present
+- `.agents/context/product-brief.md`, if present, for the document map
 - The imported planning sources
 
 ## Process
 
 1. Inventory source material without overloading the spec with copied prose.
-2. Promote reusable accepted background into `.agents/context/`.
+2. Promote reusable accepted background into the relevant major `.agents/context/` document.
 3. Extract requirements, capabilities, constraints, decisions, assumptions, risks, acceptance criteria, evidence, and proposed tasks into grouped spec records.
 4. Mark imported confidence as `imported` unless validation upgrades or conflicts exist.
 5. Mark ambiguous, stale, duplicated, or conflicting content explicitly.

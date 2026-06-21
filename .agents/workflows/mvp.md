@@ -6,7 +6,11 @@ Run this workflow after research is frozen and before active MVP implementation.
 
 ## Read First
 
-- `.agents/context/index.md`
+- `.agents/context/product-brief.md`
+- `.agents/context/product-specs.md`
+- `.agents/context/technical-specs.md`
+- `.agents/context/creative-specs.md`
+- `.agents/context/work-orders.md`
 - `.agents/specs/research/research-freeze.md`
 - `.agents/specs/research/index.md`, `status.md`, requirements, acceptance, decisions, risks, evidence, traceability, and viability gaps
 - `wireframes/screens.md`, when UI behavior matters
@@ -40,7 +44,7 @@ Create or repair these files when the MVP scope is being made executable:
 5. Distinguish proof-only behavior from production MVP behavior.
 6. Reconcile accepted review, validation, wireframe, creative, feedback, and POC learning into records before freeze.
 7. Write proposed tasks in `.agents/specs/mvp/tasks.md`; these are not active progress yet.
-8. Promote final shared product understanding into `.agents/context/`.
+8. Promote final shared product understanding into the relevant major `.agents/context/` document.
 
 ## Stop
 

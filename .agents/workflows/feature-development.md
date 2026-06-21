@@ -4,14 +4,15 @@ Use this after MVP scope is accepted for bounded feature streams, hardening, pol
 
 ## Read First
 
-- `.agents/context/index.md`
-- `.agents/context/feature-goals.md`
+- `.agents/context/product-brief.md`
+- `.agents/context/product-specs.md`
+- `.agents/context/work-orders.md`
 - The relevant spec folder or MVP records
 - `.agents/development/progress/manifest.md`, if active progress exists
 
 ## Process
 
-1. Reconcile the requested feature goal into context or a bounded spec.
+1. Reconcile the requested feature goal into a major context document or a bounded spec.
 2. Create a sibling spec only when the work has its own acceptance criteria, risks, decisions, POC, or multiple implementation items.
 3. Convert accepted tasks into progress items only when implementation starts.
 4. Verify changed surfaces before marking progress done or verified.

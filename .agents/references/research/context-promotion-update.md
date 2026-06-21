@@ -22,8 +22,8 @@ Source: `.agents/references/research/grill-session.md`
 
 ## Updated Context Files
 
-- `.agents/context/decisions.md`
-- `.agents/context/constraints.md`
-- `.agents/context/feature-goals.md`
-- `.agents/context/terms.md`
-- `.agents/context/ui-handoff.md`
+- `.agents/context/work-orders.md`
+- `.agents/context/technical-specs.md`
+- `.agents/context/product-brief.md`
+- `.agents/references/context/product/terms.md`
+- `.agents/context/creative-specs.md`

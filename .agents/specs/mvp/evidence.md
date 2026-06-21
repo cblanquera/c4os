@@ -71,7 +71,7 @@ Source:
 - `wireframes/r04-single-page-app/README.md`
 - `wireframes/r04-single-page-app/index.html`
 - `wireframes/ui-handoff-spec.md`
-- `.agents/context/ui-handoff.md`
+- `.agents/context/creative-specs.md`
 
 r04 is accepted as behavioral handoff for the MVP shell, state model,
 navigation, composer controls, structured events, right tool surfaces, settings

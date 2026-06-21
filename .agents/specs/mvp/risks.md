@@ -17,7 +17,7 @@ approvals, artifacts, providers, extensions, and persistence.
 ### RISK-002: Security Boundary Drift
 
 Status: open for implementation
-Source: `.agents/specs/research/risks.md`, `.agents/context/constraints.md`
+Source: `.agents/specs/research/risks.md`, `.agents/context/technical-specs.md`
 
 Browser, terminal, file editing, artifact preview, and extensions expand local
 authority. Implementation must preserve trusted roots, approval policy,

@@ -55,7 +55,7 @@ The composer should support:
 
 ## Related Context
 
-- `.agents/context/product.md`
-- `.agents/context/product-model.md`
-- `.agents/context/feature-surfaces.md`
-- `.agents/context/interface.md`
+- `.agents/context/product-brief.md`
+- `.agents/context/technical-specs.md`
+- `.agents/context/product-specs.md`
+- `.agents/context/creative-specs.md`

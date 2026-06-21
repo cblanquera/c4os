@@ -37,7 +37,7 @@ remains a later adapter target.
 
 ### DEC-005: Secure Provider BYOK
 
-Source: `.agents/context/constraints.md`, `.agents/specs/research/requirements.md`
+Source: `.agents/context/technical-specs.md`, `.agents/specs/research/requirements.md`
 
 Provider support starts with OpenAI-compatible profiles and raw keys in OS
 keychain or equivalent secure storage.

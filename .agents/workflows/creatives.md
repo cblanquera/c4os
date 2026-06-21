@@ -9,7 +9,8 @@ implementation depends on visual styling rules.
 ## Read First
 
 - `.agents/AGENTS.md`
-- `.agents/context/index.md`
+- `.agents/context/product-brief.md`
+- `.agents/context/creative-specs.md`
 - relevant spec brief, audience, non-goals, constraints, and acceptance
 - existing root `creatives/` artifacts, if any
 
@@ -19,7 +20,7 @@ implementation depends on visual styling rules.
 - root `creatives/<direction-or-screen-set>/index.md`
 - root `creatives/<direction-or-screen-set>/guidelines.md` after approval
 - root `creatives/<direction-or-screen-set>/reviews.md`
-- `.agents/context/` after accepted guideline creation
+- `.agents/context/creative-specs.md` after accepted guideline creation
 - `.agents/references/` for provenance, rationale, or large examples
 - spec records when creative direction changes scope, acceptance, or product truth
 
@@ -31,7 +32,7 @@ implementation depends on visual styling rules.
 4. Record accepted direction, rejected alternatives, unresolved feedback, and open questions.
 5. Link large binaries, generated images, Figma files, or production assets through provenance notes instead of storing them in `.agents/`.
 6. When direction is approved, write `creatives/<direction-or-screen-set>/guidelines.md` with color, typography, spacing, components, pages, imagery, motion, copy, accessibility, implementation notes, QA checks, deferrals, and context promotion.
-7. Promote accepted creative rules into `.agents/context/` and relevant spec records before implementation depends on them.
+7. Promote accepted creative rules into `.agents/context/creative-specs.md` and relevant spec records before implementation depends on them.
 
 ## Stop
 

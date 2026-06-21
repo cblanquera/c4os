@@ -95,6 +95,5 @@ Secrets are secure references, not raw values in workspace files, general app ta
 
 ## Related Context
 
-- `.agents/context/runtime-adapter.md`
-- `.agents/context/constraints.md`
-- `.agents/context/terms.md`
+- `.agents/context/technical-specs.md`
+- `.agents/references/context/product/terms.md`

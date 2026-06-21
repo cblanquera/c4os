@@ -8,7 +8,7 @@ Read the workflow that matches the task:
 
 - `workflows/context-ingestion.md` for adding files, links, pasted text, or raw resources to project context.
 - `workflows/goal-manager.md` for coordinating a documented goal across planning, design, implementation, QA, and handoff.
-- `workflows/document-integrity.md` for checking context, specs, indexes, derived views, and progress state.
+- `workflows/document-integrity.md` for checking context routing, specs, derived views, and progress state.
 - `workflows/import.md` for converting existing planning material into compact records.
 - `workflows/mvp.md` for creating or repairing `.agents/specs/mvp/`, the customer-usable MVP contract.
 - `workflows/feature-development.md` for bounded work after MVP scope is accepted.
@@ -28,7 +28,8 @@ Read the workflow that matches the task:
 
 - `plans/product-brief.md` and `plans/product-interface.md` are the imported human planning sources for this restart.
 - `plans/pegs/*.png` are the visual peg sources for the UI direction.
-- `.agents/context/` contains shared product understanding future specs should read first.
+- `.agents/context/` contains five shared prework documents. Start with `.agents/context/product-brief.md` for the document map, then load only the context document or reference needed for the task: product brief, product specs, technical specs, creative specs, or work orders.
+- `.agents/references/` is the non-entry detail, evidence, provenance, and historical-support layer. Do not load references by default; load them only through a context document's `Reference Routing` table or a workflow-specific need.
 - `.agents/specs/research/` contains the current imported research, MVP-scope analysis, wireframe acceptance, and POC validation records. It is discovery input only.
 - `.agents/specs/research/research-freeze.md` closes the research round and recommends the next planning path. It is not an implementation contract.
 - `.agents/specs/mvp/` is the required contract for the distributable desktop MVP. Create or repair it before active MVP implementation.
@@ -36,6 +37,27 @@ Read the workflow that matches the task:
 - `wireframes/` contains wireframe routing notes and links back to the visual pegs.
 - `creatives/` contains creative direction, asset, and guideline artifacts only when creative work is created or approved.
 - `.agents/development/progress/` should exist only after implementation or active execution tracking begins.
+
+## Context And References
+
+Use `.agents/context/` for compact, accepted, reusable product truth that future agents should read first. Keep it limited to the five major documents:
+
+- `product-brief.md` for product identity, users, goals, principles, vocabulary, and the document map.
+- `product-specs.md` for customer workflow, product behavior, feature surfaces, and MVP user-facing scope.
+- `technical-specs.md` for product model, runtime boundary, persistence, security, Browser, Terminal, and implementation constraints.
+- `creative-specs.md` for experience direction, interface contract, UI behavior, visual tone, and accessibility.
+- `work-orders.md` for accepted decisions, sequencing, validation needs, deferred work, and implementation guardrails.
+
+Use `.agents/references/` for material that supports context or specs but should not be loaded by default:
+
+- `.agents/references/context/product/` for expanded product background, vocabulary detail, and feature-goal inputs.
+- `.agents/references/context/product-specs/` for detailed product experience, feature surfaces, and MVP inventory.
+- `.agents/references/context/technical-specs/` for detailed product model, runtime adapter, constraints, and validation caveats.
+- `.agents/references/context/creative-specs/` and `.agents/references/context/ui-handoff/` for detailed interface and handoff material.
+- `.agents/references/context/work-orders/` for decision history and work-order support.
+- `.agents/references/research/` for research support, grill-session material, schemas, validation evidence, and long-form research notes.
+
+When contributing context, choose one major context document as the owner, add only compact accepted reusable truth there, route long detail to the matching references folder, and update that context document's `Reference Routing` table when the new reference should be discoverable. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
 
 ## Implementation Locations
 
@@ -55,7 +77,7 @@ Use this sequence for MVP work:
 
 1. Research records live under `.agents/specs/research/`.
 2. Research closeout writes or updates `.agents/specs/research/research-freeze.md`.
-3. Accepted reusable findings are promoted or reconciled into `.agents/context/`.
+3. Accepted reusable findings are promoted or reconciled into the relevant major `.agents/context/` document.
 4. The MVP workflow creates or repairs `.agents/specs/mvp/`.
 5. MVP freeze marks `.agents/specs/mvp/status.md` as `frozen-for-implementation`.
 6. Progress converts accepted MVP tasks into `.agents/development/progress/` items.
@@ -72,7 +94,7 @@ If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementat
 - Do not invent completed implementation, verification, runtime behavior, or user decisions.
 - Raw feedback must be validated, rejected, classified, or reconciled before becoming implementation work unless evidence is already explicit.
 - Treat imported plan content as product intent unless a later review, validation result, or user decision changes it.
-- Promote only final accepted reusable findings into `.agents/context/`.
+- Promote only final accepted reusable findings into the relevant major `.agents/context/` document and route long detail through `.agents/references/`.
 - Keep `.agents/specs/<spec-id>/poc/` focused on proof questions, expected proof, results, links, and promotion decisions. Link to `proofs/<proof-name>/` for the implementation artifact.
 
 ## Boundaries
@@ -80,6 +102,6 @@ If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementat
 - Keep generated `.agents/**/*.md` files under 500 lines.
 - Put long rationale, research, source excerpts, screenshots, QA notes, and detailed evidence under `.agents/references/` when needed.
 - Keep POC implementations under `proofs/<proof-name>/` with proof-local source, harnesses, fixtures, README/evidence notes, and ignored build output. Do not commit generated build directories such as `target/`, `node_modules/`, caches, or other bulky artifacts.
-- Put creative assets and approved guidelines under root `creatives/` when creative work exists. Promote accepted creative rules into `.agents/context/` before frontend implementation depends on them.
+- Put creative assets and approved guidelines under root `creatives/` when creative work exists. Promote accepted creative rules into `.agents/context/creative-specs.md` before frontend implementation depends on them.
 - Do not retire or delete source planning docs without `workflows/source-retirement.md`.
 - Do not start implementation unless the user explicitly asks for active execution and the relevant MVP or feature spec is frozen for implementation.

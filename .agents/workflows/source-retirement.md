@@ -5,7 +5,8 @@ Use this before declaring old planning docs, briefs, pegs, notes, or imported so
 ## Read First
 
 - `.agents/AGENTS.md`
-- `.agents/context/index.md`
+- `.agents/context/product-brief.md` for the document map
+- The relevant major context document that claims to replace the source
 - `.agents/specs/manifest.md`
 - The source proposed for retirement
 - Records that claim to replace or supersede the source

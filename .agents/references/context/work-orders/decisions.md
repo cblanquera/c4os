@@ -15,7 +15,7 @@ Source Note: Imported from human planning sources and reconciled with accepted r
 - Provider support starts with OpenAI-compatible profiles and BYOK storage.
 - Built-in provider profile types include OpenAI, OpenRouter, Hugging Face router, LiteLLM proxy, and custom OpenAI-compatible endpoint.
 - The interface uses a three-panel desktop shell with left navigation, central session content, and right-side Browser, Files, and Terminal tabs.
-- The current interface contract is promoted into `.agents/context/interface.md`.
+- The current interface contract is promoted into `.agents/context/creative-specs.md`.
 - The first usable screen after trusting a folder is the active workspace, not a marketing dashboard.
 - The MVP interface should remain neutral and utilitarian, use lucide icons, and avoid dark theme or brand styling unless a later design phase approves it.
 - All documented/r04 features are MVP scope unless explicitly moved out later; checkpoint phases are implementation milestones, not MVP scope boundaries.

@@ -23,7 +23,7 @@ state by default.
 
 ### REQ-003: Provider And Model Setup
 
-Source: `.agents/specs/research/requirements.md`, `.agents/context/constraints.md`
+Source: `.agents/specs/research/requirements.md`, `.agents/context/technical-specs.md`
 
 Users can configure OpenAI-compatible providers, store raw keys only in secure
 storage, manage models, and select provider/model context per session.
@@ -38,7 +38,7 @@ remain product-owned.
 
 ### REQ-005: Persistent Resumable Sessions
 
-Source: `.agents/specs/research/requirements.md`, `.agents/context/product.md`
+Source: `.agents/specs/research/requirements.md`, `.agents/context/product-brief.md`
 
 Sessions preserve transcript, message index, run status, selected agent,
 provider/model, approval, artifact, memory, runtime, branch/worktree, Browser,
@@ -63,7 +63,7 @@ execution.
 
 ### REQ-008: Trusted-Root Files
 
-Source: `.agents/specs/research/requirements.md`, `.agents/context/feature-goals.md`
+Source: `.agents/specs/research/requirements.md`, `.agents/context/product-brief.md`
 
 File browsing, loading, editing, saving, reverting, creating, renaming, and
 deleting stay inside trusted roots and reject traversal or casual `.git`

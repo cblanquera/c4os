@@ -8,8 +8,8 @@ progress workflows.
 ## Read First
 
 - `.agents/AGENTS.md`
-- `.agents/context/index.md`
-- `.agents/context/feature-goals.md`
+- `.agents/context/product-brief.md` for the document map
+- The context document selected by the product brief's routing table
 - `.agents/specs/manifest.md`
 - `.agents/specs/research/research-freeze.md`, when the goal depends on research output
 - `.agents/specs/mvp/status.md`, when the goal mentions MVP, viability, distribution, dogfood, desktop, or release
@@ -34,7 +34,7 @@ For this repository, implementation paths for distributable MVP work are
 ## Process
 
 1. Restate the active goal, scope, non-goals, source inputs, done definition, and verification expectation.
-2. Check context, feature goals, specs manifest, and current progress before selecting work.
+2. Check the routed context, work orders when relevant, specs manifest, and current progress before selecting work.
 3. Determine the current phase: research, MVP specification, creative review, freeze, progress, implementation, QA, batch reconciliation, or closeout.
 4. Route to the smallest useful specialist workflow.
 5. Create progress state only after an accepted/frozen spec exists and active execution is requested.

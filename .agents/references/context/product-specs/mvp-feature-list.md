@@ -240,10 +240,8 @@ The MVP must let a technical local-project user complete this workflow:
 
 ## Related Context
 
-- `.agents/context/index.md`
-- `.agents/context/product.md`
-- `.agents/context/product-experience.md`
-- `.agents/context/product-model.md`
-- `.agents/context/feature-surfaces.md`
-- `.agents/context/interface.md`
-- `.agents/context/runtime-adapter.md`
+- `.agents/context/product-brief.md`
+- `.agents/context/product-specs.md`
+- `.agents/context/technical-specs.md`
+- `.agents/context/creative-specs.md`
+- `.agents/context/work-orders.md`

@@ -31,7 +31,7 @@ agents.
   results, and research closeout.
 - `.agents/specs/mvp/`: current MVP contract draft derived from frozen
   research records.
-- `.agents/context/mvp-feature-list.md`: context-level feature inventory
+- `.agents/context/product-specs.md`: context-level feature inventory
   promoted from the current MVP contract and accepted r04 handoff.
 - `.agents/references/research/grill-session.md`: accepted grill-session
   decisions and supporting research notes.

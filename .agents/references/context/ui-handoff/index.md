@@ -7,7 +7,7 @@ Source Note: Derived from the r04 wireframe review and accepted handoff decision
 ## Summary
 
 These chunks preserve the detailed r04 UI handoff inside `.agents/references/`
-so `.agents/context/ui-handoff.md` can stay compact while still giving future
+so `.agents/context/creative-specs.md` can stay compact while still giving future
 agents enough detail to implement or spec from the wireframes without opening
 the prototype.
 
@@ -22,7 +22,7 @@ the prototype.
 
 ## Lookup Notes
 
-- Start with `.agents/context/ui-handoff.md`.
+- Start with `.agents/context/creative-specs.md`.
 - Read all chunks before converting r04 UI behavior into implementation tasks.
 - Treat r04 example data as illustrative unless another product record promotes it.
 - Do not treat simulated prototype behavior as completed implementation.

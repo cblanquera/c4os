@@ -36,9 +36,9 @@ The chunked reference index is
 ## Project Implications
 
 - Future implementation work should not infer UI behavior from screenshots
-  alone; it should read `.agents/context/interface.md` and then the chunked
+  alone; it should read `.agents/context/creative-specs.md` and then the chunked
   handoff context for older r04 detail.
-- If this file, `.agents/context/interface.md`, or the chunked r04 handoff
+- If this file, `.agents/context/creative-specs.md`, or the chunked r04 handoff
   conflicts, treat the root UI handoff provenance reference as the source to
   reconcile against until a later accepted design review changes it.
 - Example data in r04 is illustrative unless promoted into requirements,
@@ -49,5 +49,5 @@ The chunked reference index is
 
 ## Related Context
 
-- `.agents/context/index.md`
+- `.agents/context/product-brief.md`
 - `.agents/references/context/source-provenance.md`
