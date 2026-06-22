@@ -3,7 +3,8 @@ import { validateWorkspacePayload } from "./connector-contract.js";
 export function createConnector(options = {}) {
   const search = options.params || new URLSearchParams(window.location.search);
   const fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
-  const kind = search.get("connector") || "none";
+  const tauriInvoke = options.tauriInvoke || resolveTauriInvoke();
+  const kind = search.get("connector") || (tauriInvoke ? "tauri" : "none");
 
   if (kind === "server") {
     return serverConnector({
@@ -15,7 +16,9 @@ export function createConnector(options = {}) {
   }
 
   if (kind === "tauri") {
-    return tauriConnector();
+    return tauriConnector({
+      invoke: tauriInvoke
+    });
   }
 
   return disabledConnector("none", "No connector configured");
@@ -55,8 +58,45 @@ function serverConnector(config) {
   };
 }
 
-function tauriConnector() {
-  return disabledConnector("tauri", "Tauri connector is not available until native commands are registered");
+function tauriConnector(config) {
+  if (!config.invoke) return disabledConnector("tauri", "Tauri invoke bridge is not available");
+
+  const invoke = config.invoke;
+
+  return {
+    available: true,
+    kind: "tauri",
+    async loadWorkspace() {
+      const payload = await invoke("load_workspace");
+      const missing = validateWorkspacePayload(payload);
+      if (missing.length > 0) throw new Error(`Workspace payload missing: ${missing.join(", ")}`);
+      return payload;
+    },
+    async sendPrompt(prompt) {
+      return invoke("send_prompt", { prompt });
+    },
+    async openWorkspace(path) {
+      return invoke("open_workspace", { request: { path } });
+    },
+    async createSession(project) {
+      return invoke("create_session", { project });
+    },
+    async readFile(path) {
+      return invoke("read_file", { request: { path } });
+    },
+    async saveFile(path) {
+      return invoke("save_file", { request: { path } });
+    },
+    async runTerminalCommand(command) {
+      return invoke("run_terminal_command", { request: { command } });
+    },
+    async openBrowserPreview() {
+      return invoke("open_browser_preview");
+    },
+    async listExtensions() {
+      return invoke("list_extensions");
+    }
+  };
 }
 
 function disabledConnector(kind, message) {
@@ -70,4 +110,8 @@ function disabledConnector(kind, message) {
     loadWorkspace: unavailable,
     sendPrompt: unavailable
   };
+}
+
+function resolveTauriInvoke() {
+  return globalThis.__TAURI__?.core?.invoke || globalThis.__TAURI__?.invoke;
 }

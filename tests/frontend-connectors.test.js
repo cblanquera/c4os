@@ -31,14 +31,50 @@ describe("frontend connector boundary", () => {
     ]);
   });
 
-  it("provides a disabled tauri transport until TASK-003 supplies native commands", async () => {
+  it("normalizes tauri native commands behind the connector interface", async () => {
+    const calls = [];
     const connector = createConnector({
-      params: new URLSearchParams("connector=tauri")
+      params: new URLSearchParams("connector=tauri"),
+      tauriInvoke: async (command, payload) => {
+        calls.push({ command, payload });
+        if (command === "load_workspace") return createMockWorkspace();
+        if (command === "send_prompt") {
+          return {
+            agent: "Mock agent completed the requested transition.",
+            prompt: payload.prompt,
+            run: "Mock agent completed the requested transition."
+          };
+        }
+        return { ok: true, command, payload };
+      }
     });
 
     assert.equal(connector.kind, "tauri");
-    assert.equal(connector.available, false);
-    await assert.rejects(() => connector.loadWorkspace(), /Tauri connector is not available/);
+    assert.equal(connector.available, true);
+    assert.equal((await connector.loadWorkspace()).workspace.project, "Mock Workspace Alpha");
+    assert.deepEqual(await connector.sendPrompt("hello tauri"), {
+      agent: "Mock agent completed the requested transition.",
+      prompt: "hello tauri",
+      run: "Mock agent completed the requested transition."
+    });
+    assert.deepEqual(calls, [
+      { command: "load_workspace", payload: undefined },
+      { command: "send_prompt", payload: { prompt: "hello tauri" } }
+    ]);
+  });
+
+  it("auto-selects tauri transport when native invoke is available and no connector query is set", async () => {
+    const connector = createConnector({
+      params: new URLSearchParams(),
+      tauriInvoke: async (command) => {
+        if (command === "load_workspace") return createMockWorkspace();
+        return { ok: true };
+      }
+    });
+
+    assert.equal(connector.kind, "tauri");
+    assert.equal(connector.available, true);
+    assert.equal((await connector.loadWorkspace()).workspace.project, "Mock Workspace Alpha");
   });
 
   it("keeps app orchestration free of mock-server-specific function names", async () => {
