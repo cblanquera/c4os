@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-005A
+Status: ready-for-task-006
 Updated: 2026-06-22
 
 ## Active Stream
@@ -14,6 +14,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-003-backend-mock-parity.md`
 - `.agents/development/progress/items/TASK-004-first-user-flow.md`
 - `.agents/development/progress/items/TASK-005-openrouter-chat-session.md`
+- `.agents/development/progress/items/TASK-005A-scoped-frontend-state.md`
 
 ## Scope Rules
 
@@ -41,6 +42,6 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-005A` scoped frontend state and DOM update cleanup before
-`TASK-006` provider/model management. Do not start `TASK-006` until TASK-005A
-is accepted or the user explicitly redirects the queue.
+Start `TASK-006` provider/model management from the verified TASK-005A scoped
+frontend state boundary. Preserve the accepted r04 shell and scoped update
+patterns unless a later task explicitly changes the UI contract.

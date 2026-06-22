@@ -210,6 +210,7 @@ export async function sendConnectorPrompt(prompt, options = {}) {
   const activeTurn = createPendingTurn(prompt || threadState.user);
   threadTurns.push(activeTurn);
   syncThreadStateFromTurn(activeTurn);
+  options.onTurnCreated?.(activeTurn);
   if (options.createSession) ensureSessionForPrompt(prompt);
 
   try {
@@ -220,7 +221,7 @@ export async function sendConnectorPrompt(prompt, options = {}) {
       onEvent: (event) => {
         applyRuntimeEvent(event, activeTurn);
         syncThreadStateFromTurn(activeTurn);
-        options.onStateChange?.();
+        options.onStateChange?.(activeTurn);
       }
     });
     applyRuntimeEventsFromPayload(payload, activeTurn, options);
@@ -236,12 +237,15 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     activeTurn.run = message;
     appendWorkLog(activeTurn, message);
     activeTurn.failed = true;
+    options.onStateChange?.(activeTurn);
   } finally {
+    await options.beforeComplete?.(activeTurn);
     activeTurn.pending = false;
     activeTurn.completedAt = Date.now();
     activeTurn.workExpanded = Boolean(activeTurn.failed);
     syncThreadStateFromTurn(activeTurn);
     connectorState.runPending = false;
+    options.onStateChange?.(activeTurn);
   }
 }
 
@@ -314,7 +318,7 @@ function applyRuntimeEventsFromPayload(payload = {}, turn = threadState, options
   for (const event of payload.events) {
     applyRuntimeEvent(event, turn);
     syncThreadStateFromTurn(turn);
-    options.onStateChange?.();
+    options.onStateChange?.(turn);
   }
 }
 

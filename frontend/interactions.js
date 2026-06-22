@@ -1,4 +1,7 @@
 import { h, icon } from "./dom.js";
+import { appStore } from "./state.js";
+
+let scopedRouteGuardBound = false;
 
 /**
  * Build a square icon-only button for dynamically inserted controls.
@@ -11,8 +14,10 @@ function iconButton(label, iconName, className = "icon-button", attrs = {}) {
  * Bind all route-local interactions after each render pass.
  */
 export function bindInteractions(render, pluginInitials) {
+  bindScopedRouteGuard();
   document.querySelectorAll("a[data-link]").forEach((anchor) => {
     anchor.addEventListener("click", (event) => {
+      if (anchor.closest("[data-scoped-region]")) return;
       event.preventDefault();
       window.location.hash = anchor.dataset.link;
       render();
@@ -24,6 +29,19 @@ export function bindInteractions(render, pluginInitials) {
   bindTerminal();
   bindSettingsForms();
   bindDialogs(pluginInitials);
+}
+
+/**
+ * Prevent accidental route anchors inside scoped regions from changing hash.
+ */
+function bindScopedRouteGuard() {
+  if (scopedRouteGuardBound) return;
+  scopedRouteGuardBound = true;
+  document.addEventListener("click", (event) => {
+    const anchor = event.target.closest?.("[data-scoped-region] a[data-link]");
+    if (!anchor) return;
+    event.preventDefault();
+  }, true);
 }
 
 /**
@@ -57,6 +75,7 @@ function bindPanels() {
       const side = control.dataset.panelToggle;
       const collapsed = !shell.classList.contains(`is-${side}-collapsed`);
       shell.classList.toggle(`is-${side}-collapsed`, collapsed);
+      appStore.setShellValue(`${side}Collapsed`, collapsed);
       control.setAttribute("aria-pressed", String(collapsed));
     });
   });
@@ -75,6 +94,7 @@ function bindPanels() {
         // itself outside the visible browser viewport.
         const width = Math.max(min, Math.min(max, startWidth + current - start));
         shell.style.setProperty(prop, `${Math.round(width)}px`);
+        appStore.setShellValue(`${side}Width`, Math.round(width));
       };
       const up = () => {
         handle.removeEventListener("pointermove", move);
@@ -108,12 +128,18 @@ function panelWidthLimits(shell, side) {
  */
 function bindComposer() {
   document.querySelectorAll(".composer").forEach((node) => {
+    const surface = node.dataset.composerSurface || "default";
+    const composer = appStore.composerFor(surface);
     const input = node.querySelector(".attachment-input");
     const preview = node.querySelector("[data-attachments]");
-    let attachments = [];
+    let attachments = composer.attachments;
+    node.querySelector(".prompt-box")?.addEventListener("input", (event) => {
+      appStore.setComposerValue(surface, "prompt", event.currentTarget.textContent || "");
+    });
     node.querySelector("[data-attach-button]")?.addEventListener("click", () => input.click());
     input?.addEventListener("change", () => {
       attachments = attachments.concat(Array.from(input.files || []));
+      appStore.setComposerValue(surface, "attachments", attachments);
       input.value = "";
       renderAttachments();
     });
@@ -134,6 +160,7 @@ function bindComposer() {
       preview.querySelectorAll("[data-remove-attachment]").forEach((remove) => {
         remove.addEventListener("click", () => {
           attachments.splice(Number(remove.dataset.removeAttachment), 1);
+          appStore.setComposerValue(surface, "attachments", attachments);
           renderAttachments();
         });
       });
@@ -151,19 +178,21 @@ function bindComposer() {
         const trigger = control?.querySelector("span");
         if (trigger && option.textContent !== "+ Create branch") {
           trigger.textContent = option.textContent;
+          appStore.setComposerValue(surface, kind, option.textContent);
           if (kind === "approval") control.setAttribute("aria-label", `Approval policy: ${option.textContent}`);
           if (kind === "branch") control.setAttribute("aria-label", `Branch: ${option.textContent}`);
         }
         option.closest("[data-popover]").hidden = true;
       });
     });
+    renderAttachments();
   });
 }
 
 /**
  * Bind the chat message disclosure control.
  */
-function bindMessage() {
+export function bindMessage() {
   document.querySelector("[data-toggle='message']")?.addEventListener("click", (event) => {
     const message = event.currentTarget.closest(".message");
     const expanded = message.classList.toggle("is-expanded");
@@ -175,7 +204,7 @@ function bindMessage() {
 /**
  * Bind the vertical resize handle inside the Terminal tool panel.
  */
-function bindTerminal() {
+export function bindTerminal() {
   const handle = document.querySelector("[data-resize-stack='terminal']");
   if (!handle) return;
   handle.addEventListener("pointerdown", (event) => {
@@ -187,6 +216,7 @@ function bindTerminal() {
     const move = (moveEvent) => {
       const height = Math.max(120, Math.min(420, startHeight + start - moveEvent.clientY));
       panel.style.setProperty("--terminal-bottom", `${Math.round(height)}px`);
+      appStore.setShellValue("terminalBottom", Math.round(height));
     };
     const up = () => {
       handle.removeEventListener("pointermove", move);

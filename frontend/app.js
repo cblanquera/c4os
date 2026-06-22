@@ -15,13 +15,13 @@ import {
   settingsItems,
   terminalState,
   threadTurns,
-  toolState,
   skillCatalog,
   workspace
 } from "./data.js";
 import { h, icon } from "./dom.js";
-import { bindInteractions } from "./interactions.js";
+import { bindInteractions, bindMessage, bindTerminal } from "./interactions.js";
 import { renderMarkdown } from "./markdown.js";
+import { appStore, sessionSurfaceKey } from "./state.js";
 
 const app = document.querySelector("#app");
 
@@ -70,6 +70,7 @@ function routeFromHash() {
  */
 function render() {
   const route = routeFromHash();
+  appStore.setRoute(route);
   document.body.dataset.route = route;
   if (route === "app-start") app.replaceChildren(renderStart());
   else if (route.startsWith("settings")) app.replaceChildren(renderSettings(route));
@@ -79,6 +80,10 @@ function render() {
   bindWorkspaceOpen();
   bindWorkLogDisclosure();
   bindToolTabs();
+  bindPanelLinks();
+  bindComposerPickers();
+  bindSessionRows();
+  applyShellState();
 }
 
 function bindConnectorRun() {
@@ -88,15 +93,22 @@ function bindConnectorRun() {
       const composerNode = control.closest(".composer");
       const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
       const shouldCreateSession = routeFromHash() !== "chat-session";
+      appStore.composer.bySurface[composerSurfaceKey()] = { prompt: "" };
+      const promptBox = composerNode?.querySelector(".prompt-box");
+      if (promptBox) promptBox.textContent = "";
       const pending = sendConnectorPrompt(prompt, {
         createSession: shouldCreateSession,
-        onStateChange: render
+        onTurnCreated: (turn) => {
+          if (!shouldCreateSession) appendTurnToThread(turn);
+        },
+        onStateChange: (turn) => updateTurnDom(turn),
+        beforeComplete: minimumPendingFrame
       });
       window.location.hash = "chat-session";
-      render();
+      if (shouldCreateSession) render();
       await minimumPendingFrame();
       await pending;
-      render();
+      updateTurnDom(threadTurns[threadTurns.length - 1]);
     });
   });
 }
@@ -107,17 +119,21 @@ function minimumPendingFrame() {
 
 function bindWorkLogDisclosure() {
   document.querySelectorAll("[data-work-toggle]").forEach((control) => {
+    if (control.dataset.boundWorkToggle) return;
+    control.dataset.boundWorkToggle = "true";
     control.addEventListener("click", () => {
       const turn = threadTurns.find((record) => record.id === control.dataset.workToggle);
       if (!turn || turn.pending) return;
       turn.workExpanded = !turn.workExpanded;
-      render();
+      updateWorkLogDom(turn);
     });
   });
 }
 
 function bindToolTabs() {
   document.querySelectorAll("[data-tool-tab]").forEach((control) => {
+    if (control.dataset.boundToolTab) return;
+    control.dataset.boundToolTab = "true";
     control.addEventListener("click", () => {
       const route = routeFromHash();
       setActiveToolForRoute(route, control.dataset.toolTab);
@@ -130,14 +146,118 @@ function bindToolTabs() {
   });
 }
 
-function bindPanelLinks() {
-  document.querySelectorAll(".tool-panel a[data-link]").forEach((anchor) => {
-    anchor.addEventListener("click", (event) => {
+function bindSessionRows() {
+  document.querySelectorAll("[data-session-target]").forEach((control) => {
+    if (control.dataset.boundSessionTarget) return;
+    control.dataset.boundSessionTarget = "true";
+    control.addEventListener("click", (event) => {
       event.preventDefault();
-      window.location.hash = anchor.dataset.link;
+      appStore.setActiveSession(control.dataset.projectTarget, control.dataset.sessionTarget);
+      window.location.hash = "chat-session";
+      updateShellSessionDom();
+    });
+  });
+  document.querySelectorAll("[data-project-target]:not([data-session-target])").forEach((control) => {
+    if (control.dataset.boundProjectTarget) return;
+    control.dataset.boundProjectTarget = "true";
+    control.addEventListener("click", (event) => {
+      event.preventDefault();
+      workspace.project = control.dataset.projectTarget;
+      window.location.hash = "new-session";
       render();
     });
   });
+}
+
+function bindComposerPickers() {
+  document.querySelectorAll("[data-local-picker-trigger]").forEach((control) => {
+    if (control.dataset.boundLocalPicker) return;
+    control.dataset.boundLocalPicker = "true";
+    control.addEventListener("click", () => {
+      const composerNode = control.closest(".composer");
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      appStore.setComposerValue(surface, "openPicker", control.dataset.localPickerTrigger);
+      updateComposerPicker(composerNode, surface);
+    });
+  });
+  document.querySelectorAll("[data-local-provider]").forEach((control) => {
+    if (control.dataset.boundLocalProvider) return;
+    control.dataset.boundLocalProvider = "true";
+    control.addEventListener("click", () => {
+      const composerNode = control.closest(".composer");
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      appStore.setComposerValue(surface, "openPicker", "models");
+      updateComposerPicker(composerNode, surface);
+    });
+  });
+  document.querySelectorAll("[data-local-model]").forEach((control) => {
+    if (control.dataset.boundLocalModel) return;
+    control.dataset.boundLocalModel = "true";
+    control.addEventListener("click", () => {
+      const composerNode = control.closest(".composer");
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      workspace.model = control.dataset.localModel;
+      appStore.setComposerValue(surface, "openPicker", null);
+      composerNode.querySelector("[data-local-picker-trigger='models'] span").textContent = workspace.model;
+      composerNode.querySelector("[data-local-picker-trigger='models']").setAttribute("aria-label", `Model: ${workspace.model}`);
+      updateComposerPicker(composerNode, surface);
+    });
+  });
+}
+
+function bindPanelLinks() {
+  document.querySelectorAll(".tool-panel [data-file-target]").forEach((anchor) => {
+    if (anchor.dataset.boundFileTarget) return;
+    anchor.dataset.boundFileTarget = "true";
+    anchor.addEventListener("click", (event) => {
+      event.preventDefault();
+      const route = routeFromHash();
+      const surface = toolSurfaceKey(route);
+      appStore.setFileView(surface, anchor.dataset.fileTarget);
+      const panel = document.querySelector(".tool-panel");
+      panel?.replaceWith(renderToolPanel("files", route));
+      bindToolTabs();
+      bindTerminal();
+      bindPanelLinks();
+    });
+  });
+}
+
+function updateShellSessionDom() {
+  const shell = document.querySelector(".app-shell");
+  if (!shell) return render();
+  shell.dataset.screen = "chat-session";
+  document.body.dataset.route = "chat-session";
+  shell.querySelector(".topbar strong").textContent = workspace.session;
+  shell.querySelectorAll(".project-row").forEach((row) => {
+    row.classList.toggle("is-active", row.dataset.projectTarget === workspace.project);
+  });
+  shell.querySelectorAll(".session-row").forEach((row) => {
+    row.classList.toggle("is-active", row.dataset.sessionTarget === workspace.session);
+  });
+  const workbench = shell.querySelector(".workbench");
+  const currentMain = workbench.querySelector(":scope > main");
+  if (!currentMain?.classList.contains("thread-view")) {
+    currentMain?.replaceWith(renderThread());
+    bindWorkLogDisclosure();
+    bindConnectorRun();
+  }
+}
+
+function applyShellState() {
+  const shell = document.querySelector(".app-shell");
+  if (!shell) return;
+  const route = routeFromHash();
+  const routeOwnsToolPanel = route === "file-explorer" || route === "file-editor" || route === "terminal";
+  shell.classList.toggle("is-left-collapsed", appStore.shell.leftCollapsed);
+  shell.classList.toggle("is-right-collapsed", !routeOwnsToolPanel && appStore.shell.rightCollapsed);
+  shell.querySelector("[data-panel-toggle='left']")?.setAttribute("aria-pressed", String(appStore.shell.leftCollapsed));
+  shell.querySelector("[data-panel-toggle='right']")?.setAttribute("aria-pressed", String(!routeOwnsToolPanel && appStore.shell.rightCollapsed));
+  if (appStore.shell.leftWidth) shell.style.setProperty("--left-panel", `${appStore.shell.leftWidth}px`);
+  if (appStore.shell.rightWidth) shell.style.setProperty("--right-panel", `${appStore.shell.rightWidth}px`);
+  if (appStore.shell.terminalBottom) {
+    shell.querySelector(".terminal-tool")?.style.setProperty("--terminal-bottom", `${appStore.shell.terminalBottom}px`);
+  }
 }
 
 function bindWorkspaceOpen() {
@@ -220,16 +340,19 @@ function renderShell(route) {
 }
 
 function activeToolForRoute(route) {
+  if (route === "file-explorer" || route === "file-editor" || route === "terminal") {
+    return defaultToolForRoute(route);
+  }
   const key = toolSurfaceKey(route);
-  return toolState.bySurface[key] || defaultToolForRoute(route);
+  return appStore.toolFor(key, defaultToolForRoute(route));
 }
 
 function setActiveToolForRoute(route, tool) {
-  toolState.bySurface[toolSurfaceKey(route)] = tool;
+  appStore.setTool(toolSurfaceKey(route), tool);
 }
 
 function toolSurfaceKey(route) {
-  if (route === "chat-session") return `chat:${workspace.project}:${workspace.session || "untitled"}`;
+  if (route === "chat-session") return sessionSurfaceKey(workspace.project, workspace.session || "untitled");
   if (route === "new-session" || route === "providers-popover" || route === "models-popover") return `new:${workspace.project}`;
   return `route:${route}`;
 }
@@ -238,6 +361,10 @@ function defaultToolForRoute(route) {
   if (route === "file-explorer" || route === "file-editor") return "files";
   if (route === "terminal") return "terminal";
   return "browser";
+}
+
+function composerSurfaceKey() {
+  return routeFromHash() === "chat-session" ? appStore.activeSessionKey() : `new:${workspace.project}`;
 }
 
 /**
@@ -249,8 +376,17 @@ function renderSidebar(chat) {
     h("div", { class: "nav-section" }, [
       h("div", { class: "section-head" }, [h("span", { text: "Projects" }), iconButton("Add Project", "add")]),
       ...projects.flatMap((project) => [
-        link("new-session", `project-row${project.name === workspace.project && !chat ? " is-active" : ""}`, [icon("folder"), h("span", { text: project.name }), h("span", { class: "row-tools" }, [icon("pencil"), icon("trash")])]),
-        ...project.sessions.map((session) => link("chat-session", `session-row${chat && session === workspace.session ? " is-active" : ""}`, [h("span", { text: session })]))
+        h("a", {
+          class: `project-row${project.name === workspace.project && !chat ? " is-active" : ""}`,
+          href: "#new-session",
+          "data-project-target": project.name
+        }, [icon("folder"), h("span", { text: project.name }), h("span", { class: "row-tools" }, [icon("pencil"), icon("trash")])]),
+        ...project.sessions.map((session) => h("a", {
+          class: `session-row${chat && session === workspace.session ? " is-active" : ""}`,
+          href: "#chat-session",
+          "data-project-target": project.name,
+          "data-session-target": session
+        }, [h("span", { text: session })]))
       ])
     ]),
     link("settings-providers", "settings-entry", [icon("settings"), h("span", { text: "Settings" })])
@@ -287,24 +423,27 @@ function renderNewSession(route) {
  */
 function composer(placeholder, options = {}) {
   const readonly = options.readonlyContext;
-  return h("section", { class: "composer", "aria-label": "Prompt composer" }, [
+  const surface = options.surface || composerSurfaceKey();
+  const state = appStore.composerFor(surface);
+  return h("section", { class: "composer", "aria-label": "Prompt composer", "data-composer-surface": surface }, [
     h("input", { class: "attachment-input", type: "file", multiple: true, tabindex: "-1", "aria-hidden": "true" }),
     h("div", { class: "attachment-preview", "data-attachments": "", hidden: true, "aria-label": "Attached files" }),
-    h("div", { class: "prompt-box", role: "textbox", "aria-label": "Prompt", "aria-multiline": "true", contenteditable: "true", "data-placeholder": placeholder }),
+    h("div", { class: "prompt-box", role: "textbox", "aria-label": "Prompt", "aria-multiline": "true", contenteditable: "true", "data-placeholder": placeholder, text: state.prompt }),
     h("div", { class: "composer-controls" }, [
       iconButton("Attach File", "paperclip", "icon-button", { "data-attach-button": "" }),
-      h("button", { class: "chip", type: "button", "aria-label": "Approval policy: Approve for me", "data-popover-trigger": "approval" }, [icon("shield"), h("span", { text: "Approve for me" })]),
+      h("button", { class: "chip", type: "button", "aria-label": `Approval policy: ${state.approval}`, "data-popover-trigger": "approval" }, [icon("shield"), h("span", { text: state.approval })]),
       h("span", { class: "spacer" }),
       iconButton("Use Microphone", "mic"),
       iconButton("Send Prompt", "send", "icon-button send-button")
     ]),
     h("div", { class: "context-strip" }, [
-      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Branch locked for this chat" }, [icon("gitBranch"), h("span", { text: workspace.branch })]) : h("button", { class: "chip", type: "button", "aria-label": `Branch: ${workspace.branch}`, "data-popover-trigger": "branch" }, [icon("gitBranch"), h("span", { text: workspace.branch })]),
+      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Branch locked for this chat" }, [icon("gitBranch"), h("span", { text: state.branch })]) : h("button", { class: "chip", type: "button", "aria-label": `Branch: ${state.branch}`, "data-popover-trigger": "branch" }, [icon("gitBranch"), h("span", { text: state.branch })]),
       h("span", { class: "spacer" }),
-      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Model locked for this chat" }, [icon("bot"), h("span", { text: workspace.model })]) : link("models-popover", "chip", [icon("bot"), h("span", { text: workspace.model })])
+      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Model locked for this chat" }, [icon("bot"), h("span", { text: workspace.model })]) : h("button", { class: "chip", type: "button", "aria-label": `Model: ${workspace.model}`, "data-local-picker-trigger": "models" }, [icon("bot"), h("span", { text: workspace.model })])
     ]),
     composerPopover("approval", ["Ask for approval", "Approve for me"]),
     readonly ? null : composerPopover("branch", ["main", "feature/trust-shell", "+ Create branch"]),
+    state.openPicker ? localComposerPicker(state.openPicker) : null,
     options.popover
   ]);
 }
@@ -316,6 +455,34 @@ function composerPopover(kind, rows) {
   return h("div", { class: `composer-popover ${kind}-popover`, hidden: true, "data-popover": kind }, rows.map((row) =>
     h("button", { class: "popover-row", type: "button", "data-popover-option": row }, [h("span", { text: row })])
   ));
+}
+
+function localComposerPicker(kind) {
+  if (kind === "providers") {
+    return h("aside", { class: "popover", "aria-label": "Provider selector", "data-local-picker": "providers" }, [
+      h("header", { class: "popover-title" }, [h("strong", { text: "Providers" }), h("span", { text: "Select source" })]),
+      ...["OpenRouter", "OpenAI", "LiteLLM Local"].map((name) =>
+        h("button", { class: "popover-row", type: "button", "data-local-provider": name }, [h("span", { text: name }), icon("chevronRight")])
+      )
+    ]);
+  }
+  return h("aside", { class: "popover", "aria-label": "Model selector", "data-local-picker": "models" }, [
+    h("header", { class: "popover-backbar" }, [
+      h("button", { class: "popover-back", type: "button", "aria-label": "Back to providers", "data-local-picker-trigger": "providers" }, [icon("chevronLeft"), h("strong", { text: "OpenRouter" })])
+    ]),
+    ...models.slice(0, 3).map((model) => h("button", { class: `popover-row${model.active ? " is-selected" : ""}`, type: "button", "data-local-model": model.label }, [
+      h("span", { text: model.label }),
+      model.active ? h("span", { "aria-label": "Current model" }, [icon("check")]) : h("span")
+    ]))
+  ]);
+}
+
+function updateComposerPicker(composerNode, surface) {
+  const current = composerNode.querySelector("[data-local-picker]");
+  current?.remove();
+  const picker = appStore.composerFor(surface).openPicker;
+  if (picker) composerNode.append(localComposerPicker(picker));
+  bindComposerPickers();
 }
 
 /**
@@ -357,9 +524,9 @@ function renderThread() {
 
 function renderTurn(turn, interactive) {
   return [
-    h("article", { class: "message user thread-item" }, [h("p", { text: turn.user })]),
+    h("article", { class: "message user thread-item", "data-turn-id": turn.id, "data-turn-part": "user" }, [h("p", { text: turn.user })]),
     workLog(turn),
-    h("article", { class: `message agent thread-item${turn.pending && !turn.agent ? " is-pending" : ""}` }, [
+    h("article", { class: `message agent thread-item${turn.pending && !turn.agent ? " is-pending" : ""}`, "data-turn-id": turn.id, "data-turn-part": "agent" }, [
       h("div", { class: "markdown-body" }, renderMarkdown(turn.agent || "Waiting on connector")),
       h("div", { class: "message-extra markdown-body" }, renderMarkdown(turn.extra)),
       interactive ? h("button", { class: "text-button", type: "button", "data-toggle": "message", "aria-expanded": "false" }, ["Show More"]) : null
@@ -373,7 +540,7 @@ function workLog(turn) {
     h("span", { text: workLabel(turn) }),
     icon("chevronRight")
   ];
-  return h("section", { class: `work-log thread-item${turn.pending ? " is-pending" : ""}${expanded ? " is-expanded" : ""}` }, [
+  return h("section", { class: `work-log thread-item${turn.pending ? " is-pending" : ""}${expanded ? " is-expanded" : ""}`, "data-turn-id": turn.id, "data-turn-part": "work" }, [
     h("button", {
       class: "work-log-toggle",
       type: "button",
@@ -382,6 +549,57 @@ function workLog(turn) {
     }, label),
     expanded ? h("div", { class: "work-log-body markdown-body" }, renderMarkdown(workLogText(turn))) : null
   ]);
+}
+
+function appendTurnToThread(turn) {
+  const list = document.querySelector(".thread-list");
+  if (!list || list.querySelector(`[data-turn-id='${cssEscape(turn.id)}']`)) return;
+  const fragment = document.createDocumentFragment();
+  for (const node of renderTurn(turn, true)) fragment.append(node);
+  list.append(fragment);
+  refreshLatestTurnControls();
+  bindWorkLogDisclosure();
+  bindMessage();
+}
+
+function updateTurnDom(turn) {
+  if (!turn) return;
+  updateWorkLogDom(turn);
+  updateAgentTurnDom(turn);
+}
+
+function updateWorkLogDom(turn) {
+  const node = document.querySelector(`[data-turn-id='${cssEscape(turn.id)}'][data-turn-part='work']`);
+  if (!node) return;
+  const replacement = workLog(turn);
+  node.className = replacement.className;
+  node.replaceChildren(...Array.from(replacement.childNodes));
+  bindWorkLogDisclosure();
+}
+
+function updateAgentTurnDom(turn) {
+  const node = document.querySelector(`[data-turn-id='${cssEscape(turn.id)}'][data-turn-part='agent']`);
+  if (!node) return;
+  node.classList.toggle("is-pending", Boolean(turn.pending && !turn.agent));
+  node.querySelector(".markdown-body")?.replaceChildren(...renderMarkdown(turn.agent || "Waiting on connector"));
+  node.querySelector(".message-extra")?.replaceChildren(...renderMarkdown(turn.extra));
+}
+
+function refreshLatestTurnControls() {
+  const agentMessages = Array.from(document.querySelectorAll("[data-turn-part='agent']"));
+  agentMessages.forEach((message, index) => {
+    const latest = index === agentMessages.length - 1;
+    const existing = message.querySelector("[data-toggle='message']");
+    if (latest && !existing) {
+      message.append(h("button", { class: "text-button", type: "button", "data-toggle": "message", "aria-expanded": "false" }, ["Show More"]));
+    } else if (!latest && existing) {
+      existing.remove();
+    }
+  });
+}
+
+function cssEscape(value) {
+  return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/'/g, "\\'");
 }
 
 function workLabel(turn) {
@@ -418,12 +636,14 @@ function permissionPrompt(turn) {
  * Render the right-side Browser, Files, or Terminal tool panel.
  */
 function renderToolPanel(active, route) {
+  const surface = toolSurfaceKey(route);
+  const fileView = appStore.fileViewFor(surface, route === "file-editor" ? "editor" : "explorer");
   const tabs = [
     ["Browser", "browser", "globe"],
     ["Files", "files", "file"],
     ["Terminal", "terminal", "terminal"]
   ];
-  return h("aside", { class: "tool-panel", "aria-label": "Workspace tools" }, [
+  return h("aside", { class: "tool-panel", "aria-label": "Workspace tools", "data-scoped-region": "tool-panel" }, [
     h("nav", { class: "tool-tabs", "aria-label": "Workspace tool tabs" }, tabs.map(([label, key, iconName]) =>
       h("button", {
         class: `tool-tab${active === key ? " is-active" : ""}`,
@@ -433,7 +653,7 @@ function renderToolPanel(active, route) {
         "data-tool-tab": key
       }, [icon(iconName), h("span", { text: label })])
     )),
-    active === "files" ? filesTool(route === "file-editor") : active === "terminal" ? terminalTool() : browserTool()
+    active === "files" ? filesTool(fileView === "editor") : active === "terminal" ? terminalTool() : browserTool()
   ]);
 }
 
@@ -454,9 +674,9 @@ function filesTool(editor) {
   if (editor) {
     return h("section", { class: "tool-body editor-tool" }, [
       h("nav", { class: "breadcrumbs", "aria-label": "File breadcrumbs" }, [
-        link("file-explorer", "", [filesState.breadcrumbs[0] || workspace.project]),
+        h("button", { type: "button", "data-file-target": "explorer" }, [filesState.breadcrumbs[0] || workspace.project]),
         h("span", { text: ">" }),
-        link("file-explorer", "", [filesState.breadcrumbs[1] || "frontend"]),
+        h("button", { type: "button", "data-file-target": "explorer" }, [filesState.breadcrumbs[1] || "frontend"]),
         h("span", { text: ">" }),
         h("span", { text: filesState.breadcrumbs[2] || "main.js" })
       ]),
@@ -470,7 +690,13 @@ function filesTool(editor) {
   }
   return h("section", { class: "tool-body file-tool" }, [
     h("h2", { text: workspace.project }),
-    ...filesState.roots.map(([name, iconName, target], index) => link(target, `file-row${iconName === "file" ? " is-file" : ""}${index === 2 ? " is-active" : ""}`, [icon(iconName), h("span", { text: name })]))
+    ...filesState.roots.map(([name, iconName, target], index) =>
+      h("button", {
+        class: `file-row${iconName === "file" ? " is-file" : ""}${index === 2 ? " is-active" : ""}`,
+        type: "button",
+        "data-file-target": target === "file-editor" ? "editor" : "explorer"
+      }, [icon(iconName), h("span", { text: name })])
+    )
   ]);
 }
 

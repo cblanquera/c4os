@@ -193,13 +193,15 @@ input, textarea, select { font-weight: 400; }
 .preview-surface p { color: var(--ink-soft); margin: 0; overflow-wrap: anywhere; }
 .file-tool { padding: 16px 8px; }
 .file-tool h2 { padding: 0 10px; }
-.file-row { align-items: center; border-radius: var(--radius-sm); display: grid; gap: 8px; grid-template-columns: 20px minmax(0, 1fr); min-height: 30px; padding: 0 10px; }
+.file-row { align-items: center; appearance: none; background: transparent; border: 0; border-radius: var(--radius-sm); color: inherit; cursor: pointer; display: grid; gap: 8px; grid-template-columns: 20px minmax(0, 1fr); min-height: 30px; padding: 0 10px; text-align: left; width: 100%; }
 .file-row.is-file { margin-left: 24px; }
 .file-row:hover, .file-row.is-active { background: var(--field); }
 .file-row.is-active { outline: 1px solid var(--line-strong); }
 .editor-tool, .terminal-tool { display: grid; height: calc(100vh - var(--topbar)); min-height: 0; }
 .editor-tool { grid-template-rows: 36px 1fr; }
 .breadcrumbs { align-items: center; border-bottom: 1px solid var(--line); display: flex; gap: 6px; padding: 0 10px; }
+.breadcrumbs button { align-items: center; appearance: none; background: transparent; border: 0; color: var(--accent); cursor: pointer; display: inline-flex; font: inherit; min-height: 0; padding: 0; }
+.breadcrumbs button:hover { color: var(--ink); }
 .terminal-output, .code-pane { background: var(--code); color: var(--code-ink); font-family: var(--font-code); font-size: 13px; line-height: 1.65; margin: 0; overflow: auto; padding: 14px; }
 .code-pane { padding: 0; }
 .code-line { display: grid; grid-template-columns: 32px max-content; min-width: max-content; }
