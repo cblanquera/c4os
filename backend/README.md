@@ -1,21 +1,42 @@
-# Backend Rust/Tauri Mock Parity
+# Backend Rust/Tauri Backend Surface
 
-Status: TASK-003 review target.
+Status: TASK-004 review target.
 
 `backend/` is the Rust/Tauri backend authority for the accepted r04 desktop
-shell. TASK-003 scaffolds the Tauri app under this root directory, not
-`src-tauri/`, and registers Rust command handlers that intentionally return the
-same mock workspace payload and fake run behavior proven by the TASK-002
-`tests/server/` harness. It does not claim real provider, runtime, filesystem,
-Browser, terminal, extension, security, approval, or persistence behavior.
+shell. The Tauri app lives under this root directory, not `src-tauri/`.
+TASK-004 activates the first real user flow by letting `open_workspace` create
+or load a non-secret `.c4os/workspace.json` descriptor for a local project
+folder and return that real workspace identity to the accepted r04 shell.
 
-## Mock Commands
+This does not claim real provider, runtime, filesystem browsing/editing,
+Browser, terminal, extension, security, approval, action, artifact, memory, or
+deep persistence behavior.
 
-- `load_workspace` returns the TASK-002 workspace payload shape.
+## Commands
+
+- `load_workspace` still returns the TASK-002 workspace payload shape.
+- `open_workspace` canonicalizes a local folder, creates or loads
+  `.c4os/workspace.json`, and returns a shell payload with the real workspace
+  identity.
 - `send_prompt` returns the fake successful agent transition payload.
-- `open_workspace`, `create_session`, `read_file`, `save_file`,
-  `run_terminal_command`, `open_browser_preview`, and `list_extensions` are
-  Rust mock handlers matching the TASK-002 connector method inventory.
+- `create_session`, `read_file`, `save_file`, `run_terminal_command`,
+  `open_browser_preview`, and `list_extensions` are Rust mock handlers matching
+  the TASK-002 connector method inventory.
+
+## Workspace Descriptor
+
+The descriptor is stored at `.c4os/workspace.json` inside the selected folder.
+It contains only non-secret identity and reference fields:
+
+- schema version
+- stable workspace id
+- display name
+- canonical root path
+- trust flag
+- created/updated timestamps
+
+It does not store provider keys, transcripts, artifacts, local memory, terminal
+history, Browser state, approvals, or runtime output.
 
 ## Package Scripts
 
@@ -54,10 +75,12 @@ text-entry control.
 
 ## Still Mocked
 
-- Workspace trust and trusted-root state.
+- `load_workspace` boot state before opening a folder.
+- Security and policy hardening around trust beyond the first descriptor-backed
+  activation.
 - Provider/model records and settings IA records.
 - Session creation, structured thread/run events, and agent processing.
 - Files, file editor content, artifacts/previews, Browser state, and Terminal
   output.
 - Plugin, skill, MCP, extension, approval, local memory, action record,
-  workspace descriptor, and persistence state.
+  artifact, audit, and deeper persistence state.

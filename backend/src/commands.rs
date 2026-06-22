@@ -1,5 +1,6 @@
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{mock_workspace, BrowserState, TerminalState, WorkspacePayload};
+use crate::workspace::{activate_workspace, WorkspaceActivation, WorkspaceDescriptor};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 
@@ -31,6 +32,8 @@ pub struct WorkspaceOpenResponse {
     pub path: String,
     pub trusted: bool,
     pub workspace: crate::mock_data::WorkspaceSummary,
+    pub descriptor: WorkspaceDescriptor,
+    pub payload: WorkspacePayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,15 +83,9 @@ pub fn send_prompt(prompt: String) -> AgentRunResponse {
 }
 
 #[tauri::command]
-pub fn open_workspace(request: Option<WorkspaceOpenRequest>) -> WorkspaceOpenResponse {
-    let workspace = mock_workspace();
-    WorkspaceOpenResponse {
-        path: request
-            .and_then(|input| input.path)
-            .unwrap_or_else(|| "/mock/workspace".into()),
-        trusted: true,
-        workspace: workspace.workspace,
-    }
+pub fn open_workspace(request: Option<WorkspaceOpenRequest>) -> Result<WorkspaceOpenResponse, String> {
+    let activation = activate_workspace(request.and_then(|input| input.path))?;
+    Ok(open_workspace_response(activation))
 }
 
 #[tauri::command]
@@ -170,6 +167,16 @@ pub fn fake_failed_run(prompt: String) -> String {
     format!("Mock agent failed before producing output. prompt={prompt}")
 }
 
+fn open_workspace_response(activation: WorkspaceActivation) -> WorkspaceOpenResponse {
+    WorkspaceOpenResponse {
+        path: activation.path,
+        trusted: activation.trusted,
+        workspace: activation.payload.workspace.clone(),
+        descriptor: activation.descriptor,
+        payload: activation.payload,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +205,25 @@ mod tests {
         assert_eq!(read_file(None).path, "frontend/mock-main.js");
         assert_eq!(save_file(None).saved, true);
         assert!(run_terminal_command(None).output.contains("fake agent run channel connected"));
+    }
+
+    #[test]
+    fn task_004_open_workspace_returns_real_descriptor_backed_payload() {
+        let root = std::env::temp_dir().join("c4os-task-004-command");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create workspace root");
+
+        let response = open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+
+        assert_eq!(response.trusted, true);
+        assert_eq!(response.workspace.project, "c4os-task-004-command");
+        assert_eq!(response.payload.workspace.project, "c4os-task-004-command");
+        assert_eq!(response.descriptor.name, "c4os-task-004-command");
+        assert_ne!(response.workspace.project, "Mock Workspace Alpha");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

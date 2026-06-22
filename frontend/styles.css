@@ -112,11 +112,13 @@ input, textarea, select { font-weight: 400; }
 .attachment-remove { align-items: center; background: transparent; border: 0; color: var(--ink-soft); cursor: pointer; display: inline-flex; font-weight: 800; height: 24px; justify-content: center; margin-right: -4px; padding: 0; width: 24px; }
 .attachment-remove:hover { color: var(--ink); }
 .prompt-box { color: var(--ink-soft); min-height: 96px; overflow: auto; padding: 18px 22px; }
+.prompt-box:focus, .prompt-box:focus-visible { outline: 0; }
 .prompt-box:empty::before { content: attr(data-placeholder); }
 .composer-controls, .context-strip { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 10px; min-height: 50px; padding: 0 20px; }
 .context-strip { background: var(--rail); justify-content: space-between; }
 .context-strip .chip, .readonly-chip { background: transparent; border-color: transparent; color: var(--ink-soft); padding: 0 8px; }
 .send-button { background: var(--ink); border-radius: 999px; color: var(--field); }
+.send-button:hover { background: var(--ink); border-color: var(--ink); color: var(--field); }
 .popover, .composer-popover { background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; position: absolute; z-index: 10; }
 .popover { bottom: 34px; right: 120px; width: 350px; }
 .composer-popover { width: 260px; }

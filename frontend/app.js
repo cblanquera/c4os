@@ -5,6 +5,7 @@ import {
   filesState,
   mcpServers,
   models,
+  openConnectorWorkspace,
   pluginCatalog,
   pluginMarketplaces,
   projects,
@@ -73,6 +74,7 @@ function render() {
   else app.replaceChildren(renderShell(route));
   bindInteractions(render, pluginInitials);
   bindConnectorRun();
+  bindWorkspaceOpen();
 }
 
 function bindConnectorRun() {
@@ -81,10 +83,32 @@ function bindConnectorRun() {
     control.addEventListener("click", async () => {
       const composerNode = control.closest(".composer");
       const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
-      const pending = sendConnectorPrompt(prompt);
+      const shouldCreateSession = routeFromHash() !== "chat-session";
+      const pending = sendConnectorPrompt(prompt, { createSession: shouldCreateSession });
+      window.location.hash = "chat-session";
       render();
+      await minimumPendingFrame();
       await pending;
       render();
+    });
+  });
+}
+
+function minimumPendingFrame() {
+  return new Promise((resolve) => window.setTimeout(resolve, 160));
+}
+
+function bindWorkspaceOpen() {
+  if (!connectorState.connector.available) return;
+  document.querySelectorAll("[data-open-workspace]").forEach((control) => {
+    control.addEventListener("click", async () => {
+      try {
+        await openConnectorWorkspace();
+        window.location.hash = "new-session";
+        render();
+      } catch {
+        render();
+      }
     });
   });
 }
@@ -114,7 +138,7 @@ function renderStart() {
       h("h1", { text: title }),
       h("p", { class: "lead", text: lead }),
       h("div", { class: "action-row" }, [
-        button("Open Folder", "button primary"),
+        button("Open Folder", "button primary", null, { "data-open-workspace": "" }),
         button("Clone Repository"),
         button("Open Workspace File")
       ])
@@ -190,7 +214,7 @@ function resizeHandle(side) {
 function renderNewSession(route) {
   const popover = route === "providers-popover" ? providerPopover() : route === "models-popover" ? modelPopover() : null;
   return h("main", { class: "empty-workspace" }, [
-    h("h1", { text: "What should we build in this project?" }),
+    h("h1", { text: `What should we build in ${workspace.project}?` }),
     composer("Do anything", { popover })
   ]);
 }

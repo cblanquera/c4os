@@ -178,27 +178,69 @@ export function beginConnectorStateLoad() {
     });
 }
 
-export async function sendConnectorPrompt(prompt) {
+export async function openConnectorWorkspace(path) {
+  if (!connectorState.connector.available || !connectorState.connector.openWorkspace) return;
+
+  connectorState.error = null;
+  connectorState.loading = true;
+
+  try {
+    const response = await connectorState.connector.openWorkspace(path);
+    const payload = response.payload || response;
+    applyConnectorWorkspace(payload);
+    return payload;
+  } catch (error) {
+    connectorState.error = error.message;
+    throw error;
+  } finally {
+    connectorState.loading = false;
+  }
+}
+
+export async function sendConnectorPrompt(prompt, options = {}) {
   if (!connectorState.connector.available || connectorState.runPending) return;
 
   connectorState.runPending = true;
   threadState.user = prompt || threadState.user;
   threadState.agent = "Connector is processing the request.";
   threadState.extra = "Waiting for a normalized thread/run event from the active connector.";
+  threadState.tool = "Thinking";
   threadState.run = "Waiting on connector";
+  if (options.createSession) ensureSessionForPrompt(prompt);
 
   try {
+    if (options.createSession && connectorState.connector.createSession) {
+      await connectorState.connector.createSession(workspace.project);
+    }
     const payload = await connectorState.connector.sendPrompt(prompt);
     threadState.agent = "The connector response is ready.";
     threadState.extra = "Connector run events completed successfully. No real provider, runtime, filesystem, Browser, Terminal, approval, memory, action, descriptor, or persistence behavior is claimed.";
+    threadState.tool = "Thinking complete";
     threadState.run = payload.run;
   } catch (error) {
     threadState.agent = "The connector run did not complete.";
     threadState.extra = "The failure is produced by the active connector and is not a real runtime failure.";
+    threadState.tool = "Thinking stopped";
     threadState.run = error.message;
   } finally {
     connectorState.runPending = false;
   }
+}
+
+function ensureSessionForPrompt(prompt) {
+  const label = sessionLabel(prompt);
+  workspace.session = label;
+  const project = projects.find((record) => record.name === workspace.project);
+  if (!project) {
+    projects.unshift({ name: workspace.project, sessions: [label] });
+    return;
+  }
+  project.sessions = [label, ...project.sessions.filter((session) => session !== label)];
+}
+
+function sessionLabel(prompt) {
+  const text = (prompt || "New chat session").trim().replace(/\s+/g, " ");
+  return text.length > 48 ? `${text.slice(0, 45)}...` : text;
 }
 
 function applyConnectorWorkspace(payload) {

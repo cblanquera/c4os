@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-004
+Status: ready-for-task-005
 Updated: 2026-06-22
 
 ## Active Stream
@@ -12,6 +12,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-001-r04-frontend.md`
 - `.agents/development/progress/items/TASK-002-mock-server-connection.md`
 - `.agents/development/progress/items/TASK-003-backend-mock-parity.md`
+- `.agents/development/progress/items/TASK-004-first-user-flow.md`
 
 ## Scope Rules
 
@@ -39,5 +40,5 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-004` only when the user explicitly requests the first real user-flow
-activation.
+Start `TASK-005` only when the user explicitly requests the next feature-slice
+unlock after TASK-004 acceptance.
