@@ -108,7 +108,8 @@ Source: `wireframes/ui-handoff-spec.md`, `wireframes/screens.md`
 
 The app implements the accepted r04 desktop shell: App Start, New Session, Chat
 Session, provider/model selectors, three-panel layout, right Browser/Files/
-Terminal tabs, and Settings surfaces.
+Terminal tabs, Settings surfaces, and native OS-level app menu commands for
+workspace, file-save, and edit actions.
 
 ### REQ-014: Structured Prompt And Thread States
 

@@ -13,10 +13,20 @@ are not active work until converted into `.agents/development/progress/` items.
   TASK-001, not as loose visual inspiration. Port r04 screen structure and
   working interactions first; only make production cleanup after parity is
   verified.
+- TASK-001 must produce a production-quality frontend foundation, not a copied
+  wireframe. r04 parity is the minimum floor; the completed frontend should
+  preserve r04 behavior and information architecture while improving the visual
+  presentation enough to be a credible desktop product shell.
 - Do not invent UI controls, secondary panels, metadata cards, filters,
   settings abstractions, or route structures during frontend foundation work.
   Any control or layout not present in r04 or explicitly required by the MVP
   contract must be proposed as a later change, not silently added.
+- After TASK-001 passes review, later tasks may replace static fixtures,
+  placeholder data, and static component behavior with dynamic, backend-backed,
+  or working equivalents behind the accepted UI. Later tasks must not add new
+  visible UI components, controls, panels, menus, cards, settings abstractions,
+  or route structures unless a change is explicitly accepted and documented
+  before implementation.
 - Use `tests/server/` for the mock server harness because this repo's
   implementation contract uses that path, not `test/server/`.
 - Every mock-backed phase must state exactly what is mocked.
@@ -36,8 +46,36 @@ Depends on: review/freeze
 
 Build the entire frontend in `frontend/` from the r04 wireframes and
 `wireframes/ui-handoff-spec.md`. This task should establish the actual product
-shell frontend by first preserving r04 functional parity, not by redesigning
-the UI from scratch.
+shell frontend by preserving r04 functional parity and then applying a
+production visual treatment. The result should be a stable product shell ready
+for mocked server state in TASK-002, not a throwaway prototype and not a
+copy/paste of the grayscale wireframe.
+
+Purpose:
+
+- Convert the accepted r04 product shape into real app frontend code.
+- Preserve the hard-won r04 behavior, screen inventory, information
+  architecture, and control placement so later tasks can connect real state
+  without rediscovering the UI contract.
+- Improve presentation, hierarchy, typography, spacing, color, controls,
+  panels, and settings polish enough that the first reviewable frontend feels
+  like C4OS product software instead of a planning artifact.
+- Leave a tested shell that TASK-002 can connect to mock server data without
+  rewriting routes, screens, or interactions.
+
+Allowed TASK-001 implementation scope:
+
+- `frontend/` for the product shell frontend.
+- Frontend behavior tests using filenames such as `tests/frontend-*.test.*`
+  when needed for rendered browser verification.
+- Frontend-only support harness files under `tests/support/` when needed to run
+  TASK-001 verification locally.
+- Minimal package script updates when needed to expose TASK-001 frontend dev,
+  test, or acceptance commands.
+
+TASK-001 must not edit `backend/` or `tests/server/`. If frontend work exposes
+a backend or mock-server concern, record it for the next task instead of adding
+server behavior during TASK-001.
 
 Parity requirements:
 
@@ -61,6 +99,19 @@ Parity requirements:
   promote r04 names, URLs, terminal output, provider/model examples, plugin
   records, or copy into product truth.
 
+Production presentation requirements:
+
+- Do not keep the r04 white/grayscale wireframe treatment as the final TASK-001
+  visual result. Apply a restrained production desktop-app visual system while
+  preserving r04 structure and behavior.
+- Improve visual hierarchy, typography, spacing, color tokens, panel surfaces,
+  button/control treatment, settings readability, and Browser/Files/Terminal
+  polish without adding, removing, renaming, or relocating product controls.
+- Keep the interface utilitarian and work-focused. Do not turn it into a
+  marketing page, decorative dashboard, or generic chat clone.
+- If a production visual improvement appears to require a structural change,
+  record it for review and leave it out of TASK-001.
+
 Use `frontend-design` for design planning and critique passes, then use
 `chrisai-coding` over the existing frontend code for maintainability-audit,
 logic-review, and HTML/CSS/JavaScript style-guide passes. The maintainability
@@ -78,12 +129,16 @@ Required TASK-001 verification:
 - Add tests that fail when collapse, resize, popovers, dialogs, and settings
   route structures are absent. Do not rely on source-string checks as the only
   frontend acceptance evidence.
+- Keep new tests and harnesses limited to frontend rendering, interaction,
+  screenshot, and TASK-001 acceptance verification. Do not create the TASK-002
+  mock server harness or any `tests/server/` content.
 - Record screenshot or browser-test evidence for all routes before marking the
-  item `review`.
+  item `review`. Screenshot review must verify both r04 structural parity and
+  production visual treatment.
 
 Do not pause for user review at this step. Continue until the frontend code is
-coherent, maintainable, r04-parity verified, and ready to connect to mocked
-server behavior.
+coherent, maintainable, r04-parity verified, visually production-treated, and
+ready to connect to mocked server behavior.
 
 ### TASK-002: Connect Frontend To Mock Server Harness
 
@@ -121,6 +176,29 @@ persistence behavior is complete.
 Backend mock parity must preserve the TASK-001/TASK-002 frontend behavior. Do
 not replace r04-parity screens with backend-driven simplifications or invented
 administrative UI.
+
+TASK-003 must also document and expose the native desktop app menu contract at
+the OS level. The menu is part of the desktop shell, not an in-app replacement
+for accepted r04 controls. Required menu items:
+
+- `File > Open Workspace`
+- `File > Save Workspace`
+- `File > Save File`; enabled only when the file editor surface is open and a
+  file can be saved
+- `Edit`; enabled when focus is in an editable context such as the chat prompt,
+  Browser address bar, file editor, provider/settings input fields, or other
+  text-entry controls
+- `Edit > Undo`
+- `Edit > Redo`
+- `Edit > Select All`
+- `Edit > Cut`
+- `Edit > Copy`
+- `Edit > Paste`
+
+TASK-003 may wire these menu items to backend/mock handlers and focus state,
+but must not add duplicate in-app toolbar buttons or visible UI components for
+these commands unless a later accepted change explicitly revises the UI
+contract.
 
 This phase must state exactly what is still mocked and must not promote mock
 behavior into product-complete evidence.

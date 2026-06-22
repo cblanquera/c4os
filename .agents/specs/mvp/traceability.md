@@ -26,10 +26,10 @@ records remain planning records; active work lives in
 | REQ-010 Browser Surface | AC-010 | TASK-001, TASK-002, TASK-003, TASK-005, TASK-007, TASK-008 | EVD-002, EVD-005, EVD-007, EVD-009 | `product-specs.md`, `technical-specs.md`, `creative-specs.md` |
 | REQ-011 Backend-Owned Terminal Surfaces | AC-011 | TASK-001, TASK-002, TASK-003, TASK-005, TASK-007, TASK-008 | EVD-002, EVD-006, EVD-007, EVD-009 | `product-specs.md`, `technical-specs.md`, `creative-specs.md` |
 | REQ-012 Deterministic Command Allowlist | AC-012 | TASK-002, TASK-003, TASK-005, TASK-007, TASK-008 | EVD-006, EVD-009 | `technical-specs.md`, `work-orders.md` |
-| REQ-013 r04 Desktop Shell | AC-013, AC-014, AC-018, AC-021, AC-022, AC-023, AC-024 | TASK-001, TASK-002, TASK-004, TASK-006, TASK-008 | EVD-002, EVD-003, EVD-007, EVD-009 | `creative-specs.md`, `product-specs.md` |
-| REQ-014 Structured Prompt And Thread States | AC-015, AC-016, AC-022, AC-024 | TASK-001, TASK-002, TASK-004, TASK-005, TASK-008 | EVD-001, EVD-002, EVD-007, EVD-009 | `product-specs.md`, `creative-specs.md` |
+| REQ-013 r04 Desktop Shell | AC-013, AC-014, AC-018, AC-021, AC-022, AC-023, AC-024, AC-025, AC-026 | TASK-001, TASK-002, TASK-003, TASK-004, TASK-006, TASK-008 | EVD-002, EVD-003, EVD-007, EVD-009 | `creative-specs.md`, `product-specs.md` |
+| REQ-014 Structured Prompt And Thread States | AC-015, AC-016, AC-022, AC-024, AC-025 | TASK-001, TASK-002, TASK-004, TASK-005, TASK-008 | EVD-001, EVD-002, EVD-007, EVD-009 | `product-specs.md`, `creative-specs.md` |
 | REQ-015 Extension Install, Enablement, And Invocation | AC-019, AC-020 | TASK-001, TASK-002, TASK-003, TASK-005, TASK-007, TASK-008 | EVD-001, EVD-008, EVD-009 | `product-specs.md`, `technical-specs.md`, `creative-specs.md` |
-| REQ-016 Implementation Paths | AC-001 through AC-024 | TASK-001, TASK-002, TASK-003, TASK-004, TASK-005, TASK-006, TASK-007, TASK-008 | EVD-009 | `technical-specs.md`, `work-orders.md` |
+| REQ-016 Implementation Paths | AC-001 through AC-026 | TASK-001, TASK-002, TASK-003, TASK-004, TASK-005, TASK-006, TASK-007, TASK-008 | EVD-009 | `technical-specs.md`, `work-orders.md` |
 
 ## Acceptance To Evidence
 
@@ -59,14 +59,16 @@ records remain planning records; active work lives in
 | AC-022 r04 Functional Parity | EVD-002, EVD-003, EVD-007, EVD-009 | r04 route, structure, and interaction baseline. |
 | AC-023 No Invented Frontend Surfaces | EVD-002, EVD-007, EVD-009 | Prevents unapproved controls or abstractions during frontend foundation. |
 | AC-024 Behavior-Based Frontend Verification | EVD-007, EVD-009 | Requires rendered interaction checks beyond source-string assertions. |
+| AC-025 Production Frontend Treatment | EVD-002, EVD-003, EVD-007, EVD-009 | Requires production visual treatment over the r04 parity baseline. |
+| AC-026 Native Desktop App Menu | EVD-002, EVD-007, EVD-009 | TASK-003 must expose OS-level File/Edit commands without duplicating them as in-app UI. |
 
 ## Task Coverage
 
 | Task | Primary Coverage | Notes |
 | --- | --- | --- |
-| TASK-001 Build Full r04 Frontend | REQ-001, REQ-003, REQ-008, REQ-010, REQ-011, REQ-013, REQ-014, REQ-015, REQ-016 | Builds product shell from r04 with functional parity first; no invented controls or source-string-only acceptance. |
+| TASK-001 Build Full r04 Frontend | REQ-001, REQ-003, REQ-008, REQ-010, REQ-011, REQ-013, REQ-014, REQ-015, REQ-016 | Builds a production-quality frontend foundation from r04 with functional parity first, production visual treatment second, and no invented controls or source-string-only acceptance. |
 | TASK-002 Connect Frontend To Mock Server Harness | REQ-001 through REQ-016 | Mock-backed coverage must state every fake surface listed in `TASK-002` while preserving TASK-001 r04 parity. |
-| TASK-003 Build Backend Mock Parity | REQ-002 through REQ-012, REQ-015, REQ-016 | Creates real backend surface while still returning mock behavior without changing accepted frontend structure. |
+| TASK-003 Build Backend Mock Parity | REQ-002 through REQ-013, REQ-015, REQ-016 | Creates real backend surface and native app menu while still returning mock behavior without changing accepted frontend structure. |
 | TASK-004 Activate First User Flow | REQ-001 through REQ-005, REQ-008, REQ-013, REQ-014, REQ-016 | First real end-to-end flow through accepted r04 screens from App Start to useful session state. |
 | TASK-005 Unlock Feature Slices One At A Time | REQ-003 through REQ-015, REQ-016 | Replaces mock behavior behind accepted UI with real feature slices listed in `TASK-005`; order may change, scope may not shrink. |
 | TASK-006 Pause At Feature Complete | REQ-006, REQ-013, REQ-016 | User acceptance gate before final security and approval hardening. |
@@ -77,9 +79,9 @@ records remain planning records; active work lives in
 
 | Checkpoint | MVP Coverage |
 | --- | --- |
-| Frontend foundation | TASK-001; r04 functional parity completed and behavior-verified before user review. |
+| Frontend foundation | TASK-001; r04 functional parity and production visual treatment completed and behavior-verified before user review. |
 | Mock acceptance gate | TASK-002; frontend connected to fake processing and dummy data without changing r04 parity, then paused for user acceptance. |
-| Backend mock parity | TASK-003; backend returns the same mock behavior without claiming real completion or changing accepted frontend structure. |
+| Backend mock parity | TASK-003; backend returns the same mock behavior and exposes the native app menu contract without claiming real completion or changing accepted frontend structure. |
 | First user-flow activation | TASK-004; first real end-to-end journey through accepted r04 screens, then paused for user acceptance. |
 | Feature unlock sequence | TASK-005; one feature slice at a time behind accepted UI until feature complete. |
 | Feature-complete acceptance | TASK-006; pause before final policy hardening. |

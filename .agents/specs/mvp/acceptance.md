@@ -153,3 +153,37 @@ automation or equivalent rendered checks have exercised route rendering,
 collapse, resize, popovers, dialogs, settings screen structures, and important
 state transitions. Source-string checks alone do not satisfy frontend
 acceptance.
+
+Given TASK-001 adds tests or local harness files, then they use frontend test
+locations such as `tests/frontend-*.test.*` and `tests/support/`, verify
+frontend rendering and interactions only, and do not introduce backend
+behavior, `tests/server/` mock server work, provider calls, filesystem writes,
+Terminal execution, Browser automation beyond UI verification, or persistence.
+
+### AC-025: Production Frontend Treatment
+
+Given TASK-001 is marked `review`, then the frontend preserves r04 behavior and
+information architecture while applying a production desktop-app visual
+treatment. The completed surface must not look like a copied white/grayscale
+wireframe.
+
+Given the frontend is visually reviewed, then typography, spacing, color tokens,
+panel surfaces, button/control treatment, settings readability, and
+Browser/Files/Terminal polish are visibly improved without adding, removing,
+renaming, or relocating product controls from r04.
+
+### AC-026: Native Desktop App Menu
+
+Given the desktop backend shell reaches TASK-003, then the OS-level app menu
+exposes `File > Open Workspace`, `File > Save Workspace`, and `File > Save
+File`. `Save File` is enabled only when the file editor surface is open and a
+file can be saved.
+
+Given focus is in an editable context such as the chat prompt, Browser address
+bar, file editor, provider/settings input fields, or another text-entry
+control, then the OS-level `Edit` menu enables Undo, Redo, Select All, Cut,
+Copy, and Paste according to the focused control state.
+
+Given TASK-003 implements the OS-level app menu, then it does not add duplicate
+in-app toolbar buttons or new visible UI components for these commands unless a
+separate accepted UI change explicitly revises the contract.

@@ -1,13 +1,13 @@
 # MVP Status
 
 Status: frozen-for-implementation
-Updated: 2026-06-21
+Updated: 2026-06-22
 
 ## Classification
 
 - Setup mode: MVP specification
 - Source confidence: frozen research converted into MVP implementation contract
-- Implementation state: not started; first progress item is ready
+- Implementation state: TASK-001 frontend foundation verified; TASK-002 is next
 - Freeze state: frozen for implementation
 
 ## Readiness
@@ -33,5 +33,6 @@ Do not create or use `src-tauri/`.
 
 ## Next Step
 
-Use `.agents/development/progress/` for active MVP execution. Start with
-`TASK-001` from `.agents/development/progress/items/TASK-001-r04-frontend.md`.
+Use `.agents/development/progress/` for active MVP execution. Continue with
+`TASK-002` using the verified TASK-001 frontend foundation as the accepted UI
+baseline.

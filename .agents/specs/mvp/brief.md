@@ -73,7 +73,8 @@ MVP-spec decision explicitly moves an item out. Included scope covers:
 - plugin, skill, and MCP install/connect records, explicit enablement, audit
   records, and `$skill`, `@plugin`, `^mcp` prompt tags
 - r04 shell behavior: App Start, New Session, Chat Session, provider/model
-  selectors, Browser, Files, Terminal, and Settings surfaces
+  selectors, Browser, Files, Terminal, Settings surfaces, and native OS-level
+  File/Edit app menu commands
 
 ## Out Of Scope
 

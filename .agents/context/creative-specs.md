@@ -52,6 +52,16 @@ C4OS should feel neutral, utilitarian, dense enough for repeated technical work,
 - Left and right panels are resizable and collapsible; center content flexes between them.
 - Top center bar includes left-panel collapse, current project/session title, and right-panel collapse.
 
+## Native App Menu
+
+The desktop shell also owns OS-level app menu commands. File menu items are
+Open Workspace, Save Workspace, and Save File; Save File is active only when
+the file editor can save. Edit menu items are Undo, Redo, Select All, Cut,
+Copy, and Paste; they are enabled according to focus in editable contexts such
+as the chat prompt, Browser address bar, file editor, and settings input
+fields. These commands should not be duplicated as new in-app toolbar controls
+unless a later accepted UI change explicitly revises the contract.
+
 ## Left Panel
 
 The left panel contains project search, add-project action, project rows, nested chat session rows, and Settings. Project selection and active chat selection are distinct states. Chat session rows do not use chevrons, and active chat highlighting should align with the project row edge.
