@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-002
+Status: ready-for-task-003
 Updated: 2026-06-22
 
 ## Active Stream
@@ -10,6 +10,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 ## Last Verified Item
 
 - `.agents/development/progress/items/TASK-001-r04-frontend.md`
+- `.agents/development/progress/items/TASK-002-mock-server-connection.md`
 
 ## Scope Rules
 
@@ -37,5 +38,5 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Create or start the `TASK-002` progress item to connect the verified TASK-001
-frontend to mock server state without changing accepted UI structure.
+Start `TASK-003` backend mock parity using the same connector contract, mock
+data shape, and fake processing behavior proven through `tests/server/`.

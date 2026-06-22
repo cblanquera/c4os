@@ -1,4 +1,8 @@
 import {
+  beginConnectorStateLoad,
+  browserState,
+  connectorState,
+  filesState,
   mcpServers,
   models,
   pluginCatalog,
@@ -6,7 +10,10 @@ import {
   projects,
   providers,
   routes,
+  sendConnectorPrompt,
   settingsItems,
+  terminalState,
+  threadState,
   skillCatalog,
   workspace
 } from "./data.js";
@@ -65,6 +72,21 @@ function render() {
   else if (route.startsWith("settings")) app.replaceChildren(renderSettings(route));
   else app.replaceChildren(renderShell(route));
   bindInteractions(render, pluginInitials);
+  bindConnectorRun();
+}
+
+function bindConnectorRun() {
+  if (!connectorState.connector.available) return;
+  document.querySelectorAll(".send-button").forEach((control) => {
+    control.addEventListener("click", async () => {
+      const composerNode = control.closest(".composer");
+      const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
+      const pending = sendConnectorPrompt(prompt);
+      render();
+      await pending;
+      render();
+    });
+  });
 }
 
 //--------------------------------------------------------------------//
@@ -75,11 +97,22 @@ function render() {
  * Render the trusted-folder entry screen.
  */
 function renderStart() {
+  const recentProjects = connectorState.connector.available
+    ? projects.slice(0, 3)
+    : ["Project Alpha", "Agent Lab", "Docs Workbench"].map((name) => ({ name }));
+  const title = connectorState.loading
+    ? "Loading workspace state"
+    : connectorState.error
+      ? "Workspace state unavailable"
+      : "Open a folder to start working";
+  const lead = connectorState.error
+    ? connectorState.error
+    : "Local files, instructions, skills, runtime policy, approvals, and workspace state stay unavailable until a trusted project folder scopes the session.";
   return h("main", { id: "main", class: "start-view", "data-screen": "app-start", tabindex: "-1" }, [
     h("section", { class: "start-copy" }, [
       h("p", { class: "kicker", text: "No trusted project folder" }),
-      h("h1", { text: "Open a folder to start working" }),
-      h("p", { class: "lead", text: "Local files, instructions, skills, runtime policy, approvals, and workspace state stay unavailable until a trusted project folder scopes the session." }),
+      h("h1", { text: title }),
+      h("p", { class: "lead", text: lead }),
       h("div", { class: "action-row" }, [
         button("Open Folder", "button primary"),
         button("Clone Repository"),
@@ -88,9 +121,9 @@ function renderStart() {
     ]),
     h("section", { class: "recent-panel", "aria-labelledby": "recent-title" }, [
       h("h2", { id: "recent-title", text: "Recent Folder-Backed Workspaces" }),
-      ...["Project Alpha", "Agent Lab", "Docs Workbench"].map((name, index) =>
+      ...recentProjects.map((project, index) =>
         link("new-session", "workspace-row", [
-          h("strong", { text: name }),
+          h("strong", { text: project.name }),
           h("span", { text: ["Trusted", "2 roots", "Saved"][index] })
         ])
       )
@@ -227,15 +260,15 @@ function modelPopover() {
 function renderThread() {
   return h("main", { class: "thread-view" }, [
     h("div", { class: "thread-list", "aria-label": "Session messages" }, [
-      h("article", { class: "message user" }, [h("p", { text: "Locate the desktop integration path and confirm the trusted project state." })]),
+      h("article", { class: "message user" }, [h("p", { text: threadState.user })]),
       h("article", { class: "message agent has-actions" }, [
         h("div", { class: "message-actions" }, [iconButton("Collapse message", "chevronDown")]),
-        h("p", { text: "The shell boundary is visible. The next step is to connect state without changing the r04 surface." }),
-        h("div", { class: "message-extra" }, [h("p", { text: "This fixture is frontend-local and does not imply backend, filesystem, terminal, browser, approval, or persistence behavior." })]),
+        h("p", { text: threadState.agent || "Waiting on connector" }),
+        h("div", { class: "message-extra" }, [h("p", { text: threadState.extra })]),
         h("button", { class: "text-button", type: "button", "data-toggle": "message", "aria-expanded": "false" }, ["Show More"])
       ]),
-      activityCard("Tool Call", "Read project instructions", "Completed"),
-      activityCard("Agent Run", "Sensitive action waiting", null, "Review Approval")
+      activityCard("Tool Call", threadState.tool, "Completed"),
+      activityCard("Agent Run", threadState.run, null, "Review Approval")
     ]),
     h("div", { class: "composer-dock" }, [composer("Ask for follow-up changes", { readonlyContext: true })])
   ]);
@@ -276,8 +309,8 @@ function renderToolPanel(active, route) {
  */
 function browserTool() {
   return h("section", { class: "tool-body" }, [
-    h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: "http://127.0.0.1:13000" })]),
-    h("div", { class: "preview-surface" }, [h("h2", { text: "Rendered page mock" }), h("p", { text: "Single browser surface; tabs are out of scope. This is frontend-local fixture state." })])
+    h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: browserState.url })]),
+    h("div", { class: "preview-surface" }, [h("h2", { text: browserState.title }), h("p", { text: browserState.summary })])
   ]);
 }
 
@@ -287,8 +320,14 @@ function browserTool() {
 function filesTool(editor) {
   if (editor) {
     return h("section", { class: "tool-body editor-tool" }, [
-      h("nav", { class: "breadcrumbs", "aria-label": "File breadcrumbs" }, [link("file-explorer", "", ["Project Alpha"]), h("span", { text: ">" }), link("file-explorer", "", ["frontend"]), h("span", { text: ">" }), h("span", { text: "main.js" })]),
-      h("div", { class: "code-pane", tabindex: "0" }, ["import { startWorkspace } from './runtime';", "", "const trustedRoot = true;", "", "startWorkspace({ trustedRoot });"].map((line, index) =>
+      h("nav", { class: "breadcrumbs", "aria-label": "File breadcrumbs" }, [
+        link("file-explorer", "", [filesState.breadcrumbs[0] || workspace.project]),
+        h("span", { text: ">" }),
+        link("file-explorer", "", [filesState.breadcrumbs[1] || "frontend"]),
+        h("span", { text: ">" }),
+        h("span", { text: filesState.breadcrumbs[2] || "main.js" })
+      ]),
+      h("div", { class: "code-pane", tabindex: "0" }, filesState.lines.map((line, index) =>
         h("div", { class: "code-line" }, [
           h("span", { class: "line-number", text: String(index + 1) }),
           h("code", { "aria-label": `Line ${index + 1} code`, class: "line-code", contenteditable: "true", spellcheck: "false", text: line })
@@ -298,13 +337,7 @@ function filesTool(editor) {
   }
   return h("section", { class: "tool-body file-tool" }, [
     h("h2", { text: workspace.project }),
-    ...[
-      ["backend", "folder", "file-explorer"],
-      ["frontend", "folder", "file-explorer"],
-      ["main.js", "file", "file-editor"],
-      ["index.html", "file", "file-editor"],
-      ["tests", "folder", "file-explorer"]
-    ].map(([name, iconName, target]) => link(target, `file-row${iconName === "file" ? " is-file" : ""}${name === "main.js" ? " is-active" : ""}`, [icon(iconName), h("span", { text: name })]))
+    ...filesState.roots.map(([name, iconName, target], index) => link(target, `file-row${iconName === "file" ? " is-file" : ""}${index === 2 ? " is-active" : ""}`, [icon(iconName), h("span", { text: name })]))
   ]);
 }
 
@@ -313,9 +346,9 @@ function filesTool(editor) {
  */
 function terminalTool() {
   return h("section", { class: "tool-body terminal-tool" }, [
-    h("pre", { class: "terminal-output", text: "$ npm run dev\nready in 614ms\nlocal preview available at 127.0.0.1:3000" }),
+    h("pre", { class: "terminal-output", text: terminalState.output }),
     h("div", { class: "vertical-resize-handle", role: "separator", tabindex: "0", "aria-label": "Resize terminal results panel", "aria-orientation": "horizontal", "data-resize-stack": "terminal" }),
-    h("div", { class: "terminal-bottom" }, [h("strong", { text: "AI command preview/results" }), h("p", { text: "Read-only frontend fixture panel. No command execution is implied." })])
+    h("div", { class: "terminal-bottom" }, [h("strong", { text: terminalState.title }), h("p", { text: terminalState.summary })])
   ]);
 }
 
@@ -698,4 +731,8 @@ function mcpInputGroup(title, placeholders, addLabel, twoColumn = false) {
 }
 
 window.addEventListener("hashchange", render);
+const boot = beginConnectorStateLoad();
 render();
+if (boot) {
+  boot.then(render);
+}
