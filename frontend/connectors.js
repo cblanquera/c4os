@@ -4,6 +4,7 @@ export function createConnector(options = {}) {
   const search = options.params || new URLSearchParams(window.location.search);
   const fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
   const tauriInvoke = options.tauriInvoke || resolveTauriInvoke();
+  const tauriListen = options.tauriListen || resolveTauriListen();
   const kind = search.get("connector") || (tauriInvoke ? "tauri" : "none");
 
   if (kind === "server") {
@@ -17,7 +18,8 @@ export function createConnector(options = {}) {
 
   if (kind === "tauri") {
     return tauriConnector({
-      invoke: tauriInvoke
+      invoke: tauriInvoke,
+      listen: tauriListen
     });
   }
 
@@ -72,8 +74,22 @@ function tauriConnector(config) {
       if (missing.length > 0) throw new Error(`Workspace payload missing: ${missing.join(", ")}`);
       return payload;
     },
-    async sendPrompt(prompt) {
-      return invoke("send_prompt", { prompt });
+    async sendPrompt(prompt, options = {}) {
+      let unlisten;
+      if (config.listen && options.onEvent) {
+        try {
+          unlisten = await config.listen("c4os://runtime-event", (event) => {
+            options.onEvent(event.payload || event);
+          });
+        } catch {
+          unlisten = null;
+        }
+      }
+      try {
+        return await invoke("send_prompt", { prompt });
+      } finally {
+        if (typeof unlisten === "function") unlisten();
+      }
     },
     async openWorkspace(path) {
       return invoke("open_workspace", { request: { path } });
@@ -114,4 +130,8 @@ function disabledConnector(kind, message) {
 
 function resolveTauriInvoke() {
   return globalThis.__TAURI__?.core?.invoke || globalThis.__TAURI__?.invoke;
+}
+
+function resolveTauriListen() {
+  return globalThis.__TAURI__?.event?.listen;
 }

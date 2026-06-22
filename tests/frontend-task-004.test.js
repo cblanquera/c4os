@@ -184,7 +184,7 @@ describe("TASK-004 first real user-flow frontend activation", () => {
     await sendButton.click();
 
     await page.getByText("Connector is processing the request.").waitFor();
-    await page.getByText("Thinking").waitFor();
+    await page.getByRole("button", { name: /Working for|Worked for/ }).waitFor();
     await page.waitForURL(/#chat-session$/);
     await page.getByRole("link", { name: /Build the onboarding test harness/ }).waitFor();
     await page.getByText("Mock agent completed the requested transition.").waitFor();

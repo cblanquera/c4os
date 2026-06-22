@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod menu;
 pub mod mock_data;
+pub mod openrouter;
 pub mod workspace;
 
 pub fn run() {

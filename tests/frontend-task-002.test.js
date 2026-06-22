@@ -71,7 +71,7 @@ async function visibleControlNames(page) {
     return Array.from(document.querySelectorAll("button, a"))
       .filter((node) => {
         const style = getComputedStyle(node);
-        return style.display !== "none" && style.visibility !== "hidden" && !node.hidden;
+        return style.display !== "none" && style.visibility !== "hidden" && !node.hidden && !node.closest(".work-log");
       })
       .map((node) => node.getAttribute("aria-label") || node.textContent.trim())
       .filter(Boolean);

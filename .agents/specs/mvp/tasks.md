@@ -218,38 +218,179 @@ or simplified settings flows as part of this activation.
 
 Pause for user acceptance after this task.
 
-### TASK-005: Unlock Feature Slices One At A Time
+### TASK-005: OpenRouter Chat Session Review Slice
 
 Depends on: TASK-004 acceptance
 
-After the first user flow is accepted, unlock one feature slice at a time until
-the full documented/r04 MVP is feature complete. Each slice should replace mock
-behavior with real behavior, connect the result to the frontend, verify it, and
-state any remaining mocks before starting the next slice.
+Activate the real chat-session experience behind the accepted r04 shell using a
+real OpenRouter API key and a reasoning-capable model. This is the first
+feature-unlock review slice after TASK-004.
 
-Expected slices include workspace/trust records, workspace descriptors,
-provider/model setup, runtime adapter/session behavior, structured thread/run
-events, Files, safe artifact/HTML preview, Browser, Terminal, settings IA,
-extensions, concurrency, restart/resume, local memory, action records, and audit
-records. The exact order can be adjusted during progress planning, but scope
-must not shrink.
+The goal is to review the user-visible chat session behavior before broader
+feature unlocking continues. A user should be able to open a trusted folder,
+start a chat, use a configured OpenRouter provider/model, see live thinking or
+reasoning output when the selected model returns it, see structured activity
+for what the app/runtime is doing, and receive a final assistant response.
 
-Each slice must replace mock behavior behind the accepted UI instead of
-redesigning the screen. If implementation pressure reveals that r04 needs a UI
-change, stop and record a review item before changing the contract.
+Required behavior:
 
-### TASK-006: Pause At Feature Complete
+- Use a real OpenRouter API key through a backend-owned credential reference or
+  review-only secure local configuration. Do not write raw keys to workspace
+  descriptors, transcripts, normal app state, logs, or frontend fixtures.
+- Use the OpenRouter chat completions API with streaming enabled for the live
+  chat path.
+- Send reasoning configuration for reasoning-capable models and preserve
+  compatibility with models that do not return reasoning tokens.
+- Render streamed reasoning/thinking chunks as distinct structured activity
+  before the final response when OpenRouter returns `reasoning_details` or
+  equivalent reasoning text.
+- Render app/runtime activity separately from assistant content, so the user can
+  tell what C4OS is doing versus what the model is saying.
+- Persist C4OS-owned workspace, session, message, run, and runtime-event
+  records needed to keep the session list and active thread coherent during the
+  review.
+- Keep the accepted r04 chat/session layout. Do not add alternate onboarding,
+  alternate chat structure, new settings abstractions, or new route structures.
+- Pause for user review after this real OpenRouter chat slice.
 
-Depends on: TASK-005 complete
+Still allowed to remain mocked in this slice: Files content and mutation,
+Browser, Terminal, extensions, local memory, artifacts, broad restart/resume,
+full provider-management polish, advanced approval policy, audit-log hardening,
+and non-chat feature slices.
+
+### TASK-005A: Scoped Frontend State And DOM Updates
+
+Depends on: TASK-005 acceptance
+
+Consolidate the app-owned frontend state and rerender boundaries before adding
+provider/model management. This is a cleanup bridge from the TASK-005 review
+feedback, not a new feature slice and not a framework migration.
+
+Purpose:
+
+- Keep chat/session UI state explicit before provider/model, runtime, Files,
+  Browser, Terminal, approvals, and persistence work add more moving parts.
+- Stop local interactions from replacing the whole shell when only one scoped
+  surface changes.
+- Preserve the no-build frontend and existing accepted r04 shell while reducing
+  visible refresh/fade behavior and future state-management tech debt.
+
+Required behavior:
+
+- Introduce a small app-owned state store or equivalent state boundary for
+  route, workspace, active session, per-session right-panel tool state, turns,
+  connector run state, and composer-local state.
+- Replace global `render()` calls for local chat/tool interactions with scoped
+  DOM updates where practical: right-panel tab switches, work-log disclosure,
+  active-turn streaming/progress updates, and composer updates.
+- Keep right-panel active tool state scoped per chat/new-session surface.
+- Keep transcript turn DOM keyed by stable turn/session identity so appending a
+  turn does not replace prior turns.
+- Do not add React, Preact, JSX, a bundler, or a new build pipeline in this
+  cleanup task. Reconsider a framework only if this scoped-store pass proves
+  insufficient.
+- Preserve the accepted r04 routes and visible UI structure. Do not add new
+  panels, settings abstractions, or alternate chat layouts.
+
+Verification:
+
+- Tests prove right-panel tab changes do not replace the chat transcript DOM.
+- Tests prove work-log expansion does not replace message bubbles.
+- Tests prove streaming/progress updates affect only the active turn.
+- Existing TASK-001 through TASK-005 tests continue to pass.
+
+### TASK-006: Provider And Model Management Slice
+
+Depends on: TASK-005A acceptance
+
+Replace provider/model mock records behind the accepted Settings and composer
+surfaces. This slice should support OpenAI-compatible provider profiles,
+non-secret provider/model records, secure key status, model discovery or manual
+model entry, model enablement, and per-session model selection.
+
+Pause for review if provider/model UX pressure requires changing the accepted
+r04 UI contract.
+
+### TASK-007: Runtime Adapter And Persistent Sessions Slice
+
+Depends on: TASK-006 acceptance
+
+Replace remaining mock session/runtime behavior with C4OS-owned session, run,
+message, and runtime-reference records behind the OpenCode-first adapter. The
+runtime must stay behind the C4OS boundary, and user-facing records must remain
+C4OS workspace/session/run records.
+
+### TASK-008: Files Slice
+
+Depends on: TASK-007 acceptance
+
+Replace Files mock behavior with trusted-root browsing, open-file/code view,
+editing, saving, reverting, guarded mutation, and dirty-state behavior behind
+the accepted right-panel Files surfaces.
+
+### TASK-009: Artifact And Safe HTML Preview Slice
+
+Depends on: TASK-008 acceptance
+
+Replace artifact/preview mocks with product-owned artifact records and safe
+rendering for generated or untrusted HTML. Do not claim Browser or security
+hardening complete beyond the artifact preview boundary.
+
+### TASK-010: Browser Slice
+
+Depends on: TASK-009 acceptance
+
+Replace Browser mock behavior with the MVP Browser surface: project-scoped
+profile state, local file opening, public browsing, request-scoped agent
+browsing when clearly requested, and recorded agent Browser actions. Downloads
+remain out of scope.
+
+### TASK-011: Terminal Slice
+
+Depends on: TASK-010 acceptance
+
+Replace Terminal mock behavior with backend-owned user terminal and agent
+command terminal surfaces, including lifecycle ownership, cwd validation,
+sanitized environment, output streaming, cancellation, failure reporting, and
+action records. Approval-policy hardening remains TASK-016.
+
+### TASK-012: Settings IA And Extension Records Slice
+
+Depends on: TASK-011 acceptance
+
+Replace settings, plugin, skill, and MCP mock records with app-owned records
+behind the accepted Settings IA. Runtime impact remains disabled until explicit
+enablement.
+
+### TASK-013: Concurrency And Restart/Resume Slice
+
+Depends on: TASK-012 acceptance
+
+Implement concurrent session/run isolation across trusted folders and restart/
+resume behavior for transcripts, runtime references, provider/model context,
+artifacts, Browser/file/terminal/extension action records, and run state needed
+for continuation.
+
+### TASK-014: Local Memory, Action Records, And Audit Records Slice
+
+Depends on: TASK-013 acceptance
+
+Implement app-owned local memory records, action records, and audit records
+needed by the MVP surfaces. Keep these separate from raw provider state,
+workspace descriptors, and runtime-local storage.
+
+### TASK-015: Pause At Feature Complete
+
+Depends on: TASK-014 complete
 
 When all r04 MVP features are unlocked and connected, stop and pause for user
 acceptance before security and approval hardening begins. State the completed
 feature list, the acceptance evidence, and any mocks or shortcuts still
 remaining.
 
-### TASK-007: Implement Security And Approval Policies
+### TASK-016: Implement Security And Approval Policies
 
-Depends on: TASK-006 acceptance
+Depends on: TASK-015 acceptance
 
 Implement security policies, approval policies, trusted-root containment,
 descriptor safety, secure key storage, isolated HTML preview, Browser authority
@@ -258,9 +399,9 @@ against the now feature-complete product surface.
 
 This phase should harden real behavior, not merely document expected policy.
 
-### TASK-008: Complete Remaining Integration And Release Readiness
+### TASK-017: Complete Remaining Integration And Release Readiness
 
-Depends on: TASK-007
+Depends on: TASK-016
 
 Complete any remaining required implementation, integration, migration,
 packaging, QA, accessibility, restart/resume, failure-state, and acceptance-test

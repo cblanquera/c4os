@@ -14,12 +14,14 @@ import {
   sendConnectorPrompt,
   settingsItems,
   terminalState,
-  threadState,
+  threadTurns,
+  toolState,
   skillCatalog,
   workspace
 } from "./data.js";
 import { h, icon } from "./dom.js";
 import { bindInteractions } from "./interactions.js";
+import { renderMarkdown } from "./markdown.js";
 
 const app = document.querySelector("#app");
 
@@ -75,6 +77,8 @@ function render() {
   bindInteractions(render, pluginInitials);
   bindConnectorRun();
   bindWorkspaceOpen();
+  bindWorkLogDisclosure();
+  bindToolTabs();
 }
 
 function bindConnectorRun() {
@@ -84,7 +88,10 @@ function bindConnectorRun() {
       const composerNode = control.closest(".composer");
       const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
       const shouldCreateSession = routeFromHash() !== "chat-session";
-      const pending = sendConnectorPrompt(prompt, { createSession: shouldCreateSession });
+      const pending = sendConnectorPrompt(prompt, {
+        createSession: shouldCreateSession,
+        onStateChange: render
+      });
       window.location.hash = "chat-session";
       render();
       await minimumPendingFrame();
@@ -95,7 +102,42 @@ function bindConnectorRun() {
 }
 
 function minimumPendingFrame() {
-  return new Promise((resolve) => window.setTimeout(resolve, 160));
+  return new Promise((resolve) => window.setTimeout(resolve, 400));
+}
+
+function bindWorkLogDisclosure() {
+  document.querySelectorAll("[data-work-toggle]").forEach((control) => {
+    control.addEventListener("click", () => {
+      const turn = threadTurns.find((record) => record.id === control.dataset.workToggle);
+      if (!turn || turn.pending) return;
+      turn.workExpanded = !turn.workExpanded;
+      render();
+    });
+  });
+}
+
+function bindToolTabs() {
+  document.querySelectorAll("[data-tool-tab]").forEach((control) => {
+    control.addEventListener("click", () => {
+      const route = routeFromHash();
+      setActiveToolForRoute(route, control.dataset.toolTab);
+      const panel = document.querySelector(".tool-panel");
+      panel?.replaceWith(renderToolPanel(activeToolForRoute(route), route));
+      bindToolTabs();
+      bindTerminal();
+      bindPanelLinks();
+    });
+  });
+}
+
+function bindPanelLinks() {
+  document.querySelectorAll(".tool-panel a[data-link]").forEach((anchor) => {
+    anchor.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.location.hash = anchor.dataset.link;
+      render();
+    });
+  });
 }
 
 function bindWorkspaceOpen() {
@@ -160,7 +202,7 @@ function renderStart() {
  */
 function renderShell(route) {
   const chat = route === "chat-session";
-  const tool = route === "file-explorer" || route === "file-editor" ? "files" : route === "terminal" ? "terminal" : "browser";
+  const tool = activeToolForRoute(route);
   return h("div", { class: "app-shell", "data-screen": route }, [
     renderSidebar(chat),
     resizeHandle("left"),
@@ -175,6 +217,27 @@ function renderShell(route) {
     resizeHandle("right"),
     renderToolPanel(tool, route)
   ]);
+}
+
+function activeToolForRoute(route) {
+  const key = toolSurfaceKey(route);
+  return toolState.bySurface[key] || defaultToolForRoute(route);
+}
+
+function setActiveToolForRoute(route, tool) {
+  toolState.bySurface[toolSurfaceKey(route)] = tool;
+}
+
+function toolSurfaceKey(route) {
+  if (route === "chat-session") return `chat:${workspace.project}:${workspace.session || "untitled"}`;
+  if (route === "new-session" || route === "providers-popover" || route === "models-popover") return `new:${workspace.project}`;
+  return `route:${route}`;
+}
+
+function defaultToolForRoute(route) {
+  if (route === "file-explorer" || route === "file-editor") return "files";
+  if (route === "terminal") return "terminal";
+  return "browser";
 }
 
 /**
@@ -282,31 +345,71 @@ function modelPopover() {
  * Render the chat transcript fixture with disclosure and activity cards.
  */
 function renderThread() {
+  const latestTurn = threadTurns[threadTurns.length - 1];
   return h("main", { class: "thread-view" }, [
-    h("div", { class: "thread-list", "aria-label": "Session messages" }, [
-      h("article", { class: "message user" }, [h("p", { text: threadState.user })]),
-      h("article", { class: "message agent has-actions" }, [
-        h("div", { class: "message-actions" }, [iconButton("Collapse message", "chevronDown")]),
-        h("p", { text: threadState.agent || "Waiting on connector" }),
-        h("div", { class: "message-extra" }, [h("p", { text: threadState.extra })]),
-        h("button", { class: "text-button", type: "button", "data-toggle": "message", "aria-expanded": "false" }, ["Show More"])
-      ]),
-      activityCard("Tool Call", threadState.tool, "Completed"),
-      activityCard("Agent Run", threadState.run, null, "Review Approval")
-    ]),
-    h("div", { class: "composer-dock" }, [composer("Ask for follow-up changes", { readonlyContext: true })])
+    h("div", { class: "thread-list", "aria-label": "Session messages" }, threadTurns.flatMap((turn, index) => renderTurn(turn, index === threadTurns.length - 1))),
+    h("div", { class: "composer-dock" }, [
+      permissionPrompt(latestTurn),
+      composer("Ask for follow-up changes", { readonlyContext: true })
+    ])
   ]);
 }
 
-/**
- * Render an agent activity card in the transcript.
- */
-function activityCard(title, label, status, action) {
-  return h("article", { class: "activity-card" }, [
-    h("header", {}, [h("strong", { text: title }), iconButton(`Collapse message: ${title}`, "chevronDown")]),
-    h("div", { class: "activity-row" }, [
-      h("span", { text: label }),
-      action ? button(action) : h("span", { class: "status-pill", text: status })
+function renderTurn(turn, interactive) {
+  return [
+    h("article", { class: "message user thread-item" }, [h("p", { text: turn.user })]),
+    workLog(turn),
+    h("article", { class: `message agent thread-item${turn.pending && !turn.agent ? " is-pending" : ""}` }, [
+      h("div", { class: "markdown-body" }, renderMarkdown(turn.agent || "Waiting on connector")),
+      h("div", { class: "message-extra markdown-body" }, renderMarkdown(turn.extra)),
+      interactive ? h("button", { class: "text-button", type: "button", "data-toggle": "message", "aria-expanded": "false" }, ["Show More"]) : null
+    ])
+  ];
+}
+
+function workLog(turn) {
+  const expanded = turn.pending || turn.workExpanded;
+  const label = [
+    h("span", { text: workLabel(turn) }),
+    icon("chevronRight")
+  ];
+  return h("section", { class: `work-log thread-item${turn.pending ? " is-pending" : ""}${expanded ? " is-expanded" : ""}` }, [
+    h("button", {
+      class: "work-log-toggle",
+      type: "button",
+      "data-work-toggle": turn.id,
+      "aria-expanded": expanded ? "true" : "false"
+    }, label),
+    expanded ? h("div", { class: "work-log-body markdown-body" }, renderMarkdown(workLogText(turn))) : null
+  ]);
+}
+
+function workLabel(turn) {
+  const prefix = turn.pending ? "Working" : "Worked";
+  return `${prefix} for ${formatDuration((turn.completedAt || Date.now()) - turn.startedAt)}`;
+}
+
+function workLogText(turn) {
+  const logs = (turn.logs || []).filter(Boolean);
+  return logs.length > 0 ? logs.map((log) => `- ${log}`).join("\n") : "- Waiting on connector";
+}
+
+function formatDuration(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${rest}s` : `${seconds}s`;
+}
+
+function permissionPrompt(turn) {
+  if (!turn?.permission) return null;
+  return h("section", { class: "permission-prompt", role: "dialog", "aria-label": "Permission request" }, [
+    h("p", { text: turn.permission.question }),
+    h("code", {}, [turn.permission.command]),
+    h("div", { class: "permission-options" }, [
+      button("Yes"),
+      button("Yes, don't ask again"),
+      button("No")
     ])
   ]);
 }
@@ -316,13 +419,19 @@ function activityCard(title, label, status, action) {
  */
 function renderToolPanel(active, route) {
   const tabs = [
-    ["Browser", "browser", "new-session", "globe"],
-    ["Files", "files", "file-explorer", "file"],
-    ["Terminal", "terminal", "terminal", "terminal"]
+    ["Browser", "browser", "globe"],
+    ["Files", "files", "file"],
+    ["Terminal", "terminal", "terminal"]
   ];
   return h("aside", { class: "tool-panel", "aria-label": "Workspace tools" }, [
-    h("nav", { class: "tool-tabs", "aria-label": "Workspace tool tabs" }, tabs.map(([label, key, target, iconName]) =>
-      link(target, `tool-tab${active === key ? " is-active" : ""}`, [icon(iconName), h("span", { text: label })])
+    h("nav", { class: "tool-tabs", "aria-label": "Workspace tool tabs" }, tabs.map(([label, key, iconName]) =>
+      h("button", {
+        class: `tool-tab${active === key ? " is-active" : ""}`,
+        type: "button",
+        "aria-label": label,
+        "aria-pressed": active === key ? "true" : "false",
+        "data-tool-tab": key
+      }, [icon(iconName), h("span", { text: label })])
     )),
     active === "files" ? filesTool(route === "file-editor") : active === "terminal" ? terminalTool() : browserTool()
   ]);

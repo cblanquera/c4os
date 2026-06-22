@@ -125,14 +125,14 @@ describe("TASK-001 r04 frontend parity", () => {
   it("preserves chat message disclosure", async () => {
     await goto("chat-session");
     const extra = page.locator(".message-extra");
-    const activityBefore = await page.locator(".activity-card").first().boundingBox();
+    const workBefore = await page.locator(".work-log").first().boundingBox();
     assert.equal(await extra.isVisible(), false);
     await page.getByRole("button", { name: "Show More" }).click();
     assert.equal(await extra.isVisible(), true);
     const messageAfter = await page.locator(".message.agent").boundingBox();
-    const activityAfter = await page.locator(".activity-card").first().boundingBox();
-    assert.equal(activityAfter.y > messageAfter.y + messageAfter.height + 14, true);
-    assert.equal(activityAfter.y > activityBefore.y, true);
+    const workAfter = await page.locator(".work-log").first().boundingBox();
+    assert.equal(messageAfter.y > workAfter.y + workAfter.height + 14, true);
+    assert.equal(Math.abs(workAfter.y - workBefore.y) <= 10, true);
     await page.getByRole("button", { name: "Show Less" }).click();
     assert.equal(await extra.isVisible(), false);
   });
@@ -146,16 +146,17 @@ describe("TASK-001 r04 frontend parity", () => {
       const layout = await page.evaluate(() => {
         const message = document.querySelector(".message.agent").getBoundingClientRect();
         const extra = document.querySelector(".message-extra").getBoundingClientRect();
-        const activity = document.querySelector(".activity-card").getBoundingClientRect();
+        const work = document.querySelector(".work-log").getBoundingClientRect();
         return {
-          activityTop: activity.top,
+          workBottom: work.bottom,
           extraBottom: extra.bottom,
+          messageTop: message.top,
           messageBottom: message.bottom
         };
       });
 
       assert.equal(layout.extraBottom <= layout.messageBottom - 16, true);
-      assert.equal(layout.activityTop >= layout.messageBottom + 18, true);
+      assert.equal(layout.messageTop >= layout.workBottom + 18, true);
     } finally {
       await page.setViewportSize({ width: 1440, height: 920 });
     }

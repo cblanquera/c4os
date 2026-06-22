@@ -1,8 +1,9 @@
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{mock_workspace, BrowserState, TerminalState, WorkspacePayload};
+use crate::openrouter::{run_chat_stream, RuntimeEvent};
 use crate::workspace::{activate_workspace, WorkspaceActivation, WorkspaceDescriptor};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 const FAKE_RUN_MESSAGE: &str = "Mock agent completed the requested transition.";
 
@@ -12,6 +13,8 @@ pub struct AgentRunResponse {
     pub prompt: String,
     pub run: String,
     pub agent: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<RuntimeEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,8 +81,30 @@ pub fn load_workspace() -> WorkspacePayload {
 }
 
 #[tauri::command]
-pub fn send_prompt(prompt: String) -> AgentRunResponse {
-    fake_successful_run(prompt)
+pub fn send_prompt<R: Runtime>(app: AppHandle<R>, prompt: String) -> AgentRunResponse {
+    if std::env::var("OPENROUTER_API_KEY").is_err() {
+        return fake_successful_run(prompt);
+    }
+
+    run_chat_stream(&prompt, |event| {
+        let _ = app.emit("c4os://runtime-event", event);
+    })
+    .map(|result| AgentRunResponse {
+        prompt: result.prompt,
+        run: result.run,
+        agent: result.agent,
+        events: result.events,
+    })
+    .unwrap_or_else(|error| AgentRunResponse {
+        prompt,
+        run: error.clone(),
+        agent: "The OpenRouter request did not complete.".into(),
+        events: vec![RuntimeEvent {
+            kind: "error".into(),
+            text: error,
+            sequence: 1,
+        }],
+    })
 }
 
 #[tauri::command]
@@ -160,6 +185,7 @@ pub fn fake_successful_run(prompt: String) -> AgentRunResponse {
         prompt,
         run: FAKE_RUN_MESSAGE.into(),
         agent: FAKE_RUN_MESSAGE.into(),
+        events: Vec::new(),
     }
 }
 
@@ -190,7 +216,7 @@ mod tests {
 
     #[test]
     fn fake_run_preserves_task_002_success_and_failure_text() {
-        let success = send_prompt("Summarize backend parity".into());
+        let success = fake_successful_run("Summarize backend parity".into());
 
         assert_eq!(success.prompt, "Summarize backend parity");
         assert_eq!(success.run, "Mock agent completed the requested transition.");

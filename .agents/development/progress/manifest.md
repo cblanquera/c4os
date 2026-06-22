@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-005
+Status: ready-for-task-005A
 Updated: 2026-06-22
 
 ## Active Stream
@@ -13,6 +13,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-002-mock-server-connection.md`
 - `.agents/development/progress/items/TASK-003-backend-mock-parity.md`
 - `.agents/development/progress/items/TASK-004-first-user-flow.md`
+- `.agents/development/progress/items/TASK-005-openrouter-chat-session.md`
 
 ## Scope Rules
 
@@ -40,5 +41,6 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-005` only when the user explicitly requests the next feature-slice
-unlock after TASK-004 acceptance.
+Start `TASK-005A` scoped frontend state and DOM update cleanup before
+`TASK-006` provider/model management. Do not start `TASK-006` until TASK-005A
+is accepted or the user explicitly redirects the queue.
