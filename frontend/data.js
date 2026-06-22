@@ -26,7 +26,7 @@ export const workspace = {
   project: "Project Alpha",
   session: "Integration planning",
   branch: "main",
-  model: "fast-coder"
+  model: ""
 };
 
 // Sidebar project/session fixtures preserve the accepted r04 information shape.
@@ -39,20 +39,11 @@ export const projects = [
 ];
 
 // Provider rows are display fixtures only; credentials are not persisted here.
-export const providers = [
-  { label: "OpenRouter - Personal", endpoint: "https://openrouter.ai/api/v1", status: "API key saved" },
-  { label: "OpenAI - Work", endpoint: "https://api.openai.com/v1", status: "API key saved" },
-  { label: "LiteLLM Local", endpoint: "http://localhost:4000/v1", status: "API key saved" }
-];
+export const providers = [];
 
-// Model rows mirror the provider/model picker routes without making live calls.
-export const models = [
-  { label: "Gemini 2.5 Flash", provider: "OpenRouter - Personal", active: true },
-  { label: "ChatGPT o4", provider: "OpenRouter - Personal" },
-  { label: "Grok 2.0", provider: "OpenRouter - Personal" },
-  { label: "gpt-4.1", provider: "OpenAI - Work" },
-  { label: "local/coder-small", provider: "LiteLLM Local" }
-];
+// Fallback records keep the r04 routes renderable until a connector hydrates
+// provider/model state. They do not carry raw API keys or secret material.
+export const models = [];
 
 // Settings navigation order is an r04 parity surface, not generated metadata.
 export const settingsItems = [
@@ -155,6 +146,10 @@ export const toolState = {
   bySurface: {}
 };
 
+export const sessionState = {
+  bySurface: {}
+};
+
 function replaceArray(target, next) {
   target.splice(0, target.length, ...next);
 }
@@ -208,16 +203,26 @@ export async function sendConnectorPrompt(prompt, options = {}) {
 
   connectorState.runPending = true;
   const activeTurn = createPendingTurn(prompt || threadState.user);
+  if (options.createSession) {
+    captureActiveSessionState();
+    ensureSessionForPrompt(prompt);
+    activateSessionState(workspace.project, workspace.session, {
+      model: options.model || workspace.model,
+      reset: true,
+      skipCapture: true,
+      turns: []
+    });
+  }
   threadTurns.push(activeTurn);
   syncThreadStateFromTurn(activeTurn);
   options.onTurnCreated?.(activeTurn);
-  if (options.createSession) ensureSessionForPrompt(prompt);
 
   try {
     if (options.createSession && connectorState.connector.createSession) {
-      await connectorState.connector.createSession(workspace.project);
+      await connectorState.connector.createSession(workspace.project, options.model || workspace.model);
     }
     const payload = await connectorState.connector.sendPrompt(prompt, {
+      model: options.model || workspace.model,
       onEvent: (event) => {
         applyRuntimeEvent(event, activeTurn);
         syncThreadStateFromTurn(activeTurn);
@@ -246,7 +251,112 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     syncThreadStateFromTurn(activeTurn);
     connectorState.runPending = false;
     options.onStateChange?.(activeTurn);
+    captureActiveSessionState();
   }
+}
+
+export async function setConnectorModelEnabled(modelId, enabled) {
+  const record = models.find((model) => model.id === modelId);
+  if (!record) return null;
+
+  record.enabled = enabled;
+  if (!connectorState.connector.available || !connectorState.connector.setModelEnabled) return record;
+
+  const updated = await connectorState.connector.setModelEnabled(modelId, enabled);
+  Object.assign(record, updated);
+  return record;
+}
+
+export async function setConnectorProviderEnabled(providerId, enabled) {
+  const record = providers.find((provider) => provider.id === providerId);
+  if (!record) return null;
+
+  record.enabled = enabled;
+  if (!connectorState.connector.available || !connectorState.connector.setProviderEnabled) return record;
+
+  const updated = await connectorState.connector.setProviderEnabled(providerId, enabled);
+  Object.assign(record, updated);
+  return record;
+}
+
+export async function selectConnectorSessionModel(session, model) {
+  workspace.model = model;
+  models.forEach((record) => {
+    record.active = record.label === model;
+  });
+  captureActiveSessionState();
+
+  if (!connectorState.connector.available || !connectorState.connector.selectSessionModel) {
+    return { session, model };
+  }
+
+  return connectorState.connector.selectSessionModel(session, model);
+}
+
+export async function saveConnectorProviderProfile(request) {
+  const fallback = {
+    id: request.providerId || providerIdFromLabel(request.label),
+    label: request.label,
+    kind: request.kind || "OpenAI-compatible",
+    baseUrl: request.baseUrl || defaultProviderBaseUrl(request.kind),
+    endpoint: request.baseUrl || defaultProviderBaseUrl(request.kind),
+    status: request.apiKey ? "Key configured" : "Key not configured",
+    keyStatus: { state: request.apiKey ? "present" : "missing", source: "session" },
+    enabled: true,
+    supportsDiscovery: true
+  };
+
+  const saved = connectorState.connector.available && connectorState.connector.saveProviderProfile
+    ? await connectorState.connector.saveProviderProfile(request)
+    : fallback;
+
+  removeProviderPlaceholders(saved);
+  const index = providers.findIndex((provider) => provider.id === saved.id || provider.label === saved.label);
+  if (index >= 0) providers.splice(index, 1, saved);
+  else providers.push(saved);
+  await refreshConnectorProviderModels();
+  return saved;
+}
+
+export async function deleteConnectorProviderProfile(providerId) {
+  const response = connectorState.connector.available && connectorState.connector.deleteProviderProfile
+    ? await connectorState.connector.deleteProviderProfile(providerId)
+    : { providerId, deleted: true };
+
+  replaceArray(providers, providers.filter((provider) => provider.id !== providerId));
+  replaceArray(models, models.filter((model) => model.providerId !== providerId));
+  return response;
+}
+
+export async function refreshConnectorProviderModels() {
+  if (!connectorState.connector.available || !connectorState.connector.listProviderModels) return models;
+  const next = await connectorState.connector.listProviderModels();
+  replaceArray(models, next);
+  return models;
+}
+
+function removeProviderPlaceholders(saved) {
+  const savedBase = (saved.baseUrl || saved.endpoint || "").trim();
+  for (let index = providers.length - 1; index >= 0; index -= 1) {
+    const provider = providers[index];
+    if (provider.id === saved.id || provider.label === saved.label) continue;
+    const providerBase = (provider.baseUrl || provider.endpoint || "").trim();
+    const placeholder = provider.keyStatus?.state === "unknown" || provider.status === "Key status managed by backend";
+    if (placeholder && providerBase === savedBase) providers.splice(index, 1);
+  }
+}
+
+function providerIdFromLabel(label) {
+  return String(label || "provider")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "provider";
+}
+
+function defaultProviderBaseUrl(kind) {
+  if (kind === "OpenAI") return "https://api.openai.com/v1";
+  return "https://openrouter.ai/api/v1";
 }
 
 function createPendingTurn(prompt) {
@@ -363,6 +473,78 @@ function applyConnectorWorkspace(payload) {
   assignObject(terminalState, payload.terminal);
   assignObject(threadState, payload.thread);
   replaceArray(threadTurns, workspace.session ? [turnFromThreadState(threadState, "connector-turn")] : []);
+  captureActiveSessionState();
+}
+
+export function activateSessionState(project, session, options = {}) {
+  if (!options.skipCapture) captureActiveSessionState();
+
+  workspace.project = project;
+  workspace.session = session;
+  const key = sessionKey(project, session);
+  if (options.reset || !sessionState.bySurface[key]) {
+    sessionState.bySurface[key] = sessionSnapshot({
+      model: options.model ?? workspace.model,
+      turns: options.turns || []
+    });
+  }
+
+  applySessionSnapshot(sessionState.bySurface[key]);
+  return key;
+}
+
+function captureActiveSessionState() {
+  if (!workspace.project || !workspace.session) return;
+  sessionState.bySurface[sessionKey(workspace.project, workspace.session)] = sessionSnapshot({
+    browser: browserState,
+    files: filesState,
+    model: workspace.model,
+    terminal: terminalState,
+    thread: threadState,
+    turns: threadTurns
+  });
+}
+
+function applySessionSnapshot(snapshot) {
+  workspace.model = snapshot.model || "";
+  assignObject(browserState, cloneValue(snapshot.browser));
+  assignObject(filesState, cloneValue(snapshot.files));
+  assignObject(terminalState, cloneValue(snapshot.terminal));
+  assignObject(threadState, cloneValue(snapshot.thread));
+  replaceArray(threadTurns, cloneValue(snapshot.turns));
+}
+
+function sessionSnapshot(overrides = {}) {
+  const turns = cloneValue(overrides.turns || []);
+  return {
+    browser: cloneValue(overrides.browser || browserState),
+    files: cloneValue(overrides.files || filesState),
+    model: overrides.model || "",
+    terminal: cloneValue(overrides.terminal || terminalState),
+    thread: cloneValue(overrides.thread || threadStateFromTurns(turns)),
+    turns
+  };
+}
+
+function threadStateFromTurns(turns) {
+  const latest = turns[turns.length - 1];
+  return latest
+    ? {
+        user: latest.user,
+        agent: latest.agent,
+        extra: latest.extra,
+        tool: latest.tool,
+        run: latest.run
+      }
+    : { user: "", agent: "", extra: "", tool: "", run: "" };
+}
+
+function sessionKey(project, session) {
+  return `chat:${project}:${session || "untitled"}`;
+}
+
+function cloneValue(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function turnFromThreadState(state, id) {

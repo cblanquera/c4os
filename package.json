@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node tests/support/browser-harness/dev-server.js",
-    "test": "node --test tests/*.test.js tests/server/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js tests/server/*.test.js",
     "backend:build": "cargo build --manifest-path backend/Cargo.toml",
     "backend:run": "cargo run --manifest-path backend/Cargo.toml",
     "backend:test": "cargo test --manifest-path backend/Cargo.toml",

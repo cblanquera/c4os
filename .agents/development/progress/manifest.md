@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-006
+Status: ready-for-task-007
 Updated: 2026-06-22
 
 ## Active Stream
@@ -15,6 +15,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-004-first-user-flow.md`
 - `.agents/development/progress/items/TASK-005-openrouter-chat-session.md`
 - `.agents/development/progress/items/TASK-005A-scoped-frontend-state.md`
+- `.agents/development/progress/items/TASK-006-provider-model-management.md`
 
 ## Scope Rules
 
@@ -42,6 +43,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-006` provider/model management from the verified TASK-005A scoped
-frontend state boundary. Preserve the accepted r04 shell and scoped update
-patterns unless a later task explicitly changes the UI contract.
+Start `TASK-007` runtime adapter and persistent sessions from the verified
+TASK-006 provider/model management boundary. Preserve the accepted r04 shell,
+TASK-005 chat UX, TASK-005A scoped update patterns, and TASK-006 provider/model
+selection records unless a later task explicitly changes the UI contract.

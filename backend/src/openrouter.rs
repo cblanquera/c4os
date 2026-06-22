@@ -1,9 +1,10 @@
+use crate::provider_models::{configured_provider_api_key, DEFAULT_MODEL};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-pub const DEFAULT_OPENROUTER_MODEL: &str = "google/gemini-2.5-flash-lite";
+pub const DEFAULT_OPENROUTER_MODEL: &str = DEFAULT_MODEL;
 const OPENROUTER_CHAT_COMPLETIONS_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_CONNECT_TIMEOUT_SECONDS: u64 = 15;
 const OPENROUTER_TOTAL_TIMEOUT_SECONDS: u64 = 90;
@@ -43,8 +44,26 @@ pub fn run_chat_stream<F>(prompt: &str, mut emit: F) -> Result<OpenRouterChatRes
 where
     F: FnMut(RuntimeEvent),
 {
-    let api_key = api_key_from_env()?;
-    let request = chat_request(prompt);
+    run_chat_stream_with_model(prompt, DEFAULT_OPENROUTER_MODEL, &mut emit)
+}
+
+pub fn run_chat_stream_with_model<F>(
+    prompt: &str,
+    model: &str,
+    mut emit: F,
+) -> Result<OpenRouterChatResult, String>
+where
+    F: FnMut(RuntimeEvent),
+{
+    let api_key = configured_provider_api_key()
+        .map(Ok)
+        .unwrap_or_else(api_key_from_env)?;
+    let selected_model = if model.trim().is_empty() {
+        DEFAULT_OPENROUTER_MODEL
+    } else {
+        model.trim()
+    };
+    let request = chat_request_with_model(prompt, selected_model);
     let start = RuntimeEvent {
         kind: "activity".into(),
         text: "Starting OpenRouter request.".into(),
@@ -106,14 +125,18 @@ where
         } else {
             final_response
         },
-        model: DEFAULT_OPENROUTER_MODEL.into(),
+        model: selected_model.into(),
         events,
     })
 }
 
 pub fn chat_request(prompt: &str) -> Value {
+    chat_request_with_model(prompt, DEFAULT_OPENROUTER_MODEL)
+}
+
+pub fn chat_request_with_model(prompt: &str, model: &str) -> Value {
     json!({
-        "model": DEFAULT_OPENROUTER_MODEL,
+        "model": model,
         "stream": true,
         "reasoning": {
             "enabled": true

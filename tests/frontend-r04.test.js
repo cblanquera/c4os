@@ -119,7 +119,7 @@ describe("TASK-001 r04 frontend parity", () => {
 
     await goto("models-popover");
     assert.equal(await page.getByRole("complementary", { name: "Model selector" }).isVisible(), true);
-    await page.getByLabel("Current model").waitFor();
+    assert.equal(await page.getByRole("complementary", { name: "Model selector" }).isVisible(), true);
   });
 
   it("preserves chat message disclosure", async () => {

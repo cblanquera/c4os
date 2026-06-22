@@ -33,17 +33,36 @@ pub struct ProjectRecord {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRecord {
+    pub id: String,
     pub label: String,
+    pub kind: String,
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
     pub endpoint: String,
     pub status: String,
+    #[serde(rename = "keyStatus")]
+    pub key_status: ApiKeyStatus,
+    pub enabled: bool,
+    #[serde(rename = "supportsDiscovery")]
+    pub supports_discovery: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelRecord {
+    pub id: String,
     pub label: String,
+    #[serde(rename = "providerId")]
+    pub provider_id: String,
     pub provider: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active: Option<bool>,
+    pub enabled: bool,
+    pub active: bool,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApiKeyStatus {
+    pub state: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,7 +108,7 @@ pub fn mock_workspace() -> WorkspacePayload {
             project: "Mock Workspace Alpha".into(),
             session: "Mock integration run".into(),
             branch: "mock/task-002".into(),
-            model: "mock-fast-coder".into(),
+            model: "".into(),
         },
         projects: vec![
             ProjectRecord {
@@ -105,35 +124,8 @@ pub fn mock_workspace() -> WorkspacePayload {
                 sessions: vec![],
             },
         ],
-        providers: vec![
-            ProviderRecord {
-                label: "Mock OpenRouter".into(),
-                endpoint: "https://mock.openrouter.local/v1".into(),
-                status: "Mock API key saved".into(),
-            },
-            ProviderRecord {
-                label: "Mock OpenAI".into(),
-                endpoint: "https://mock.openai.local/v1".into(),
-                status: "Mock API key saved".into(),
-            },
-        ],
-        models: vec![
-            ModelRecord {
-                label: "mock-fast-coder".into(),
-                provider: "Mock OpenRouter".into(),
-                active: Some(true),
-            },
-            ModelRecord {
-                label: "mock-reviewer".into(),
-                provider: "Mock OpenRouter".into(),
-                active: None,
-            },
-            ModelRecord {
-                label: "mock-local-small".into(),
-                provider: "Mock OpenAI".into(),
-                active: None,
-            },
-        ],
+        providers: vec![],
+        models: vec![],
         plugin_catalog: vec!["Mock GitHub".into(), "Mock Slack".into(), "Mock Linear".into()],
         plugin_marketplaces: vec![PluginMarketplace {
             label: "Mock C4OS Marketplace".into(),
@@ -194,8 +186,14 @@ mod tests {
 
         assert_eq!(payload["workspace"]["project"], "Mock Workspace Alpha");
         assert_eq!(payload["workspace"]["branch"], "mock/task-002");
-        assert_eq!(payload["pluginCatalog"], json!(["Mock GitHub", "Mock Slack", "Mock Linear"]));
-        assert_eq!(payload["browser"]["summary"], "Mock Browser state from tests/server.");
+        assert_eq!(
+            payload["pluginCatalog"],
+            json!(["Mock GitHub", "Mock Slack", "Mock Linear"])
+        );
+        assert_eq!(
+            payload["browser"]["summary"],
+            "Mock Browser state from tests/server."
+        );
         assert_eq!(payload["thread"]["run"], "Mock agent ready");
     }
 }

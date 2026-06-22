@@ -56,7 +56,13 @@ describe("TASK-003 Rust/Tauri backend scaffold", () => {
   });
 
   it("passes Rust tests for TASK-002 mock parity and native menu state", async () => {
-    const result = await run("cargo", ["test", "--manifest-path", "backend/Cargo.toml"]);
+    const result = await run("cargo", [
+      "test",
+      "--manifest-path",
+      "backend/Cargo.toml",
+      "--",
+      "--test-threads=1"
+    ]);
 
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /test result: ok/);

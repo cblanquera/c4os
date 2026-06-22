@@ -7,7 +7,14 @@ export const connectorMethods = [
   "saveFile",
   "runTerminalCommand",
   "openBrowserPreview",
-  "listExtensions"
+  "listExtensions",
+  "listProviderProfiles",
+  "saveProviderProfile",
+  "deleteProviderProfile",
+  "listProviderModels",
+  "setModelEnabled",
+  "setProviderEnabled",
+  "selectSessionModel"
 ];
 
 export const workspacePayloadFields = [

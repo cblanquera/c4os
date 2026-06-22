@@ -59,7 +59,7 @@ describe("frontend connector boundary", () => {
     });
     assert.deepEqual(calls, [
       { command: "load_workspace", payload: undefined },
-      { command: "send_prompt", payload: { prompt: "hello tauri" } }
+      { command: "send_prompt", payload: { prompt: "hello tauri", model: undefined } }
     ]);
   });
 
@@ -95,7 +95,14 @@ describe("frontend connector boundary", () => {
       "saveFile",
       "runTerminalCommand",
       "openBrowserPreview",
-      "listExtensions"
+      "listExtensions",
+      "listProviderProfiles",
+      "saveProviderProfile",
+      "deleteProviderProfile",
+      "listProviderModels",
+      "setModelEnabled",
+      "setProviderEnabled",
+      "selectSessionModel"
     ]);
   });
 

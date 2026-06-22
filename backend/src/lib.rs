@@ -2,6 +2,7 @@ pub mod commands;
 pub mod menu;
 pub mod mock_data;
 pub mod openrouter;
+pub mod provider_models;
 pub mod workspace;
 
 pub fn run() {
@@ -19,6 +20,13 @@ pub fn run() {
             commands::run_terminal_command,
             commands::open_browser_preview,
             commands::list_extensions,
+            commands::list_provider_profiles,
+            commands::save_provider_profile,
+            commands::delete_provider_profile,
+            commands::list_provider_models,
+            commands::set_model_enabled,
+            commands::set_provider_enabled,
+            commands::select_session_model,
             commands::native_menu_contract,
             commands::native_menu_state
         ])

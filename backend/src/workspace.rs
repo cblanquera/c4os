@@ -1,6 +1,7 @@
 use crate::mock_data::{
     mock_workspace, ProjectRecord, ThreadState, WorkspacePayload, WorkspaceSummary,
 };
+use crate::provider_models::DEFAULT_MODEL;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -41,8 +42,8 @@ pub fn activate_workspace(path: Option<String>) -> Result<WorkspaceActivation, S
 
 pub fn activate_workspace_at(root: impl AsRef<Path>) -> Result<WorkspaceActivation, String> {
     let root = root.as_ref();
-    let canonical = fs::canonicalize(root)
-        .map_err(|error| format!("Cannot open workspace folder: {error}"))?;
+    let canonical =
+        fs::canonicalize(root).map_err(|error| format!("Cannot open workspace folder: {error}"))?;
 
     if !canonical.is_dir() {
         return Err("Workspace path must be a folder".into());
@@ -140,7 +141,7 @@ fn payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload 
         project: descriptor.name.clone(),
         session: "".into(),
         branch: "main".into(),
-        model: "mock-fast-coder".into(),
+        model: DEFAULT_MODEL.into(),
     };
     payload.projects = vec![ProjectRecord {
         name: descriptor.name.clone(),
@@ -197,9 +198,15 @@ mod tests {
 
         assert_eq!(activation.trusted, true);
         assert_eq!(activation.descriptor.name, "c4os-task-004-creates");
-        assert_eq!(activation.payload.workspace.project, "c4os-task-004-creates");
+        assert_eq!(
+            activation.payload.workspace.project,
+            "c4os-task-004-creates"
+        );
         assert_eq!(activation.payload.workspace.session, "");
-        assert_eq!(activation.payload.projects[0].sessions, Vec::<String>::new());
+        assert_eq!(
+            activation.payload.projects[0].sessions,
+            Vec::<String>::new()
+        );
         assert!(descriptor.contains("\"trusted\": true"));
         assert!(descriptor.contains("\"schemaVersion\": 1"));
 
@@ -225,9 +232,15 @@ mod tests {
         let activation = activate_workspace_at(&root).expect("activate existing workspace");
 
         assert_eq!(activation.descriptor.id, "c4os-ws-existing");
-        assert_eq!(activation.payload.workspace.project, "Existing Product Repo");
+        assert_eq!(
+            activation.payload.workspace.project,
+            "Existing Product Repo"
+        );
         assert_ne!(activation.payload.workspace.project, "Mock Workspace Alpha");
-        assert_eq!(activation.payload.thread.tool, "Workspace descriptor loaded");
+        assert_eq!(
+            activation.payload.thread.tool,
+            "Workspace descriptor loaded"
+        );
 
         let _ = fs::remove_dir_all(root);
     }

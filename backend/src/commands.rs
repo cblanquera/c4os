@@ -1,6 +1,16 @@
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{mock_workspace, BrowserState, TerminalState, WorkspacePayload};
-use crate::openrouter::{run_chat_stream, RuntimeEvent};
+use crate::openrouter::{run_chat_stream_with_model, RuntimeEvent};
+use crate::provider_models::{
+    delete_provider_profile as delete_provider_profile_record, provider_api_key_configured,
+    provider_models, provider_profiles, save_provider_profile as save_provider_profile_record,
+    select_session_model as select_provider_session_model,
+    set_model_enabled as set_provider_model_enabled,
+    set_provider_enabled as set_provider_profile_enabled, ModelEnablementRequest,
+    ProviderDeleteRequest, ProviderDeleteResponse, ProviderEnablementRequest, ProviderModel,
+    ProviderProfile, ProviderProfileSaveRequest, SessionModelSelection,
+    SessionModelSelectionRequest, DEFAULT_MODEL,
+};
 use crate::workspace::{activate_workspace, WorkspaceActivation, WorkspaceDescriptor};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime};
@@ -77,16 +87,30 @@ pub struct ExtensionList {
 
 #[tauri::command]
 pub fn load_workspace() -> WorkspacePayload {
-    mock_workspace()
+    let mut payload = mock_workspace();
+    payload.providers = provider_profiles()
+        .into_iter()
+        .map(provider_record_from_profile)
+        .collect();
+    payload.models = provider_models()
+        .into_iter()
+        .map(model_record_from_provider_model)
+        .collect();
+    payload
 }
 
 #[tauri::command]
-pub fn send_prompt<R: Runtime>(app: AppHandle<R>, prompt: String) -> AgentRunResponse {
-    if std::env::var("OPENROUTER_API_KEY").is_err() {
+pub fn send_prompt<R: Runtime>(
+    app: AppHandle<R>,
+    prompt: String,
+    model: Option<String>,
+) -> AgentRunResponse {
+    if !provider_api_key_configured() {
         return fake_successful_run(prompt);
     }
 
-    run_chat_stream(&prompt, |event| {
+    let selected_model = model.unwrap_or_else(|| DEFAULT_MODEL.into());
+    run_chat_stream_with_model(&prompt, &selected_model, |event| {
         let _ = app.emit("c4os://runtime-event", event);
     })
     .map(|result| AgentRunResponse {
@@ -108,17 +132,21 @@ pub fn send_prompt<R: Runtime>(app: AppHandle<R>, prompt: String) -> AgentRunRes
 }
 
 #[tauri::command]
-pub fn open_workspace(request: Option<WorkspaceOpenRequest>) -> Result<WorkspaceOpenResponse, String> {
+pub fn open_workspace(
+    request: Option<WorkspaceOpenRequest>,
+) -> Result<WorkspaceOpenResponse, String> {
     let activation = activate_workspace(request.and_then(|input| input.path))?;
     Ok(open_workspace_response(activation))
 }
 
 #[tauri::command]
-pub fn create_session(project: Option<String>) -> SessionResponse {
+pub fn create_session(project: Option<String>, model: Option<String>) -> SessionResponse {
     SessionResponse {
         id: "mock-session-task-003".into(),
         project: project.unwrap_or_else(|| "Mock Workspace Alpha".into()),
-        status: "mock-created".into(),
+        status: model
+            .map(|selected| format!("created-with-model:{selected}"))
+            .unwrap_or_else(|| "mock-created".into()),
     }
 }
 
@@ -170,6 +198,47 @@ pub fn list_extensions() -> ExtensionList {
 }
 
 #[tauri::command]
+pub fn list_provider_profiles() -> Vec<ProviderProfile> {
+    provider_profiles()
+}
+
+#[tauri::command]
+pub fn save_provider_profile(
+    request: ProviderProfileSaveRequest,
+) -> Result<ProviderProfile, String> {
+    save_provider_profile_record(request)
+}
+
+#[tauri::command]
+pub fn delete_provider_profile(
+    request: ProviderDeleteRequest,
+) -> Result<ProviderDeleteResponse, String> {
+    delete_provider_profile_record(request)
+}
+
+#[tauri::command]
+pub fn list_provider_models() -> Vec<ProviderModel> {
+    provider_models()
+}
+
+#[tauri::command]
+pub fn set_model_enabled(request: ModelEnablementRequest) -> Result<ProviderModel, String> {
+    set_provider_model_enabled(request)
+}
+
+#[tauri::command]
+pub fn set_provider_enabled(request: ProviderEnablementRequest) -> Result<ProviderProfile, String> {
+    set_provider_profile_enabled(request)
+}
+
+#[tauri::command]
+pub fn select_session_model(
+    request: SessionModelSelectionRequest,
+) -> Result<SessionModelSelection, String> {
+    select_provider_session_model(request)
+}
+
+#[tauri::command]
 pub fn native_menu_contract() -> MenuContract {
     menu_contract()
 }
@@ -194,12 +263,51 @@ pub fn fake_failed_run(prompt: String) -> String {
 }
 
 fn open_workspace_response(activation: WorkspaceActivation) -> WorkspaceOpenResponse {
+    let mut payload = activation.payload;
+    payload.providers = provider_profiles()
+        .into_iter()
+        .map(provider_record_from_profile)
+        .collect();
+    payload.models = provider_models()
+        .into_iter()
+        .map(model_record_from_provider_model)
+        .collect();
+
     WorkspaceOpenResponse {
         path: activation.path,
         trusted: activation.trusted,
-        workspace: activation.payload.workspace.clone(),
+        workspace: payload.workspace.clone(),
         descriptor: activation.descriptor,
-        payload: activation.payload,
+        payload,
+    }
+}
+
+fn provider_record_from_profile(profile: ProviderProfile) -> crate::mock_data::ProviderRecord {
+    crate::mock_data::ProviderRecord {
+        id: profile.id,
+        label: profile.label,
+        kind: profile.kind,
+        base_url: profile.base_url,
+        endpoint: profile.endpoint,
+        status: profile.status,
+        key_status: crate::mock_data::ApiKeyStatus {
+            state: profile.key_status.state,
+            source: profile.key_status.source,
+        },
+        enabled: profile.enabled,
+        supports_discovery: profile.supports_discovery,
+    }
+}
+
+fn model_record_from_provider_model(model: ProviderModel) -> crate::mock_data::ModelRecord {
+    crate::mock_data::ModelRecord {
+        id: model.id,
+        label: model.label,
+        provider_id: model.provider_id,
+        provider: model.provider,
+        enabled: model.enabled,
+        active: model.active,
+        source: model.source,
     }
 }
 
@@ -211,7 +319,10 @@ mod tests {
     fn command_inventory_returns_task_002_mock_payloads() {
         assert_eq!(load_workspace().workspace.project, "Mock Workspace Alpha");
         assert_eq!(open_browser_preview().title, "Mock rendered page");
-        assert_eq!(list_extensions().mcp_servers, vec!["mock_node_repl", "mock_docs_mcp"]);
+        assert_eq!(
+            list_extensions().mcp_servers,
+            vec!["mock_node_repl", "mock_docs_mcp"]
+        );
     }
 
     #[test]
@@ -219,7 +330,10 @@ mod tests {
         let success = fake_successful_run("Summarize backend parity".into());
 
         assert_eq!(success.prompt, "Summarize backend parity");
-        assert_eq!(success.run, "Mock agent completed the requested transition.");
+        assert_eq!(
+            success.run,
+            "Mock agent completed the requested transition."
+        );
         assert_eq!(
             fake_failed_run("fail this run".into()),
             "Mock agent failed before producing output. prompt=fail this run"
@@ -230,7 +344,9 @@ mod tests {
     fn mock_file_and_terminal_commands_do_not_claim_real_io() {
         assert_eq!(read_file(None).path, "frontend/mock-main.js");
         assert_eq!(save_file(None).saved, true);
-        assert!(run_terminal_command(None).output.contains("fake agent run channel connected"));
+        assert!(run_terminal_command(None)
+            .output
+            .contains("fake agent run channel connected"));
     }
 
     #[test]

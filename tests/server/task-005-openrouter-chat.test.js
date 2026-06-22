@@ -8,9 +8,10 @@ describe("TASK-005 OpenRouter chat session review slice", () => {
     const openRouterSource = await readFile(new URL("../../backend/src/openrouter.rs", import.meta.url), "utf8");
     const commandsSource = await readFile(new URL("../../backend/src/commands.rs", import.meta.url), "utf8");
     const workspaceSource = await readFile(new URL("../../backend/src/workspace.rs", import.meta.url), "utf8");
+    const providerSource = await readFile(new URL("../../backend/src/provider_models.rs", import.meta.url), "utf8");
 
     assert.match(openRouterSource, /OPENROUTER_API_KEY/);
-    assert.match(openRouterSource, /google\/gemini-2\.5-flash-lite/);
+    assert.match(providerSource, /google\/gemini-2\.5-flash-lite/);
     assert.match(openRouterSource, /reasoning_details/);
     assert.match(openRouterSource, /chat\/completions/);
     assert.match(commandsSource, /c4os:\/\/runtime-event/);

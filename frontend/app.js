@@ -11,7 +11,12 @@ import {
   projects,
   providers,
   routes,
+  deleteConnectorProviderProfile,
+  saveConnectorProviderProfile,
+  selectConnectorSessionModel,
   sendConnectorPrompt,
+  setConnectorModelEnabled,
+  setConnectorProviderEnabled,
   settingsItems,
   terminalState,
   threadTurns,
@@ -24,6 +29,13 @@ import { renderMarkdown } from "./markdown.js";
 import { appStore, sessionSurfaceKey } from "./state.js";
 
 const app = document.querySelector("#app");
+let providerFormDraft = null;
+let providerSetupGate = false;
+let lastAppRouteBeforeSettings = "app-start";
+const modelSettingsFilters = {
+  provider: "all",
+  search: ""
+};
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -70,47 +82,136 @@ function routeFromHash() {
  */
 function render() {
   const route = routeFromHash();
+  const previousRoute = appStore.route;
+  if (route.startsWith("settings") && !previousRoute.startsWith("settings")) {
+    lastAppRouteBeforeSettings = previousRoute;
+  }
+  if (route === "new-session" && previousRoute === "chat-session") {
+    const surface = `new:${workspace.project}`;
+    appStore.composer.bySurface[surface] = {
+      ...appStore.composerFor(surface),
+      model: null,
+      openPicker: null,
+      prompt: ""
+    };
+  }
   appStore.setRoute(route);
   document.body.dataset.route = route;
   if (route === "app-start") app.replaceChildren(renderStart());
   else if (route.startsWith("settings")) app.replaceChildren(renderSettings(route));
   else app.replaceChildren(renderShell(route));
   bindInteractions(render, pluginInitials);
+  bindDelegatedConnectorRun();
   bindConnectorRun();
   bindWorkspaceOpen();
   bindWorkLogDisclosure();
   bindToolTabs();
   bindPanelLinks();
+  bindSettingsNavigation();
+  bindDelegatedComposerPickers();
   bindComposerPickers();
+  bindModelEnablement();
+  bindProviderRows();
+  bindModelFilters();
+  bindModelBulkToggle();
+  bindProviderFormSave();
   bindSessionRows();
   applyShellState();
+}
+
+function bindDelegatedComposerPickers() {
+  if (document.body.dataset.boundDelegatedComposerPickers) return;
+  document.body.dataset.boundDelegatedComposerPickers = "true";
+  document.body.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-local-picker-trigger]");
+    if (trigger) {
+      const composerNode = trigger.closest(".composer");
+      if (!composerNode) return;
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      appStore.setComposerValue(surface, "openPicker", trigger.dataset.localPickerTrigger);
+      updateComposerPicker(composerNode, surface);
+      return;
+    }
+
+    const provider = event.target.closest("[data-local-provider]");
+    if (provider) {
+      const composerNode = provider.closest(".composer");
+      if (!composerNode) return;
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      appStore.setComposerValue(surface, "openPicker", "models");
+      updateComposerPicker(composerNode, surface);
+      return;
+    }
+
+    const model = event.target.closest("[data-local-model]");
+    if (model) {
+      const composerNode = model.closest(".composer");
+      if (!composerNode) return;
+      const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
+      appStore.setComposerValue(surface, "model", model.dataset.localModel);
+      if (routeFromHash() === "chat-session") {
+        workspace.model = model.dataset.localModel;
+        selectConnectorSessionModel(workspace.session || surface, model.dataset.localModel).catch((error) => {
+          connectorState.error = error.message;
+        });
+      }
+      appStore.setComposerValue(surface, "openPicker", null);
+      composerNode.querySelector("[data-local-picker-trigger='models'] span").textContent = selectedModelLabel(surface);
+      composerNode.querySelector("[data-local-picker-trigger='models']").setAttribute("aria-label", `Model: ${selectedModelLabel(surface)}`);
+      updateComposerPicker(composerNode, surface);
+    }
+  });
 }
 
 function bindConnectorRun() {
   if (!connectorState.connector.available) return;
   document.querySelectorAll(".send-button").forEach((control) => {
+    if (control.dataset.boundConnectorRun) return;
+    control.dataset.boundConnectorRun = "true";
     control.addEventListener("click", async () => {
-      const composerNode = control.closest(".composer");
-      const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
-      const shouldCreateSession = routeFromHash() !== "chat-session";
-      appStore.composer.bySurface[composerSurfaceKey()] = { prompt: "" };
-      const promptBox = composerNode?.querySelector(".prompt-box");
-      if (promptBox) promptBox.textContent = "";
-      const pending = sendConnectorPrompt(prompt, {
-        createSession: shouldCreateSession,
-        onTurnCreated: (turn) => {
-          if (!shouldCreateSession) appendTurnToThread(turn);
-        },
-        onStateChange: (turn) => updateTurnDom(turn),
-        beforeComplete: minimumPendingFrame
-      });
-      window.location.hash = "chat-session";
-      if (shouldCreateSession) render();
-      await minimumPendingFrame();
-      await pending;
-      updateTurnDom(threadTurns[threadTurns.length - 1]);
+      await sendFromComposerControl(control);
     });
   });
+}
+
+function bindDelegatedConnectorRun() {
+  if (document.body.dataset.boundDelegatedConnectorRun) return;
+  document.body.dataset.boundDelegatedConnectorRun = "true";
+  document.body.addEventListener("click", async (event) => {
+    const control = event.target.closest(".send-button");
+    if (!control || control.dataset.boundConnectorRun === "true") return;
+    await sendFromComposerControl(control);
+  });
+}
+
+async function sendFromComposerControl(control) {
+  if (connectorState.runPending && !threadTurns.some((turn) => turn.pending)) {
+    connectorState.runPending = false;
+  }
+  if (!connectorState.connector.available || connectorState.runPending) return;
+  const composerNode = control.closest(".composer");
+  const prompt = composerNode?.querySelector(".prompt-box")?.textContent?.trim() || "";
+  const shouldCreateSession = routeFromHash() !== "chat-session";
+  const surface = composerNode?.dataset.composerSurface || composerSurfaceKey();
+  const selectedModel = selectedModelForSurface(surface);
+  appStore.composer.bySurface[surface] = { prompt: "" };
+  const promptBox = composerNode?.querySelector(".prompt-box");
+  if (promptBox) promptBox.textContent = "";
+  const pending = sendConnectorPrompt(prompt, {
+    createSession: shouldCreateSession,
+    model: selectedModel,
+    onTurnCreated: (turn) => {
+      if (!shouldCreateSession) appendTurnToThread(turn);
+    },
+    onStateChange: (turn) => updateTurnDom(turn),
+    beforeComplete: minimumPendingFrame
+  });
+  window.location.hash = "chat-session";
+  if (shouldCreateSession) render();
+  await minimumPendingFrame();
+  await pending;
+  if (shouldCreateSession) appStore.setComposerValue(surface, "model", null);
+  updateTurnDom(threadTurns[threadTurns.length - 1]);
 }
 
 function minimumPendingFrame() {
@@ -196,13 +297,192 @@ function bindComposerPickers() {
     control.addEventListener("click", () => {
       const composerNode = control.closest(".composer");
       const surface = composerNode.dataset.composerSurface || composerSurfaceKey();
-      workspace.model = control.dataset.localModel;
+      appStore.setComposerValue(surface, "model", control.dataset.localModel);
+      if (routeFromHash() === "chat-session") {
+        workspace.model = control.dataset.localModel;
+        selectConnectorSessionModel(workspace.session || surface, control.dataset.localModel).catch((error) => {
+          connectorState.error = error.message;
+        });
+      }
       appStore.setComposerValue(surface, "openPicker", null);
-      composerNode.querySelector("[data-local-picker-trigger='models'] span").textContent = workspace.model;
-      composerNode.querySelector("[data-local-picker-trigger='models']").setAttribute("aria-label", `Model: ${workspace.model}`);
+      composerNode.querySelector("[data-local-picker-trigger='models'] span").textContent = selectedModelLabel(surface);
+      composerNode.querySelector("[data-local-picker-trigger='models']").setAttribute("aria-label", `Model: ${selectedModelLabel(surface)}`);
       updateComposerPicker(composerNode, surface);
     });
   });
+}
+
+function bindModelEnablement() {
+  document.querySelectorAll("[data-model-enable]").forEach((control) => {
+    if (control.dataset.boundModelEnable) return;
+    control.dataset.boundModelEnable = "true";
+    control.addEventListener("click", async () => {
+      const next = control.dataset.modelEnabled !== "true";
+      const model = await setConnectorModelEnabled(control.dataset.modelEnable, next);
+      if (!model) return;
+      setModelEnablementDom(control, model);
+      document.querySelector("[data-model-bulk-toggle]")?.replaceWith(modelBulkToggle());
+      bindModelBulkToggle();
+    });
+  });
+}
+
+function setModelEnablementDom(control, model) {
+  control.dataset.modelEnabled = String(model.enabled);
+  control.setAttribute("aria-label", `${model.label} ${model.enabled ? "enabled" : "disabled"}`);
+  control.setAttribute("aria-pressed", String(model.enabled));
+  const row = control.closest(".data-row");
+  const status = row?.querySelector(".status-pill");
+  if (status) status.textContent = model.enabled ? "Enabled" : "Disabled";
+}
+
+async function setFilteredModelsEnabled(enabled) {
+  for (const model of filteredModels()) {
+    if (model.enabled === enabled) continue;
+    await setConnectorModelEnabled(model.id, enabled);
+  }
+  document.querySelector(".data-list")?.replaceWith(modelSettingsList());
+  document.querySelector("[data-model-bulk-toggle]")?.replaceWith(modelBulkToggle());
+  bindModelEnablement();
+  bindModelBulkToggle();
+}
+
+function bindModelBulkToggle() {
+  const control = document.querySelector("[data-model-bulk-toggle]");
+  if (!control || control.dataset.boundModelBulkToggle) return;
+  control.dataset.boundModelBulkToggle = "true";
+  control.addEventListener("click", async () => {
+    await setFilteredModelsEnabled(control.dataset.modelBulkEnabled !== "false");
+  });
+}
+
+function bindProviderRows() {
+  document.querySelectorAll("[data-provider-edit]").forEach((control) => {
+    if (control.dataset.boundProviderEdit) return;
+    control.dataset.boundProviderEdit = "true";
+    control.addEventListener("click", () => {
+      providerFormDraft = providers.find((provider) => provider.id === control.dataset.providerEdit) || null;
+      window.location.hash = "settings-add-provider";
+      render();
+    });
+  });
+  document.querySelectorAll("[data-provider-new]").forEach((control) => {
+    if (control.dataset.boundProviderNew) return;
+    control.dataset.boundProviderNew = "true";
+    control.addEventListener("click", () => {
+      providerFormDraft = null;
+    });
+  });
+  document.querySelectorAll("[data-provider-enable]").forEach((control) => {
+    if (control.dataset.boundProviderEnable) return;
+    control.dataset.boundProviderEnable = "true";
+    control.addEventListener("click", async () => {
+      const next = control.dataset.providerEnabled !== "true";
+      const provider = await setConnectorProviderEnabled(control.dataset.providerEnable, next);
+      if (!provider) return;
+      control.dataset.providerEnabled = String(provider.enabled);
+      control.setAttribute("aria-label", `${provider.label} ${provider.enabled ? "enabled" : "disabled"}`);
+      control.setAttribute("aria-pressed", String(provider.enabled));
+    });
+  });
+}
+
+function bindModelFilters() {
+  const search = document.querySelector("[data-model-search]");
+  if (search && !search.dataset.boundModelSearch) {
+    search.dataset.boundModelSearch = "true";
+    search.addEventListener("input", () => {
+      modelSettingsFilters.search = search.value;
+      document.querySelector(".data-list")?.replaceWith(modelSettingsList());
+      document.querySelector("[data-model-bulk-toggle]")?.replaceWith(modelBulkToggle());
+      bindModelEnablement();
+      bindModelBulkToggle();
+    });
+  }
+
+  const provider = document.querySelector("[data-model-provider-filter]");
+  if (provider && !provider.dataset.boundModelProvider) {
+    provider.dataset.boundModelProvider = "true";
+    provider.addEventListener("change", () => {
+      modelSettingsFilters.provider = provider.value;
+      document.querySelector(".data-list")?.replaceWith(modelSettingsList());
+      document.querySelector("[data-model-bulk-toggle]")?.replaceWith(modelBulkToggle());
+      bindModelEnablement();
+      bindModelBulkToggle();
+    });
+  }
+}
+
+function bindProviderFormSave() {
+  const form = document.querySelector(".provider-form");
+  if (!form || form.dataset.boundProviderSave) return;
+  form.dataset.boundProviderSave = "true";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const request = providerFormRequest(form);
+    const keyInput = form.querySelector("#api-key");
+    try {
+      await saveConnectorProviderProfile(request);
+      if (keyInput) keyInput.value = "";
+      providerFormDraft = null;
+      window.location.hash = providerSetupGate ? "new-session" : "settings-providers";
+      providerSetupGate = false;
+      render();
+    } catch (error) {
+      connectorState.error = error.message;
+    }
+  });
+
+  form.querySelector("[data-provider-delete]")?.addEventListener("click", async () => {
+    if (!providerFormDraft?.id) return;
+    try {
+      await deleteConnectorProviderProfile(providerFormDraft.id);
+      providerFormDraft = null;
+      window.location.hash = "settings-providers";
+      render();
+    } catch (error) {
+      connectorState.error = error.message;
+    }
+  });
+}
+
+function bindSettingsNavigation() {
+  document.querySelectorAll("[data-settings-entry]").forEach((control) => {
+    if (control.dataset.boundSettingsEntry) return;
+    control.dataset.boundSettingsEntry = "true";
+    control.addEventListener("click", () => {
+      lastAppRouteBeforeSettings = routeFromHash();
+    }, true);
+  });
+  document.querySelectorAll("[data-settings-back-action]").forEach((control) => {
+    if (control.dataset.boundSettingsBack) return;
+    control.dataset.boundSettingsBack = "true";
+    control.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (lastAppRouteBeforeSettings === "app-start" || projects.length === 0) {
+        providerSetupGate = false;
+        window.location.hash = "app-start";
+      } else if (lastAppRouteBeforeSettings === "new-session" && providers.length === 0) {
+        providerSetupGate = true;
+        providerFormDraft = null;
+        window.location.hash = "settings-add-provider";
+      } else {
+        window.location.hash = "new-session";
+      }
+      render();
+    });
+  });
+}
+
+function providerFormRequest(form) {
+  const value = (selector) => form.querySelector(selector)?.value?.trim() || "";
+  return {
+    kind: value("#provider-type"),
+    label: value("#provider-label"),
+    baseUrl: value("#api-base-url"),
+    apiKey: value("#api-key"),
+    providerId: providerFormDraft?.id || undefined
+  };
 }
 
 function bindPanelLinks() {
@@ -237,11 +517,15 @@ function updateShellSessionDom() {
   });
   const workbench = shell.querySelector(".workbench");
   const currentMain = workbench.querySelector(":scope > main");
-  if (!currentMain?.classList.contains("thread-view")) {
-    currentMain?.replaceWith(renderThread());
-    bindWorkLogDisclosure();
-    bindConnectorRun();
-  }
+  currentMain?.replaceWith(renderThread());
+  shell.querySelector(".tool-panel")?.replaceWith(renderToolPanel(activeToolForRoute("chat-session"), "chat-session"));
+  bindWorkLogDisclosure();
+  bindMessage();
+  bindConnectorRun();
+  bindToolTabs();
+  bindTerminal();
+  bindPanelLinks();
+  applyShellState();
 }
 
 function applyShellState() {
@@ -302,7 +586,8 @@ function renderStart() {
       h("div", { class: "action-row" }, [
         button("Open Folder", "button primary", null, { "data-open-workspace": "" }),
         button("Clone Repository"),
-        button("Open Workspace File")
+        button("Open Workspace File"),
+        link("settings-providers", "button secondary", [icon("settings"), h("span", { text: "Settings" })], { "data-settings-entry": "" })
       ])
     ]),
     h("section", { class: "recent-panel", "aria-labelledby": "recent-title" }, [
@@ -389,7 +674,7 @@ function renderSidebar(chat) {
         }, [h("span", { text: session })]))
       ])
     ]),
-    link("settings-providers", "settings-entry", [icon("settings"), h("span", { text: "Settings" })])
+    link("settings-providers", "settings-entry", [icon("settings"), h("span", { text: "Settings" })], { "data-settings-entry": "" })
   ]);
 }
 
@@ -439,7 +724,7 @@ function composer(placeholder, options = {}) {
     h("div", { class: "context-strip" }, [
       readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Branch locked for this chat" }, [icon("gitBranch"), h("span", { text: state.branch })]) : h("button", { class: "chip", type: "button", "aria-label": `Branch: ${state.branch}`, "data-popover-trigger": "branch" }, [icon("gitBranch"), h("span", { text: state.branch })]),
       h("span", { class: "spacer" }),
-      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Model locked for this chat" }, [icon("bot"), h("span", { text: workspace.model })]) : h("button", { class: "chip", type: "button", "aria-label": `Model: ${workspace.model}`, "data-local-picker-trigger": "models" }, [icon("bot"), h("span", { text: workspace.model })])
+      readonly ? h("span", { class: "chip readonly-chip", "aria-label": "Model locked for this chat" }, [icon("bot"), h("span", { text: selectedModelLabel(surface) })]) : h("button", { class: "chip", type: "button", "aria-label": `Model: ${selectedModelLabel(surface)}`, "data-local-picker-trigger": "models" }, [icon("bot"), h("span", { text: selectedModelLabel(surface) })])
     ]),
     composerPopover("approval", ["Ask for approval", "Approve for me"]),
     readonly ? null : composerPopover("branch", ["main", "feature/trust-shell", "+ Create branch"]),
@@ -460,21 +745,39 @@ function composerPopover(kind, rows) {
 function localComposerPicker(kind) {
   if (kind === "providers") {
     return h("aside", { class: "popover", "aria-label": "Provider selector", "data-local-picker": "providers" }, [
-      h("header", { class: "popover-title" }, [h("strong", { text: "Providers" }), h("span", { text: "Select source" })]),
-      ...["OpenRouter", "OpenAI", "LiteLLM Local"].map((name) =>
-        h("button", { class: "popover-row", type: "button", "data-local-provider": name }, [h("span", { text: name }), icon("chevronRight")])
-      )
+      h("header", { class: "popover-title" }, [h("strong", { text: "Providers" })]),
+      h("div", { class: "popover-scroll" }, providers.map((provider) =>
+        h("button", { class: "popover-row", type: "button", "data-local-provider": provider.id || provider.label }, [h("span", { text: provider.label }), icon("chevronRight")])
+      ))
     ]);
   }
-  return h("aside", { class: "popover", "aria-label": "Model selector", "data-local-picker": "models" }, [
+  const selectableModels = enabledModels();
+  return h("aside", { class: "popover model-picker", "aria-label": "Model selector", "data-local-picker": "models" }, [
     h("header", { class: "popover-backbar" }, [
-      h("button", { class: "popover-back", type: "button", "aria-label": "Back to providers", "data-local-picker-trigger": "providers" }, [icon("chevronLeft"), h("strong", { text: "OpenRouter" })])
+      h("button", { class: "popover-back", type: "button", "aria-label": "Back to providers", "data-local-picker-trigger": "providers" }, [icon("chevronLeft"), h("strong", { text: activeProviderLabel() })])
     ]),
-    ...models.slice(0, 3).map((model) => h("button", { class: `popover-row${model.active ? " is-selected" : ""}`, type: "button", "data-local-model": model.label }, [
+    h("div", { class: "popover-scroll" }, selectableModels.map((model) => h("button", { class: `popover-row${model.label === selectedModelForSurface(composerSurfaceKey()) ? " is-selected" : ""}`, type: "button", "data-local-model": model.label }, [
       h("span", { text: model.label }),
-      model.active ? h("span", { "aria-label": "Current model" }, [icon("check")]) : h("span")
-    ]))
+      model.label === selectedModelForSurface(composerSurfaceKey()) ? h("span", { "aria-label": "Current model" }, [icon("check")]) : h("span")
+    ])))
   ]);
+}
+
+function enabledModels() {
+  return models.filter((model) => model.enabled !== false);
+}
+
+function activeProviderLabel() {
+  const activeModel = models.find((model) => model.label === workspace.model) || models.find((model) => model.enabled !== false);
+  return activeModel?.provider || providers[0]?.label || "Provider";
+}
+
+function selectedModelForSurface(surface) {
+  return appStore.composerFor(surface).model || (routeFromHash() === "chat-session" ? workspace.model : "") || enabledModels()[0]?.label || "";
+}
+
+function selectedModelLabel(surface) {
+  return selectedModelForSurface(surface) || "Select model";
 }
 
 function updateComposerPicker(composerNode, surface) {
@@ -490,8 +793,8 @@ function updateComposerPicker(composerNode, surface) {
  */
 function providerPopover() {
   return h("aside", { class: "popover", "aria-label": "Provider selector" }, [
-    h("header", { class: "popover-title" }, [h("strong", { text: "Providers" }), h("span", { text: "Select source" })]),
-    ...["OpenRouter", "OpenAI", "LiteLLM Local"].map((name) => link("models-popover", "popover-row", [h("span", { text: name }), icon("chevronRight")]))
+    h("header", { class: "popover-title" }, [h("strong", { text: "Providers" })]),
+    h("div", { class: "popover-scroll" }, providers.map((provider) => link("models-popover", "popover-row", [h("span", { text: provider.label }), icon("chevronRight")])))
   ]);
 }
 
@@ -499,12 +802,13 @@ function providerPopover() {
  * Render the model selector route popover.
  */
 function modelPopover() {
-  return h("aside", { class: "popover", "aria-label": "Model selector" }, [
-    h("header", { class: "popover-backbar" }, [link("providers-popover", "popover-back", [icon("chevronLeft"), h("strong", { text: "OpenRouter" })])]),
-    ...models.slice(0, 3).map((model) => link("new-session", `popover-row${model.active ? " is-selected" : ""}`, [
+  const selectableModels = enabledModels();
+  return h("aside", { class: "popover model-picker", "aria-label": "Model selector" }, [
+    h("header", { class: "popover-backbar" }, [link("providers-popover", "popover-back", [icon("chevronLeft"), h("strong", { text: activeProviderLabel() })])]),
+    h("div", { class: "popover-scroll" }, selectableModels.map((model) => link("new-session", `popover-row${model.label === selectedModelForSurface(composerSurfaceKey()) ? " is-selected" : ""}`, [
       h("span", { text: model.label }),
-      model.active ? h("span", { "aria-label": "Current model" }, [icon("check")]) : h("span")
-    ]))
+      model.label === selectedModelForSurface(composerSurfaceKey()) ? h("span", { "aria-label": "Current model" }, [icon("check")]) : h("span")
+    ])))
   ]);
 }
 
@@ -720,9 +1024,14 @@ function terminalTool() {
  */
 function renderSettings(route) {
   const active = route.replace("settings-", "");
+  if (providerSetupGate && active === "add-provider") {
+    return h("div", { class: "settings-shell setup-only", "data-screen": route }, [
+      h("main", { id: "main", class: "settings-main", tabindex: "-1" }, [settingsBody(active)])
+    ]);
+  }
   return h("div", { class: "settings-shell", "data-screen": route }, [
     h("aside", { class: "settings-nav", "aria-label": "Settings navigation" }, [
-      link("new-session", "settings-back", [icon("arrowLeft"), h("span", { text: "Back to app" })]),
+      h("a", { class: "settings-back", href: "#new-session", "data-settings-back-action": "" }, [icon("arrowLeft"), h("span", { text: "Back to app" })]),
       h("p", { class: "kicker", text: "Settings" }),
       ...settingsItems.flatMap(([label, target, iconName, divider]) => [
         divider ? h("div", { class: "settings-divider", role: "separator" }) : null,
@@ -745,16 +1054,107 @@ function settingsTitle(title, summary, action) {
  */
 function settingsBody(active) {
   if (active === "add-provider") return providerForm();
-  if (active === "models") return dataList("Models", "Models are fetched from enabled provider connections when available.", models.map((model) => [model.label, model.provider, model.active ? "Current" : "Enabled"]));
+  if (active === "models") return modelSettings();
   if (active === "runtimes") return runtimes();
   if (active === "configuration") return configuration();
   if (active === "plugins") return plugins();
   if (active === "skills") return skills();
   if (active === "mcp") return mcp();
   return h("section", {}, [
-    settingsTitle("Providers", "Manage OpenAI-compatible provider connections. Labels must be unique.", link("settings-add-provider", "button primary", [icon("add"), h("span", { text: "Add Provider" })])),
-    h("div", { class: "data-list" }, providers.map((provider) => dataRow(provider.label, `${provider.endpoint} - ${provider.status}`, button("Edit"), true)))
+    settingsTitle("Providers", "Manage OpenAI-compatible provider connections. Labels must be unique.", link("settings-add-provider", "button primary", [icon("add"), h("span", { text: "Add Provider" })], { "data-provider-new": "" })),
+    h("div", { class: "data-list" }, providers.map((provider) => dataRow(
+      provider.label,
+      `${provider.endpoint || provider.baseUrl} - ${providerStatus(provider)}`,
+      button("Edit", "button secondary", null, {
+        "aria-label": `Edit ${provider.label}`,
+        "data-provider-edit": provider.id
+      }),
+      {
+        kind: "provider",
+        label: `${provider.label} ${provider.enabled === false ? "disabled" : "enabled"}`,
+        providerId: provider.id,
+        enabled: provider.enabled !== false
+      }
+    )))
   ]);
+}
+
+function providerStatus(provider) {
+  if (provider.keyStatus?.state === "present") return "Key configured";
+  if (provider.keyStatus?.state === "missing") return "Key not configured";
+  return provider.status || "Key status managed by backend";
+}
+
+function modelSettings() {
+  const providerOptions = uniqueModelProviders();
+  return h("section", {}, [
+    settingsTitle("Models", "Models are fetched from enabled provider connections when available; manual model entries can be enabled here."),
+    h("div", { class: "models-toolbar" }, [
+      h("label", { class: "model-search" }, [
+        icon("search"),
+        h("span", { class: "sr-only", text: "Search models" }),
+        h("input", {
+          type: "search",
+          "aria-label": "Search models",
+          placeholder: "Search models",
+          value: modelSettingsFilters.search,
+          "data-model-search": ""
+        })
+      ]),
+      h("select", { class: "model-provider-filter", "aria-label": "Filter models by provider", "data-model-provider-filter": "" }, [
+        h("option", { value: "all", selected: modelSettingsFilters.provider === "all", text: "All providers" }),
+        ...providerOptions.map((provider) => h("option", {
+          value: provider,
+          selected: modelSettingsFilters.provider === provider,
+          text: provider
+        }))
+      ]),
+      modelBulkToggle()
+    ]),
+    modelSettingsList()
+  ]);
+}
+
+function modelBulkToggle() {
+  const filtered = filteredModels();
+  const hasModels = filtered.length > 0;
+  const allEnabled = hasModels && filtered.every((model) => model.enabled !== false);
+  const enable = !allEnabled;
+  return h("button", {
+    class: "button secondary model-bulk-toggle",
+    type: "button",
+    "aria-label": enable ? "Enable results" : "Disable results",
+    "data-model-bulk-toggle": "",
+    "data-model-bulk-enabled": String(enable),
+    disabled: hasModels ? null : "true"
+  }, [h("span", { text: enable ? "Enable results" : "Disable results" })]);
+}
+
+function modelSettingsList() {
+  return h("div", { class: "data-list" }, filteredModels().map((model) => dataRow(
+      model.label,
+      `${model.provider} - ${model.source || "manual"}`,
+      h("span", { class: "status-pill", text: model.enabled ? "Enabled" : "Disabled" }),
+      {
+        kind: "model",
+        label: `${model.label} ${model.enabled ? "enabled" : "disabled"}`,
+        modelId: model.id,
+        enabled: model.enabled
+      }
+    )));
+}
+
+function filteredModels() {
+  const search = modelSettingsFilters.search.trim().toLowerCase();
+  return models.filter((model) => {
+    const matchesProvider = modelSettingsFilters.provider === "all" || model.provider === modelSettingsFilters.provider;
+    const haystack = `${model.label} ${model.provider} ${model.source || ""}`.toLowerCase();
+    return matchesProvider && (!search || haystack.includes(search));
+  });
+}
+
+function uniqueModelProviders() {
+  return Array.from(new Set(models.map((model) => model.provider).filter(Boolean))).sort((left, right) => left.localeCompare(right));
 }
 
 /**
@@ -771,10 +1171,20 @@ function dataList(title, summary, rows) {
  * Render one row in a settings list.
  */
 function dataRow(name, meta, middle, toggle) {
+  const toggleKind = typeof toggle === "object" ? toggle.kind : null;
   return h("article", { class: "data-row" }, [
     h("div", {}, [h("strong", { text: name }), h("span", { text: meta })]),
     middle,
-    toggle ? h("button", { class: "switch", type: "button", "aria-label": `${name} enabled` }, [h("span")]) : null
+    toggle ? h("button", {
+      class: "switch",
+      type: "button",
+      "aria-label": typeof toggle === "object" ? toggle.label : `${name} enabled`,
+      "aria-pressed": typeof toggle === "object" ? String(toggle.enabled) : "true",
+      "data-model-enable": toggleKind === "model" ? toggle.modelId : null,
+      "data-model-enabled": toggleKind === "model" ? String(toggle.enabled) : null,
+      "data-provider-enable": toggleKind === "provider" ? toggle.providerId : null,
+      "data-provider-enabled": toggleKind === "provider" ? String(toggle.enabled) : null
+    }, [h("span")]) : null
   ]);
 }
 
@@ -782,19 +1192,24 @@ function dataRow(name, meta, middle, toggle) {
  * Render the Add Provider form with the documented provider type list.
  */
 function providerForm() {
+  const draft = providerFormDraft;
   const fields = [
-    { id: "provider-type", label: "Provider Type", options: ["OpenAI", "OpenRouter", "Hugging Face router", "LiteLLM proxy", "Custom OpenAI-compatible endpoint"], type: "select", value: "Custom OpenAI-compatible endpoint" },
-    { id: "provider-label", label: "Label", type: "text", value: "OpenRouter - Personal" },
-    { id: "api-base-url", label: "API Base URL", type: "url", value: "https://openrouter.ai/api/v1" },
-    { id: "api-key", label: "API Key", type: "password", value: "sk-****************" },
+    { id: "provider-type", label: "Provider Type", options: ["OpenAI", "OpenRouter", "Hugging Face router", "LiteLLM proxy", "Custom OpenAI-compatible endpoint"], type: "select", value: draft?.kind || "Custom OpenAI-compatible endpoint" },
+    { id: "provider-label", label: "Label", type: "text", value: draft?.label || "OpenRouter - Personal" },
+    { id: "api-base-url", label: "API Base URL", type: "url", value: draft?.baseUrl || draft?.endpoint || "https://openrouter.ai/api/v1" },
+    { id: "api-key", label: "API Key", type: "password", value: "", placeholder: "Stored by backend credential status" },
     { id: "auth-type", label: "Auth", options: ["Bearer token", "Custom header"], type: "select", value: "Bearer token" },
     { id: "provider-headers", label: "Headers", type: "textarea", value: "{}" }
   ];
   return h("section", {}, [
-    settingsTitle("Add Provider", "Save an OpenAI-compatible connection profile."),
+    settingsTitle(draft ? "Edit Provider" : "Add Provider", "Save an OpenAI-compatible connection profile."),
     h("form", { class: "provider-form" }, [
       ...fields.map(settingsField),
-      h("div", { class: "form-actions" }, [link("settings-providers", "button primary", ["Save Provider"]), link("settings-providers", "button secondary", ["Cancel"])])
+      h("div", { class: "form-actions" }, [
+        draft ? button("Remove Provider", "button danger", null, { "data-provider-delete": "" }) : null,
+        button("Save Provider", "button primary", null, { type: "submit" }),
+        link("settings-providers", "button secondary", ["Cancel"])
+      ])
     ])
   ]);
 }
@@ -807,7 +1222,7 @@ function settingsField(field) {
     ? h("select", { id: field.id, name: field.id }, field.options.map((option) => h("option", { selected: option === field.value, text: option })))
     : field.type === "textarea"
       ? h("textarea", { id: field.id, name: field.id, rows: "5", spellcheck: "false" }, [field.value])
-      : h("input", { id: field.id, name: field.id, type: field.type, value: field.value, spellcheck: field.type === "password" ? "false" : null });
+      : h("input", { id: field.id, name: field.id, type: field.type, value: field.value, placeholder: field.placeholder || null, spellcheck: field.type === "password" ? "false" : null });
   return h("label", { class: "field", "data-provider-field": field.id, for: field.id }, [h("span", { text: field.label }), control]);
 }
 

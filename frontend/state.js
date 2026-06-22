@@ -1,4 +1,5 @@
 import {
+  activateSessionState,
   connectorState,
   threadTurns,
   toolState,
@@ -43,9 +44,7 @@ export const appStore = {
     return view;
   },
   setActiveSession(project, session) {
-    workspace.project = project;
-    workspace.session = session;
-    return this.activeSessionKey();
+    return activateSessionState(project, session);
   },
   composerFor(surface) {
     this.composer.bySurface[surface] ||= {
