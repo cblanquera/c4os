@@ -3,6 +3,7 @@ export const connectorMethods = [
   "sendPrompt",
   "openWorkspace",
   "createSession",
+  "loadSession",
   "readFile",
   "saveFile",
   "runTerminalCommand",

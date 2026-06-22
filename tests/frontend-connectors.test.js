@@ -59,7 +59,7 @@ describe("frontend connector boundary", () => {
     });
     assert.deepEqual(calls, [
       { command: "load_workspace", payload: undefined },
-      { command: "send_prompt", payload: { prompt: "hello tauri", model: undefined } }
+      { command: "send_prompt", payload: { prompt: "hello tauri", sessionId: undefined, project: undefined, model: undefined } }
     ]);
   });
 
@@ -91,6 +91,7 @@ describe("frontend connector boundary", () => {
       "sendPrompt",
       "openWorkspace",
       "createSession",
+      "loadSession",
       "readFile",
       "saveFile",
       "runTerminalCommand",

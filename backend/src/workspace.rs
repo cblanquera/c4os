@@ -142,6 +142,7 @@ fn payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload 
         session: "".into(),
         branch: "main".into(),
         model: DEFAULT_MODEL.into(),
+        session_id: "".into(),
     };
     payload.projects = vec![ProjectRecord {
         name: descriptor.name.clone(),
@@ -205,7 +206,7 @@ mod tests {
         assert_eq!(activation.payload.workspace.session, "");
         assert_eq!(
             activation.payload.projects[0].sessions,
-            Vec::<String>::new()
+            Vec::<crate::runtime_sessions::ProjectSessionRecord>::new()
         );
         assert!(descriptor.contains("\"trusted\": true"));
         assert!(descriptor.contains("\"schemaVersion\": 1"));

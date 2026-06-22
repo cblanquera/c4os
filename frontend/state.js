@@ -28,7 +28,7 @@ export const appStore = {
   turns: threadTurns,
   workspace,
   activeSessionKey() {
-    return sessionSurfaceKey(workspace.project, workspace.session || "untitled");
+    return sessionSurfaceKey(workspace.project, workspace.sessionId || workspace.session || "untitled");
   },
   setRoute(route) {
     this.route = route;

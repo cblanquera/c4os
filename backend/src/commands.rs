@@ -1,9 +1,9 @@
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{mock_workspace, BrowserState, TerminalState, WorkspacePayload};
-use crate::openrouter::{run_chat_stream_with_model, RuntimeEvent};
+use crate::openrouter::RuntimeEvent;
 use crate::provider_models::{
-    delete_provider_profile as delete_provider_profile_record, provider_api_key_configured,
-    provider_models, provider_profiles, save_provider_profile as save_provider_profile_record,
+    delete_provider_profile as delete_provider_profile_record, provider_models, provider_profiles,
+    save_provider_profile as save_provider_profile_record,
     select_session_model as select_provider_session_model,
     set_model_enabled as set_provider_model_enabled,
     set_provider_enabled as set_provider_profile_enabled, ModelEnablementRequest,
@@ -11,11 +11,15 @@ use crate::provider_models::{
     ProviderProfile, ProviderProfileSaveRequest, SessionModelSelection,
     SessionModelSelectionRequest, DEFAULT_MODEL,
 };
+use crate::runtime_sessions::{
+    active_session, append_prompt, create_session as create_c4os_session,
+    load_session as load_c4os_session, project_sessions, sessions as c4os_sessions,
+    set_session_model as set_c4os_session_model, C4osSessionRecord, CreateSessionRequest,
+    SendPromptRequest,
+};
 use crate::workspace::{activate_workspace, WorkspaceActivation, WorkspaceDescriptor};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime};
-
-const FAKE_RUN_MESSAGE: &str = "Mock agent completed the requested transition.";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,16 +27,16 @@ pub struct AgentRunResponse {
     pub prompt: String,
     pub run: String,
     pub agent: String,
+    pub model: String,
+    pub session: C4osSessionRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<RuntimeEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionResponse {
-    pub id: String,
-    pub project: String,
-    pub status: String,
+pub struct SessionLoadRequest {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +92,7 @@ pub struct ExtensionList {
 #[tauri::command]
 pub fn load_workspace() -> WorkspacePayload {
     let mut payload = mock_workspace();
+    apply_runtime_session_payload(&mut payload);
     payload.providers = provider_profiles()
         .into_iter()
         .map(provider_record_from_profile)
@@ -103,26 +108,39 @@ pub fn load_workspace() -> WorkspacePayload {
 pub fn send_prompt<R: Runtime>(
     app: AppHandle<R>,
     prompt: String,
+    session_id: Option<String>,
+    project: Option<String>,
     model: Option<String>,
 ) -> AgentRunResponse {
-    if !provider_api_key_configured() {
-        return fake_successful_run(prompt);
-    }
-
-    let selected_model = model.unwrap_or_else(|| DEFAULT_MODEL.into());
-    run_chat_stream_with_model(&prompt, &selected_model, |event| {
+    let request = SendPromptRequest {
+        session_id,
+        project,
+        prompt: prompt.clone(),
+        model,
+    };
+    append_prompt(request, |event| {
         let _ = app.emit("c4os://runtime-event", event);
     })
     .map(|result| AgentRunResponse {
         prompt: result.prompt,
         run: result.run,
         agent: result.agent,
+        model: result.model,
+        session: result.session,
         events: result.events,
     })
     .unwrap_or_else(|error| AgentRunResponse {
         prompt,
         run: error.clone(),
         agent: "The OpenRouter request did not complete.".into(),
+        model: DEFAULT_MODEL.into(),
+        session: active_session().unwrap_or_else(|| {
+            create_c4os_session(CreateSessionRequest {
+                project: None,
+                label: Some("Failed runtime request".into()),
+                model: Some(DEFAULT_MODEL.into()),
+            })
+        }),
         events: vec![RuntimeEvent {
             kind: "error".into(),
             text: error,
@@ -140,14 +158,22 @@ pub fn open_workspace(
 }
 
 #[tauri::command]
-pub fn create_session(project: Option<String>, model: Option<String>) -> SessionResponse {
-    SessionResponse {
-        id: "mock-session-task-003".into(),
-        project: project.unwrap_or_else(|| "Mock Workspace Alpha".into()),
-        status: model
-            .map(|selected| format!("created-with-model:{selected}"))
-            .unwrap_or_else(|| "mock-created".into()),
-    }
+pub fn create_session(
+    project: Option<String>,
+    label: Option<String>,
+    model: Option<String>,
+) -> C4osSessionRecord {
+    create_c4os_session(CreateSessionRequest {
+        project,
+        label,
+        model,
+    })
+}
+
+#[tauri::command]
+pub fn load_session(request: SessionLoadRequest) -> Result<C4osSessionRecord, String> {
+    load_c4os_session(&request.session_id)
+        .ok_or_else(|| format!("Unknown C4OS session '{}'", request.session_id))
 }
 
 #[tauri::command]
@@ -235,7 +261,9 @@ pub fn set_provider_enabled(request: ProviderEnablementRequest) -> Result<Provid
 pub fn select_session_model(
     request: SessionModelSelectionRequest,
 ) -> Result<SessionModelSelection, String> {
-    select_provider_session_model(request)
+    let selection = select_provider_session_model(request)?;
+    let _ = set_c4os_session_model(&selection.session, &selection.model);
+    Ok(selection)
 }
 
 #[tauri::command]
@@ -249,21 +277,13 @@ pub fn native_menu_state<R: Runtime>(app: AppHandle<R>, focus_state: FocusState)
         .unwrap_or_else(|_| evaluate_menu_state(&focus_state))
 }
 
-pub fn fake_successful_run(prompt: String) -> AgentRunResponse {
-    AgentRunResponse {
-        prompt,
-        run: FAKE_RUN_MESSAGE.into(),
-        agent: FAKE_RUN_MESSAGE.into(),
-        events: Vec::new(),
-    }
-}
-
 pub fn fake_failed_run(prompt: String) -> String {
     format!("Mock agent failed before producing output. prompt={prompt}")
 }
 
 fn open_workspace_response(activation: WorkspaceActivation) -> WorkspaceOpenResponse {
     let mut payload = activation.payload;
+    apply_runtime_session_payload(&mut payload);
     payload.providers = provider_profiles()
         .into_iter()
         .map(provider_record_from_profile)
@@ -279,6 +299,24 @@ fn open_workspace_response(activation: WorkspaceActivation) -> WorkspaceOpenResp
         workspace: payload.workspace.clone(),
         descriptor: activation.descriptor,
         payload,
+    }
+}
+
+fn apply_runtime_session_payload(payload: &mut WorkspacePayload) {
+    let sessions = c4os_sessions();
+    payload.sessions = sessions.clone();
+    for project in &mut payload.projects {
+        project.sessions = project_sessions(&project.name);
+    }
+    if let Some(active) = sessions.first() {
+        payload.workspace.project = active.project.clone();
+        payload.workspace.session = active.title.clone();
+        payload.workspace.session_id = active.id.clone();
+        payload.workspace.model = active.selected_model.clone();
+        payload.browser = active.browser.clone();
+        payload.files = active.files.clone();
+        payload.terminal = active.terminal.clone();
+        payload.thread = active.thread.clone();
     }
 }
 
@@ -326,14 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn fake_run_preserves_task_002_success_and_failure_text() {
-        let success = fake_successful_run("Summarize backend parity".into());
-
-        assert_eq!(success.prompt, "Summarize backend parity");
-        assert_eq!(
-            success.run,
-            "Mock agent completed the requested transition."
-        );
+    fn fake_run_preserves_task_002_failure_text() {
         assert_eq!(
             fake_failed_run("fail this run".into()),
             "Mock agent failed before producing output. prompt=fail this run"

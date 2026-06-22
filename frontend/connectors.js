@@ -86,7 +86,12 @@ function tauriConnector(config) {
         }
       }
       try {
-        return await invoke("send_prompt", { prompt, model: options.model });
+        return await invoke("send_prompt", {
+          prompt,
+          sessionId: options.sessionId,
+          project: options.project,
+          model: options.model
+        });
       } finally {
         if (typeof unlisten === "function") unlisten();
       }
@@ -94,8 +99,11 @@ function tauriConnector(config) {
     async openWorkspace(path) {
       return invoke("open_workspace", { request: { path } });
     },
-    async createSession(project, model) {
-      return invoke("create_session", { project, model });
+    async createSession(project, model, label) {
+      return invoke("create_session", { project, model, label });
+    },
+    async loadSession(sessionId) {
+      return invoke("load_session", { request: { sessionId } });
     },
     async readFile(path) {
       return invoke("read_file", { request: { path } });

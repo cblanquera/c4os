@@ -1,3 +1,4 @@
+use crate::runtime_sessions::{C4osSessionRecord, ProjectSessionRecord};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ pub struct WorkspacePayload {
     pub files: FilesState,
     pub terminal: TerminalState,
     pub thread: ThreadState,
+    pub sessions: Vec<C4osSessionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,12 +25,14 @@ pub struct WorkspaceSummary {
     pub session: String,
     pub branch: String,
     pub model: String,
+    #[serde(rename = "sessionId", default)]
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectRecord {
     pub name: String,
-    pub sessions: Vec<String>,
+    pub sessions: Vec<ProjectSessionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,15 +113,28 @@ pub fn mock_workspace() -> WorkspacePayload {
             session: "Mock integration run".into(),
             branch: "mock/task-002".into(),
             model: "".into(),
+            session_id: "".into(),
         },
         projects: vec![
             ProjectRecord {
                 name: "Mock Workspace Alpha".into(),
-                sessions: vec!["Mock integration run".into(), "Mock review session".into()],
+                sessions: vec![
+                    ProjectSessionRecord {
+                        id: "mock-integration-run".into(),
+                        label: "Mock integration run".into(),
+                    },
+                    ProjectSessionRecord {
+                        id: "mock-review-session".into(),
+                        label: "Mock review session".into(),
+                    },
+                ],
             },
             ProjectRecord {
                 name: "Mock Agent Lab".into(),
-                sessions: vec!["Harness rehearsal".into()],
+                sessions: vec![ProjectSessionRecord {
+                    id: "harness-rehearsal".into(),
+                    label: "Harness rehearsal".into(),
+                }],
             },
             ProjectRecord {
                 name: "Mock Docs Workbench".into(),
@@ -172,6 +189,7 @@ pub fn mock_workspace() -> WorkspacePayload {
             tool: "Mock project instructions loaded".into(),
             run: "Mock agent ready".into(),
         },
+        sessions: vec![],
     }
 }
 

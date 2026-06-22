@@ -3,6 +3,7 @@ import {
   browserState,
   connectorState,
   filesState,
+  loadConnectorSession,
   mcpServers,
   models,
   openConnectorWorkspace,
@@ -151,7 +152,7 @@ function bindDelegatedComposerPickers() {
       appStore.setComposerValue(surface, "model", model.dataset.localModel);
       if (routeFromHash() === "chat-session") {
         workspace.model = model.dataset.localModel;
-        selectConnectorSessionModel(workspace.session || surface, model.dataset.localModel).catch((error) => {
+        selectConnectorSessionModel(workspace.sessionId || workspace.session || surface, model.dataset.localModel).catch((error) => {
           connectorState.error = error.message;
         });
       }
@@ -253,9 +254,19 @@ function bindSessionRows() {
     control.dataset.boundSessionTarget = "true";
     control.addEventListener("click", (event) => {
       event.preventDefault();
-      appStore.setActiveSession(control.dataset.projectTarget, control.dataset.sessionTarget);
-      window.location.hash = "chat-session";
-      updateShellSessionDom();
+      appStore.setActiveSession(control.dataset.projectTarget, {
+        id: control.dataset.sessionId || "",
+        label: control.dataset.sessionTarget
+      });
+      const finalize = () => {
+        window.location.hash = "chat-session";
+        updateShellSessionDom();
+      };
+      if (control.dataset.sessionId && !control.dataset.sessionId.startsWith("local-")) {
+        loadConnectorSession(control.dataset.sessionId).finally(finalize);
+      } else {
+        finalize();
+      }
     });
   });
   document.querySelectorAll("[data-project-target]:not([data-session-target])").forEach((control) => {
@@ -300,7 +311,7 @@ function bindComposerPickers() {
       appStore.setComposerValue(surface, "model", control.dataset.localModel);
       if (routeFromHash() === "chat-session") {
         workspace.model = control.dataset.localModel;
-        selectConnectorSessionModel(workspace.session || surface, control.dataset.localModel).catch((error) => {
+        selectConnectorSessionModel(workspace.sessionId || workspace.session || surface, control.dataset.localModel).catch((error) => {
           connectorState.error = error.message;
         });
       }
@@ -513,7 +524,7 @@ function updateShellSessionDom() {
     row.classList.toggle("is-active", row.dataset.projectTarget === workspace.project);
   });
   shell.querySelectorAll(".session-row").forEach((row) => {
-    row.classList.toggle("is-active", row.dataset.sessionTarget === workspace.session);
+    row.classList.toggle("is-active", (row.dataset.sessionId || row.dataset.sessionTarget) === (workspace.sessionId || workspace.session));
   });
   const workbench = shell.querySelector(".workbench");
   const currentMain = workbench.querySelector(":scope > main");
@@ -637,7 +648,7 @@ function setActiveToolForRoute(route, tool) {
 }
 
 function toolSurfaceKey(route) {
-  if (route === "chat-session") return sessionSurfaceKey(workspace.project, workspace.session || "untitled");
+  if (route === "chat-session") return sessionSurfaceKey(workspace.project, workspace.sessionId || workspace.session || "untitled");
   if (route === "new-session" || route === "providers-popover" || route === "models-popover") return `new:${workspace.project}`;
   return `route:${route}`;
 }
@@ -666,16 +677,29 @@ function renderSidebar(chat) {
           href: "#new-session",
           "data-project-target": project.name
         }, [icon("folder"), h("span", { text: project.name }), h("span", { class: "row-tools" }, [icon("pencil"), icon("trash")])]),
-        ...project.sessions.map((session) => h("a", {
-          class: `session-row${chat && session === workspace.session ? " is-active" : ""}`,
+        ...project.sessions.map((session) => {
+          const label = sessionLabel(session);
+          const id = sessionId(session);
+          return h("a", {
+          class: `session-row${chat && (id || label) === (workspace.sessionId || workspace.session) ? " is-active" : ""}`,
           href: "#chat-session",
           "data-project-target": project.name,
-          "data-session-target": session
-        }, [h("span", { text: session })]))
+          "data-session-target": label,
+          "data-session-id": id
+        }, [h("span", { text: label })]);
+        })
       ])
     ]),
     link("settings-providers", "settings-entry", [icon("settings"), h("span", { text: "Settings" })], { "data-settings-entry": "" })
   ]);
+}
+
+function sessionLabel(session) {
+  return typeof session === "string" ? session : session?.label || session?.title || "";
+}
+
+function sessionId(session) {
+  return typeof session === "string" ? "" : session?.id || session?.sessionId || "";
 }
 
 /**

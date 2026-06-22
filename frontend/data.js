@@ -26,7 +26,8 @@ export const workspace = {
   project: "Project Alpha",
   session: "Integration planning",
   branch: "main",
-  model: ""
+  model: "",
+  sessionId: ""
 };
 
 // Sidebar project/session fixtures preserve the accepted r04 information shape.
@@ -132,6 +133,7 @@ export const threadState = {
 };
 
 export const threadTurns = [turnFromThreadState(threadState, "fixture-turn")];
+export const persistentSessions = [];
 
 export const connectorState = {
   connector: createConnector(),
@@ -198,30 +200,47 @@ export async function openConnectorWorkspace(path) {
   }
 }
 
+export async function loadConnectorSession(sessionId) {
+  if (!sessionId || !connectorState.connector.available || !connectorState.connector.loadSession) return null;
+  const record = await connectorState.connector.loadSession(sessionId);
+  applySessionRecord(record);
+  captureActiveSessionState();
+  return record;
+}
+
 export async function sendConnectorPrompt(prompt, options = {}) {
   if (!connectorState.connector.available || connectorState.runPending) return;
 
   connectorState.runPending = true;
   const activeTurn = createPendingTurn(prompt || threadState.user);
-  if (options.createSession) {
-    captureActiveSessionState();
-    ensureSessionForPrompt(prompt);
-    activateSessionState(workspace.project, workspace.session, {
-      model: options.model || workspace.model,
-      reset: true,
-      skipCapture: true,
-      turns: []
-    });
-  }
-  threadTurns.push(activeTurn);
-  syncThreadStateFromTurn(activeTurn);
-  options.onTurnCreated?.(activeTurn);
 
   try {
+    if (options.createSession) {
+      captureActiveSessionState();
+      const label = sessionLabel(prompt);
+      const created = connectorState.connector.createSession
+        ? await connectorState.connector.createSession(workspace.project, options.model || workspace.model, label)
+        : null;
+      ensureSessionForPrompt(prompt, created);
+      activateSessionState(workspace.project, workspace.session, {
+        model: options.model || workspace.model,
+        reset: true,
+        sessionId: workspace.sessionId,
+        skipCapture: true,
+        turns: []
+      });
+    }
+    threadTurns.push(activeTurn);
+    syncThreadStateFromTurn(activeTurn);
+    options.onTurnCreated?.(activeTurn);
+
     if (options.createSession && connectorState.connector.createSession) {
-      await connectorState.connector.createSession(workspace.project, options.model || workspace.model);
+      // Session creation is intentionally handled before the pending turn so
+      // the runtime append targets the backend-owned C4OS session id.
     }
     const payload = await connectorState.connector.sendPrompt(prompt, {
+      project: workspace.project,
+      sessionId: workspace.sessionId,
       model: options.model || workspace.model,
       onEvent: (event) => {
         applyRuntimeEvent(event, activeTurn);
@@ -229,6 +248,9 @@ export async function sendConnectorPrompt(prompt, options = {}) {
         options.onStateChange?.(activeTurn);
       }
     });
+    if (payload?.session) {
+      applySessionRecord(payload.session);
+    }
     applyRuntimeEventsFromPayload(payload, activeTurn, options);
     if (payload.agent) activeTurn.agent = payload.agent;
     activeTurn.extra = "Connector run events completed successfully. Files, Browser, Terminal, approval, memory, artifacts, audit, and non-chat feature behavior can still be mocked.";
@@ -443,15 +465,21 @@ function runLabelFromPayload(payload = {}, turn = {}) {
   return run === String(payload.agent || "").trim() ? "Connector run completed" : run;
 }
 
-function ensureSessionForPrompt(prompt) {
-  const label = sessionLabel(prompt);
+function ensureSessionForPrompt(prompt, created = null) {
+  const label = created?.title || sessionLabel(prompt);
+  const id = created?.title && created?.id ? created.id : `local-${providerIdFromLabel(label)}`;
   workspace.session = label;
+  workspace.sessionId = id;
   const project = projects.find((record) => record.name === workspace.project);
+  const sessionRecord = { id, label };
   if (!project) {
-    projects.unshift({ name: workspace.project, sessions: [label] });
+    projects.unshift({ name: workspace.project, sessions: [sessionRecord] });
     return;
   }
-  project.sessions = [label, ...project.sessions.filter((session) => session !== label)];
+  project.sessions = [
+    sessionRecord,
+    ...project.sessions.filter((session) => sessionLabelOf(session) !== label && sessionIdOf(session) !== id)
+  ];
 }
 
 function sessionLabel(prompt) {
@@ -461,6 +489,7 @@ function sessionLabel(prompt) {
 
 function applyConnectorWorkspace(payload) {
   assignObject(workspace, payload.workspace);
+  replaceArray(persistentSessions, payload.sessions || []);
   replaceArray(projects, payload.projects);
   replaceArray(providers, payload.providers);
   replaceArray(models, payload.models);
@@ -472,7 +501,9 @@ function applyConnectorWorkspace(payload) {
   assignObject(filesState, payload.files);
   assignObject(terminalState, payload.terminal);
   assignObject(threadState, payload.thread);
-  replaceArray(threadTurns, workspace.session ? [turnFromThreadState(threadState, "connector-turn")] : []);
+  const activeRecord = persistentSessions.find((session) => session.id === workspace.sessionId);
+  if (activeRecord) applySessionRecord(activeRecord, { skipWorkspace: true });
+  else replaceArray(threadTurns, workspace.session ? [turnFromThreadState(threadState, "connector-turn")] : []);
   captureActiveSessionState();
 }
 
@@ -480,11 +511,14 @@ export function activateSessionState(project, session, options = {}) {
   if (!options.skipCapture) captureActiveSessionState();
 
   workspace.project = project;
-  workspace.session = session;
-  const key = sessionKey(project, session);
+  workspace.session = sessionLabelOf(session);
+  const nextSessionId = options.sessionId !== undefined ? options.sessionId : sessionIdOf(session);
+  workspace.sessionId = nextSessionId || "";
+  const key = sessionKey(project, workspace.session, workspace.sessionId);
   if (options.reset || !sessionState.bySurface[key]) {
     sessionState.bySurface[key] = sessionSnapshot({
       model: options.model ?? workspace.model,
+      sessionId: workspace.sessionId,
       turns: options.turns || []
     });
   }
@@ -495,10 +529,11 @@ export function activateSessionState(project, session, options = {}) {
 
 function captureActiveSessionState() {
   if (!workspace.project || !workspace.session) return;
-  sessionState.bySurface[sessionKey(workspace.project, workspace.session)] = sessionSnapshot({
+  sessionState.bySurface[sessionKey(workspace.project, workspace.session, workspace.sessionId)] = sessionSnapshot({
     browser: browserState,
     files: filesState,
     model: workspace.model,
+    sessionId: workspace.sessionId,
     terminal: terminalState,
     thread: threadState,
     turns: threadTurns
@@ -507,11 +542,50 @@ function captureActiveSessionState() {
 
 function applySessionSnapshot(snapshot) {
   workspace.model = snapshot.model || "";
+  workspace.sessionId = snapshot.sessionId || workspace.sessionId || "";
   assignObject(browserState, cloneValue(snapshot.browser));
   assignObject(filesState, cloneValue(snapshot.files));
   assignObject(terminalState, cloneValue(snapshot.terminal));
   assignObject(threadState, cloneValue(snapshot.thread));
   replaceArray(threadTurns, cloneValue(snapshot.turns));
+}
+
+function applySessionRecord(record, options = {}) {
+  if (!record) return;
+  const turns = Array.isArray(record.turns) && record.turns.length > 0
+    ? record.turns.map((turn, index) => ({
+        id: turn.id || `${record.id}-turn-${index + 1}`,
+        user: turn.user,
+        agent: turn.agent,
+        extra: turn.extra,
+        tool: turn.tool,
+        run: turn.run,
+        logs: [turn.tool, turn.run].filter(Boolean),
+        startedAt: Date.now(),
+        completedAt: Date.now(),
+        workExpanded: false,
+        permission: null,
+        failed: false,
+        pending: false
+      }))
+    : (record.thread?.user || record.thread?.agent ? [turnFromThreadState(record.thread, `${record.id}-turn`)] : []);
+
+  if (!options.skipWorkspace) {
+    workspace.project = record.project || workspace.project;
+    workspace.session = record.title || workspace.session;
+    workspace.sessionId = record.id || workspace.sessionId;
+  }
+  const key = sessionKey(record.project || workspace.project, record.title || workspace.session, record.id || workspace.sessionId);
+  sessionState.bySurface[key] = sessionSnapshot({
+    browser: record.browser,
+    files: record.files,
+    model: record.selectedModel || record.selected_model || "",
+    sessionId: record.id || workspace.sessionId,
+    terminal: record.terminal,
+    thread: record.thread,
+    turns
+  });
+  applySessionSnapshot(sessionState.bySurface[key]);
 }
 
 function sessionSnapshot(overrides = {}) {
@@ -520,10 +594,21 @@ function sessionSnapshot(overrides = {}) {
     browser: cloneValue(overrides.browser || browserState),
     files: cloneValue(overrides.files || filesState),
     model: overrides.model || "",
+    sessionId: overrides.sessionId || workspace.sessionId || "",
     terminal: cloneValue(overrides.terminal || terminalState),
     thread: cloneValue(overrides.thread || threadStateFromTurns(turns)),
     turns
   };
+}
+
+function sessionLabelOf(session) {
+  if (typeof session === "string") return session;
+  return session?.label || session?.title || "";
+}
+
+function sessionIdOf(session) {
+  if (typeof session === "string") return "";
+  return session?.id || session?.sessionId || "";
 }
 
 function threadStateFromTurns(turns) {
@@ -539,8 +624,8 @@ function threadStateFromTurns(turns) {
     : { user: "", agent: "", extra: "", tool: "", run: "" };
 }
 
-function sessionKey(project, session) {
-  return `chat:${project}:${session || "untitled"}`;
+function sessionKey(project, session, sessionId = "") {
+  return `chat:${project}:${sessionId || session || "untitled"}`;
 }
 
 function cloneValue(value) {

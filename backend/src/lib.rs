@@ -3,6 +3,8 @@ pub mod menu;
 pub mod mock_data;
 pub mod openrouter;
 pub mod provider_models;
+pub mod runtime_adapter;
+pub mod runtime_sessions;
 pub mod workspace;
 
 pub fn run() {
@@ -15,6 +17,7 @@ pub fn run() {
             commands::send_prompt,
             commands::open_workspace,
             commands::create_session,
+            commands::load_session,
             commands::read_file,
             commands::save_file,
             commands::run_terminal_command,
