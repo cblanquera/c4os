@@ -315,6 +315,147 @@ export async function selectConnectorSessionModel(session, model) {
   return connectorState.connector.selectSessionModel(session, model);
 }
 
+export async function openConnectorFile(path) {
+  const fallback = applyFileState({
+    path,
+    currentPath: path,
+    content: filesState.content || filesState.lines.join("\n"),
+    savedContent: filesState.savedContent || filesState.lines.join("\n"),
+    lines: filesState.lines,
+    roots: filesState.roots,
+    breadcrumbs: [workspace.project, path],
+    dirty: false,
+    status: "Opened"
+  });
+
+  if (!connectorState.connector.available || !connectorState.connector.readFile) return fallback;
+
+  try {
+    const response = await connectorState.connector.readFile(path, { sessionId: workspace.sessionId });
+    return applyFileState(response);
+  } catch (error) {
+    filesState.status = connectorErrorMessage(error);
+    captureActiveSessionState();
+    throw error;
+  }
+}
+
+export async function saveConnectorFile(path, content) {
+  if (!connectorState.connector.available || !connectorState.connector.saveFile) {
+    return applyFileState({
+      path,
+      currentPath: path,
+      content,
+      savedContent: content,
+      lines: content.split("\n"),
+      roots: filesState.roots,
+      breadcrumbs: filesState.breadcrumbs,
+      dirty: false,
+      status: "Saved"
+    });
+  }
+
+  try {
+    const response = await connectorState.connector.saveFile(path, content, { sessionId: workspace.sessionId });
+    return applyFileState(response);
+  } catch (error) {
+    filesState.status = connectorErrorMessage(error);
+    captureActiveSessionState();
+    throw error;
+  }
+}
+
+export async function updateConnectorNativeMenuState(focusState) {
+  if (!connectorState.connector.available || !connectorState.connector.updateNativeMenuState) {
+    return null;
+  }
+  return connectorState.connector.updateNativeMenuState(focusState);
+}
+
+export function editConnectorFile(content) {
+  filesState.content = content;
+  filesState.lines = content.split("\n");
+  filesState.dirty = content !== (filesState.savedContent || "");
+  filesState.status = filesState.dirty ? "Unsaved changes" : "Saved";
+  captureActiveSessionState();
+  return filesState;
+}
+
+export async function restoreConnectorExplorerScope(path) {
+  filesState.expandedFolders = {};
+  const root = connectorState.connector.available && connectorState.connector.readFile
+    ? await connectorState.connector.readFile("", { sessionId: workspace.sessionId })
+    : { roots: filesState.roots || [], breadcrumbs: [workspace.project], status: "Ready" };
+  applyFileState({
+    ...root,
+    currentPath: filesState.currentPath,
+    content: filesState.content,
+    savedContent: filesState.savedContent,
+    lines: filesState.lines,
+    dirty: filesState.dirty,
+    status: root.status || "Ready"
+  });
+
+  const segments = path.split("/").filter(Boolean);
+  let current = "";
+  for (const segment of segments) {
+    current = current ? `${current}/${segment}` : segment;
+    await expandConnectorFolder(current);
+  }
+  captureActiveSessionState();
+  return filesState;
+}
+
+export async function toggleConnectorFolder(path) {
+  filesState.expandedFolders ||= {};
+  const currentRows = filesState.roots || [];
+  const parentIndex = currentRows.findIndex((row) => fileRowPath(row) === path);
+  if (parentIndex < 0) return filesState;
+
+  if (filesState.expandedFolders[path]) {
+    delete filesState.expandedFolders[path];
+    filesState.roots = currentRows.filter((row) => {
+      const rowPath = fileRowPath(row);
+      return rowPath === path || !rowPath.startsWith(`${path}/`);
+    });
+    captureActiveSessionState();
+    return filesState;
+  }
+
+  const parentDepth = Number(currentRows[parentIndex][4] || 0);
+  await expandConnectorFolder(path, parentIndex, parentDepth);
+  return filesState;
+}
+
+async function expandConnectorFolder(path, knownParentIndex = -1, knownParentDepth = 0) {
+  filesState.expandedFolders ||= {};
+  const currentRows = filesState.roots || [];
+  const parentIndex = knownParentIndex >= 0 ? knownParentIndex : currentRows.findIndex((row) => fileRowPath(row) === path);
+  if (parentIndex < 0 || filesState.expandedFolders[path]) return filesState;
+  const parentDepth = knownParentIndex >= 0 ? knownParentDepth : Number(currentRows[parentIndex][4] || 0);
+  const response = connectorState.connector.available && connectorState.connector.readFile
+    ? await connectorState.connector.readFile(path, { sessionId: workspace.sessionId })
+    : { roots: [] };
+  const children = (response.roots || []).map((row) => [
+    row[0],
+    row[1],
+    row[2],
+    row[3]?.startsWith(`${path}/`) ? row[3] : `${path}/${row[3] || row[0]}`,
+    row[4] || String(parentDepth + 1),
+    row[5] || "",
+    row[6] || ""
+  ]);
+  filesState.roots = [
+    ...currentRows.slice(0, parentIndex + 1),
+    ...children,
+    ...currentRows.slice(parentIndex + 1)
+  ];
+  filesState.expandedFolders[path] = true;
+  filesState.status = response.status || filesState.status || "Ready";
+  captureActiveSessionState();
+  return filesState;
+}
+
 export async function saveConnectorProviderProfile(request) {
   const fallback = {
     id: request.providerId || providerIdFromLabel(request.label),
@@ -585,7 +726,42 @@ function applySessionRecord(record, options = {}) {
     thread: record.thread,
     turns
   });
+  if (record.files?.currentPath) {
+    toolState.fileViewBySurface ||= {};
+    toolState.fileViewBySurface[key] = "editor";
+  }
   applySessionSnapshot(sessionState.bySurface[key]);
+}
+
+function applyFileState(response = {}) {
+  const currentPath = response.currentPath || response.path || filesState.currentPath || "";
+  const content = response.content ?? response.lines?.join("\n") ?? filesState.content ?? "";
+  const savedContent = response.savedContent ?? response.saved_content ?? content;
+  const existingRoots = filesState.roots || [];
+  const responseRoots = response.roots || existingRoots;
+  const preserveExpandedRoots = Boolean(
+    currentPath &&
+    response.roots &&
+    Object.keys(filesState.expandedFolders || {}).length > 0 &&
+    existingRoots.length > responseRoots.length
+  );
+  assignObject(filesState, {
+    roots: preserveExpandedRoots ? existingRoots : responseRoots,
+    breadcrumbs: response.breadcrumbs || (currentPath ? [workspace.project, currentPath] : [workspace.project]),
+    lines: response.lines || content.split("\n"),
+    currentPath,
+    content,
+    savedContent,
+    dirty: Boolean(response.dirty),
+    status: response.status || (response.saved ? "Saved" : "Opened"),
+    expandedFolders: filesState.expandedFolders || {}
+  });
+  captureActiveSessionState();
+  return filesState;
+}
+
+function fileRowPath(row) {
+  return row?.[3] || row?.[0] || "";
 }
 
 function sessionSnapshot(overrides = {}) {

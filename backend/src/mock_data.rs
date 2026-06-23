@@ -84,10 +84,21 @@ pub struct BrowserState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FilesState {
-    pub roots: Vec<[String; 3]>,
+    pub roots: Vec<Vec<String>>,
     pub breadcrumbs: Vec<String>,
     pub lines: Vec<String>,
+    #[serde(default)]
+    pub current_path: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub saved_content: String,
+    #[serde(default)]
+    pub dirty: bool,
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,11 +173,11 @@ pub fn mock_workspace() -> WorkspacePayload {
         },
         files: FilesState {
             roots: vec![
-                ["backend".into(), "folder".into(), "file-explorer".into()],
-                ["frontend".into(), "folder".into(), "file-explorer".into()],
-                ["mock-main.js".into(), "file".into(), "file-editor".into()],
-                ["mock-index.html".into(), "file".into(), "file-editor".into()],
-                ["tests".into(), "folder".into(), "file-explorer".into()],
+                vec!["backend".into(), "folder".into(), "file-explorer".into()],
+                vec!["frontend".into(), "folder".into(), "file-explorer".into()],
+                vec!["mock-main.js".into(), "file".into(), "file-editor".into()],
+                vec!["mock-index.html".into(), "file".into(), "file-editor".into()],
+                vec!["tests".into(), "folder".into(), "file-explorer".into()],
             ],
             breadcrumbs: vec!["Mock Workspace Alpha".into(), "frontend".into(), "mock-main.js".into()],
             lines: vec![
@@ -176,6 +187,11 @@ pub fn mock_workspace() -> WorkspacePayload {
                 "".into(),
                 "startMockWorkspace({ trustedRoot });".into(),
             ],
+            current_path: "frontend/mock-main.js".into(),
+            content: "import { startMockWorkspace } from './mock-runtime';\n\nconst trustedRoot = 'mocked';\n\nstartMockWorkspace({ trustedRoot });".into(),
+            saved_content: "import { startMockWorkspace } from './mock-runtime';\n\nconst trustedRoot = 'mocked';\n\nstartMockWorkspace({ trustedRoot });".into(),
+            dirty: false,
+            status: "Mock file content".into(),
         },
         terminal: TerminalState {
             output: "$ npm run mock:task-002\nmock server ready\nfake agent run channel connected".into(),

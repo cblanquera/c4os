@@ -8,6 +8,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ pub struct WorkspaceActivation {
     pub payload: WorkspacePayload,
 }
 
+static ACTIVE_WORKSPACE: OnceLock<Mutex<Option<WorkspaceDescriptor>>> = OnceLock::new();
+
 pub fn activate_workspace(path: Option<String>) -> Result<WorkspaceActivation, String> {
     let root = match path {
         Some(input) if !input.trim().is_empty() => PathBuf::from(input),
@@ -51,6 +54,7 @@ pub fn activate_workspace_at(root: impl AsRef<Path>) -> Result<WorkspaceActivati
 
     let descriptor = load_or_create_descriptor(&canonical)?;
     let payload = payload_for_descriptor(&descriptor);
+    set_active_workspace(descriptor.clone());
 
     Ok(WorkspaceActivation {
         path: descriptor.root_path.clone(),
@@ -58,6 +62,17 @@ pub fn activate_workspace_at(root: impl AsRef<Path>) -> Result<WorkspaceActivati
         descriptor,
         payload,
     })
+}
+
+pub fn active_workspace_descriptor() -> Option<WorkspaceDescriptor> {
+    active_workspace()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+pub fn active_workspace_root() -> Option<PathBuf> {
+    active_workspace_descriptor().map(|descriptor| PathBuf::from(descriptor.root_path))
 }
 
 fn load_or_create_descriptor(root: &Path) -> Result<WorkspaceDescriptor, String> {
@@ -148,7 +163,11 @@ fn payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload 
         name: descriptor.name.clone(),
         sessions: vec![],
     }];
-    payload.files.breadcrumbs = vec![descriptor.name.clone()];
+    payload.files = crate::files::list_files_state(Path::new(&descriptor.root_path), None)
+        .unwrap_or_else(|_| {
+            payload.files.breadcrumbs = vec![descriptor.name.clone()];
+            payload.files.clone()
+        });
     payload.thread = ThreadState {
         user: "Open trusted local workspace.".into(),
         agent: format!(
@@ -161,6 +180,16 @@ fn payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload 
     };
 
     payload
+}
+
+fn set_active_workspace(descriptor: WorkspaceDescriptor) {
+    *active_workspace()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(descriptor);
+}
+
+fn active_workspace() -> &'static Mutex<Option<WorkspaceDescriptor>> {
+    ACTIVE_WORKSPACE.get_or_init(|| Mutex::new(None))
 }
 
 fn workspace_name(root: &Path) -> String {

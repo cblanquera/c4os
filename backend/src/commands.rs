@@ -1,3 +1,4 @@
+use crate::files::{list_files_state, read_file_state, save_file_state};
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{mock_workspace, BrowserState, TerminalState, WorkspacePayload};
 use crate::openrouter::RuntimeEvent;
@@ -14,10 +15,12 @@ use crate::provider_models::{
 use crate::runtime_sessions::{
     active_session, append_prompt, create_session as create_c4os_session,
     load_session as load_c4os_session, project_sessions, sessions as c4os_sessions,
-    set_session_model as set_c4os_session_model, C4osSessionRecord, CreateSessionRequest,
-    SendPromptRequest,
+    set_session_files as set_c4os_session_files, set_session_model as set_c4os_session_model,
+    C4osSessionRecord, CreateSessionRequest, SendPromptRequest,
 };
-use crate::workspace::{activate_workspace, WorkspaceActivation, WorkspaceDescriptor};
+use crate::workspace::{
+    activate_workspace, active_workspace_root, WorkspaceActivation, WorkspaceDescriptor,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime};
 
@@ -54,20 +57,38 @@ pub struct WorkspaceOpenResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileRequest {
     pub path: Option<String>,
+    pub content: Option<String>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileReadResponse {
     pub path: String,
+    pub content: String,
+    pub saved_content: String,
     pub lines: Vec<String>,
+    pub roots: Vec<Vec<String>>,
+    pub breadcrumbs: Vec<String>,
+    pub dirty: bool,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileSaveResponse {
     pub path: String,
     pub saved: bool,
+    pub content: String,
+    pub saved_content: String,
+    pub lines: Vec<String>,
+    pub roots: Vec<Vec<String>>,
+    pub breadcrumbs: Vec<String>,
+    pub dirty: bool,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,24 +198,62 @@ pub fn load_session(request: SessionLoadRequest) -> Result<C4osSessionRecord, St
 }
 
 #[tauri::command]
-pub fn read_file(request: Option<FileRequest>) -> FileReadResponse {
-    let workspace = mock_workspace();
-    FileReadResponse {
-        path: request
-            .and_then(|input| input.path)
-            .unwrap_or_else(|| "frontend/mock-main.js".into()),
-        lines: workspace.files.lines,
+pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, String> {
+    let request = request.unwrap_or(FileRequest {
+        path: None,
+        content: None,
+        session_id: None,
+    });
+    let root =
+        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let path = request.path.unwrap_or_default();
+    let state = if path.trim().is_empty() {
+        list_files_state(&root, None)?
+    } else if crate::files::trusted_path(&root, &path)?.is_dir() {
+        list_files_state(&root, Some(&path))?
+    } else {
+        read_file_state(&root, &path)?
+    };
+    if let Some(session_id) = active_file_session_id(request.session_id) {
+        let _ = set_c4os_session_files(&session_id, state.clone());
     }
+    Ok(FileReadResponse {
+        path: state.current_path,
+        content: state.content,
+        saved_content: state.saved_content,
+        lines: state.lines,
+        roots: state.roots,
+        breadcrumbs: state.breadcrumbs,
+        dirty: state.dirty,
+        status: state.status,
+    })
 }
 
 #[tauri::command]
-pub fn save_file(request: Option<FileRequest>) -> FileSaveResponse {
-    FileSaveResponse {
-        path: request
-            .and_then(|input| input.path)
-            .unwrap_or_else(|| "frontend/mock-main.js".into()),
-        saved: true,
+pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, String> {
+    let request = request.ok_or_else(|| "File save request is required".to_string())?;
+    let root =
+        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let path = request
+        .path
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "File path is required".to_string())?;
+    let content = request.content.unwrap_or_default();
+    let state = save_file_state(&root, &path, &content)?;
+    if let Some(session_id) = active_file_session_id(request.session_id) {
+        let _ = set_c4os_session_files(&session_id, state.clone());
     }
+    Ok(FileSaveResponse {
+        path: state.current_path,
+        saved: true,
+        content: state.content,
+        saved_content: state.saved_content,
+        lines: state.lines,
+        roots: state.roots,
+        breadcrumbs: state.breadcrumbs,
+        dirty: state.dirty,
+        status: state.status,
+    })
 }
 
 #[tauri::command]
@@ -308,7 +367,10 @@ fn apply_runtime_session_payload(payload: &mut WorkspacePayload) {
     for project in &mut payload.projects {
         project.sessions = project_sessions(&project.name);
     }
-    if let Some(active) = sessions.first() {
+    if let Some(active) = sessions
+        .iter()
+        .find(|session| session.project == payload.workspace.project)
+    {
         payload.workspace.project = active.project.clone();
         payload.workspace.session = active.title.clone();
         payload.workspace.session_id = active.id.clone();
@@ -317,7 +379,17 @@ fn apply_runtime_session_payload(payload: &mut WorkspacePayload) {
         payload.files = active.files.clone();
         payload.terminal = active.terminal.clone();
         payload.thread = active.thread.clone();
+    } else if let Some(root) = active_workspace_root() {
+        if let Ok(files) = list_files_state(&root, None) {
+            payload.files = files;
+        }
     }
+}
+
+fn active_file_session_id(request_session_id: Option<String>) -> Option<String> {
+    request_session_id
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| active_session().map(|session| session.id))
 }
 
 fn provider_record_from_profile(profile: ProviderProfile) -> crate::mock_data::ProviderRecord {
@@ -352,6 +424,178 @@ fn model_record_from_provider_model(model: ProviderModel) -> crate::mock_data::M
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn task_008_trusted_root_browsing_omits_root_row_and_reads_file() {
+        let root = task_008_root("browse");
+        fs::create_dir_all(root.join("frontend")).expect("create frontend");
+        fs::create_dir_all(root.join("node_modules")).expect("create ignored folder");
+        fs::create_dir_all(root.join("mcp.md").join("node_modules"))
+            .expect("create nested ignored folder");
+        fs::write(root.join(".gitignore"), "node_modules/\n").expect("write gitignore");
+        fs::write(root.join("README.md"), "Task 008 readme").expect("write readme");
+        fs::write(
+            root.join("frontend").join("app.js"),
+            "console.log('task008');",
+        )
+        .expect("write app");
+        initialize_git_repo(&root);
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+        let payload = load_workspace();
+
+        assert_eq!(payload.files.breadcrumbs, vec!["c4os-task-008-browse"]);
+        assert!(payload.files.roots.iter().any(|row| row[0] == "README.md"));
+        assert!(payload.files.roots.iter().all(|row| row.len() >= 5));
+        assert!(payload
+            .files
+            .roots
+            .iter()
+            .any(|row| row[0] == "node_modules"
+                && row.get(6).is_some_and(|state| state == "ignored")));
+        assert!(payload
+            .files
+            .roots
+            .iter()
+            .any(|row| row[0] == "mcp.md" && !row.get(6).is_some_and(|state| state == "ignored")));
+        assert!(!payload
+            .files
+            .roots
+            .first()
+            .map(|row| row[0].as_str())
+            .is_some_and(|name| name == "c4os-task-008-browse"));
+
+        let opened = read_file(Some(FileRequest {
+            path: Some("README.md".into()),
+            content: None,
+            session_id: None,
+        }))
+        .expect("read trusted file");
+        assert_eq!(opened.path, "README.md");
+        assert_eq!(opened.content, "Task 008 readme");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_008_edits_save_revert_and_update_session_owned_file_state() {
+        let root = task_008_root("save");
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(root.join("notes.md"), "persisted").expect("write notes");
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+        let session = create_session(
+            Some("c4os-task-008-save".into()),
+            Some("Files save session".into()),
+            Some("model/files".into()),
+        );
+
+        let opened = read_file(Some(FileRequest {
+            path: Some("notes.md".into()),
+            content: None,
+            session_id: Some(session.id.clone()),
+        }))
+        .expect("read notes");
+        assert_eq!(opened.saved_content, "persisted");
+
+        let saved = save_file(Some(FileRequest {
+            path: Some("notes.md".into()),
+            content: Some("changed".into()),
+            session_id: Some(session.id.clone()),
+        }))
+        .expect("save notes");
+
+        assert!(saved.saved);
+        assert_eq!(
+            fs::read_to_string(root.join("notes.md")).expect("read saved"),
+            "changed"
+        );
+        let restored = load_c4os_session(&session.id).expect("session restored");
+        assert_eq!(restored.files.current_path, "notes.md");
+        assert_eq!(restored.files.content, "changed");
+        assert_eq!(restored.files.dirty, false);
+
+        let reverted = read_file(Some(FileRequest {
+            path: Some("notes.md".into()),
+            content: None,
+            session_id: Some(session.id.clone()),
+        }))
+        .expect("revert by reread");
+        assert_eq!(reverted.content, "changed");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_008_new_sessions_inherit_real_workspace_file_roots() {
+        let root = task_008_root("session-files");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("README.md"), "real workspace").expect("write readme");
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+
+        let session = create_session(
+            Some("c4os-task-008-session-files".into()),
+            Some("Real files session".into()),
+            Some("model/files".into()),
+        );
+        let restored = load_c4os_session(&session.id).expect("session restored");
+        let rows = restored
+            .files
+            .roots
+            .iter()
+            .map(|row| row[0].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(rows.contains(&"README.md"));
+        assert!(rows.contains(&"src"));
+        assert!(!rows.contains(&"mock-main.js"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_008_rejects_traversal_and_casual_git_access_before_read_or_write() {
+        let root = task_008_root("guards");
+        fs::create_dir_all(root.join(".git")).expect("create git");
+        fs::write(root.join("safe.txt"), "safe").expect("write safe");
+        fs::write(root.join(".git").join("config"), "secret").expect("write git");
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+
+        let outside = read_file(Some(FileRequest {
+            path: Some("../outside.txt".into()),
+            content: None,
+            session_id: None,
+        }))
+        .expect_err("reject traversal read");
+        assert!(outside.contains("outside trusted root"));
+
+        let git = save_file(Some(FileRequest {
+            path: Some(".git/config".into()),
+            content: Some("mutated".into()),
+            session_id: None,
+        }))
+        .expect_err("reject git write");
+        assert!(git.contains(".git"));
+        assert_eq!(
+            fs::read_to_string(root.join(".git").join("config")).expect("read git"),
+            "secret"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn command_inventory_returns_task_002_mock_payloads() {
@@ -373,8 +617,8 @@ mod tests {
 
     #[test]
     fn mock_file_and_terminal_commands_do_not_claim_real_io() {
-        assert_eq!(read_file(None).path, "frontend/mock-main.js");
-        assert_eq!(save_file(None).saved, true);
+        assert!(read_file(None).is_err());
+        assert!(save_file(None).is_err());
         assert!(run_terminal_command(None)
             .output
             .contains("fake agent run channel connected"));
@@ -398,5 +642,22 @@ mod tests {
         assert_ne!(response.workspace.project, "Mock Workspace Alpha");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn task_008_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("c4os-task-008-{name}"));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+
+    fn initialize_git_repo(root: &std::path::Path) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .arg("init")
+            .arg("--quiet")
+            .status()
+            .expect("run git init");
+        assert!(status.success());
     }
 }

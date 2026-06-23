@@ -91,6 +91,47 @@ describe("TASK-001 r04 frontend parity", () => {
     }
   });
 
+  it("lets side panels overlay instead of clipping the workbench on narrow windows", async () => {
+    try {
+      await page.setViewportSize({ width: 900, height: 760 });
+      await goto("new-session");
+
+      const layout = await page.evaluate(() => {
+        const read = (selector) => {
+          const box = document.querySelector(selector).getBoundingClientRect();
+          return {
+            left: Math.round(box.left),
+            right: Math.round(box.right),
+            width: Math.round(box.width)
+          };
+        };
+        return {
+          app: read(".app-shell"),
+          composer: read(".composer"),
+          left: read(".sidebar"),
+          right: read(".tool-panel"),
+          viewport: window.innerWidth,
+          workbench: read(".workbench")
+        };
+      });
+
+      assert.equal(layout.app.width, 900);
+      assert.equal(layout.workbench.left, 0);
+      assert.equal(layout.workbench.width, 900);
+      assert.equal(layout.composer.width >= 620, true);
+      assert.equal(layout.left.right > layout.composer.left, true);
+      assert.equal(layout.right.left < layout.composer.right, true);
+
+      await page.getByRole("button", { name: "Collapse left panel" }).click();
+      await page.getByRole("button", { name: "Collapse right panel" }).click();
+      const visibleComposer = await page.locator(".composer").boundingBox();
+      assert.equal(visibleComposer.x >= 0, true);
+      assert.equal(visibleComposer.x + visibleComposer.width <= 900, true);
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 920 });
+    }
+  });
+
   it("preserves composer attachments and popovers", async () => {
     await goto("new-session");
 
@@ -141,6 +182,13 @@ describe("TASK-001 r04 frontend parity", () => {
     try {
       await page.setViewportSize({ width: 900, height: 720 });
       await goto("chat-session");
+      const shell = page.locator(".app-shell");
+      if (!(await shell.evaluate((node) => node.classList.contains("is-left-collapsed")))) {
+        await page.getByRole("button", { name: "Collapse left panel" }).click();
+      }
+      if (!(await shell.evaluate((node) => node.classList.contains("is-right-collapsed")))) {
+        await page.getByRole("button", { name: "Collapse right panel" }).click();
+      }
       await page.getByRole("button", { name: "Show More" }).click();
 
       const layout = await page.evaluate(() => {

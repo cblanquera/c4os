@@ -31,6 +31,7 @@ describe("TASK-003 Rust/Tauri backend scaffold", () => {
       "File > Open Workspace",
       "File > Save Workspace",
       "File > Save File",
+      "File > Revert File",
       "Edit > Undo",
       "Edit > Redo",
       "Edit > Select All",
@@ -49,8 +50,14 @@ describe("TASK-003 Rust/Tauri backend scaffold", () => {
     assert.match(menuSource, /pub fn apply_native_menu_state/);
     assert.match(menuSource, /MenuBuilder::new/);
     assert.match(menuSource, /SubmenuBuilder::with_id/);
+    assert.match(menuSource, /menu\.get\("file"\)/);
+    assert.match(menuSource, /file\s*\n\s*\.get\("file\.saveFile"\)/);
+    assert.match(menuSource, /file\s*\n\s*\.get\("file\.revertFile"\)/);
     assert.match(menuSource, /set_enabled\(state.commands\["file.saveFile"\].enabled\)/);
-    assert.match(menuSource, /file_editor_open && focus_state.file_can_save/);
+    assert.match(menuSource, /set_enabled\(state.commands\["file.revertFile"\].enabled\)/);
+    assert.match(menuSource, /__c4osNativeMenuCommand/);
+    assert.match(menuSource, /webview_windows\(\)/);
+    assert.match(menuSource, /file_editor_open/);
     assert.match(menuSource, /focus_state.editable/);
     assert.equal(tauriConfig.app.withGlobalTauri, true);
   });

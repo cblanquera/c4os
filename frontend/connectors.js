@@ -105,11 +105,14 @@ function tauriConnector(config) {
     async loadSession(sessionId) {
       return invoke("load_session", { request: { sessionId } });
     },
-    async readFile(path) {
-      return invoke("read_file", { request: { path } });
+    async readFile(path, options = {}) {
+      return invoke("read_file", { request: { path, sessionId: options.sessionId } });
     },
-    async saveFile(path) {
-      return invoke("save_file", { request: { path } });
+    async saveFile(path, content, options = {}) {
+      return invoke("save_file", { request: { path, content, sessionId: options.sessionId } });
+    },
+    async updateNativeMenuState(focusState) {
+      return invoke("native_menu_state", { focusState });
     },
     async runTerminalCommand(command) {
       return invoke("run_terminal_command", { request: { command } });

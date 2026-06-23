@@ -6,6 +6,8 @@ import {
   loadConnectorSession,
   mcpServers,
   models,
+  editConnectorFile,
+  openConnectorFile,
   openConnectorWorkspace,
   pluginCatalog,
   pluginMarketplaces,
@@ -14,6 +16,8 @@ import {
   routes,
   deleteConnectorProviderProfile,
   saveConnectorProviderProfile,
+  saveConnectorFile,
+  restoreConnectorExplorerScope,
   selectConnectorSessionModel,
   sendConnectorPrompt,
   setConnectorModelEnabled,
@@ -21,6 +25,8 @@ import {
   settingsItems,
   terminalState,
   threadTurns,
+  toggleConnectorFolder,
+  updateConnectorNativeMenuState,
   skillCatalog,
   workspace
 } from "./data.js";
@@ -37,6 +43,10 @@ const modelSettingsFilters = {
   provider: "all",
   search: ""
 };
+let nativeFileMenuBound = false;
+let nativeFileEditorOpen = false;
+let nativeFileShortcutsBound = false;
+let nativeFileFocusBound = false;
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -105,9 +115,11 @@ function render() {
   bindDelegatedConnectorRun();
   bindConnectorRun();
   bindWorkspaceOpen();
+  bindNativeFileMenu();
   bindWorkLogDisclosure();
   bindToolTabs();
   bindPanelLinks();
+  bindFileEditor();
   bindSettingsNavigation();
   bindDelegatedComposerPickers();
   bindComposerPickers();
@@ -244,6 +256,10 @@ function bindToolTabs() {
       bindToolTabs();
       bindTerminal();
       bindPanelLinks();
+      bindFileEditor();
+      if (anchor.dataset.fileTarget === "editor" && anchor.dataset.filePath) {
+        document.querySelector("[data-file-editor]")?.focus({ preventScroll: true });
+      }
     });
   });
 }
@@ -500,18 +516,187 @@ function bindPanelLinks() {
   document.querySelectorAll(".tool-panel [data-file-target]").forEach((anchor) => {
     if (anchor.dataset.boundFileTarget) return;
     anchor.dataset.boundFileTarget = "true";
-    anchor.addEventListener("click", (event) => {
+    anchor.addEventListener("click", async (event) => {
       event.preventDefault();
       const route = routeFromHash();
       const surface = toolSurfaceKey(route);
-      appStore.setFileView(surface, anchor.dataset.fileTarget);
+      if (anchor.hasAttribute("data-breadcrumb-path")) {
+        try {
+          await restoreConnectorExplorerScope(anchor.dataset.breadcrumbPath || "");
+        } catch {
+          // The state status carries the backend rejection for rendering.
+        }
+        appStore.setFileView(surface, "explorer");
+      } else if (anchor.dataset.fileKind === "folder") {
+        try {
+          await toggleConnectorFolder(anchor.dataset.filePath);
+        } catch {
+          // The state status carries the backend rejection for rendering.
+        }
+        appStore.setFileView(surface, "explorer");
+      } else if (anchor.dataset.filePath) {
+        try {
+          await openConnectorFile(anchor.dataset.filePath);
+        } catch {
+          // The status text is rendered from filesState below.
+        }
+        appStore.setFileView(surface, anchor.dataset.fileTarget);
+      } else {
+        appStore.setFileView(surface, anchor.dataset.fileTarget);
+      }
       const panel = document.querySelector(".tool-panel");
       panel?.replaceWith(renderToolPanel("files", route));
       bindToolTabs();
       bindTerminal();
       bindPanelLinks();
+      bindFileEditor();
     });
   });
+}
+
+function bindFileEditor() {
+  bindNativeFileFocusTracking();
+  const editor = document.querySelector("[data-file-editor]");
+  if (editor && !editor.dataset.boundFileEditor) {
+    editor.dataset.boundFileEditor = "true";
+    editor.addEventListener("input", () => {
+      editConnectorFile(editor.value);
+      updateFileEditorChrome(editor.closest(".editor-tool"));
+    });
+    editor.addEventListener("focus", () => updateNativeFileMenuState(true, { force: true }));
+    editor.addEventListener("scroll", () => syncEditorScroll(editor));
+  }
+  if (editor) syncEditorScroll(editor);
+  updateNativeFileMenuState(isFileEditorFocused(), { force: Boolean(editor) || nativeFileEditorOpen });
+}
+
+function updateFileEditorChrome(tool) {
+  if (!tool) return;
+  const dirtyMark = tool.querySelector("[data-dirty-marker]");
+  if (dirtyMark) dirtyMark.textContent = filesState.dirty ? " *" : "";
+  const gutter = tool.querySelector(".line-number-gutter");
+  if (gutter) {
+    const lineCount = Math.max(1, filesState.lines?.length || 1);
+    gutter.replaceChildren(...Array.from({ length: lineCount }, (_, index) =>
+      h("span", { class: "line-number", text: String(index + 1) })
+    ));
+  }
+  const highlight = tool.querySelector(".syntax-highlight");
+  if (highlight) {
+    highlight.replaceChildren(...syntaxHighlightNodes(filesState.content || "", filesState.currentPath || ""));
+  }
+}
+
+function updateNativeFileMenuState(fileEditorOpen, options = {}) {
+  const force = Boolean(options.force);
+  if (!fileEditorOpen && !nativeFileEditorOpen && !force) return;
+  if (!force && fileEditorOpen === nativeFileEditorOpen) return;
+  nativeFileEditorOpen = fileEditorOpen;
+  updateConnectorNativeMenuState({
+    editable: fileEditorOpen,
+    fileEditorOpen,
+    fileCanSave: fileEditorOpen
+  }).catch(() => {});
+}
+
+function syncEditorScroll(editor) {
+  const surface = editor.closest(".editor-surface");
+  const highlight = surface?.querySelector(".syntax-highlight");
+  if (!highlight) return;
+  highlight.scrollTop = editor.scrollTop;
+  highlight.scrollLeft = editor.scrollLeft;
+}
+
+function bindNativeFileMenu() {
+  bindNativeFileShortcuts();
+  globalThis.__c4osNativeMenuCommand = handleNativeFileMenuCommand;
+  if (nativeFileMenuBound) return;
+  const listen = globalThis.__TAURI__?.event?.listen;
+  if (!listen) return;
+  nativeFileMenuBound = true;
+  listen("c4os://native-menu", async (event) => {
+    await handleNativeFileMenuCommand(event?.payload || event);
+  }).catch(() => {
+    nativeFileMenuBound = false;
+  });
+}
+
+async function handleNativeFileMenuCommand(id) {
+  if (id === "file.saveFile") await saveActiveFile();
+  if (id === "file.revertFile") await revertActiveFile();
+}
+
+function bindNativeFileFocusTracking() {
+  if (nativeFileFocusBound) return;
+  nativeFileFocusBound = true;
+  document.addEventListener("focusin", (event) => {
+    const fileEditorFocused = Boolean(event.target?.closest?.("[data-file-editor]"));
+    if (fileEditorFocused || nativeFileEditorOpen || document.querySelector("[data-file-editor]")) {
+      updateNativeFileMenuState(fileEditorFocused, { force: true });
+    }
+  });
+}
+
+function isFileEditorFocused() {
+  return Boolean(document.activeElement?.closest?.("[data-file-editor]"));
+}
+
+function bindNativeFileShortcuts() {
+  if (nativeFileShortcutsBound) return;
+  nativeFileShortcutsBound = true;
+  window.addEventListener("keydown", async (event) => {
+    if (!(event.metaKey || event.ctrlKey)) return;
+    if (event.altKey || event.shiftKey) return;
+    if (!document.querySelector("[data-file-editor]")) return;
+    const key = event.key.toLowerCase();
+    if (key === "s") {
+      event.preventDefault();
+      await saveActiveFile();
+    } else if (key === "r") {
+      event.preventDefault();
+      await revertActiveFile();
+    }
+  });
+}
+
+async function saveActiveFile() {
+  if (!filesState.currentPath) return;
+  const editor = document.querySelector("[data-file-editor]");
+  const current = editor?.value ?? filesState.content ?? "";
+  const selection = editor
+    ? { start: editor.selectionStart, end: editor.selectionEnd, direction: editor.selectionDirection }
+    : null;
+  try {
+    await saveConnectorFile(filesState.currentPath, current);
+  } catch {
+    // The state status carries the backend rejection for rendering.
+  }
+  if (editor && document.contains(editor)) {
+    updateFileEditorChrome(editor.closest(".editor-tool"));
+    if (selection) {
+      editor.setSelectionRange(selection.start, selection.end, selection.direction);
+    }
+    updateNativeFileMenuState(true, { force: true });
+  } else {
+    refreshFileToolPanel();
+  }
+}
+
+async function revertActiveFile() {
+  if (!filesState.currentPath) return;
+  try {
+    await openConnectorFile(filesState.currentPath);
+  } catch {
+    // The state status carries the backend rejection for rendering.
+  }
+  refreshFileToolPanel();
+}
+
+function refreshFileToolPanel() {
+  document.querySelector(".tool-panel")?.replaceWith(renderToolPanel("files", routeFromHash()));
+  bindToolTabs();
+  bindPanelLinks();
+  bindFileEditor();
 }
 
 function updateShellSessionDom() {
@@ -536,6 +721,7 @@ function updateShellSessionDom() {
   bindToolTabs();
   bindTerminal();
   bindPanelLinks();
+  bindFileEditor();
   applyShellState();
 }
 
@@ -1000,32 +1186,167 @@ function browserTool() {
  */
 function filesTool(editor) {
   if (editor) {
-    return h("section", { class: "tool-body editor-tool" }, [
+    const path = filesState.currentPath || filesState.breadcrumbs?.[filesState.breadcrumbs.length - 1] || "main.js";
+    const content = filesState.content ?? filesState.lines.join("\n");
+    return h("section", { class: "tool-body editor-tool no-status" }, [
       h("nav", { class: "breadcrumbs", "aria-label": "File breadcrumbs" }, [
-        h("button", { type: "button", "data-file-target": "explorer" }, [filesState.breadcrumbs[0] || workspace.project]),
+        h("button", { type: "button", "data-file-target": "explorer", "data-breadcrumb-path": "" }, [filesState.breadcrumbs[0] || workspace.project]),
+        ...filesState.breadcrumbs.slice(1, -1).flatMap((crumb, index) => [
+          h("span", { text: ">" }),
+          h("button", { type: "button", "data-file-target": "explorer", "data-breadcrumb-path": breadcrumbPathAt(index + 1) }, [crumb])
+        ]),
         h("span", { text: ">" }),
-        h("button", { type: "button", "data-file-target": "explorer" }, [filesState.breadcrumbs[1] || "frontend"]),
-        h("span", { text: ">" }),
-        h("span", { text: filesState.breadcrumbs[2] || "main.js" })
-      ]),
-      h("div", { class: "code-pane", tabindex: "0" }, filesState.lines.map((line, index) =>
-        h("div", { class: "code-line" }, [
-          h("span", { class: "line-number", text: String(index + 1) }),
-          h("code", { "aria-label": `Line ${index + 1} code`, class: "line-code", contenteditable: "true", spellcheck: "false", text: line })
+        h("span", {}, [
+          filesState.breadcrumbs[filesState.breadcrumbs.length - 1] || path,
+          h("span", { "data-dirty-marker": "", text: filesState.dirty ? " *" : "" })
         ])
-      ))
+      ]),
+      h("div", { class: "code-pane", tabindex: "0" }, [
+        h("div", { class: "line-number-gutter", "aria-hidden": "true" }, (content.split("\n").length ? content.split("\n") : [""]).map((_, index) =>
+          h("span", { class: "line-number", text: String(index + 1) })
+        )),
+        h("div", { class: "editor-compat-line", "aria-hidden": "true" }, [
+          h("code", { class: "line-code", contenteditable: "true", spellcheck: "false" })
+        ]),
+        h("div", { class: "editor-surface" }, [
+          h("pre", { class: `syntax-highlight ${languageClass(path)}`, "aria-hidden": "true" }, syntaxHighlightNodes(content, path)),
+          h("textarea", { class: "code-editor", "aria-label": `Code editor for ${path}`, spellcheck: "false", "data-file-editor": "", text: content })
+        ])
+      ])
     ]);
   }
   return h("section", { class: "tool-body file-tool" }, [
     h("h2", { text: workspace.project }),
-    ...filesState.roots.map(([name, iconName, target], index) =>
-      h("button", {
-        class: `file-row${iconName === "file" ? " is-file" : ""}${index === 2 ? " is-active" : ""}`,
+    h("div", { class: "file-list", "aria-label": "Project files" }, filesState.roots.map(([name, iconName, target, rowPath, depth = "0", gitState = "", ignoredState = ""]) => {
+      const path = rowPath || name;
+      const openFile = iconName === "file" && filesState.currentPath === path;
+      return h("button", {
+        class: fileRowClass({ name, kind: iconName, path, openFile, gitState, ignoredState }),
         type: "button",
-        "data-file-target": target === "file-editor" ? "editor" : "explorer"
-      }, [icon(iconName), h("span", { text: name })])
-    )
+        "data-file-target": target === "file-editor" ? "editor" : "explorer",
+        "data-file-path": path,
+        "data-file-kind": iconName,
+        "data-git-state": gitState || null,
+        "data-ignored": ignoredState || null,
+        "aria-current": openFile ? "true" : null,
+        "aria-expanded": iconName === "folder" ? String(Boolean(filesState.expandedFolders?.[path])) : null,
+        style: `--file-depth: ${Number(depth) || 0}`
+      }, [icon(iconName), h("span", { text: name })]);
+    }))
   ]);
+}
+
+function breadcrumbPathAt(crumbIndex) {
+  const parts = (filesState.currentPath || "").split("/").filter(Boolean);
+  return parts.slice(0, crumbIndex).join("/");
+}
+
+function fileRowClass({ name, kind, path, openFile, gitState, ignoredState }) {
+  const classes = ["file-row"];
+  if (kind === "file") classes.push("is-file", fileTypeClass(path || name));
+  else classes.push("is-folder");
+  if (openFile) classes.push("is-active");
+  if (gitState) classes.push(`git-${gitState}`);
+  if (ignoredState === "ignored") classes.push("is-ignored");
+  return classes.filter(Boolean).join(" ");
+}
+
+function fileTypeClass(path) {
+  const lower = String(path).toLowerCase();
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) return "file-type-js";
+  if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "file-type-ts";
+  if (lower.endsWith(".json")) return "file-type-json";
+  if (lower.endsWith(".css")) return "file-type-css";
+  if (lower.endsWith(".md") || lower.endsWith(".mdx")) return "file-type-md";
+  if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "file-type-shell";
+  if (lower.endsWith(".py")) return "file-type-python";
+  if (lower.endsWith(".html")) return "file-type-html";
+  return "file-type-default";
+}
+
+function languageClass(path) {
+  return fileTypeClass(path).replace("file-type-", "language-");
+}
+
+function syntaxHighlightNodes(content, path) {
+  const language = languageClass(path);
+  if (language === "language-js" || language === "language-ts") return tokenizeCode(content);
+  if (language === "language-json") return tokenizeJson(content);
+  if (language === "language-css") return tokenizeCss(content);
+  if (language === "language-md") return tokenizeMarkdown(content);
+  if (language === "language-shell") return tokenizeShell(content);
+  return [content || ""];
+}
+
+function tokenizeCode(content) {
+  return tokenize(content, [
+    [/\/\/.*/y, "comment"],
+    [/\/\*[\s\S]*?\*\//y, "comment"],
+    [/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/y, "string"],
+    [/\b(?:import|from|export|const|let|var|function|return|if|else|for|while|class|new|async|await|try|catch|throw|type|interface)\b/y, "keyword"],
+    [/\b(?:true|false|null|undefined)\b/y, "constant"],
+    [/\b\d+(?:\.\d+)?\b/y, "number"]
+  ]);
+}
+
+function tokenizeJson(content) {
+  return tokenize(content, [
+    [/"(?:\\.|[^"\\])*"(?=\s*:)/y, "property"],
+    [/"(?:\\.|[^"\\])*"/y, "string"],
+    [/\b(?:true|false|null)\b/y, "constant"],
+    [/-?\b\d+(?:\.\d+)?\b/y, "number"]
+  ]);
+}
+
+function tokenizeCss(content) {
+  return tokenize(content, [
+    [/\/\*[\s\S]*?\*\//y, "comment"],
+    [/[.#]?[a-zA-Z_-][\w-]*(?=\s*\{)/y, "selector"],
+    [/[a-zA-Z-]+(?=\s*:)/y, "property"],
+    [/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/y, "string"],
+    [/#(?:[0-9a-fA-F]{3,8})\b/y, "number"]
+  ]);
+}
+
+function tokenizeMarkdown(content) {
+  return tokenize(content, [
+    [/^#{1,6}.*/ym, "keyword"],
+    [/`[^`]*`/y, "string"],
+    [/\*\*[^*]+\*\*/y, "strong"],
+    [/\[[^\]]+\]\([^)]+\)/y, "string"]
+  ]);
+}
+
+function tokenizeShell(content) {
+  return tokenize(content, [
+    [/#.*/y, "comment"],
+    [/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/y, "string"],
+    [/\b(?:if|then|else|fi|for|do|done|case|esac|function|export|set)\b/y, "keyword"],
+    [/\$[A-Za-z_][\w]*/y, "constant"]
+  ]);
+}
+
+function tokenize(content, rules) {
+  const nodes = [];
+  let index = 0;
+  while (index < content.length) {
+    let matched = false;
+    for (const [pattern, className] of rules) {
+      pattern.lastIndex = index;
+      const match = pattern.exec(content);
+      if (match && match.index === index) {
+        nodes.push(h("span", { class: `syntax-token ${className}`, text: match[0] }));
+        index += match[0].length;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      nodes.push(content[index]);
+      index += 1;
+    }
+  }
+  return nodes.length ? nodes : [""];
 }
 
 /**

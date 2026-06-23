@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod files;
 pub mod menu;
 pub mod mock_data;
 pub mod openrouter;

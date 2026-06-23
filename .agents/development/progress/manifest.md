@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-008
+Status: ready-for-task-009
 Updated: 2026-06-23
 
 ## Active Stream
@@ -17,6 +17,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-005A-scoped-frontend-state.md`
 - `.agents/development/progress/items/TASK-006-provider-model-management.md`
 - `.agents/development/progress/items/TASK-007-runtime-adapter-persistent-sessions.md`
+- `.agents/development/progress/items/TASK-008-files-slice.md`
 
 ## Scope Rules
 
@@ -44,8 +45,9 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-008` Files slice from the verified TASK-007 runtime/session
-authority boundary. Preserve the accepted r04 shell, TASK-005 chat UX,
-TASK-005A scoped update patterns, TASK-006 provider/model selection records,
-and TASK-007 per-session state ownership unless a later task explicitly changes
-the UI contract.
+Start `TASK-009` Artifact and Safe HTML Preview slice from the verified
+TASK-008 trusted-root Files boundary. Preserve the accepted r04 shell,
+right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update patterns,
+TASK-006 provider/model boundaries, TASK-007 session ownership, and TASK-008
+Files/File Editor authority unless a later task explicitly changes the UI
+contract.

@@ -230,6 +230,18 @@ pub fn set_session_model(session_id: &str, model: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_session_files(session_id: &str, files: FilesState) -> Result<(), String> {
+    let mut store = load_store();
+    let session = store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
+    session.files = files;
+    save_store(&store);
+    Ok(())
+}
+
 fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: C4osRuntimeResult) {
     session.selected_model = runtime.model.clone();
     let run_id = format!("c4os-run-{}", session.runs.len() + 1);
@@ -285,6 +297,9 @@ fn empty_session(
     selected_model: &str,
 ) -> C4osSessionRecord {
     let fallback = mock_workspace();
+    let files = crate::workspace::active_workspace_root()
+        .and_then(|root| crate::files::list_files_state(&root, None).ok())
+        .unwrap_or_else(|| fallback.files.clone());
     C4osSessionRecord {
         id: id.into(),
         workspace_id: workspace.id.clone(),
@@ -292,7 +307,7 @@ fn empty_session(
         title: title.into(),
         selected_model: selected_model.into(),
         browser: fallback.browser,
-        files: fallback.files,
+        files,
         terminal: fallback.terminal,
         thread: ThreadState {
             user: String::new(),

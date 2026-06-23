@@ -8,9 +8,8 @@ TASK-004 activates the first real user flow by letting `open_workspace` create
 or load a non-secret `.c4os/workspace.json` descriptor for a local project
 folder and return that real workspace identity to the accepted r04 shell.
 
-This does not claim real provider, runtime, filesystem browsing/editing,
-Browser, terminal, extension, security, approval, action, artifact, memory, or
-deep persistence behavior.
+This does not claim real provider, runtime, Browser, terminal, extension,
+security, approval, action, artifact, memory, or deep persistence behavior.
 
 ## Commands
 
@@ -19,9 +18,11 @@ deep persistence behavior.
   `.c4os/workspace.json`, and returns a shell payload with the real workspace
   identity.
 - `send_prompt` returns the fake successful agent transition payload.
-- `create_session`, `read_file`, `save_file`, `run_terminal_command`,
-  `open_browser_preview`, and `list_extensions` are Rust mock handlers matching
-  the TASK-002 connector method inventory.
+- `create_session` creates C4OS-owned session records.
+- `read_file` and `save_file` enforce trusted-root Files behavior for the
+  active workspace.
+- `run_terminal_command`, `open_browser_preview`, and `list_extensions` remain
+  Rust mock handlers matching the TASK-002 connector method inventory.
 
 ## Workspace Descriptor
 
@@ -59,6 +60,7 @@ Required menu items:
 - `File > Open Workspace`
 - `File > Save Workspace`
 - `File > Save File`
+- `File > Revert File`
 - `Edit > Undo`
 - `Edit > Redo`
 - `Edit > Select All`
@@ -66,9 +68,10 @@ Required menu items:
 - `Edit > Copy`
 - `Edit > Paste`
 
-`File > Save File` is enabled only when the file editor surface is open and the
-current file can be saved. The menu starts with `Save File` disabled, and
-`native_menu_state` applies focus-state updates to the real Tauri menu item.
+`File > Save File` and `File > Revert File` are enabled only when the file
+editor surface is open and the current file can be saved. The menu starts with
+these file editor commands disabled, and `native_menu_state` applies
+focus-state updates to the real Tauri menu items.
 `Edit` is enabled when focus is in an editable context such as the chat prompt,
 Browser address bar, file editor, provider/settings input fields, or another
 text-entry control.
@@ -79,8 +82,7 @@ text-entry control.
 - Security and policy hardening around trust beyond the first descriptor-backed
   activation.
 - Provider/model records and settings IA records.
-- Session creation, structured thread/run events, and agent processing.
-- Files, file editor content, artifacts/previews, Browser state, and Terminal
-  output.
+- Agent processing beyond the current C4OS session/runtime adapter slice.
+- Artifacts/previews, Browser state, and Terminal output.
 - Plugin, skill, MCP, extension, approval, local memory, action record,
   artifact, audit, and deeper persistence state.

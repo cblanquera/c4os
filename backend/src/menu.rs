@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tauri::{
     menu::{MenuBuilder, MenuItem as TauriMenuItem, SubmenuBuilder},
-    AppHandle, Emitter, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,8 +80,15 @@ pub fn menu_contract() -> MenuContract {
                     MenuItem {
                         id: "file.saveFile".into(),
                         label: "Save File".into(),
-                        enabled_when: Some("file_editor_open && file_can_save".into()),
+                        enabled_when: Some("file_editor_open".into()),
                         handler: Some("save_file".into()),
+                        role: None,
+                    },
+                    MenuItem {
+                        id: "file.revertFile".into(),
+                        label: "Revert File".into(),
+                        enabled_when: Some("file_editor_open".into()),
+                        handler: Some("revert_file".into()),
                         role: None,
                     },
                 ],
@@ -125,12 +132,20 @@ pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::me
         false,
         Some("CmdOrCtrl+S"),
     )?;
+    let revert_file = TauriMenuItem::with_id(
+        app,
+        "file.revertFile",
+        "Revert File",
+        false,
+        Some("CmdOrCtrl+R"),
+    )?;
 
     let file = SubmenuBuilder::with_id(app, "file", "File")
         .item(&open_workspace)
         .item(&save_workspace)
         .separator()
         .item(&save_file)
+        .item(&revert_file)
         .build()?;
 
     let edit = SubmenuBuilder::with_id(app, "edit", "Edit")
@@ -153,17 +168,22 @@ pub fn apply_native_menu_state<R: Runtime>(
     let state = evaluate_menu_state(focus_state);
 
     if let Some(menu) = app.menu() {
-        if let Some(save_file) = menu
-            .get("file.saveFile")
-            .and_then(|item| item.as_menuitem().cloned())
-        {
-            save_file.set_enabled(state.commands["file.saveFile"].enabled)?;
+        if let Some(file) = menu.get("file").and_then(|item| item.as_submenu().cloned()) {
+            if let Some(save_file) = file
+                .get("file.saveFile")
+                .and_then(|item| item.as_menuitem().cloned())
+            {
+                save_file.set_enabled(state.commands["file.saveFile"].enabled)?;
+            }
+            if let Some(revert_file) = file
+                .get("file.revertFile")
+                .and_then(|item| item.as_menuitem().cloned())
+            {
+                revert_file.set_enabled(state.commands["file.revertFile"].enabled)?;
+            }
         }
 
-        if let Some(edit) = menu
-            .get("edit")
-            .and_then(|item| item.as_submenu().cloned())
-        {
+        if let Some(edit) = menu.get("edit").and_then(|item| item.as_submenu().cloned()) {
             edit.set_enabled(state.menus["Edit"].enabled)?;
         }
     }
@@ -175,14 +195,24 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::Men
     let id = event.id().0.as_str();
     if matches!(
         id,
-        "file.openWorkspace" | "file.saveWorkspace" | "file.saveFile"
+        "file.openWorkspace" | "file.saveWorkspace" | "file.saveFile" | "file.revertFile"
     ) {
         let _ = app.emit("c4os://native-menu", id);
+        if matches!(id, "file.saveFile" | "file.revertFile") {
+            if let Ok(serialized_id) = serde_json::to_string(id) {
+                let script = format!(
+                    "globalThis.__c4osNativeMenuCommand && globalThis.__c4osNativeMenuCommand({serialized_id});"
+                );
+                for webview in app.webview_windows().values() {
+                    let _ = webview.eval(script.clone());
+                }
+            }
+        }
     }
 }
 
 pub fn evaluate_menu_state(focus_state: &FocusState) -> MenuState {
-    let file_can_save = focus_state.file_editor_open && focus_state.file_can_save;
+    let file_editor_open = focus_state.file_editor_open;
     let mut menus = BTreeMap::new();
     menus.insert(
         "File".into(),
@@ -203,8 +233,8 @@ pub fn evaluate_menu_state(focus_state: &FocusState) -> MenuState {
     for menu in menu_contract().menus {
         for item in menu.items {
             let is_edit_command = item.id.starts_with("edit.");
-            let enabled = if item.id == "file.saveFile" {
-                file_can_save
+            let enabled = if item.id == "file.saveFile" || item.id == "file.revertFile" {
+                file_editor_open
             } else {
                 !is_edit_command || focus_state.editable
             };
@@ -246,7 +276,12 @@ mod tests {
                 .iter()
                 .map(|item| item.label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Open Workspace", "Save Workspace", "Save File"]
+            vec![
+                "Open Workspace",
+                "Save Workspace",
+                "Save File",
+                "Revert File"
+            ]
         );
         assert_eq!(
             contract.menus[1]
@@ -259,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn enables_save_file_only_when_editor_can_save() {
+    fn enables_file_editor_commands_when_editor_is_open() {
         let without_editor = evaluate_menu_state(&FocusState {
             editable: true,
             file_editor_open: false,
@@ -268,11 +303,13 @@ mod tests {
         let with_editor = evaluate_menu_state(&FocusState {
             editable: false,
             file_editor_open: true,
-            file_can_save: true,
+            file_can_save: false,
         });
 
         assert!(!without_editor.commands["file.saveFile"].enabled);
+        assert!(!without_editor.commands["file.revertFile"].enabled);
         assert!(with_editor.commands["file.saveFile"].enabled);
+        assert!(with_editor.commands["file.revertFile"].enabled);
     }
 
     #[test]
