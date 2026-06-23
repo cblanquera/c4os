@@ -36,6 +36,7 @@ describe("TASK-004 first real user-flow frontend activation", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["Mock Workspace Alpha"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: { user: "mock", agent: "mock", extra: "mock", tool: "mock", run: "mock" }
@@ -126,6 +127,7 @@ describe("TASK-004 first real user-flow frontend activation", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["style-review-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {

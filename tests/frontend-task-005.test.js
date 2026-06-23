@@ -36,6 +36,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["openrouter-review-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {
@@ -169,6 +170,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["openrouter-review-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {
@@ -239,6 +241,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["openrouter-review-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {
@@ -311,6 +314,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["openrouter-review-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {
@@ -371,6 +375,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [["frontend", "folder", "file-explorer"]], breadcrumbs: ["openrouter-review-repo"], lines: ["# mock"] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {

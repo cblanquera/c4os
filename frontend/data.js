@@ -97,8 +97,14 @@ export const mcpServers = [
 export const browserState = {
   url: "http://127.0.0.1:13000",
   title: "Rendered page mock",
-  summary: "Single browser surface; tabs are out of scope. This is frontend-local fixture state."
+  summary: "Single browser surface; tabs are out of scope. This is frontend-local fixture state.",
+  previewMode: "public",
+  profileId: "",
+  localPath: "",
+  html: ""
 };
+
+export const artifactState = [];
 
 export const filesState = {
   roots: [
@@ -335,6 +341,43 @@ export async function openConnectorFile(path) {
     return applyFileState(response);
   } catch (error) {
     filesState.status = connectorErrorMessage(error);
+    captureActiveSessionState();
+    throw error;
+  }
+}
+
+export async function openConnectorBrowser(target) {
+  const currentTarget = String(target || "").trim();
+  if (!currentTarget) {
+    browserState.status = "Browser target is required";
+    captureActiveSessionState();
+    throw new Error(browserState.status);
+  }
+
+  if (!connectorState.connector.available || !connectorState.connector.openBrowser) {
+    browserState.url = currentTarget;
+    browserState.title = currentTarget;
+    browserState.summary = "Browser target staged locally; connector is not available.";
+    browserState.previewMode = currentTarget.startsWith("http://") || currentTarget.startsWith("https://") ? "public" : "local-file";
+    browserState.localPath = browserState.previewMode === "local-file" ? currentTarget : "";
+    browserState.status = "Opened";
+    captureActiveSessionState();
+    return { browser: browserState };
+  }
+
+  try {
+    const response = await connectorState.connector.openBrowser(currentTarget, {
+      sessionId: workspace.sessionId,
+      actor: "user",
+      clearRequest: false
+    });
+    assignObject(browserState, response.browser || response);
+    browserState.status = "Opened";
+    replaceArray(artifactState, []);
+    captureActiveSessionState();
+    return response;
+  } catch (error) {
+    browserState.status = connectorErrorMessage(error);
     captureActiveSessionState();
     throw error;
   }
@@ -639,6 +682,7 @@ function applyConnectorWorkspace(payload) {
   replaceArray(skillCatalog, payload.skillCatalog);
   replaceArray(mcpServers, payload.mcpServers);
   assignObject(browserState, payload.browser);
+  replaceArray(artifactState, payload.artifacts || []);
   assignObject(filesState, payload.files);
   assignObject(terminalState, payload.terminal);
   assignObject(threadState, payload.thread);
@@ -672,6 +716,7 @@ function captureActiveSessionState() {
   if (!workspace.project || !workspace.session) return;
   sessionState.bySurface[sessionKey(workspace.project, workspace.session, workspace.sessionId)] = sessionSnapshot({
     browser: browserState,
+    artifacts: artifactState,
     files: filesState,
     model: workspace.model,
     sessionId: workspace.sessionId,
@@ -685,6 +730,7 @@ function applySessionSnapshot(snapshot) {
   workspace.model = snapshot.model || "";
   workspace.sessionId = snapshot.sessionId || workspace.sessionId || "";
   assignObject(browserState, cloneValue(snapshot.browser));
+  replaceArray(artifactState, cloneValue(snapshot.artifacts || []));
   assignObject(filesState, cloneValue(snapshot.files));
   assignObject(terminalState, cloneValue(snapshot.terminal));
   assignObject(threadState, cloneValue(snapshot.thread));
@@ -719,6 +765,7 @@ function applySessionRecord(record, options = {}) {
   const key = sessionKey(record.project || workspace.project, record.title || workspace.session, record.id || workspace.sessionId);
   sessionState.bySurface[key] = sessionSnapshot({
     browser: record.browser,
+    artifacts: record.artifacts || [],
     files: record.files,
     model: record.selectedModel || record.selected_model || "",
     sessionId: record.id || workspace.sessionId,
@@ -768,6 +815,7 @@ function sessionSnapshot(overrides = {}) {
   const turns = cloneValue(overrides.turns || []);
   return {
     browser: cloneValue(overrides.browser || browserState),
+    artifacts: cloneValue(overrides.artifacts || artifactState),
     files: cloneValue(overrides.files || filesState),
     model: overrides.model || "",
     sessionId: overrides.sessionId || workspace.sessionId || "",

@@ -6,6 +6,8 @@ export const connectorMethods = [
   "loadSession",
   "readFile",
   "saveFile",
+  "createArtifactPreview",
+  "openBrowser",
   "runTerminalCommand",
   "openBrowserPreview",
   "listExtensions",
@@ -28,6 +30,7 @@ export const workspacePayloadFields = [
   "skillCatalog",
   "mcpServers",
   "browser",
+  "artifacts",
   "files",
   "terminal",
   "thread"

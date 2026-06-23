@@ -31,6 +31,7 @@ export function createMockWorkspace() {
       title: "Mock rendered page",
       summary: "Mock Browser state from tests/server."
     },
+    artifacts: [],
     files: {
       roots: [
         ["backend", "folder", "file-explorer"],

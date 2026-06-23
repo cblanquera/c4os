@@ -62,6 +62,7 @@ describe("TASK-005A scoped frontend state and DOM updates", () => {
         skillCatalog: [],
         mcpServers: [],
         browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
         files: { roots: [], breadcrumbs: ["scoped-update-repo"], lines: [] },
         terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
         thread: {

@@ -77,6 +77,9 @@ records remain planning records; active work lives in
 | TASK-008 Files Slice | REQ-008, REQ-013, REQ-016 | Replaces Files mock behavior with trusted-root browsing, editing, saving, reverting, and guarded mutation. |
 | TASK-009 Artifact And Safe HTML Preview Slice | REQ-009, REQ-016 | Replaces artifact/preview mocks with product-owned artifact records and safe generated/untrusted HTML rendering. |
 | TASK-010 Browser Slice | REQ-010, REQ-013, REQ-016 | Replaces Browser mock behavior with project-scoped profile state, local/public browsing, request-scoped agent browsing, and recorded agent Browser actions. |
+| TASK-010A Browser Address Bar And Local Target UI | REQ-010, REQ-013, REQ-016 | Exposes TASK-010 Browser capabilities through the accepted Browser address bar and trusted local-target UI without adding new routes, panels, tabs, or downloads. |
+| TASK-010B Native Browser Webview Or External-Open Fallback | REQ-010, REQ-013, REQ-016 | Handles public websites that block iframe embedding while preserving Browser/Files/Terminal tabs, artifact preview isolation, and user-vs-agent browsing authority. |
+| TASK-010C Artifact Preview Type Rendering | REQ-009, REQ-010, REQ-013, REQ-016 | Extends product-owned artifact previews by MIME type or file extension while keeping artifacts distinct from general Browser navigation. |
 | TASK-011 Terminal Slice | REQ-011, REQ-012, REQ-013, REQ-016 | Replaces Terminal mock behavior with backend-owned terminal lifecycle, cwd validation, output streaming, cancellation, and action records. |
 | TASK-012 Settings IA And Extension Records Slice | REQ-015, REQ-013, REQ-016 | Replaces settings and extension mock records behind accepted Settings IA while keeping runtime impact gated. |
 | TASK-013 Concurrency And Restart/Resume Slice | REQ-005, REQ-006, REQ-016 | Implements concurrent run isolation and restart/resume behavior for MVP continuation state. |

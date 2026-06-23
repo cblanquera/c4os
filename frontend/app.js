@@ -1,5 +1,6 @@
 import {
   beginConnectorStateLoad,
+  artifactState,
   browserState,
   connectorState,
   filesState,
@@ -7,6 +8,7 @@ import {
   mcpServers,
   models,
   editConnectorFile,
+  openConnectorBrowser,
   openConnectorFile,
   openConnectorWorkspace,
   pluginCatalog,
@@ -120,6 +122,7 @@ function render() {
   bindToolTabs();
   bindPanelLinks();
   bindFileEditor();
+  bindBrowserAddress();
   bindSettingsNavigation();
   bindDelegatedComposerPickers();
   bindComposerPickers();
@@ -550,8 +553,47 @@ function bindPanelLinks() {
       bindTerminal();
       bindPanelLinks();
       bindFileEditor();
+      bindBrowserAddress();
     });
   });
+}
+
+function bindBrowserAddress() {
+  if (document.body.dataset.boundBrowserAddress) return;
+  document.body.dataset.boundBrowserAddress = "true";
+  document.body.addEventListener("submit", async (event) => {
+    const form = event.target.closest?.("[data-browser-address-form]");
+    if (!form) return;
+    await submitBrowserAddress(form, event);
+  });
+  document.body.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") return;
+    const input = event.target.closest?.("[data-browser-address-input]");
+    if (!input) return;
+    const form = input.closest("[data-browser-address-form]");
+    if (!form) return;
+    await submitBrowserAddress(form, event);
+  });
+}
+
+async function submitBrowserAddress(form, event) {
+  event.preventDefault();
+  const input = form.querySelector("[data-browser-address-input]");
+  const target = input?.value?.trim() || "";
+  if (input) input.disabled = true;
+  try {
+    await openConnectorBrowser(target);
+  } catch {
+    // Failure text is stored on browserState and rendered in-panel below.
+  } finally {
+    if (input) input.disabled = false;
+    const panel = document.querySelector(".tool-panel");
+    panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
+    bindToolTabs();
+    bindTerminal();
+    bindPanelLinks();
+    bindFileEditor();
+  }
 }
 
 function bindFileEditor() {
@@ -1171,14 +1213,77 @@ function renderToolPanel(active, route) {
   ]);
 }
 
-/**
- * Render the browser preview fixture.
- */
 function browserTool() {
-  return h("section", { class: "tool-body" }, [
-    h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: browserState.url })]),
-    h("div", { class: "preview-surface" }, [h("h2", { text: browserState.title }), h("p", { text: browserState.summary })])
+  const artifact = activeBrowserArtifact();
+  if (artifact?.safePreview) {
+    return h("section", { class: "tool-body browser-tool", "data-artifact-preview": artifact.id }, [
+      h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: artifact.safePreview.url || browserState.url })]),
+      h("div", { class: "preview-surface artifact-preview" }, [
+        h("header", { class: "artifact-preview-header" }, [
+          h("h2", { text: artifact.safePreview.title || artifact.title }),
+          h("p", { text: artifact.safePreview.summary || "Generated HTML artifact preview" })
+        ]),
+        h("iframe", {
+          class: "artifact-frame",
+          title: artifact.safePreview.title || artifact.title,
+          sandbox: "allow-scripts",
+          src: artifactPreviewDocumentUrl(artifact.safePreview.html || ""),
+          "data-artifact-frame": "",
+          "data-artifact-id": artifact.id
+        })
+      ])
+    ]);
+  }
+  const previewMode = browserState.previewMode || browserState.preview_mode || "public";
+  const frameAttrs = {
+    class: "browser-frame",
+    title: browserState.title || "Browser",
+    "data-browser-frame": ""
+  };
+  if (previewMode !== "public") frameAttrs.sandbox = "allow-forms allow-scripts";
+  if (browserState.html) frameAttrs.src = browserDocumentUrl(browserState.html);
+  else frameAttrs.src = browserState.url || "about:blank";
+
+  return h("section", {
+    class: "tool-body browser-tool",
+    "data-browser-preview": previewMode,
+    "data-local-browser-file": browserState.localPath || browserState.local_path || null
+  }, [
+    h("form", { class: "address-bar", "data-browser-address-form": "" }, [
+      icon("globe"),
+      h("input", {
+        type: "text",
+        value: browserState.url || "",
+        "aria-label": "Browser address",
+        "data-browser-address-input": "",
+        autocomplete: "off",
+        spellcheck: "false"
+      })
+    ]),
+    h("div", { class: "browser-preview" }, [
+      browserStatusIsFailure() ? h("p", { class: "browser-status", role: "status", text: browserState.status }) : null,
+      h("iframe", frameAttrs)
+    ])
   ]);
+}
+
+function browserStatusIsFailure() {
+  const status = String(browserState.status || "").trim();
+  return Boolean(status && status !== "Ready" && status !== "Opened");
+}
+
+function activeBrowserArtifact() {
+  if ((browserState.previewMode || browserState.preview_mode) !== "artifact") return null;
+  const artifactId = browserState.artifactId || browserState.artifact_id;
+  return artifactState.find((artifact) => artifact.id === artifactId) || artifactState[0] || null;
+}
+
+function artifactPreviewDocumentUrl(html) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function browserDocumentUrl(html) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 /**

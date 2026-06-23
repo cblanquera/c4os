@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-009
+Status: ready-for-task-010B
 Updated: 2026-06-23
 
 ## Active Stream
@@ -18,6 +18,9 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-006-provider-model-management.md`
 - `.agents/development/progress/items/TASK-007-runtime-adapter-persistent-sessions.md`
 - `.agents/development/progress/items/TASK-008-files-slice.md`
+- `.agents/development/progress/items/TASK-009-artifact-safe-html-preview.md`
+- `.agents/development/progress/items/TASK-010-browser-slice.md`
+- `.agents/development/progress/items/TASK-010A-browser-address-bar-local-target-ui.md`
 
 ## Scope Rules
 
@@ -45,9 +48,14 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-009` Artifact and Safe HTML Preview slice from the verified
-TASK-008 trusted-root Files boundary. Preserve the accepted r04 shell,
-right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update patterns,
-TASK-006 provider/model boundaries, TASK-007 session ownership, and TASK-008
-Files/File Editor authority unless a later task explicitly changes the UI
-contract.
+Start `TASK-010B` Native Browser Webview Or External-Open Fallback from the
+verified TASK-010A Browser address bar boundary. Preserve the accepted r04
+shell, Browser / Files / Terminal right-panel tab contract, TASK-005 chat UX,
+TASK-005A scoped update patterns, TASK-006 provider/model boundaries,
+TASK-007 session ownership, TASK-008 Files/File Editor authority, TASK-009
+product-owned artifact preview records, TASK-010 project-scoped Browser
+records, and TASK-010A editable Browser address bar behavior. TASK-010B
+handles public websites that block iframe embedding without weakening artifact
+preview sandboxing or merging user browsing authority with agent browsing
+authority. TASK-010C artifact preview type rendering follows TASK-010B, then
+TASK-011 resumes Terminal work.

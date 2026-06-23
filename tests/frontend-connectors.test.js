@@ -94,6 +94,8 @@ describe("frontend connector boundary", () => {
       "loadSession",
       "readFile",
       "saveFile",
+      "createArtifactPreview",
+      "openBrowser",
       "runTerminalCommand",
       "openBrowserPreview",
       "listExtensions",
@@ -118,6 +120,7 @@ describe("frontend connector boundary", () => {
       "skillCatalog",
       "mcpServers",
       "browser",
+      "artifacts",
       "files",
       "terminal",
       "thread"
