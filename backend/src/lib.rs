@@ -2,6 +2,7 @@ pub mod commands;
 pub mod files;
 pub mod menu;
 pub mod mock_data;
+pub mod native_browser;
 pub mod openrouter;
 pub mod provider_models;
 pub mod runtime_adapter;
@@ -21,6 +22,9 @@ pub fn run() {
             commands::load_session,
             commands::read_file,
             commands::save_file,
+            commands::create_artifact_preview,
+            commands::open_browser,
+            native_browser::sync_native_browser,
             commands::run_terminal_command,
             commands::open_browser_preview,
             commands::list_extensions,

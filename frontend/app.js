@@ -1,5 +1,6 @@
 import {
   beginConnectorStateLoad,
+  artifactState,
   browserState,
   connectorState,
   filesState,
@@ -7,6 +8,7 @@ import {
   mcpServers,
   models,
   editConnectorFile,
+  openConnectorBrowser,
   openConnectorFile,
   openConnectorWorkspace,
   pluginCatalog,
@@ -23,6 +25,7 @@ import {
   setConnectorModelEnabled,
   setConnectorProviderEnabled,
   settingsItems,
+  syncConnectorNativeBrowser,
   terminalState,
   threadTurns,
   toggleConnectorFolder,
@@ -47,6 +50,10 @@ let nativeFileMenuBound = false;
 let nativeFileEditorOpen = false;
 let nativeFileShortcutsBound = false;
 let nativeFileFocusBound = false;
+let nativeBrowserSurfaceActive = false;
+let nativeBrowserResizeObserver = null;
+let nativeBrowserObservedFrame = null;
+let nativeBrowserWindowResizeBound = false;
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -120,6 +127,7 @@ function render() {
   bindToolTabs();
   bindPanelLinks();
   bindFileEditor();
+  bindBrowserAddress();
   bindSettingsNavigation();
   bindDelegatedComposerPickers();
   bindComposerPickers();
@@ -257,9 +265,7 @@ function bindToolTabs() {
       bindTerminal();
       bindPanelLinks();
       bindFileEditor();
-      if (anchor.dataset.fileTarget === "editor" && anchor.dataset.filePath) {
-        document.querySelector("[data-file-editor]")?.focus({ preventScroll: true });
-      }
+      syncNativeBrowserSurface();
     });
   });
 }
@@ -550,8 +556,49 @@ function bindPanelLinks() {
       bindTerminal();
       bindPanelLinks();
       bindFileEditor();
+      bindBrowserAddress();
+      syncNativeBrowserSurface();
     });
   });
+}
+
+function bindBrowserAddress() {
+  if (document.body.dataset.boundBrowserAddress) return;
+  document.body.dataset.boundBrowserAddress = "true";
+  document.body.addEventListener("submit", async (event) => {
+    const form = event.target.closest?.("[data-browser-address-form]");
+    if (!form) return;
+    await submitBrowserAddress(form, event);
+  });
+  document.body.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") return;
+    const input = event.target.closest?.("[data-browser-address-input]");
+    if (!input) return;
+    const form = input.closest("[data-browser-address-form]");
+    if (!form) return;
+    await submitBrowserAddress(form, event);
+  });
+}
+
+async function submitBrowserAddress(form, event) {
+  event.preventDefault();
+  const input = form.querySelector("[data-browser-address-input]");
+  const target = input?.value?.trim() || "";
+  if (input) input.disabled = true;
+  try {
+    await openConnectorBrowser(target);
+  } catch {
+    // Failure text is stored on browserState and rendered in-panel below.
+  } finally {
+    if (input) input.disabled = false;
+    const panel = document.querySelector(".tool-panel");
+    panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
+    bindToolTabs();
+    bindTerminal();
+    bindPanelLinks();
+    bindFileEditor();
+    syncNativeBrowserSurface();
+  }
 }
 
 function bindFileEditor() {
@@ -722,6 +769,7 @@ function updateShellSessionDom() {
   bindTerminal();
   bindPanelLinks();
   bindFileEditor();
+  syncNativeBrowserSurface();
   applyShellState();
 }
 
@@ -1171,14 +1219,269 @@ function renderToolPanel(active, route) {
   ]);
 }
 
-/**
- * Render the browser preview fixture.
- */
 function browserTool() {
-  return h("section", { class: "tool-body" }, [
-    h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: browserState.url })]),
-    h("div", { class: "preview-surface" }, [h("h2", { text: browserState.title }), h("p", { text: browserState.summary })])
+  const artifact = activeBrowserArtifact();
+  if (artifact?.safePreview) {
+    const preview = artifact.safePreview;
+    return h("section", { class: "tool-body browser-tool", "data-artifact-preview": artifact.id }, [
+      h("div", { class: "address-bar" }, [icon("globe"), h("span", { text: preview.url || browserState.url })]),
+      h("div", { class: "preview-surface artifact-preview" }, [
+        h("header", { class: "artifact-preview-header" }, [
+          h("h2", { text: preview.title || artifact.title }),
+          h("p", { text: preview.summary || "Generated artifact preview" })
+        ]),
+        artifactPreviewBody(artifact)
+      ])
+    ]);
+  }
+  const previewMode = browserState.previewMode || browserState.preview_mode || "public";
+  const frameAttrs = {
+    class: "browser-frame",
+    title: browserState.title || "Browser",
+    "data-browser-frame": ""
+  };
+  if (previewMode !== "public") frameAttrs.sandbox = "allow-forms allow-scripts";
+  if (browserState.html) frameAttrs.src = browserDocumentUrl(browserState.html);
+  else frameAttrs.src = browserState.url || "about:blank";
+  const usesNativeBrowser =
+    (previewMode === "public" && isPublicBrowserUrl(browserState.url)) ||
+    (previewMode === "local-file" && !localBrowserFileIsMarkdown());
+  const localFilePreview = localFileBrowserPreviewBody(previewMode);
+
+  return h("section", {
+    class: "tool-body browser-tool",
+    "data-browser-preview": previewMode,
+    "data-local-browser-file": browserState.localPath || browserState.local_path || null
+  }, [
+    h("form", { class: "address-bar", "data-browser-address-form": "" }, [
+      icon("globe"),
+      h("input", {
+        type: "text",
+        value: browserState.url || "",
+        "aria-label": "Browser address",
+        "data-browser-address-input": "",
+        autocomplete: "off",
+        spellcheck: "false"
+      })
+    ]),
+    h("div", { class: "browser-preview" }, [
+      browserStatusIsFailure() ? h("p", { class: "browser-status", role: "status", text: browserState.status }) : null,
+      usesNativeBrowser ? h("div", {
+        class: "native-browser-frame",
+        "data-native-browser-frame": "",
+        "data-native-browser-url": browserState.url,
+        role: "presentation"
+      }) : localFilePreview || h("iframe", frameAttrs)
+    ])
   ]);
+}
+
+function isPublicBrowserUrl(url) {
+  return /^https?:\/\//i.test(String(url || "").trim());
+}
+
+function localFileBrowserPreviewBody(previewMode) {
+  if (previewMode !== "local-file") return null;
+  if (localBrowserFileIsMarkdown()) {
+    return h("article", {
+      class: "browser-local-render artifact-render artifact-markdown markdown-body",
+      "data-local-file-renderer": "markdown"
+    }, renderMarkdown(browserState.html || ""));
+  }
+  return null;
+}
+
+function localBrowserFileIsMarkdown() {
+  const target = String(browserState.localPath || browserState.local_path || browserState.url || "").toLowerCase();
+  return target.endsWith(".md") || target.endsWith(".markdown");
+}
+
+function syncNativeBrowserSurface() {
+  bindNativeBrowserResizeSync();
+  window.requestAnimationFrame(async () => {
+    const frame = document.querySelector("[data-native-browser-frame]");
+    if (!frame) {
+      unobserveNativeBrowserFrame();
+      if (!nativeBrowserSurfaceActive) return;
+      try {
+        await syncConnectorNativeBrowser({ visible: false });
+        nativeBrowserSurfaceActive = false;
+      } catch {
+        // Failure state is rendered only when the Browser panel is active.
+      }
+      return;
+    }
+    observeNativeBrowserFrame(frame);
+    const rect = frame.getBoundingClientRect();
+    const topInset = nativeBrowserTopInset(frame);
+    const syncRequest = {
+      url: frame.dataset.nativeBrowserUrl || browserState.url,
+      x: rect.x,
+      y: rect.y + topInset,
+      width: rect.width,
+      height: Math.max(1, rect.height),
+      visible: rect.width > 0 && rect.height > 0
+    };
+    try {
+      await syncConnectorNativeBrowser(syncRequest);
+      nativeBrowserSurfaceActive = rect.width > 0 && rect.height > 0;
+    } catch {
+      const panel = document.querySelector(".tool-panel");
+      panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
+      bindToolTabs();
+      bindTerminal();
+      bindPanelLinks();
+      bindFileEditor();
+    }
+  });
+}
+
+function nativeBrowserTopInset(frame) {
+  const addressInput = frame.closest(".browser-tool")?.querySelector("[data-browser-address-input]");
+  if (!addressInput) return 0;
+  return Math.max(0, Math.round(addressInput.getBoundingClientRect().height - 2));
+}
+
+function bindNativeBrowserResizeSync() {
+  if (nativeBrowserWindowResizeBound) return;
+  nativeBrowserWindowResizeBound = true;
+  window.addEventListener("resize", () => {
+    if (nativeBrowserSurfaceActive || document.querySelector("[data-native-browser-frame]")) {
+      syncNativeBrowserSurface();
+    }
+  });
+}
+
+function observeNativeBrowserFrame(frame) {
+  if (nativeBrowserObservedFrame === frame) return;
+  unobserveNativeBrowserFrame();
+  if (!("ResizeObserver" in window)) return;
+  nativeBrowserResizeObserver = new ResizeObserver(() => syncNativeBrowserSurface());
+  nativeBrowserResizeObserver.observe(frame);
+  nativeBrowserObservedFrame = frame;
+}
+
+function unobserveNativeBrowserFrame() {
+  nativeBrowserResizeObserver?.disconnect();
+  nativeBrowserResizeObserver = null;
+  nativeBrowserObservedFrame = null;
+}
+
+function browserStatusIsFailure() {
+  const status = String(browserState.status || "").trim();
+  return Boolean(status && status !== "Ready" && status !== "Opened");
+}
+
+function activeBrowserArtifact() {
+  if ((browserState.previewMode || browserState.preview_mode) !== "artifact") return null;
+  const artifactId = browserState.artifactId || browserState.artifact_id;
+  return artifactState.find((artifact) => artifact.id === artifactId) || artifactState[0] || null;
+}
+
+function artifactPreviewBody(artifact) {
+  const preview = artifact.safePreview || artifact.safe_preview || {};
+  const type = artifactPreviewType(artifact);
+  const content = artifactPreviewContent(preview);
+  if (type === "html") {
+    return h("iframe", {
+      class: "artifact-frame",
+      title: preview.title || artifact.title,
+      sandbox: "allow-scripts",
+      src: artifactPreviewDocumentUrl(preview.html || content),
+      "data-artifact-frame": "",
+      "data-artifact-id": artifact.id
+    });
+  }
+  if (type === "markdown") {
+    return h("article", { class: "artifact-render artifact-markdown markdown-body", "data-artifact-renderer": "markdown" }, renderMarkdown(content));
+  }
+  if (type === "image") {
+    const source = artifactPreviewSource(preview);
+    return artifactMediaPreview("figure", "artifact-image", "image", source, "Image preview is unavailable.", () => h("img", {
+      src: source,
+      alt: preview.title || artifact.title || "Artifact image"
+    }));
+  }
+  if (type === "pdf") {
+    const source = artifactPreviewSource(preview);
+    return artifactMediaPreview("div", "artifact-pdf", "pdf", source, "PDF preview is unavailable.", () => h("iframe", {
+      src: source,
+      title: preview.title || artifact.title || "PDF preview"
+    }));
+  }
+  if (type === "json") {
+    return artifactCodePreview("json", formatJsonPreview(content));
+  }
+  if (type === "code") {
+    return artifactCodePreview("code", content);
+  }
+  return h("div", { class: "artifact-render artifact-text", "data-artifact-renderer": "text" }, [
+    h("pre", { text: content || "Plain text preview is unavailable." })
+  ]);
+}
+
+function artifactMediaPreview(tag, className, renderer, source, emptyMessage, renderSource) {
+  return h(tag, { class: `artifact-render ${className}`, "data-artifact-renderer": renderer }, [
+    source ? renderSource() : artifactEmptyState(emptyMessage)
+  ]);
+}
+
+function artifactCodePreview(renderer, content) {
+  return h("div", { class: "artifact-render artifact-code", "data-artifact-renderer": renderer }, [
+    h("pre", {}, [h("code", { text: content })])
+  ]);
+}
+
+function artifactPreviewType(artifact) {
+  const preview = artifact.safePreview || artifact.safe_preview || {};
+  const mime = String(artifact.mimeType || artifact.mime_type || preview.mimeType || preview.mime_type || "").toLowerCase();
+  const filename = String(artifact.filename || artifact.fileName || artifact.file_name || preview.filename || preview.fileName || preview.file_name || "");
+  const extension = filename.toLowerCase().split(".").pop() || "";
+  if (preview.html || mime.includes("html") || extension === "html" || extension === "htm" || artifact.kind === "html") return "html";
+  if (mime.includes("markdown") || ["md", "markdown"].includes(extension) || artifact.kind === "markdown") return "markdown";
+  if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension) || artifact.kind === "image") return "image";
+  if (mime === "application/pdf" || extension === "pdf" || artifact.kind === "pdf") return "pdf";
+  if (mime.includes("json") || extension === "json" || artifact.kind === "json") return "json";
+  if (isCodePreview(mime, extension, artifact.kind)) return "code";
+  return "text";
+}
+
+function isCodePreview(mime, extension, kind) {
+  return kind === "code" ||
+    mime.includes("javascript") ||
+    mime.includes("typescript") ||
+    mime.includes("x-python") ||
+    mime.includes("x-rust") ||
+    mime.includes("x-shellscript") ||
+    ["js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "rb", "php", "sh", "css", "sql", "toml", "yaml", "yml"].includes(extension);
+}
+
+function artifactPreviewContent(preview) {
+  return String(preview.content ?? preview.text ?? preview.markdown ?? preview.code ?? preview.html ?? "");
+}
+
+function artifactPreviewSource(preview) {
+  return preview.dataUrl || preview.data_url || preview.src || preview.url || "";
+}
+
+function artifactEmptyState(message) {
+  return h("p", { class: "artifact-empty", text: message });
+}
+
+function formatJsonPreview(content) {
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    return content || "{}";
+  }
+}
+
+function artifactPreviewDocumentUrl(html) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function browserDocumentUrl(html) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 /**

@@ -1,7 +1,7 @@
 # Progress Manifest
 
-Status: ready-for-task-009
-Updated: 2026-06-23
+Status: ready-for-task-011
+Updated: 2026-06-24
 
 ## Active Stream
 
@@ -18,6 +18,11 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-006-provider-model-management.md`
 - `.agents/development/progress/items/TASK-007-runtime-adapter-persistent-sessions.md`
 - `.agents/development/progress/items/TASK-008-files-slice.md`
+- `.agents/development/progress/items/TASK-009-artifact-safe-html-preview.md`
+- `.agents/development/progress/items/TASK-010-browser-slice.md`
+- `.agents/development/progress/items/TASK-010A-browser-address-bar-local-target-ui.md`
+- `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
+- `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
 
 ## Scope Rules
 
@@ -45,9 +50,14 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-009` Artifact and Safe HTML Preview slice from the verified
-TASK-008 trusted-root Files boundary. Preserve the accepted r04 shell,
-right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update patterns,
-TASK-006 provider/model boundaries, TASK-007 session ownership, and TASK-008
-Files/File Editor authority unless a later task explicitly changes the UI
-contract.
+Start `TASK-011` Terminal Slice from the verified TASK-010C artifact preview
+type rendering boundary. Preserve the accepted r04 shell, Browser / Files /
+Terminal right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update
+patterns, TASK-006 provider/model boundaries, TASK-007 session ownership,
+TASK-008 Files/File Editor authority, TASK-009 product-owned artifact preview
+records, TASK-010 project-scoped Browser records, TASK-010A editable Browser
+address bar behavior, TASK-010B public-page native Wry Browser host behavior,
+and TASK-010C typed artifact preview rendering. TASK-011 replaces Terminal
+mock behavior with backend-owned user terminal and agent command terminal
+surfaces without moving Browser, Files, or artifact preview behavior out of
+the existing right-panel tab contract.

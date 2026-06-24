@@ -111,14 +111,30 @@ function tauriConnector(config) {
     async saveFile(path, content, options = {}) {
       return invoke("save_file", { request: { path, content, sessionId: options.sessionId } });
     },
+    async createArtifactPreview(title, html, options = {}) {
+      return invoke("create_artifact_preview", { request: { title, html, sessionId: options.sessionId } });
+    },
+    async openBrowser(target, options = {}) {
+      return invoke("open_browser", {
+        request: {
+          target,
+          sessionId: options.sessionId,
+          actor: options.actor || "user",
+          clearRequest: Boolean(options.clearRequest)
+        }
+      });
+    },
+    async syncNativeBrowser(request) {
+      return invoke("sync_native_browser", { request });
+    },
     async updateNativeMenuState(focusState) {
       return invoke("native_menu_state", { focusState });
     },
     async runTerminalCommand(command) {
       return invoke("run_terminal_command", { request: { command } });
     },
-    async openBrowserPreview() {
-      return invoke("open_browser_preview");
+    async openBrowserPreview(options = {}) {
+      return invoke("open_browser_preview", { sessionId: options.sessionId });
     },
     async listExtensions() {
       return invoke("list_extensions");

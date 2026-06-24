@@ -13,6 +13,7 @@ pub struct WorkspacePayload {
     pub skill_catalog: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub browser: BrowserState,
+    pub artifacts: Vec<ArtifactRecord>,
     pub files: FilesState,
     pub terminal: TerminalState,
     pub thread: ThreadState,
@@ -81,6 +82,42 @@ pub struct BrowserState {
     pub url: String,
     pub title: String,
     pub summary: String,
+    #[serde(rename = "artifactId", default)]
+    pub artifact_id: String,
+    #[serde(rename = "previewMode", default)]
+    pub preview_mode: String,
+    #[serde(rename = "profileId", default)]
+    pub profile_id: String,
+    #[serde(rename = "localPath", default)]
+    pub local_path: String,
+    #[serde(default)]
+    pub html: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRecord {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub origin: String,
+    #[serde(default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub filename: String,
+    pub safe_preview: SafeArtifactPreview,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SafeArtifactPreview {
+    pub url: String,
+    pub title: String,
+    pub summary: String,
+    pub html: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,7 +207,13 @@ pub fn mock_workspace() -> WorkspacePayload {
             url: "http://127.0.0.1:43123/mock-preview".into(),
             title: "Mock rendered page".into(),
             summary: "Mock Browser state from tests/server.".into(),
+            artifact_id: String::new(),
+            preview_mode: String::new(),
+            profile_id: String::new(),
+            local_path: String::new(),
+            html: String::new(),
         },
+        artifacts: vec![],
         files: FilesState {
             roots: vec![
                 vec!["backend".into(), "folder".into(), "file-explorer".into()],

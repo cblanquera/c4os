@@ -1,4 +1,7 @@
-use crate::mock_data::{mock_workspace, BrowserState, FilesState, TerminalState, ThreadState};
+use crate::mock_data::{
+    mock_workspace, ArtifactRecord, BrowserState, FilesState, SafeArtifactPreview, TerminalState,
+    ThreadState,
+};
 use crate::openrouter::RuntimeEvent;
 use crate::runtime_adapter::{C4osRuntimeAdapter, C4osRuntimeResult};
 use serde::{Deserialize, Serialize};
@@ -23,9 +26,12 @@ pub struct C4osSessionRecord {
     pub title: String,
     pub selected_model: String,
     pub browser: BrowserState,
+    pub artifacts: Vec<ArtifactRecord>,
     pub files: FilesState,
     pub terminal: TerminalState,
     pub thread: ThreadState,
+    #[serde(default)]
+    pub browser_actions: Vec<BrowserActionRecord>,
     pub turns: Vec<C4osTurnRecord>,
     pub messages: Vec<C4osMessageRecord>,
     pub runs: Vec<C4osRunRecord>,
@@ -64,6 +70,17 @@ pub struct C4osRunRecord {
     pub status: String,
     pub runtime_reference_id: String,
     pub events: Vec<RuntimeEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserActionRecord {
+    pub id: String,
+    pub session_id: String,
+    pub actor: String,
+    pub action: String,
+    pub target: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -242,6 +259,82 @@ pub fn set_session_files(session_id: &str, files: FilesState) -> Result<(), Stri
     Ok(())
 }
 
+pub fn create_session_artifact_preview(
+    session_id: &str,
+    title: &str,
+    html: &str,
+) -> Result<(ArtifactRecord, BrowserState), String> {
+    let mut store = load_store();
+    let session = store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
+    let id = format!("artifact-{}", session.artifacts.len() + 1);
+    let title = if title.trim().is_empty() {
+        "Generated HTML artifact"
+    } else {
+        title.trim()
+    };
+    let artifact = ArtifactRecord {
+        id: id.clone(),
+        title: title.into(),
+        kind: "html".into(),
+        origin: "generated".into(),
+        mime_type: "text/html".into(),
+        filename: format!("{id}.html"),
+        safe_preview: SafeArtifactPreview {
+            url: format!("artifact://{id}"),
+            title: title.into(),
+            summary: "Generated HTML artifact preview".into(),
+            html: html.into(),
+            content: String::new(),
+            data_url: String::new(),
+        },
+    };
+    session.browser = BrowserState {
+        url: artifact.safe_preview.url.clone(),
+        title: artifact.safe_preview.title.clone(),
+        summary: artifact.safe_preview.summary.clone(),
+        artifact_id: artifact.id.clone(),
+        preview_mode: "artifact".into(),
+        profile_id: browser_profile_id(session),
+        local_path: String::new(),
+        html: String::new(),
+    };
+    session.artifacts.push(artifact.clone());
+    let browser = session.browser.clone();
+    save_store(&store);
+    Ok((artifact, browser))
+}
+
+pub fn set_session_browser(
+    session_id: &str,
+    browser: BrowserState,
+    actor: &str,
+    action: &str,
+    target: &str,
+) -> Result<BrowserActionRecord, String> {
+    let mut store = load_store();
+    let session = store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
+    session.browser = browser;
+    let record = BrowserActionRecord {
+        id: format!("browser-action-{}", session.browser_actions.len() + 1),
+        session_id: session.id.clone(),
+        actor: actor.into(),
+        action: action.into(),
+        target: target.into(),
+        status: "recorded".into(),
+    };
+    session.browser_actions.push(record.clone());
+    save_store(&store);
+    Ok(record)
+}
+
 fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: C4osRuntimeResult) {
     session.selected_model = runtime.model.clone();
     let run_id = format!("c4os-run-{}", session.runs.len() + 1);
@@ -300,13 +393,16 @@ fn empty_session(
     let files = crate::workspace::active_workspace_root()
         .and_then(|root| crate::files::list_files_state(&root, None).ok())
         .unwrap_or_else(|| fallback.files.clone());
+    let mut browser = fallback.browser;
+    browser.profile_id = format!("browser-profile-{}", stable_id(project));
     C4osSessionRecord {
         id: id.into(),
         workspace_id: workspace.id.clone(),
         project: project.into(),
         title: title.into(),
         selected_model: selected_model.into(),
-        browser: fallback.browser,
+        browser,
+        artifacts: fallback.artifacts,
         files,
         terminal: fallback.terminal,
         thread: ThreadState {
@@ -316,6 +412,7 @@ fn empty_session(
             tool: String::new(),
             run: String::new(),
         },
+        browser_actions: Vec::new(),
         turns: Vec::new(),
         messages: Vec::new(),
         runs: Vec::new(),
@@ -325,6 +422,10 @@ fn empty_session(
             adapter: "c4os-runtime-adapter".into(),
         },
     }
+}
+
+pub fn browser_profile_id(session: &C4osSessionRecord) -> String {
+    format!("browser-profile-{}", stable_id(&session.project))
 }
 
 fn load_store() -> SessionStore {

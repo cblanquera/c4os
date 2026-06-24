@@ -74,8 +74,9 @@ mutation.
 Source: `.agents/specs/research/requirements.md`, `wireframes/ui-handoff-spec.md`
 
 Artifacts are product records with safe viewers. Generated or untrusted HTML
-renders without provider credentials, arbitrary workspace file access, shell
-state, or privileged app APIs.
+renders inside the existing right-panel Browser/Preview tab without provider
+credentials, arbitrary workspace file access, shell state, or privileged app
+APIs.
 
 ### REQ-010: Browser Surface
 

@@ -81,7 +81,7 @@ async function expectSessionSurface(page, expected) {
   assert.match(await page.locator(".thread-list").innerText(), expected.thread);
 
   await page.getByRole("button", { name: "Browser" }).click();
-  assert.match(await page.locator(".tool-panel").innerText(), expected.browser);
+  assert.match(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), expected.browser);
 
   await page.getByRole("button", { name: "Terminal" }).click();
   assert.match(await page.locator(".tool-panel").innerText(), expected.terminal);
@@ -107,6 +107,7 @@ async function installTask007Tauri(page, options = {}) {
         title,
         selectedModel: model,
         browser: { url: `http://${title.split(" ")[0].toLowerCase()}.local`, title, summary: `${title} browser` },
+        artifacts: [],
         files: { roots: [[`${title.split(" ")[0].toLowerCase()}-file.js`, "file", "file-editor"]], breadcrumbs: ["runtime-session-repo", "frontend", `${title.split(" ")[0].toLowerCase()}-file.js`], lines: [`console.log("${title}")`] },
         terminal: { output: `${title.split(" ")[0].toLowerCase()} session terminal`, title: `${title} Terminal`, summary: `${title} output` },
         thread: { user: prompt, agent: `${title} answer`, extra: "Restored C4OS session record.", tool: "Runtime restored", run: "Run restored" },
@@ -137,6 +138,7 @@ async function installTask007Tauri(page, options = {}) {
         skillCatalog: [],
         mcpServers: [],
         browser: active?.browser || { url: "http://empty.local", title: "Empty", summary: "Empty browser" },
+        artifacts: active?.artifacts || [],
         files: active?.files || { roots: [], breadcrumbs: ["runtime-session-repo"], lines: [] },
         terminal: active?.terminal || { output: "", title: "Terminal", summary: "" },
         thread: active?.thread || { user: "", agent: "", extra: "", tool: "", run: "" },

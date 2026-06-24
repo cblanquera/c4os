@@ -435,6 +435,7 @@ async function installProviderModelTauri(page, options = {}) {
       skillCatalog: [],
       mcpServers: [],
       browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+      artifacts: [],
       files: { roots: [], breadcrumbs: ["provider-model-repo"], lines: [] },
       terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
       thread: {

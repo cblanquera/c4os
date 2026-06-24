@@ -50,8 +50,9 @@ casual `.git` mutation are rejected before read or write behavior occurs.
 
 ### AC-009: Safe Artifact Preview
 
-Given generated or untrusted HTML is previewed, then it cannot access provider
-credentials, arbitrary workspace files, shell state, or privileged app APIs.
+Given generated or untrusted HTML is previewed in the existing right-panel
+Browser/Preview tab, then it cannot access provider credentials, arbitrary
+workspace files, shell state, or privileged app APIs.
 
 ### AC-010: Browser Scope
 

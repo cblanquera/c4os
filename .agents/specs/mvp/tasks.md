@@ -333,8 +333,10 @@ the accepted right-panel Files surfaces.
 Depends on: TASK-008 acceptance
 
 Replace artifact/preview mocks with product-owned artifact records and safe
-rendering for generated or untrusted HTML. Do not claim Browser or security
-hardening complete beyond the artifact preview boundary.
+rendering for generated or untrusted HTML inside the existing right-panel
+Browser/Preview tab. This slice must not add a new Artifacts tab, reuse the
+Terminal tab, or claim full Browser or security hardening complete beyond the
+artifact preview boundary.
 
 ### TASK-010: Browser Slice
 
@@ -345,9 +347,51 @@ profile state, local file opening, public browsing, request-scoped agent
 browsing when clearly requested, and recorded agent Browser actions. Downloads
 remain out of scope.
 
-### TASK-011: Terminal Slice
+### TASK-010A: Browser Address Bar And Local Target UI
 
 Depends on: TASK-010 acceptance
+
+Expose the TASK-010 Browser capabilities through the accepted right-panel
+Browser surface: make the existing Browser address bar user-editable for public
+URLs, resolve user-entered local file targets to canonical absolute `file:///`
+URLs, keep agent-entered local Browser targets behind trusted-root authority,
+and show bounded success/failure state without adding Browser routes, panels,
+tabs, alternate layouts, downloads, React/Preact/JSX, a bundler, or settings
+abstractions. This follow-up completes the user-testable Browser navigation
+path for the MVP surface without expanding Browser security hardening beyond
+the TASK-010/TASK-016 boundary.
+
+### TASK-010B: Native Browser Webview Or External-Open Fallback
+
+Depends on: TASK-010A acceptance
+
+Resolve the iframe-blocked public website limitation in the Browser surface
+with the accepted raw Wry native webview-backed Browser host. Public Browser
+pages must no longer rely on the DOM iframe path that fails on
+`X-Frame-Options`, CSP `frame-ancestors`, or equivalent browser restrictions.
+Preserve the existing Browser / Files / Terminal right-panel tab contract,
+keep TASK-009 artifact previews on their distinct sandboxed preview path, keep
+local-file Browser previews separate from general public browsing, keep user
+browsing separate from agent browsing authority, and do not add downloads,
+external-open fallback UI, unrelated settings abstractions, or alternate app
+layouts.
+
+### TASK-010C: Artifact Preview Type Rendering
+
+Depends on: TASK-010B acceptance
+
+Extend the TASK-009 artifact preview path inside the accepted Browser/Preview
+surface so product-owned artifact records render according to MIME type or file
+extension. Support safe previews for common artifact types such as generated
+or untrusted HTML, Markdown, images, PDF, plain text, JSON, and code where
+reasonable for the MVP. Keep generated/untrusted HTML sandboxed, keep artifact
+previews distinct from general Browser navigation, do not render artifacts in
+Terminal, and do not add a new Artifacts tab, route, panel, alternate layout,
+downloads, React/Preact/JSX, a bundler, or settings abstraction.
+
+### TASK-011: Terminal Slice
+
+Depends on: TASK-010C acceptance
 
 Replace Terminal mock behavior with backend-owned user terminal and agent
 command terminal surfaces, including lifecycle ownership, cwd validation,
