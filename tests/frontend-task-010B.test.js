@@ -49,7 +49,7 @@ describe("TASK-010B native Wry Browser surface", () => {
     assert.ok(browserBox && addressBox && inputBox && nativeBox);
     const nativeInset = Math.max(0, Math.round(inputBox.height - 2));
     assert.ok(Math.abs(request.y - (nativeBox.y + nativeInset)) <= 1);
-    assert.ok(Math.abs(request.height - (nativeBox.height - nativeInset)) <= 1);
+    assert.ok(Math.abs(request.height - nativeBox.height) <= 1);
     assert.ok(Math.abs(nativeBox.x - browserBox.x) <= 1);
     assert.ok(Math.abs(nativeBox.width - browserBox.width) <= 1);
     assert.ok(Math.abs(nativeBox.y - (addressBox.y + addressBox.height)) <= 1);

@@ -1319,7 +1319,7 @@ function syncNativeBrowserSurface() {
       x: rect.x,
       y: rect.y + topInset,
       width: rect.width,
-      height: Math.max(1, rect.height - topInset),
+      height: Math.max(1, rect.height),
       visible: rect.width > 0 && rect.height > 0
     };
     try {
