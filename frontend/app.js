@@ -20,6 +20,7 @@ import {
   saveConnectorProviderProfile,
   saveConnectorFile,
   restoreConnectorExplorerScope,
+  runConnectorTerminalCommand,
   selectConnectorSessionModel,
   sendConnectorPrompt,
   setConnectorModelEnabled,
@@ -34,7 +35,7 @@ import {
   workspace
 } from "./data.js";
 import { h, icon } from "./dom.js";
-import { bindInteractions, bindMessage, bindTerminal } from "./interactions.js";
+import { bindInteractions, bindMessage } from "./interactions.js";
 import { renderMarkdown } from "./markdown.js";
 import { appStore, sessionSurfaceKey } from "./state.js";
 
@@ -54,6 +55,11 @@ let nativeBrowserSurfaceActive = false;
 let nativeBrowserResizeObserver = null;
 let nativeBrowserObservedFrame = null;
 let nativeBrowserWindowResizeBound = false;
+let terminalInstance = null;
+let terminalKey = "";
+let terminalOutputUnlisten = null;
+let terminalOutputVersion = 0;
+let terminalOutputPollTimer = null;
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -125,6 +131,7 @@ function render() {
   bindNativeFileMenu();
   bindWorkLogDisclosure();
   bindToolTabs();
+  bindTerminalEmulator();
   bindPanelLinks();
   bindFileEditor();
   bindBrowserAddress();
@@ -262,12 +269,238 @@ function bindToolTabs() {
       const panel = document.querySelector(".tool-panel");
       panel?.replaceWith(renderToolPanel(activeToolForRoute(route), route));
       bindToolTabs();
-      bindTerminal();
+      bindTerminalEmulator();
       bindPanelLinks();
       bindFileEditor();
       syncNativeBrowserSurface();
     });
   });
+}
+
+async function bindTerminalEmulator() {
+  const host = document.querySelector("[data-terminal-emulator]");
+  if (!host) return;
+  bindTerminalAgentResize();
+  const sessionId = workspace.sessionId || "";
+  const key = `${sessionId}:user`;
+  if (terminalInstance && terminalKey === key && host.querySelector(".xterm")) return;
+  terminalInstance?.dispose?.();
+  terminalInstance = null;
+  stopTerminalOutputPolling();
+  terminalKey = key;
+
+  const TerminalRenderer = typeof window.Terminal === "function" ? window.Terminal : BasicTerminalRenderer;
+  const term = new TerminalRenderer({
+    cols: 102,
+    cursorBlink: true,
+    cursorStyle: "block",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.2,
+    rows: 31,
+    theme: {
+      background: "#1e1e1f",
+      cursor: "#c4c4bf",
+      foreground: "#f4f4f0",
+      selectionBackground: "#565a61"
+    }
+  });
+  terminalInstance = term;
+  term.open(host);
+  host.addEventListener("pointerdown", () => window.setTimeout(() => term.focus(), 0));
+  host.addEventListener("click", () => term.focus());
+  term.focus();
+
+  const hasLiveTerminalSession = Boolean(connectorState.connector.startTerminalSession);
+  const existing = terminalState.userTerminal?.output || terminalState.output || "";
+  if (!hasLiveTerminalSession && existing.trim()) {
+    term.write(existing.endsWith("\n") ? existing : `${existing}\n`);
+  }
+
+  let terminalEventsAttached = false;
+  term.onData((input) => {
+    const writeInput = connectorState.connector.writeTerminalInput;
+    if (!writeInput) {
+      echoLocalTerminalInput(term, input);
+      return;
+    }
+    const outputVersionBeforeWrite = terminalOutputVersion;
+    Promise.resolve(writeInput(input, {
+      sessionId: workspace.sessionId,
+      terminalKind: "user"
+    })).then(() => {
+      drainTerminalOutput();
+      window.setTimeout(() => {
+        if ((terminalEventsAttached || !connectorState.connector.readTerminalOutput) && terminalOutputVersion === outputVersionBeforeWrite) {
+          echoLocalTerminalInput(term, input);
+        }
+      }, 120);
+    }).catch(() => echoLocalTerminalInput(term, input));
+  });
+
+  if (!terminalOutputUnlisten && connectorState.connector.listenTerminalOutput) {
+    try {
+      terminalOutputUnlisten = await connectorState.connector.listenTerminalOutput((event) => {
+        writeTerminalOutputEvent(event);
+      });
+      terminalEventsAttached = Boolean(terminalOutputUnlisten);
+    } catch {
+      terminalOutputUnlisten = null;
+    }
+  }
+  if (!terminalEventsAttached) startTerminalOutputPolling();
+
+  try {
+    await connectorState.connector.startTerminalSession?.({
+      sessionId: workspace.sessionId,
+      terminalKind: "user"
+    });
+    await drainTerminalOutput();
+    await connectorState.connector.resizeTerminalSession?.({
+      rows: term.rows || 31,
+      cols: term.cols || 102
+    }, {
+      sessionId: workspace.sessionId,
+      terminalKind: "user"
+    });
+  } catch (error) {
+    term.write(`Terminal unavailable: ${terminalErrorMessage(error)}\r\n`);
+  }
+}
+
+class BasicTerminalRenderer {
+  constructor(options = {}) {
+    this.cols = options.cols || 102;
+    this.rows = options.rows || 31;
+    this.text = "";
+    this.onDataCallback = null;
+  }
+
+  open(host) {
+    this.host = host;
+    host.replaceChildren();
+    host.classList.add("xterm", "basic-terminal");
+    this.screen = document.createElement("div");
+    this.screen.className = "xterm-screen basic-terminal-screen";
+    this.screen.tabIndex = 0;
+    this.screen.setAttribute("role", "textbox");
+    this.screen.setAttribute("aria-label", "User terminal input");
+    this.screen.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.onDataCallback?.("\r");
+      } else if (event.key === "Backspace") {
+        event.preventDefault();
+        this.onDataCallback?.("\u007f");
+      } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        this.onDataCallback?.(event.key);
+      }
+    });
+    host.append(this.screen);
+  }
+
+  focus() {
+    this.screen?.focus();
+  }
+
+  onData(callback) {
+    this.onDataCallback = callback;
+  }
+
+  write(value) {
+    this.text += value;
+    this.screen.textContent = this.text;
+  }
+
+  dispose() {
+    this.host?.replaceChildren();
+  }
+}
+
+async function drainTerminalOutput() {
+  const readOutput = connectorState.connector.readTerminalOutput;
+  if (!terminalInstance || !readOutput) return;
+  try {
+    const event = await readOutput({
+      sessionId: workspace.sessionId,
+      terminalKind: "user"
+    });
+    writeTerminalOutputEvent(event);
+  } catch {
+    stopTerminalOutputPolling();
+  }
+}
+
+function startTerminalOutputPolling() {
+  if (terminalOutputPollTimer || !connectorState.connector.readTerminalOutput) return;
+  terminalOutputPollTimer = window.setInterval(() => {
+    drainTerminalOutput();
+  }, 120);
+}
+
+function stopTerminalOutputPolling() {
+  if (!terminalOutputPollTimer) return;
+  window.clearInterval(terminalOutputPollTimer);
+  terminalOutputPollTimer = null;
+}
+
+function writeTerminalOutputEvent(event) {
+  if (!event) return;
+  if (event.sessionId && workspace.sessionId && event.sessionId !== workspace.sessionId) return;
+  if ((event.terminalKind || "user") !== "user") return;
+  const text = event.text || "";
+  if (!text) return;
+  terminalOutputVersion += 1;
+  terminalInstance?.write(text);
+  if (terminalState.userTerminal) {
+    terminalState.userTerminal.output = `${terminalState.userTerminal.output || ""}${text}`;
+    terminalState.output = terminalState.userTerminal.output;
+  }
+}
+
+function bindTerminalAgentResize() {
+  const handle = document.querySelector("[data-resize-stack='terminal-agent']");
+  if (!handle || handle.dataset.boundTerminalAgentResize) return;
+  handle.dataset.boundTerminalAgentResize = "true";
+  handle.addEventListener("pointerdown", (event) => {
+    const panel = handle.closest(".terminal-tool");
+    const agentPane = panel?.querySelector("[data-agent-terminal]");
+    if (!panel || !agentPane) return;
+    const start = event.clientY;
+    const startHeight = agentPane.getBoundingClientRect().height;
+    handle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      const height = Math.max(96, Math.min(420, startHeight + start - moveEvent.clientY));
+      panel.style.setProperty("--terminal-agent", `${Math.round(height)}px`);
+      appStore.setShellValue("terminalBottom", Math.round(height));
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  });
+}
+
+function echoLocalTerminalInput(term, input) {
+  if (input === "\r") {
+    term.write("\r\n");
+    return;
+  }
+  if (input === "\u007f") {
+    term.write("\b \b");
+    return;
+  }
+  term.write(input);
+}
+
+function terminalErrorMessage(error) {
+  if (!error) return "Terminal session failed to start";
+  if (typeof error === "string") return error;
+  return error.message || "Terminal session failed to start";
 }
 
 function bindSessionRows() {
@@ -553,7 +786,7 @@ function bindPanelLinks() {
       const panel = document.querySelector(".tool-panel");
       panel?.replaceWith(renderToolPanel("files", route));
       bindToolTabs();
-      bindTerminal();
+      bindTerminalEmulator();
       bindPanelLinks();
       bindFileEditor();
       bindBrowserAddress();
@@ -594,7 +827,7 @@ async function submitBrowserAddress(form, event) {
     const panel = document.querySelector(".tool-panel");
     panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
     bindToolTabs();
-    bindTerminal();
+    bindTerminalEmulator();
     bindPanelLinks();
     bindFileEditor();
     syncNativeBrowserSurface();
@@ -766,7 +999,7 @@ function updateShellSessionDom() {
   bindMessage();
   bindConnectorRun();
   bindToolTabs();
-  bindTerminal();
+  bindTerminalEmulator();
   bindPanelLinks();
   bindFileEditor();
   syncNativeBrowserSurface();
@@ -785,7 +1018,7 @@ function applyShellState() {
   if (appStore.shell.leftWidth) shell.style.setProperty("--left-panel", `${appStore.shell.leftWidth}px`);
   if (appStore.shell.rightWidth) shell.style.setProperty("--right-panel", `${appStore.shell.rightWidth}px`);
   if (appStore.shell.terminalBottom) {
-    shell.querySelector(".terminal-tool")?.style.setProperty("--terminal-bottom", `${appStore.shell.terminalBottom}px`);
+    shell.querySelector(".terminal-tool")?.style.setProperty("--terminal-agent", `${appStore.shell.terminalBottom}px`);
   }
 }
 
@@ -1329,7 +1562,6 @@ function syncNativeBrowserSurface() {
       const panel = document.querySelector(".tool-panel");
       panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
       bindToolTabs();
-      bindTerminal();
       bindPanelLinks();
       bindFileEditor();
     }
@@ -1652,14 +1884,28 @@ function tokenize(content, rules) {
   return nodes.length ? nodes : [""];
 }
 
-/**
- * Render the terminal fixture and its resizable result panel.
- */
 function terminalTool() {
-  return h("section", { class: "tool-body terminal-tool" }, [
-    h("pre", { class: "terminal-output", text: terminalState.output }),
-    h("div", { class: "vertical-resize-handle", role: "separator", tabindex: "0", "aria-label": "Resize terminal results panel", "aria-orientation": "horizontal", "data-resize-stack": "terminal" }),
-    h("div", { class: "terminal-bottom" }, [h("strong", { text: terminalState.title }), h("p", { text: terminalState.summary })])
+  return h("section", { class: "tool-body terminal-tool terminal-emulator-tool" }, [
+    h("div", {
+      class: "terminal-emulator",
+      "data-terminal-emulator": "user",
+      tabindex: "0"
+    }),
+    h("div", {
+      class: "vertical-resize-handle terminal-agent-resize",
+      role: "separator",
+      tabindex: "0",
+      "aria-label": "Resize agent command terminal",
+      "aria-orientation": "horizontal",
+      "data-resize-stack": "terminal-agent"
+    }),
+    h("div", { class: "terminal-agent-pane", "data-agent-terminal": "true" }, [
+      h("div", { class: "terminal-agent-title", text: terminalState.agentTerminal?.title || "Agent command terminal" }),
+      h("pre", {
+        class: "terminal-agent-transcript",
+        text: terminalState.agentTerminal?.output || terminalState.agentTerminal?.summary || ""
+      })
+    ])
   ]);
 }
 

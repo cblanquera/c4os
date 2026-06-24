@@ -17,6 +17,7 @@ Read the workflow that matches the task:
 - `workflows/creatives.md` for visual direction, asset notes, creative review rounds, and approved creative guidelines.
 - `workflows/review.md` for readiness, risk, consistency, and traceability review.
 - `workflows/validation.md` for evidence-gathering on risky claims or blockers.
+- `workflows/manual-qa.md` for built desktop app acceptance passes, visible navigation checks, and runtime log capture.
 - `workflows/freeze.md` for turning accepted MVP or bounded feature records into implementation contracts.
 - `workflows/progress.md` for active execution packets, logs, and handoffs after a frozen spec exists.
 - `workflows/batch-reconciliation.md` for validated QA, feedback, and polish batches.

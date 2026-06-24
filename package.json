@@ -8,6 +8,7 @@
     "test": "node --test --test-concurrency=1 tests/*.test.js tests/server/*.test.js",
     "backend:build": "cargo build --manifest-path backend/Cargo.toml",
     "backend:run": "cargo run --manifest-path backend/Cargo.toml",
+    "backend:run:qa": "C4OS_SESSION_STORE=/tmp/c4os-task-011-qa-sessions.json cargo run --manifest-path backend/Cargo.toml",
     "backend:test": "cargo test --manifest-path backend/Cargo.toml",
     "acceptance:mvp": "node scripts/mvp-acceptance.js",
     "acceptance:desktop-wrapper": "node scripts/create-desktop-app-wrapper.js"
@@ -19,6 +20,7 @@
     "@earendil-works/pi-agent-core": "^0.79.8",
     "@earendil-works/pi-coding-agent": "^0.79.8",
     "@opencode-ai/sdk": "^1.17.8",
+    "@xterm/xterm": "^5.5.0",
     "opencode-ai": "^1.17.8",
     "playwright": "^1.60.0"
   }

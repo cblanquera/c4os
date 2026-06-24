@@ -139,10 +139,25 @@ pub struct FilesState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalPaneState {
+    pub output: String,
+    pub title: String,
+    pub summary: String,
+    pub cwd: String,
+    pub running: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalState {
     pub output: String,
     pub title: String,
     pub summary: String,
+    pub user_terminal: TerminalPaneState,
+    pub agent_terminal: TerminalPaneState,
+    #[serde(default)]
+    pub actions: Vec<crate::runtime_sessions::TerminalActionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -240,6 +255,21 @@ pub fn mock_workspace() -> WorkspacePayload {
             output: "$ npm run mock:task-002\nmock server ready\nfake agent run channel connected".into(),
             title: "Mock command preview/results".into(),
             summary: "Read-only mock terminal output. No command execution is implied.".into(),
+            user_terminal: TerminalPaneState {
+                output: "$ npm run mock:task-002\nmock server ready\nfake agent run channel connected".into(),
+                title: "User terminal".into(),
+                summary: "User command surface awaits a trusted workspace.".into(),
+                cwd: String::new(),
+                running: false,
+            },
+            agent_terminal: TerminalPaneState {
+                output: "Agent command output is not running.".into(),
+                title: "Agent command terminal".into(),
+                summary: "Read-only agent command output surface.".into(),
+                cwd: String::new(),
+                running: false,
+            },
+            actions: vec![],
         },
         thread: ThreadState {
             user: "Confirm the mock server harness state.".into(),

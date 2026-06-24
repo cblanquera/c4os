@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C4OS Terminal Inline UI Proof</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --frame: #3f3f3c;
+      --terminal: #1e1e1f;
+      --terminal-edge: #111113;
+      --ink: #f1f1ee;
+      --muted: #a8aaa4;
+      --green: #28c840;
+      --yellow: #ffbd2e;
+      --red: #ff5f57;
+      --blue: #4ea1ff;
+      --warning: #d7d75f;
+      --success: #4bd063;
+      --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      align-items: center;
+      background: #101112;
+      color: var(--ink);
+      display: grid;
+      font-family: var(--font);
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .terminal-window {
+      background: var(--terminal);
+      border: 1px solid var(--terminal-edge);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+      display: grid;
+      grid-template-rows: 54px minmax(0, 1fr);
+      height: min(760px, calc(100vh - 48px));
+      margin: 0 auto;
+      max-width: 1220px;
+      width: min(100%, 1220px);
+    }
+
+    .titlebar {
+      align-items: center;
+      background: var(--frame);
+      border-bottom: 1px solid #151515;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      padding: 0 16px;
+    }
+
+    .lights {
+      display: flex;
+      gap: 14px;
+    }
+
+    .light {
+      border-radius: 999px;
+      display: block;
+      height: 22px;
+      width: 22px;
+    }
+
+    .red { background: var(--red); }
+    .yellow { background: var(--yellow); }
+    .green { background: var(--green); }
+
+    .title {
+      color: #c9cac6;
+      font: 700 26px var(--font);
+      min-width: 0;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .size {
+      color: #c9cac6;
+      font-size: 18px;
+      opacity: 0.8;
+    }
+
+    .screen {
+      cursor: text;
+      font: 700 clamp(15px, 1.9vw, 24px) / 1.25 var(--font);
+      min-height: 0;
+      overflow: auto;
+      padding: 8px 14px 20px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .line {
+      min-height: 1.25em;
+    }
+
+    .prompt {
+      color: var(--ink);
+    }
+
+    .command {
+      color: var(--ink);
+    }
+
+    .info { color: var(--blue); }
+    .success { color: var(--success); }
+    .warn { color: var(--warning); }
+    .muted { color: var(--muted); }
+
+    .cursor {
+      animation: blink 1s steps(1, end) infinite;
+      background: #bfc0bc;
+      display: inline-block;
+      height: 1.12em;
+      transform: translateY(0.12em);
+      width: 0.62em;
+    }
+
+    .screen:focus {
+      outline: 2px solid rgba(78, 161, 255, 0.55);
+      outline-offset: -2px;
+    }
+
+    @keyframes blink {
+      0%, 48% { opacity: 1; }
+      49%, 100% { opacity: 0; }
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 0; }
+      .terminal-window {
+        border-left: 0;
+        border-right: 0;
+        height: 100vh;
+        width: 100%;
+      }
+      .title {
+        font-size: 18px;
+      }
+      .size {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="terminal-window" aria-label="Terminal inline transcript proof">
+    <header class="titlebar">
+      <div class="lights" aria-hidden="true">
+        <span class="light red"></span>
+        <span class="light yellow"></span>
+        <span class="light green"></span>
+      </div>
+      <div class="title">📁 c4os — -zsh — 102×62</div>
+      <div class="size">proof</div>
+    </header>
+    <section id="screen" class="screen" tabindex="0" aria-label="Terminal transcript"></section>
+  </main>
+
+  <script>
+    const screen = document.querySelector("#screen");
+    const prompt = "cblanquera@Chris-MacBook-2022 c4os % ";
+    const outputs = new Map([
+      ["ls", [
+        "backend   frontend   proofs   tests",
+        ".agents   package.json   README.md"
+      ]],
+      ["git init", [
+        "Initialized empty Git repository in /Users/cblanquera/server/projects/cblanquera/c4os/.git/"
+      ]],
+      ["yarn install", [
+        "yarn install v1.22.22",
+        "info No lockfile found.",
+        "[1/4] 🔍  Resolving packages...",
+        "[2/4] 🚚  Fetching packages...",
+        "[3/4] 🔗  Linking dependencies...",
+        "[4/4] 🔨  Building fresh packages...",
+        "success Saved lockfile.",
+        "✨  Done in 14.98s."
+      ]],
+      ["rm -rf .git", [
+        "blocked: high-impact command requires approval before launch"
+      ]]
+    ]);
+    const demoCommands = ["ls", "rm -rf .git", "git init", "yarn install"];
+    let input = "";
+    let demoIndex = 0;
+
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function render(lines = []) {
+      const transcript = lines.join("");
+      screen.innerHTML = `${transcript}<div class="line"><span class="prompt">${escapeHtml(prompt)}</span><span class="command">${escapeHtml(input)}</span><span class="cursor" aria-hidden="true"></span></div>`;
+      screen.scrollTop = screen.scrollHeight;
+    }
+
+    const transcript = [];
+
+    function appendCommand(command) {
+      transcript.push(`<div class="line"><span class="prompt">${escapeHtml(prompt)}</span><span class="command">${escapeHtml(command)}</span></div>`);
+      const commandOutput = outputs.get(command) || [`zsh: command not found: ${command}`];
+      for (const row of commandOutput) {
+        const cls = row.startsWith("success") || row.startsWith("✨") ? "success"
+          : row.startsWith("warning") || row.startsWith("blocked") ? "warn"
+          : row.startsWith("info") ? "info"
+          : "line";
+        transcript.push(`<div class="line ${cls}">${escapeHtml(row)}</div>`);
+      }
+      input = "";
+      render(transcript);
+    }
+
+    screen.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        appendCommand(input.trim());
+        return;
+      }
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        input = input.slice(0, -1);
+        render(transcript);
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const next = demoCommands[demoIndex % demoCommands.length];
+        demoIndex += 1;
+        input = next;
+        render(transcript);
+        return;
+      }
+      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        input += event.key;
+        render(transcript);
+      }
+    });
+
+    screen.addEventListener("pointerdown", () => screen.focus());
+    render();
+    screen.focus();
+  </script>
+</body>
+</html>

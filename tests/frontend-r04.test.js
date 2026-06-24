@@ -234,13 +234,13 @@ describe("TASK-001 r04 frontend parity", () => {
     assert.equal(edges.composer.right, edges.user.right);
   });
 
-  it("preserves terminal bottom panel resize", async () => {
+  it("preserves the Terminal tab inside the accepted right panel", async () => {
     await goto("terminal");
-    const bottom = page.locator(".terminal-bottom");
-    const before = await bottom.boundingBox();
-    await drag(page.locator("[data-resize-stack='terminal']"), 0, -80);
-    const after = await bottom.boundingBox();
-    assert.notEqual(Math.round(before.height), Math.round(after.height));
+    await page.locator("[data-terminal-emulator]").waitFor();
+    await page.locator(".tool-panel [data-tool-tab].is-active", { hasText: "Terminal" }).waitFor();
+    assert.equal(await page.locator("[data-terminal-form]").count(), 0);
+    assert.equal(await page.locator(".terminal-tool [data-browser-preview]").count(), 0);
+    assert.equal(await page.locator(".terminal-tool .files-list").count(), 0);
   });
 
   it("preserves plugin, skill, and MCP dialogs plus transport switching", async () => {

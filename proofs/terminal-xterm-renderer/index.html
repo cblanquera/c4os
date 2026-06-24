@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C4OS xterm renderer proof</title>
+  <link rel="stylesheet" href="./node_modules/@xterm/xterm/css/xterm.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --frame: #3f3f3c;
+      --terminal: #1e1e1f;
+      --edge: #101012;
+      --ink: #f4f4f0;
+      --muted: #b8b9b2;
+      --red: #ff5f57;
+      --yellow: #ffbd2e;
+      --green: #28c840;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      align-items: center;
+      background: #111214;
+      display: grid;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .terminal-window {
+      background: var(--terminal);
+      border: 1px solid var(--edge);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      display: grid;
+      grid-template-rows: 54px minmax(0, 1fr);
+      height: min(760px, calc(100vh - 48px));
+      max-width: 1220px;
+      width: min(100%, 1220px);
+    }
+
+    .titlebar {
+      align-items: center;
+      background: var(--frame);
+      border-bottom: 1px solid #151515;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      padding: 0 16px;
+    }
+
+    .lights { display: flex; gap: 14px; }
+    .light { border-radius: 999px; height: 22px; width: 22px; }
+    .red { background: var(--red); }
+    .yellow { background: var(--yellow); }
+    .green { background: var(--green); }
+
+    .title {
+      color: var(--muted);
+      font: 700 26px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .size {
+      color: var(--muted);
+      font: 700 18px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    #terminal {
+      min-height: 0;
+      overflow: hidden;
+      padding: 8px 10px;
+    }
+
+    .xterm {
+      height: 100%;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <main class="terminal-window">
+    <header class="titlebar">
+      <div class="lights" aria-hidden="true">
+        <span class="light red"></span>
+        <span class="light yellow"></span>
+        <span class="light green"></span>
+      </div>
+      <div class="title">📁 c4os — -zsh — 102×62</div>
+      <div class="size">xterm</div>
+    </header>
+    <section id="terminal" aria-label="xterm terminal proof"></section>
+  </main>
+
+  <script src="./node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script>
+    const prompt = "cblanquera@Chris-MacBook-2022 c4os % ";
+    const samples = ["ls", "rm -rf .git", "git init", "yarn install"];
+    const outputs = new Map([
+      ["ls", ["backend   frontend   proofs   tests", ".agents   package.json   README.md"]],
+      ["rm -rf .git", ["blocked: high-impact command requires approval before launch"]],
+      ["git init", ["Initialized empty Git repository in /Users/cblanquera/server/projects/cblanquera/c4os/.git/"]],
+      ["yarn install", [
+        "yarn install v1.22.22",
+        "info No lockfile found.",
+        "[1/4] \u001b[36mResolving packages...\u001b[0m",
+        "[2/4] Fetching packages...",
+        "[3/4] Linking dependencies...",
+        "[4/4] Building fresh packages...",
+        "\u001b[32msuccess\u001b[0m Saved lockfile.",
+        "Done in 14.98s."
+      ]]
+    ]);
+
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: "block",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontSize: 21,
+      fontWeight: 700,
+      lineHeight: 1.18,
+      rows: 31,
+      cols: 102,
+      theme: {
+        background: "#1e1e1f",
+        foreground: "#f4f4f0",
+        cursor: "#c4c4bf",
+        selectionBackground: "#565a61"
+      }
+    });
+
+    let input = "";
+    let sampleIndex = 0;
+
+    term.open(document.querySelector("#terminal"));
+    term.focus();
+    term.write(prompt);
+
+    function printOutput(command) {
+      const lines = outputs.get(command) || [`zsh: command not found: ${command}`];
+      for (const line of lines) {
+        term.writeln(line);
+      }
+      term.write(prompt);
+    }
+
+    function submitCommand(command) {
+      input = command;
+      term.write(command);
+      term.write("\r\n");
+      printOutput(input.trim());
+      input = "";
+    }
+
+    term.onData((data) => {
+      if (data === "\r") {
+        term.write("\r\n");
+        printOutput(input.trim());
+        input = "";
+        return;
+      }
+      if (data === "\u007f") {
+        if (input.length > 0) {
+          input = input.slice(0, -1);
+          term.write("\b \b");
+        }
+        return;
+      }
+      if (data === "\t") {
+        for (let index = 0; index < input.length; index += 1) {
+          term.write("\b \b");
+        }
+        input = samples[sampleIndex % samples.length];
+        sampleIndex += 1;
+        term.write(input);
+        return;
+      }
+      if (data >= " " && data !== "\u007f") {
+        input += data;
+        term.write(data);
+      }
+    });
+
+    window.__c4osXtermProof = {
+      submitCommand,
+      text: () => term.buffer.active
+        .translateBufferLineToString(0, true, 0, term.cols)
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[package]
+name = "c4os-terminal-xterm-pty-bridge-proof"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+portable-pty = "0.9"
+serde_json = "1"

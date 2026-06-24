@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-011
+Status: ready-for-task-012
 Updated: 2026-06-24
 
 ## Active Stream
@@ -23,6 +23,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-010A-browser-address-bar-local-target-ui.md`
 - `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
 - `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
+- `.agents/development/progress/items/TASK-011-terminal-slice.md`
 
 ## Scope Rules
 
@@ -50,14 +51,10 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-011` Terminal Slice from the verified TASK-010C artifact preview
-type rendering boundary. Preserve the accepted r04 shell, Browser / Files /
-Terminal right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update
-patterns, TASK-006 provider/model boundaries, TASK-007 session ownership,
-TASK-008 Files/File Editor authority, TASK-009 product-owned artifact preview
-records, TASK-010 project-scoped Browser records, TASK-010A editable Browser
-address bar behavior, TASK-010B public-page native Wry Browser host behavior,
-and TASK-010C typed artifact preview rendering. TASK-011 replaces Terminal
-mock behavior with backend-owned user terminal and agent command terminal
-surfaces without moving Browser, Files, or artifact preview behavior out of
-the existing right-panel tab contract.
+Start `TASK-012` from `.agents/specs/mvp/tasks.md` and preserve the verified
+TASK-011 Terminal slice: the existing right-panel Terminal tab renders an
+`@xterm/xterm` transcript backed by C4OS-owned `portable-pty` Tauri
+commands/events, while user terminal and agent command terminal state remain
+product-owned and distinct. Prompt-driven agent command execution into the
+bottom agent terminal is desired follow-up work and remains blocked on explicit
+approval-policy and action/audit-record wiring.

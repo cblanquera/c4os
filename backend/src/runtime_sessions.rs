@@ -7,6 +7,7 @@ use crate::runtime_adapter::{C4osRuntimeAdapter, C4osRuntimeResult};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +82,19 @@ pub struct BrowserActionRecord {
     pub action: String,
     pub target: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalActionRecord {
+    pub id: String,
+    pub session_id: String,
+    pub terminal_kind: String,
+    pub command: String,
+    pub cwd: String,
+    pub status: String,
+    pub output: String,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -335,6 +349,83 @@ pub fn set_session_browser(
     Ok(record)
 }
 
+pub fn run_session_terminal_command(
+    session_id: &str,
+    command: &str,
+    terminal_kind: &str,
+) -> Result<(TerminalState, TerminalActionRecord), String> {
+    let root = crate::workspace::active_workspace_root()
+        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("Terminal command is required".into());
+    }
+    let terminal_kind = normalized_terminal_kind(terminal_kind);
+    let mut store = load_store();
+    let session = store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
+
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(&root)
+        .env_clear()
+        .env("HOME", root.to_string_lossy().as_ref())
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .output()
+        .map_err(|error| format!("Terminal command failed to start: {error}"))?;
+    let exit_code = output.status.code();
+    let status = if output.status.success() {
+        "completed"
+    } else {
+        "failed"
+    };
+    let mut command_output = String::new();
+    command_output.push_str(&String::from_utf8_lossy(&output.stdout));
+    command_output.push_str(&String::from_utf8_lossy(&output.stderr));
+    let command_block = format!(
+        "$ {command}\n{}",
+        if command_output.trim().is_empty() {
+            format!("{status} with no output")
+        } else {
+            command_output.trim_end().to_string()
+        }
+    );
+
+    let cwd = root.to_string_lossy().into_owned();
+    let pane = if terminal_kind == "agent" {
+        &mut session.terminal.agent_terminal
+    } else {
+        &mut session.terminal.user_terminal
+    };
+    pane.cwd = cwd.clone();
+    pane.running = false;
+    pane.output = append_terminal_output(&pane.output, &command_block);
+    if terminal_kind == "user" {
+        session.terminal.output = pane.output.clone();
+    }
+    session.terminal.title = "Backend terminal".into();
+    session.terminal.summary =
+        "Backend-owned terminal state persisted on the active C4OS session.".into();
+    let record = TerminalActionRecord {
+        id: format!("terminal-action-{}", session.terminal.actions.len() + 1),
+        session_id: session.id.clone(),
+        terminal_kind,
+        command: command.into(),
+        cwd,
+        status: status.into(),
+        output: pane.output.clone(),
+        exit_code,
+    };
+    session.terminal.actions.push(record.clone());
+    let terminal = session.terminal.clone();
+    save_store(&store);
+    Ok((terminal, record))
+}
+
 fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: C4osRuntimeResult) {
     session.selected_model = runtime.model.clone();
     let run_id = format!("c4os-run-{}", session.runs.len() + 1);
@@ -395,6 +486,12 @@ fn empty_session(
         .unwrap_or_else(|| fallback.files.clone());
     let mut browser = fallback.browser;
     browser.profile_id = format!("browser-profile-{}", stable_id(project));
+    let mut terminal = fallback.terminal;
+    if let Some(root) = crate::workspace::active_workspace_root() {
+        let cwd = root.to_string_lossy().into_owned();
+        terminal.user_terminal.cwd = cwd.clone();
+        terminal.agent_terminal.cwd = cwd;
+    }
     C4osSessionRecord {
         id: id.into(),
         workspace_id: workspace.id.clone(),
@@ -404,7 +501,7 @@ fn empty_session(
         browser,
         artifacts: fallback.artifacts,
         files,
-        terminal: fallback.terminal,
+        terminal,
         thread: ThreadState {
             user: String::new(),
             agent: String::new(),
@@ -426,6 +523,22 @@ fn empty_session(
 
 pub fn browser_profile_id(session: &C4osSessionRecord) -> String {
     format!("browser-profile-{}", stable_id(&session.project))
+}
+
+fn normalized_terminal_kind(value: &str) -> String {
+    if value.trim().eq_ignore_ascii_case("agent") {
+        "agent".into()
+    } else {
+        "user".into()
+    }
+}
+
+fn append_terminal_output(current: &str, next: &str) -> String {
+    if current.trim().is_empty() {
+        next.into()
+    } else {
+        format!("{}\n{}", current.trim_end(), next)
+    }
 }
 
 fn load_store() -> SessionStore {

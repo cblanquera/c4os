@@ -26,7 +26,6 @@ export function bindInteractions(render, pluginInitials) {
   bindPanels();
   bindComposer();
   bindMessage();
-  bindTerminal();
   bindSettingsForms();
   bindDialogs(pluginInitials);
 }
@@ -198,32 +197,6 @@ export function bindMessage() {
     const expanded = message.classList.toggle("is-expanded");
     event.currentTarget.textContent = expanded ? "Show Less" : "Show More";
     event.currentTarget.setAttribute("aria-expanded", String(expanded));
-  });
-}
-
-/**
- * Bind the vertical resize handle inside the Terminal tool panel.
- */
-export function bindTerminal() {
-  const handle = document.querySelector("[data-resize-stack='terminal']");
-  if (!handle) return;
-  handle.addEventListener("pointerdown", (event) => {
-    const panel = handle.closest(".terminal-tool");
-    const bottom = panel.querySelector(".terminal-bottom");
-    const start = event.clientY;
-    const startHeight = bottom.getBoundingClientRect().height;
-    handle.setPointerCapture(event.pointerId);
-    const move = (moveEvent) => {
-      const height = Math.max(120, Math.min(420, startHeight + start - moveEvent.clientY));
-      panel.style.setProperty("--terminal-bottom", `${Math.round(height)}px`);
-      appStore.setShellValue("terminalBottom", Math.round(height));
-    };
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
   });
 }
 

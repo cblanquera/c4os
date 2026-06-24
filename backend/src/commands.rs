@@ -1,7 +1,8 @@
 use crate::files::{list_files_state, read_file_state, save_file_state};
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{
-    mock_workspace, ArtifactRecord, BrowserState, TerminalState, WorkspacePayload,
+    mock_workspace, ArtifactRecord, BrowserState, TerminalPaneState, TerminalState,
+    WorkspacePayload,
 };
 use crate::openrouter::RuntimeEvent;
 use crate::provider_models::{
@@ -17,12 +18,18 @@ use crate::provider_models::{
 use crate::runtime_sessions::{
     active_session, append_prompt, create_session as create_c4os_session,
     create_session_artifact_preview, load_session as load_c4os_session, project_sessions,
-    sessions as c4os_sessions, set_session_browser as set_c4os_session_browser,
-    set_session_files as set_c4os_session_files, set_session_model as set_c4os_session_model,
-    BrowserActionRecord, C4osSessionRecord, CreateSessionRequest, SendPromptRequest,
+    run_session_terminal_command, sessions as c4os_sessions,
+    set_session_browser as set_c4os_session_browser, set_session_files as set_c4os_session_files,
+    set_session_model as set_c4os_session_model, BrowserActionRecord, C4osSessionRecord,
+    CreateSessionRequest, SendPromptRequest, TerminalActionRecord,
+};
+use crate::terminal_pty::{
+    read_terminal, resize_terminal, start_terminal, stop_terminal, write_terminal,
+    TerminalOutputEvent, TerminalResize,
 };
 use crate::workspace::{
-    activate_workspace, active_workspace_root, WorkspaceActivation, WorkspaceDescriptor,
+    activate_workspace, active_workspace_descriptor, active_workspace_root, WorkspaceActivation,
+    WorkspaceDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -127,12 +134,53 @@ pub struct BrowserOpenResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalCommandRequest {
     pub command: Option<String>,
+    pub session_id: Option<String>,
+    pub terminal_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSessionRequest {
+    pub session_id: Option<String>,
+    pub terminal_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalInputRequest {
+    pub session_id: Option<String>,
+    pub terminal_kind: Option<String>,
+    pub input: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalResizeRequest {
+    pub session_id: Option<String>,
+    pub terminal_kind: Option<String>,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalReadRequest {
+    pub session_id: Option<String>,
+    pub terminal_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalCommandResponse {
     pub command: String,
     pub output: String,
+    pub terminal: TerminalState,
+    pub action: TerminalActionRecord,
+}
+
+#[derive(Debug, Clone)]
+struct TerminalCommandScope {
+    id: String,
+    terminal: TerminalState,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -304,14 +352,79 @@ pub fn create_artifact_preview(
 }
 
 #[tauri::command]
-pub fn run_terminal_command(request: Option<TerminalCommandRequest>) -> TerminalCommandResponse {
-    let terminal: TerminalState = mock_workspace().terminal;
-    TerminalCommandResponse {
-        command: request
-            .and_then(|input| input.command)
-            .unwrap_or_else(|| "npm run mock:task-003".into()),
-        output: terminal.output,
-    }
+pub fn run_terminal_command(
+    request: Option<TerminalCommandRequest>,
+) -> Result<TerminalCommandResponse, String> {
+    let request = request.ok_or_else(|| "Terminal command request is required".to_string())?;
+    let command = request.command.unwrap_or_default();
+    let session_id = request
+        .session_id
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| active_session().map(|session| session.id))
+        .ok_or_else(|| "A C4OS session is required before running Terminal commands".to_string())?;
+    let terminal_kind = request.terminal_kind.unwrap_or_else(|| "user".into());
+    let (terminal, action) = run_session_terminal_command(&session_id, &command, &terminal_kind)?;
+    Ok(TerminalCommandResponse {
+        command,
+        output: action.output.clone(),
+        terminal,
+        action,
+    })
+}
+
+#[tauri::command]
+pub fn start_terminal_session<R: Runtime>(
+    app: AppHandle<R>,
+    request: TerminalSessionRequest,
+) -> Result<TerminalState, String> {
+    let scope = terminal_scope_from_request(request.session_id)?;
+    let terminal_kind = normalized_terminal_actor(request.terminal_kind.as_deref());
+    let root =
+        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    start_terminal(&scope.id, &terminal_kind, &root, move |event| {
+        let _ = app.emit("c4os://terminal-output", event);
+    })?;
+    Ok(scope.terminal)
+}
+
+#[tauri::command]
+pub fn write_terminal_input(request: TerminalInputRequest) -> Result<TerminalState, String> {
+    let scope = terminal_scope_from_request(request.session_id)?;
+    let terminal_kind = normalized_terminal_actor(request.terminal_kind.as_deref());
+    write_terminal(&scope.id, &terminal_kind, &request.input)?;
+    Ok(scope.terminal)
+}
+
+#[tauri::command]
+pub fn read_terminal_output(request: TerminalReadRequest) -> Result<TerminalOutputEvent, String> {
+    let scope = terminal_scope_from_request(request.session_id)?;
+    let terminal_kind = normalized_terminal_actor(request.terminal_kind.as_deref());
+    Ok(TerminalOutputEvent {
+        session_id: scope.id.clone(),
+        terminal_kind: terminal_kind.clone(),
+        text: read_terminal(&scope.id, &terminal_kind)?,
+    })
+}
+
+#[tauri::command]
+pub fn resize_terminal_session(request: TerminalResizeRequest) -> Result<(), String> {
+    let scope = terminal_scope_from_request(request.session_id)?;
+    let terminal_kind = normalized_terminal_actor(request.terminal_kind.as_deref());
+    resize_terminal(
+        &scope.id,
+        &terminal_kind,
+        TerminalResize {
+            rows: request.rows,
+            cols: request.cols,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn stop_terminal_session(request: TerminalSessionRequest) -> Result<(), String> {
+    let scope = terminal_scope_from_request(request.session_id)?;
+    let terminal_kind = normalized_terminal_actor(request.terminal_kind.as_deref());
+    stop_terminal(&scope.id, &terminal_kind)
 }
 
 #[tauri::command]
@@ -466,6 +579,57 @@ fn active_file_session_id(request_session_id: Option<String>) -> Option<String> 
     request_session_id
         .filter(|value| !value.trim().is_empty())
         .or_else(|| active_session().map(|session| session.id))
+}
+
+fn terminal_scope_from_request(session_id: Option<String>) -> Result<TerminalCommandScope, String> {
+    if let Some(session) = session_id
+        .filter(|value| !value.trim().is_empty())
+        .as_deref()
+        .and_then(load_c4os_session)
+    {
+        return Ok(TerminalCommandScope {
+            id: session.id,
+            terminal: session.terminal,
+        });
+    }
+
+    let descriptor = active_workspace_descriptor()
+        .ok_or_else(|| "A trusted workspace is required before using Terminal".to_string())?;
+    Ok(TerminalCommandScope {
+        id: format!("workspace:{}", descriptor.id),
+        terminal: workspace_terminal_state(&descriptor),
+    })
+}
+
+fn workspace_terminal_state(descriptor: &WorkspaceDescriptor) -> TerminalState {
+    let cwd = descriptor.root_path.clone();
+    TerminalState {
+        output: String::new(),
+        title: "User terminal".into(),
+        summary: "Backend-owned user terminal for the active trusted workspace.".into(),
+        user_terminal: TerminalPaneState {
+            output: String::new(),
+            title: "User terminal".into(),
+            summary: "Interactive user command surface.".into(),
+            cwd: cwd.clone(),
+            running: false,
+        },
+        agent_terminal: TerminalPaneState {
+            output: "Agent command output is not running.".into(),
+            title: "Agent command terminal".into(),
+            summary: "Read-only agent command output surface.".into(),
+            cwd,
+            running: false,
+        },
+        actions: vec![],
+    }
+}
+
+fn normalized_terminal_actor(actor: Option<&str>) -> String {
+    match actor.unwrap_or("user").trim().to_ascii_lowercase().as_str() {
+        "agent" => "agent".into(),
+        _ => "user".into(),
+    }
 }
 
 fn normalized_browser_actor(actor: Option<&str>) -> String {
@@ -1079,6 +1243,26 @@ mod tests {
     }
 
     #[test]
+    fn task_011_terminal_scope_uses_trusted_workspace_before_chat_session_exists() {
+        let root = task_011_root("new-session-terminal-scope");
+        fs::create_dir_all(&root).expect("create terminal workspace");
+        fs::write(root.join("README.md"), "task 011 terminal workspace").expect("write readme");
+        let activation = crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+
+        let scope =
+            terminal_scope_from_request(None).expect("resolve terminal scope from workspace");
+
+        assert_eq!(scope.id, format!("workspace:{}", activation.descriptor.id));
+        assert_eq!(scope.terminal.user_terminal.output, "");
+        assert_eq!(
+            scope.terminal.agent_terminal.output,
+            "Agent command output is not running."
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn command_inventory_returns_task_002_mock_payloads() {
         assert_eq!(load_workspace().workspace.project, "Mock Workspace Alpha");
         assert_eq!(open_browser_preview(None).title, "Mock rendered page");
@@ -1101,6 +1285,10 @@ mod tests {
         assert!(read_file(None).is_err());
         assert!(save_file(None).is_err());
         assert!(run_terminal_command(None)
+            .expect_err("terminal command now requires a backend-owned request")
+            .contains("Terminal command request is required"));
+        assert!(mock_workspace()
+            .terminal
             .output
             .contains("fake agent run channel connected"));
     }
@@ -1127,6 +1315,12 @@ mod tests {
 
     fn task_008_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("c4os-task-008-{name}"));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+
+    fn task_011_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("c4os-task-011-{name}"));
         let _ = fs::remove_dir_all(&root);
         root
     }

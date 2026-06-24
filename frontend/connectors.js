@@ -130,8 +130,63 @@ function tauriConnector(config) {
     async updateNativeMenuState(focusState) {
       return invoke("native_menu_state", { focusState });
     },
-    async runTerminalCommand(command) {
-      return invoke("run_terminal_command", { request: { command } });
+    async runTerminalCommand(command, options = {}) {
+      return invoke("run_terminal_command", {
+        request: {
+          command,
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user"
+        }
+      });
+    },
+    async startTerminalSession(options = {}) {
+      return invoke("start_terminal_session", {
+        request: {
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user"
+        }
+      });
+    },
+    async writeTerminalInput(input, options = {}) {
+      return invoke("write_terminal_input", {
+        request: {
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user",
+          input
+        }
+      });
+    },
+    async readTerminalOutput(options = {}) {
+      return invoke("read_terminal_output", {
+        request: {
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user"
+        }
+      });
+    },
+    async resizeTerminalSession(size, options = {}) {
+      return invoke("resize_terminal_session", {
+        request: {
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user",
+          rows: size.rows,
+          cols: size.cols
+        }
+      });
+    },
+    async stopTerminalSession(options = {}) {
+      return invoke("stop_terminal_session", {
+        request: {
+          sessionId: options.sessionId,
+          terminalKind: options.terminalKind || "user"
+        }
+      });
+    },
+    async listenTerminalOutput(callback) {
+      if (!config.listen) return null;
+      return config.listen("c4os://terminal-output", (event) => {
+        callback(event.payload || event);
+      });
     },
     async openBrowserPreview(options = {}) {
       return invoke("open_browser_preview", { sessionId: options.sessionId });
@@ -177,7 +232,10 @@ function disabledConnector(kind, message) {
 }
 
 function resolveTauriInvoke() {
-  return globalThis.__TAURI__?.core?.invoke || globalThis.__TAURI__?.invoke;
+  return globalThis.__TAURI__?.core?.invoke
+    || globalThis.__TAURI__?.tauri?.invoke
+    || globalThis.__TAURI__?.invoke
+    || globalThis.__TAURI_INTERNALS__?.invoke;
 }
 
 function resolveTauriListen() {

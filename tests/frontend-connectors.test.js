@@ -77,6 +77,29 @@ describe("frontend connector boundary", () => {
     assert.equal((await connector.loadWorkspace()).workspace.project, "Mock Workspace Alpha");
   });
 
+  it("recognizes alternate Tauri global invoke shapes from desktop WebViews", async () => {
+    const previous = globalThis.__TAURI__;
+    globalThis.__TAURI__ = {
+      tauri: {
+        invoke: async (command) => {
+          if (command === "load_workspace") return createMockWorkspace();
+          return { ok: true };
+        }
+      }
+    };
+
+    try {
+      const connector = createConnector({ params: new URLSearchParams() });
+      assert.equal(connector.kind, "tauri");
+      assert.equal(connector.available, true);
+      assert.equal((await connector.loadWorkspace()).workspace.project, "Mock Workspace Alpha");
+    } finally {
+      if (previous === undefined) delete globalThis.__TAURI__;
+      else globalThis.__TAURI__ = previous;
+    }
+  });
+
+
   it("keeps app orchestration free of mock-server-specific function names", async () => {
     const source = await readFile(new URL("../frontend/app.js", import.meta.url), "utf8");
 
@@ -98,6 +121,12 @@ describe("frontend connector boundary", () => {
       "openBrowser",
       "syncNativeBrowser",
       "runTerminalCommand",
+      "startTerminalSession",
+      "writeTerminalInput",
+      "readTerminalOutput",
+      "resizeTerminalSession",
+      "stopTerminalSession",
+      "listenTerminalOutput",
       "openBrowserPreview",
       "listExtensions",
       "listProviderProfiles",

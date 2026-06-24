@@ -103,7 +103,8 @@ describe("TASK-010C artifact preview type rendering", () => {
     assert.equal(await page.locator("[data-artifact-renderer='markdown']").count(), 1);
 
     await page.getByRole("button", { name: "Terminal" }).click();
-    assert.match(await page.locator(".terminal-tool").innerText(), /alpha terminal/);
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /alpha terminal/);
     assert.equal(await page.locator(".terminal-tool [data-artifact-renderer]").count(), 0);
     assert.equal(await page.locator(".terminal-tool iframe[data-artifact-frame]").count(), 0);
 

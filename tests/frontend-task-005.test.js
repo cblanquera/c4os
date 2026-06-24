@@ -410,7 +410,8 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
     assert.equal(await page.locator(".thread-list").evaluate((node) => node.dataset.stabilityProbe), "kept");
 
     await page.getByRole("button", { name: "Terminal" }).click();
-    await page.locator(".terminal-output", { hasText: "mock terminal" }).waitFor();
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /mock terminal/);
     assert.match(page.url(), /#chat-session$/);
     assert.equal(await page.locator("[data-screen='chat-session']").count(), 1);
     assert.equal(await page.locator(".thread-list").evaluate((node) => node.dataset.stabilityProbe), "kept");
@@ -419,6 +420,7 @@ describe("TASK-005 OpenRouter streaming chat experience", () => {
     await page.getByRole("button", { name: "Files" }).click();
     await page.getByText("frontend").waitFor();
     await page.goto(`${server.origin}/#chat-session`);
-    await page.locator(".terminal-output", { hasText: "mock terminal" }).waitFor();
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /mock terminal/);
   });
 });

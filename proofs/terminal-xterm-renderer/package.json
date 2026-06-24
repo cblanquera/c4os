@@ -1,0 +1,9 @@
+{
+  "name": "c4os-terminal-xterm-renderer-proof",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@xterm/xterm": "^5.5.0"
+  }
+}

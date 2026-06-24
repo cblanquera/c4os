@@ -7,6 +7,7 @@ pub mod openrouter;
 pub mod provider_models;
 pub mod runtime_adapter;
 pub mod runtime_sessions;
+pub mod terminal_pty;
 pub mod workspace;
 
 pub fn run() {
@@ -26,6 +27,11 @@ pub fn run() {
             commands::open_browser,
             native_browser::sync_native_browser,
             commands::run_terminal_command,
+            commands::start_terminal_session,
+            commands::write_terminal_input,
+            commands::read_terminal_output,
+            commands::resize_terminal_session,
+            commands::stop_terminal_session,
             commands::open_browser_preview,
             commands::list_extensions,
             commands::list_provider_profiles,

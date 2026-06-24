@@ -263,10 +263,16 @@ input, textarea, select { font-weight: 400; }
 .editor-compat-line { left: 0; opacity: 0; pointer-events: none; position: absolute; top: 0; }
 .line-number { background: var(--code); color: #7f9489; left: 0; padding: 0 8px; position: sticky; text-align: right; z-index: 1; }
 .line-code { display: block; outline: 0; padding: 0 28px 0 10px; white-space: pre; }
-.terminal-tool { --terminal-bottom: 220px; grid-template-rows: minmax(0, 1fr) 7px var(--terminal-bottom); }
+.terminal-tool { --terminal-agent: 180px; background: #1e1e1f; display: grid; grid-template-rows: minmax(0, 1fr) 7px var(--terminal-agent); min-height: 0; overflow: hidden; }
+.terminal-emulator { height: 100%; min-height: 0; overflow: hidden; padding: 8px 10px; }
+.terminal-emulator .xterm { height: 100%; width: 100%; }
+.terminal-emulator .xterm-viewport { overflow-y: auto; }
+.basic-terminal-screen { box-sizing: border-box; color: #f4f4f0; font-family: var(--font-code); font-size: 14px; font-weight: 700; height: 100%; line-height: 1.2; outline: none; overflow: auto; padding: 4px 2px; white-space: pre-wrap; }
+.terminal-agent-pane { background: #151617; border-top: 1px solid #373a3c; color: #f4f4f0; min-height: 0; overflow: auto; padding: 10px 12px; }
+.terminal-agent-resize { background: #373a3c; }
+.terminal-agent-title { color: #a9b1aa; font: 700 12px var(--font-code); margin-bottom: 8px; }
+.terminal-agent-transcript { color: #f4f4f0; font: 700 13px/1.45 var(--font-code); margin: 0; white-space: pre-wrap; }
 .vertical-resize-handle { background: var(--line); cursor: row-resize; min-height: 7px; touch-action: none; }
-.terminal-bottom { background: #dfe8e2; min-height: 0; overflow: auto; padding: 16px; }
-.terminal-bottom p { margin: 6px 0 0; }
 
 /* Settings */
 

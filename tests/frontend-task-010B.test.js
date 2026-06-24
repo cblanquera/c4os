@@ -93,7 +93,8 @@ describe("TASK-010B native Wry Browser surface", () => {
     await page.waitForFunction(() => window.__task010BNativeRequests.some((request) => request.visible === false));
 
     await page.getByRole("button", { name: "Terminal" }).click();
-    assert.match(await page.locator(".tool-panel").innerText(), /alpha terminal/);
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /alpha terminal/);
     assert.deepEqual(
       await page.locator(".tool-tabs [data-tool-tab]").evaluateAll((nodes) => nodes.map((node) => node.textContent.trim())),
       ["Browser", "Files", "Terminal"]

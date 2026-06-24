@@ -127,7 +127,22 @@ export const filesState = {
 export const terminalState = {
   output: "$ npm run dev\nready in 614ms\nlocal preview available at 127.0.0.1:3000",
   title: "AI command preview/results",
-  summary: "Read-only frontend fixture panel. No command execution is implied."
+  summary: "Read-only frontend fixture panel. No command execution is implied.",
+  userTerminal: {
+    output: "$ npm run dev\nready in 614ms\nlocal preview available at 127.0.0.1:3000",
+    title: "User terminal",
+    summary: "Interactive user command surface.",
+    cwd: "",
+    running: false
+  },
+  agentTerminal: {
+    output: "Agent command output will appear here.",
+    title: "Agent command terminal",
+    summary: "Read-only agent command output.",
+    cwd: "",
+    running: false
+  },
+  actions: []
 };
 
 export const threadState = {
@@ -163,10 +178,15 @@ function replaceArray(target, next) {
 }
 
 function assignObject(target, next) {
+  if (!next) return;
   Object.keys(target).forEach((key) => {
     if (!(key in next)) delete target[key];
   });
   Object.assign(target, next);
+}
+
+function appendTerminalOutput(current, next) {
+  return current?.trim() ? `${current.trimEnd()}\n${next}` : next;
 }
 
 export function beginConnectorStateLoad() {
@@ -427,6 +447,37 @@ export async function updateConnectorNativeMenuState(focusState) {
     return null;
   }
   return connectorState.connector.updateNativeMenuState(focusState);
+}
+
+export async function runConnectorTerminalCommand(command, terminalKind = "user") {
+  const trimmed = String(command || "").trim();
+  if (!trimmed) return null;
+  const normalizedKind = terminalKind === "agent" ? "agent" : "user";
+  const pane = normalizedKind === "agent" ? terminalState.agentTerminal : terminalState.userTerminal;
+  pane.running = true;
+
+  try {
+    if (!connectorState.connector.available || !connectorState.connector.runTerminalCommand) {
+      pane.output = appendTerminalOutput(pane.output, `$ ${trimmed}\nConnector unavailable`);
+      terminalState.output = terminalState.userTerminal?.output || terminalState.output;
+      captureActiveSessionState();
+      return { terminal: terminalState };
+    }
+
+    const response = await connectorState.connector.runTerminalCommand(trimmed, {
+      sessionId: workspace.sessionId,
+      terminalKind: normalizedKind
+    });
+    assignObject(terminalState, response.terminal || terminalState);
+    captureActiveSessionState();
+    return response;
+  } catch (error) {
+    pane.output = appendTerminalOutput(pane.output, `$ ${trimmed}\n${connectorErrorMessage(error)}`);
+    captureActiveSessionState();
+    throw error;
+  } finally {
+    pane.running = false;
+  }
 }
 
 export function editConnectorFile(content) {

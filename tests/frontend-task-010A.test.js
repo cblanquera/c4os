@@ -110,7 +110,8 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     await page.getByRole("button", { name: "Files" }).click();
     assert.match(await page.locator(".tool-panel").innerText(), /alpha\.md/);
     await page.getByRole("button", { name: "Terminal" }).click();
-    assert.match(await page.locator(".tool-panel").innerText(), /alpha terminal/);
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /alpha terminal/);
   });
 
   it("keeps TASK-009 artifact preview distinct from general browsing", async () => {

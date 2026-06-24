@@ -75,7 +75,8 @@ describe("TASK-010 Browser slice frontend behavior", () => {
     await page.getByRole("button", { name: "Files" }).click();
     assert.match(await page.locator(".tool-panel").innerText(), /alpha\.md/);
     await page.getByRole("button", { name: "Terminal" }).click();
-    assert.match(await page.locator(".tool-panel").innerText(), /alpha terminal/);
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /alpha terminal/);
 
     await page.locator("[data-session-target='Beta Browser']").click();
     await page.getByRole("button", { name: "Browser" }).click();
@@ -84,7 +85,8 @@ describe("TASK-010 Browser slice frontend behavior", () => {
     await page.getByRole("button", { name: "Files" }).click();
     assert.match(await page.locator(".tool-panel").innerText(), /beta\.md/);
     await page.getByRole("button", { name: "Terminal" }).click();
-    assert.match(await page.locator(".tool-panel").innerText(), /beta terminal/);
+    await page.locator(".terminal-tool .xterm-screen").waitFor();
+    assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), /beta terminal/);
   });
 
   it("only records agent Browser actions when the request is explicit", async () => {

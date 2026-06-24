@@ -84,7 +84,8 @@ async function expectSessionSurface(page, expected) {
   assert.match(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), expected.browser);
 
   await page.getByRole("button", { name: "Terminal" }).click();
-  assert.match(await page.locator(".tool-panel").innerText(), expected.terminal);
+  await page.locator(".terminal-tool .xterm-screen").waitFor();
+  assert.doesNotMatch(await page.locator(".terminal-tool .xterm-screen").innerText(), expected.terminal);
 
   await page.getByRole("button", { name: "Files" }).click();
   assert.match(await page.locator(".tool-panel").innerText(), expected.file);
