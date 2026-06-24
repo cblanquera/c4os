@@ -8,6 +8,7 @@ export const connectorMethods = [
   "saveFile",
   "createArtifactPreview",
   "openBrowser",
+  "syncNativeBrowser",
   "runTerminalCommand",
   "openBrowserPreview",
   "listExtensions",

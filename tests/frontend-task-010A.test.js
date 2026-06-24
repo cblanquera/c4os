@@ -27,14 +27,14 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     await address.fill("https://example.com/manual");
     await address.press("Enter");
 
-    await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").waitFor();
     assert.equal(await page.locator("[data-browser-preview='public']").count(), 1);
+    assert.equal(await page.locator("[data-native-browser-frame]").count(), 1);
+    assert.equal(await page.locator("[data-browser-frame]").count(), 0);
     assert.equal(await address.inputValue(), "https://example.com/manual");
-    assert.equal(await page.locator(".tool-panel iframe[data-browser-frame]").getAttribute("sandbox"), null);
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Manual Browser");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/manual");
     const browserBox = await page.locator(".browser-tool").boundingBox();
     const addressBox = await page.locator(".browser-tool .address-bar").boundingBox();
-    const frameBox = await page.locator(".browser-tool iframe[data-browser-frame]").boundingBox();
+    const frameBox = await page.locator(".browser-tool [data-native-browser-frame]").boundingBox();
     assert.ok(browserBox && addressBox && frameBox);
     assert.ok(Math.abs(frameBox.x - browserBox.x) <= 1, `frame x ${frameBox.x} should align to browser x ${browserBox.x}`);
     assert.ok(Math.abs(frameBox.width - browserBox.width) <= 1, `frame width ${frameBox.width} should fill browser width ${browserBox.width}`);
@@ -78,8 +78,8 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     await address.fill("iamawesome.com");
     await address.press("Enter");
 
-    await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").waitFor();
     assert.equal(await address.inputValue(), "https://iamawesome.com/");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://iamawesome.com/");
     assert.deepEqual(await page.evaluate(() => window.__task010AOpenRequests.at(-1)), {
       sessionId: "alpha",
       target: "iamawesome.com",
@@ -133,12 +133,12 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     await page.goto(`${server.origin}/#chat-session`);
     await page.getByRole("button", { name: "Browser" }).click();
     assert.equal(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), "https://example.com/alpha");
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Alpha Browser");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/alpha");
 
     await page.locator("[data-session-target='Beta Browser']").click();
     await page.getByRole("button", { name: "Browser" }).click();
     assert.equal(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), "https://example.com/beta");
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Beta Browser");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/beta");
   });
 });
 

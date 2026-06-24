@@ -365,16 +365,16 @@ the TASK-010/TASK-016 boundary.
 
 Depends on: TASK-010A acceptance
 
-Resolve the iframe-blocked public website limitation in the Browser surface.
-Detect or handle public sites that cannot be embedded in the current Browser
-iframe because of `X-Frame-Options`, CSP `frame-ancestors`, or equivalent
-browser restrictions. Choose and implement an accepted fallback such as a
-native webview-backed Browser surface, a system-browser handoff, or an explicit
-`Open externally` fallback while preserving the existing Browser / Files /
-Terminal right-panel tab contract. This task must not weaken TASK-009 artifact
-sandboxing, must keep artifact previews distinct from general browsing, must
-keep user browsing separate from agent browsing authority, and must not add
-downloads, unrelated settings abstractions, or alternate app layouts.
+Resolve the iframe-blocked public website limitation in the Browser surface
+with the accepted raw Wry native webview-backed Browser host. Public Browser
+pages must no longer rely on the DOM iframe path that fails on
+`X-Frame-Options`, CSP `frame-ancestors`, or equivalent browser restrictions.
+Preserve the existing Browser / Files / Terminal right-panel tab contract,
+keep TASK-009 artifact previews on their distinct sandboxed preview path, keep
+local-file Browser previews separate from general public browsing, keep user
+browsing separate from agent browsing authority, and do not add downloads,
+external-open fallback UI, unrelated settings abstractions, or alternate app
+layouts.
 
 ### TASK-010C: Artifact Preview Type Rendering
 

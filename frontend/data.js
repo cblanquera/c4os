@@ -383,6 +383,20 @@ export async function openConnectorBrowser(target) {
   }
 }
 
+export async function syncConnectorNativeBrowser(request) {
+  if (!connectorState.connector.available || !connectorState.connector.syncNativeBrowser) return null;
+  try {
+    return await connectorState.connector.syncNativeBrowser({
+      ...request,
+      sessionId: workspace.sessionId
+    });
+  } catch (error) {
+    browserState.status = connectorErrorMessage(error);
+    captureActiveSessionState();
+    throw error;
+  }
+}
+
 export async function saveConnectorFile(path, content) {
   if (!connectorState.connector.available || !connectorState.connector.saveFile) {
     return applyFileState({

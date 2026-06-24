@@ -124,6 +124,9 @@ function tauriConnector(config) {
         }
       });
     },
+    async syncNativeBrowser(request) {
+      return invoke("sync_native_browser", { request });
+    },
     async updateNativeMenuState(focusState) {
       return invoke("native_menu_state", { focusState });
     },

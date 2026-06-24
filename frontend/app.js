@@ -25,6 +25,7 @@ import {
   setConnectorModelEnabled,
   setConnectorProviderEnabled,
   settingsItems,
+  syncConnectorNativeBrowser,
   terminalState,
   threadTurns,
   toggleConnectorFolder,
@@ -49,6 +50,10 @@ let nativeFileMenuBound = false;
 let nativeFileEditorOpen = false;
 let nativeFileShortcutsBound = false;
 let nativeFileFocusBound = false;
+let nativeBrowserSurfaceActive = false;
+let nativeBrowserResizeObserver = null;
+let nativeBrowserObservedFrame = null;
+let nativeBrowserWindowResizeBound = false;
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -260,9 +265,7 @@ function bindToolTabs() {
       bindTerminal();
       bindPanelLinks();
       bindFileEditor();
-      if (anchor.dataset.fileTarget === "editor" && anchor.dataset.filePath) {
-        document.querySelector("[data-file-editor]")?.focus({ preventScroll: true });
-      }
+      syncNativeBrowserSurface();
     });
   });
 }
@@ -554,6 +557,7 @@ function bindPanelLinks() {
       bindPanelLinks();
       bindFileEditor();
       bindBrowserAddress();
+      syncNativeBrowserSurface();
     });
   });
 }
@@ -593,6 +597,7 @@ async function submitBrowserAddress(form, event) {
     bindTerminal();
     bindPanelLinks();
     bindFileEditor();
+    syncNativeBrowserSurface();
   }
 }
 
@@ -764,6 +769,7 @@ function updateShellSessionDom() {
   bindTerminal();
   bindPanelLinks();
   bindFileEditor();
+  syncNativeBrowserSurface();
   applyShellState();
 }
 
@@ -1243,6 +1249,7 @@ function browserTool() {
   if (previewMode !== "public") frameAttrs.sandbox = "allow-forms allow-scripts";
   if (browserState.html) frameAttrs.src = browserDocumentUrl(browserState.html);
   else frameAttrs.src = browserState.url || "about:blank";
+  const usesNativeBrowser = previewMode === "public" && isPublicBrowserUrl(browserState.url);
 
   return h("section", {
     class: "tool-body browser-tool",
@@ -1262,9 +1269,89 @@ function browserTool() {
     ]),
     h("div", { class: "browser-preview" }, [
       browserStatusIsFailure() ? h("p", { class: "browser-status", role: "status", text: browserState.status }) : null,
-      h("iframe", frameAttrs)
+      usesNativeBrowser ? h("div", {
+        class: "native-browser-frame",
+        "data-native-browser-frame": "",
+        "data-native-browser-url": browserState.url,
+        role: "presentation"
+      }) : h("iframe", frameAttrs)
     ])
   ]);
+}
+
+function isPublicBrowserUrl(url) {
+  return /^https?:\/\//i.test(String(url || "").trim());
+}
+
+function syncNativeBrowserSurface() {
+  bindNativeBrowserResizeSync();
+  window.requestAnimationFrame(async () => {
+    const frame = document.querySelector("[data-native-browser-frame]");
+    if (!frame) {
+      unobserveNativeBrowserFrame();
+      if (!nativeBrowserSurfaceActive) return;
+      try {
+        await syncConnectorNativeBrowser({ visible: false });
+        nativeBrowserSurfaceActive = false;
+      } catch {
+        // Failure state is rendered only when the Browser panel is active.
+      }
+      return;
+    }
+    observeNativeBrowserFrame(frame);
+    const rect = frame.getBoundingClientRect();
+    const topInset = nativeBrowserTopInset(frame);
+    const syncRequest = {
+      url: frame.dataset.nativeBrowserUrl || browserState.url,
+      x: rect.x,
+      y: rect.y + topInset,
+      width: rect.width,
+      height: Math.max(1, rect.height - topInset),
+      visible: rect.width > 0 && rect.height > 0
+    };
+    try {
+      await syncConnectorNativeBrowser(syncRequest);
+      nativeBrowserSurfaceActive = rect.width > 0 && rect.height > 0;
+    } catch {
+      const panel = document.querySelector(".tool-panel");
+      panel?.replaceWith(renderToolPanel("browser", routeFromHash()));
+      bindToolTabs();
+      bindTerminal();
+      bindPanelLinks();
+      bindFileEditor();
+    }
+  });
+}
+
+function nativeBrowserTopInset(frame) {
+  const addressInput = frame.closest(".browser-tool")?.querySelector("[data-browser-address-input]");
+  if (!addressInput) return 0;
+  return Math.max(0, Math.round(addressInput.getBoundingClientRect().height - 2));
+}
+
+function bindNativeBrowserResizeSync() {
+  if (nativeBrowserWindowResizeBound) return;
+  nativeBrowserWindowResizeBound = true;
+  window.addEventListener("resize", () => {
+    if (nativeBrowserSurfaceActive || document.querySelector("[data-native-browser-frame]")) {
+      syncNativeBrowserSurface();
+    }
+  });
+}
+
+function observeNativeBrowserFrame(frame) {
+  if (nativeBrowserObservedFrame === frame) return;
+  unobserveNativeBrowserFrame();
+  if (!("ResizeObserver" in window)) return;
+  nativeBrowserResizeObserver = new ResizeObserver(() => syncNativeBrowserSurface());
+  nativeBrowserResizeObserver.observe(frame);
+  nativeBrowserObservedFrame = frame;
+}
+
+function unobserveNativeBrowserFrame() {
+  nativeBrowserResizeObserver?.disconnect();
+  nativeBrowserResizeObserver = null;
+  nativeBrowserObservedFrame = null;
 }
 
 function browserStatusIsFailure() {

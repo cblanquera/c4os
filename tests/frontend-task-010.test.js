@@ -30,10 +30,10 @@ describe("TASK-010 Browser slice frontend behavior", () => {
     );
     assert.equal(await page.getByRole("button", { name: "Browser" }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.locator("[data-browser-preview]").count(), 1);
-    assert.equal(await page.locator("[data-browser-frame]").count(), 1);
+    assert.equal(await page.locator("[data-native-browser-frame]").count(), 1);
+    assert.equal(await page.locator("[data-browser-frame]").count(), 0);
     assert.equal(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), "https://example.com/docs");
-    await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").waitFor();
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Example Docs");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/docs");
 
     await page.goto(`${server.origin}/#browser`);
     assert.equal(await page.locator("[data-screen='app-start']").count(), 1);
@@ -69,7 +69,8 @@ describe("TASK-010 Browser slice frontend behavior", () => {
 
     await page.goto(`${server.origin}/#chat-session`);
     await page.getByRole("button", { name: "Browser" }).click();
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Alpha Browser");
+    assert.equal(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), "https://example.com/alpha");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/alpha");
 
     await page.getByRole("button", { name: "Files" }).click();
     assert.match(await page.locator(".tool-panel").innerText(), /alpha\.md/);
@@ -78,7 +79,8 @@ describe("TASK-010 Browser slice frontend behavior", () => {
 
     await page.locator("[data-session-target='Beta Browser']").click();
     await page.getByRole("button", { name: "Browser" }).click();
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Beta Browser");
+    assert.equal(await page.getByRole("textbox", { name: "Browser address" }).inputValue(), "https://example.com/beta");
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "https://example.com/beta");
     await page.getByRole("button", { name: "Files" }).click();
     assert.match(await page.locator(".tool-panel").innerText(), /beta\.md/);
     await page.getByRole("button", { name: "Terminal" }).click();

@@ -96,6 +96,7 @@ describe("frontend connector boundary", () => {
       "saveFile",
       "createArtifactPreview",
       "openBrowser",
+      "syncNativeBrowser",
       "runTerminalCommand",
       "openBrowserPreview",
       "listExtensions",
