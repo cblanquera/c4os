@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-010C
+Status: ready-for-task-011
 Updated: 2026-06-24
 
 ## Active Stream
@@ -22,6 +22,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-010-browser-slice.md`
 - `.agents/development/progress/items/TASK-010A-browser-address-bar-local-target-ui.md`
 - `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
+- `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
 
 ## Scope Rules
 
@@ -49,15 +50,14 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-Start `TASK-010C` Artifact Preview Type Rendering from the verified TASK-010B
-raw Wry native Browser boundary. Preserve the accepted r04 shell, Browser /
-Files / Terminal right-panel tab contract, TASK-005 chat UX, TASK-005A scoped
-update patterns, TASK-006 provider/model boundaries, TASK-007 session
-ownership, TASK-008 Files/File Editor authority, TASK-009 product-owned
-artifact preview records, TASK-010 project-scoped Browser records, TASK-010A
-editable Browser address bar behavior, and TASK-010B public-page native Wry
-Browser host behavior. TASK-010C extends artifact previews by MIME type or
-file extension while keeping artifacts distinct from general Browser
-navigation and without adding a new Artifacts tab, route, panel, alternate
-layout, downloads, React/Preact/JSX, a bundler, or settings abstraction.
-TASK-011 resumes Terminal work after TASK-010C.
+Start `TASK-011` Terminal Slice from the verified TASK-010C artifact preview
+type rendering boundary. Preserve the accepted r04 shell, Browser / Files /
+Terminal right-panel tab contract, TASK-005 chat UX, TASK-005A scoped update
+patterns, TASK-006 provider/model boundaries, TASK-007 session ownership,
+TASK-008 Files/File Editor authority, TASK-009 product-owned artifact preview
+records, TASK-010 project-scoped Browser records, TASK-010A editable Browser
+address bar behavior, TASK-010B public-page native Wry Browser host behavior,
+and TASK-010C typed artifact preview rendering. TASK-011 replaces Terminal
+mock behavior with backend-owned user terminal and agent command terminal
+surfaces without moving Browser, Files, or artifact preview behavior out of
+the existing right-panel tab contract.

@@ -100,7 +100,7 @@ describe("TASK-010B native Wry Browser surface", () => {
     );
   });
 
-  it("keeps artifact preview and local files distinct from the native public Browser host", async () => {
+  it("keeps artifact preview distinct while trusted local files use the native Browser host", async () => {
     const artifactPage = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask010BTauri(artifactPage, { artifact: true });
 
@@ -117,11 +117,11 @@ describe("TASK-010B native Wry Browser surface", () => {
 
     await localPage.goto(`${server.origin}/#chat-session`);
     await localPage.getByRole("button", { name: "Browser" }).click();
+    await localPage.waitForFunction(() => window.__task010BNativeRequests.length > 0);
     assert.equal(await localPage.locator("[data-browser-preview='local-file']").count(), 1);
-    assert.equal(await localPage.locator("[data-native-browser-frame]").count(), 0);
-    assert.equal(await localPage.locator("[data-browser-frame]").count(), 1);
-    await localPage.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").waitFor();
-    assert.equal(await localPage.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Trusted local file");
+    assert.equal(await localPage.locator("[data-native-browser-frame]").count(), 1);
+    assert.equal(await localPage.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "file:///Users/cblanquera/server/projects/cblanquera/mcp/docs/preview.html");
+    assert.equal(await localPage.locator("[data-browser-frame]").count(), 0);
   });
 });
 
@@ -163,7 +163,7 @@ async function installTask010BTauri(page, options = {}) {
         ? browserState("Trusted local file", "file:///Users/cblanquera/server/projects/cblanquera/mcp/docs/preview.html", {
             previewMode: "local-file",
             localPath: "/Users/cblanquera/server/projects/cblanquera/mcp/docs/preview.html",
-            html: "<!doctype html><html><body><h1>Trusted local file</h1></body></html>"
+            html: ""
           })
         : browserState("LinkedIn", "https://linkedin.com/");
 

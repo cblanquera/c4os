@@ -500,8 +500,7 @@ fn browser_state_for_target(
     if !file.is_file() {
         return Err("Browser local target must be a trusted project file".into());
     }
-    let html =
-        std::fs::read_to_string(&file).map_err(|error| format!("Cannot read file: {error}"))?;
+    let html = local_browser_dom_preview_content(&file)?;
     let local_path = file.to_string_lossy().into_owned();
     Ok((
         BrowserState {
@@ -521,6 +520,26 @@ fn browser_state_for_target(
         },
         "open-local-file",
     ))
+}
+
+fn local_browser_dom_preview_content(file: &Path) -> Result<String, String> {
+    if local_browser_file_is_markdown(file) {
+        return std::fs::read_to_string(file).map_err(|error| format!("Cannot read file: {error}"));
+    }
+    Ok(String::new())
+}
+
+fn local_browser_file_is_markdown(file: &Path) -> bool {
+    matches!(
+        local_browser_extension(file).as_deref(),
+        Some("md" | "markdown")
+    )
+}
+
+fn local_browser_extension(file: &Path) -> Option<String> {
+    file.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
 }
 
 fn normalize_public_browser_url(target: &str) -> Option<String> {
@@ -861,8 +880,13 @@ mod tests {
         let root = std::env::temp_dir().join("c4os-task-010-browser-files");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create root");
-        fs::write(root.join("preview.html"), "<h1>Trusted local preview</h1>")
-            .expect("write preview");
+        fs::write(
+            root.join("preview.html"),
+            r#"<link rel="stylesheet" href="form.css"><h1>Trusted local preview</h1><script src="form.js"></script>"#,
+        )
+        .expect("write preview");
+        fs::write(root.join("form.css"), "body { background: #f0fdfa; }").expect("write css");
+        fs::write(root.join("form.js"), "window.formLoaded = true;").expect("write js");
         let canonical_preview =
             fs::canonicalize(root.join("preview.html")).expect("canonical preview");
         fs::create_dir_all(root.join(".git")).expect("create git");
@@ -894,7 +918,31 @@ mod tests {
             opened.browser.url,
             format!("file://{}", canonical_preview.to_string_lossy())
         );
-        assert!(opened.browser.html.contains("Trusted local preview"));
+        assert_eq!(opened.browser.html, "");
+
+        let image = root.join("icon.png");
+        fs::write(&image, [137, 80, 78, 71, 13, 10, 26, 10]).expect("write png");
+        let opened_image = open_browser(BrowserOpenRequest {
+            session_id: Some(session.id.clone()),
+            target: "icon.png".into(),
+            actor: Some("user".into()),
+            clear_request: false,
+        })
+        .expect("open trusted browser image");
+        assert_eq!(opened_image.browser.preview_mode, "local-file");
+        assert_eq!(opened_image.browser.html, "");
+        assert!(opened_image.browser.url.ends_with("/icon.png"));
+
+        fs::write(root.join("README.md"), "# Trusted markdown").expect("write markdown");
+        let opened_markdown = open_browser(BrowserOpenRequest {
+            session_id: Some(session.id.clone()),
+            target: "README.md".into(),
+            actor: Some("user".into()),
+            clear_request: false,
+        })
+        .expect("open trusted browser markdown");
+        assert_eq!(opened_markdown.browser.preview_mode, "local-file");
+        assert_eq!(opened_markdown.browser.html, "# Trusted markdown");
 
         let outside = open_browser(BrowserOpenRequest {
             session_id: Some(session.id.clone()),

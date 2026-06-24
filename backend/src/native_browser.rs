@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, ffi::c_void, ptr::NonNull};
+use std::{
+    cell::RefCell,
+    ffi::c_void,
+    path::{Component, Path, PathBuf},
+    ptr::NonNull,
+};
 use tauri::{Runtime, Window};
 use wry::{
     dpi::{LogicalPosition, LogicalSize},
@@ -250,16 +255,35 @@ fn normalize_native_browser_url(url: &str) -> Result<String, String> {
     if allowed_native_browser_navigation(value) {
         return Ok(value.into());
     }
-    Err("Native Browser only supports public http:// and https:// URLs".into())
+    Err("Native Browser only supports public URLs or trusted local files".into())
 }
 
 fn allowed_native_browser_navigation(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
+    url.starts_with("http://")
+        || url.starts_with("https://")
+        || native_browser_file_url_is_allowed(url)
+}
+
+fn native_browser_file_url_is_allowed(url: &str) -> bool {
+    let Some(path) = url.strip_prefix("file://") else {
+        return false;
+    };
+    let Ok(path) = PathBuf::from(path).canonicalize() else {
+        return false;
+    };
+    path.is_file() && !path_enters_git_dir(&path)
+}
+
+fn path_enters_git_dir(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::Normal(name) if name == ".git"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::{open_workspace, WorkspaceOpenRequest};
+    use std::fs;
 
     #[test]
     fn task_010b_native_browser_accepts_public_urls_only() {
@@ -271,5 +295,43 @@ mod tests {
         assert!(normalize_native_browser_url("javascript:alert(1)").is_err());
         assert!(normalize_native_browser_url("data:text/html,hi").is_err());
         assert!(normalize_native_browser_url("tauri://localhost").is_err());
+    }
+
+    #[test]
+    fn task_010c_native_browser_accepts_user_local_files_and_rejects_git_files() {
+        let root = std::env::temp_dir().join("c4os-task-010c-native-local");
+        let outside = std::env::temp_dir().join("c4os-task-010c-native-outside.html");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_file(&outside);
+        fs::create_dir_all(&root).expect("create root");
+        let trusted = root.join("preview.html");
+        fs::write(&trusted, "<h1>Trusted</h1>").expect("write trusted file");
+        fs::write(&outside, "<h1>User local file</h1>").expect("write outside file");
+        fs::create_dir_all(root.join(".git")).expect("create git");
+        fs::write(root.join(".git").join("config"), "secret").expect("write git config");
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+
+        let trusted_url = format!("file://{}", trusted.to_string_lossy());
+        assert_eq!(
+            normalize_native_browser_url(&trusted_url).expect("trusted local file"),
+            trusted_url
+        );
+        let outside_url = format!("file://{}", outside.to_string_lossy());
+        assert_eq!(
+            normalize_native_browser_url(&outside_url).expect("user local file"),
+            outside_url
+        );
+        assert!(normalize_native_browser_url("file:///tmp/c4os-missing-local.html").is_err());
+        assert!(normalize_native_browser_url(&format!(
+            "file://{}",
+            root.join(".git/config").to_string_lossy()
+        ))
+        .is_err());
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(outside);
     }
 }

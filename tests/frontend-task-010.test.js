@@ -49,9 +49,9 @@ describe("TASK-010 Browser slice frontend behavior", () => {
     await page.getByRole("button", { name: "Browser" }).click();
 
     assert.equal(await page.locator("[data-browser-preview][data-local-browser-file='docs/preview.html']").count(), 1);
-    const localFrame = page.frameLocator(".tool-panel iframe[data-browser-frame]");
-    await localFrame.locator("h1").waitFor();
-    assert.equal(await localFrame.locator("h1").innerText(), "Trusted local file");
+    assert.equal(await page.locator("[data-native-browser-frame]").count(), 1);
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "file://project/docs/preview.html");
+    assert.equal(await page.locator("[data-browser-frame]").count(), 0);
 
     const artifactPage = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask010Tauri(artifactPage, { artifact: true });
@@ -172,7 +172,7 @@ async function installTask010Tauri(page, options = {}) {
       ? browserState("Trusted local file", "file://project/docs/preview.html", {
           previewMode: "local-file",
           localPath: "docs/preview.html",
-          html: "<!doctype html><html><body><h1>Trusted local file</h1></body></html>"
+          html: ""
         })
       : nextOptions.artifact
         ? browserState("Generated artifact", "artifact://browser-boundary", {

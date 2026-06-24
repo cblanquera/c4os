@@ -101,6 +101,10 @@ pub struct ArtifactRecord {
     pub title: String,
     pub kind: String,
     pub origin: String,
+    #[serde(default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub filename: String,
     pub safe_preview: SafeArtifactPreview,
 }
 
@@ -110,6 +114,10 @@ pub struct SafeArtifactPreview {
     pub title: String,
     pub summary: String,
     pub html: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

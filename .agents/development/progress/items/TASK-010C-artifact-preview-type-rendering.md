@@ -1,7 +1,7 @@
 # TASK-010C Artifact Preview Type Rendering
 
-Status: queued
-Updated: 2026-06-23
+Status: verified
+Updated: 2026-06-24
 
 ## Source
 
@@ -47,3 +47,58 @@ extension.
 - Files and Terminal tab behavior remains unchanged.
 - No new Artifacts route, panel, tab, alternate layout, download flow, or
   settings abstraction is introduced.
+
+## Outputs
+
+- Extended the existing Browser/Preview artifact branch to classify
+  product-owned artifact records by MIME type, filename extension, or kind.
+- Preserved generated or untrusted HTML on the existing sandboxed artifact
+  iframe path with `sandbox="allow-scripts"`.
+- Added safe Browser/Preview renderers for Markdown, images, PDF, plain text,
+  JSON, and code without adding an Artifacts tab, route, panel, alternate
+  layout, downloads, React/Preact/JSX, a bundler, or settings abstraction.
+- Kept artifact previews distinct from public Browser navigation and the raw
+  Wry native Browser host.
+- Simplified trusted local-file Browser previews after user-approved scope
+  widening: trusted non-Markdown project files now use the native Wry Browser
+  host instead of product-owned per-file-type DOM/data-URL renderers.
+- Kept trusted `.md` and `.markdown` Browser previews as the only explicit
+  local-file DOM renderer because native WebKit/Wry does not format Markdown.
+- Removed the intermediate local-file HTML asset inlining and binary data-URL
+  preview path; CSS, JS, images, PDFs, and other trusted project-local files are
+  delegated to native Wry after Browser authority accepts them.
+- Corrected the native Wry local-file validator to match the accepted TASK-010A
+  Browser authority: user-opened absolute local files may render through Wry,
+  missing files and `.git` internals remain rejected, and agent-opened local
+  files remain scoped by `open_browser` trusted-root checks.
+- Preserved Files and Terminal tab behavior, including the rule that Terminal
+  does not render artifacts.
+- Added typed artifact preview fields to backend product-owned artifact
+  records while preserving the existing generated-HTML command contract.
+
+## Deferred
+
+- Full Browser and approval-policy hardening remains TASK-016.
+- Terminal execution behavior remains TASK-011.
+
+## Verification Run
+
+- `node --test tests/frontend-task-010.test.js tests/frontend-task-010A.test.js
+  tests/frontend-task-010B.test.js tests/frontend-task-010C.test.js` passed:
+  17 tests, 17 pass.
+- `cargo test --manifest-path backend/Cargo.toml task_010 -- --test-threads=1`
+  passed: 6 tests, 6 pass.
+- `node --test tests/frontend-task-009.test.js tests/frontend-task-010.test.js
+  tests/frontend-task-010A.test.js tests/frontend-task-010B.test.js
+  tests/frontend-task-010C.test.js tests/frontend-connectors.test.js
+  tests/server/task-010b-native-browser.test.js` passed: 29 tests, 29 pass.
+- `cargo test --manifest-path backend/Cargo.toml -- --test-threads=1`
+  passed: 36 tests, 36 pass.
+- `cargo fmt --manifest-path backend/Cargo.toml -- --check` passed.
+- `npm run backend:build` passed.
+- `npm test` passed: 111 tests, 111 pass.
+- `git diff --check` passed.
+- Follow-up absolute local-file native Wry verification:
+  `cargo test --manifest-path backend/Cargo.toml task_010 -- --test-threads=1`
+  passed: 6 tests, 6 pass; `cargo fmt --manifest-path backend/Cargo.toml
+  -- --check` passed.

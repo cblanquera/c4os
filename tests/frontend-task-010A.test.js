@@ -49,7 +49,7 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     );
   });
 
-  it("opens project-local targets through Browser authority and renders local-file state", async () => {
+  it("opens project-local targets through Browser authority and hands local files to the native surface", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask010ATauri(page);
 
@@ -59,13 +59,14 @@ describe("TASK-010A Browser address bar and local target UI", () => {
     await address.fill("docs/local-preview.html");
     await address.press("Enter");
 
-    await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").waitFor();
     assert.equal(
       await page.locator("[data-browser-preview='local-file'][data-local-browser-file='/Users/cblanquera/server/projects/cblanquera/mcp/docs/local-preview.html']").count(),
       1
     );
     assert.equal(await address.inputValue(), "file:///Users/cblanquera/server/projects/cblanquera/mcp/docs/local-preview.html");
-    assert.equal(await page.frameLocator(".tool-panel iframe[data-browser-frame]").locator("h1").innerText(), "Trusted local target");
+    assert.equal(await page.locator("[data-native-browser-frame]").count(), 1);
+    assert.equal(await page.locator("[data-native-browser-frame]").getAttribute("data-native-browser-url"), "file:///Users/cblanquera/server/projects/cblanquera/mcp/docs/local-preview.html");
+    assert.equal(await page.locator("[data-browser-frame]").count(), 0);
   });
 
   it("lets backend resolve bare public hostnames from the editable address bar", async () => {
@@ -242,7 +243,7 @@ async function installTask010ATauri(page, options = {}) {
               : browserState("Trusted local target", `file:///Users/cblanquera/server/projects/cblanquera/mcp/${request.target}`, {
                   previewMode: "local-file",
                   localPath: `/Users/cblanquera/server/projects/cblanquera/mcp/${request.target}`,
-                  html: "<!doctype html><html><body><h1>Trusted local target</h1></body></html>"
+                  html: ""
                 });
             session.browser = browser;
             session.artifacts = [];

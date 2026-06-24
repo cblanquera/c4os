@@ -281,11 +281,15 @@ pub fn create_session_artifact_preview(
         title: title.into(),
         kind: "html".into(),
         origin: "generated".into(),
+        mime_type: "text/html".into(),
+        filename: format!("{id}.html"),
         safe_preview: SafeArtifactPreview {
             url: format!("artifact://{id}"),
             title: title.into(),
             summary: "Generated HTML artifact preview".into(),
             html: html.into(),
+            content: String::new(),
+            data_url: String::new(),
         },
     };
     session.browser = BrowserState {
