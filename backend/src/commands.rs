@@ -1247,7 +1247,8 @@ mod tests {
         let root = task_011_root("new-session-terminal-scope");
         fs::create_dir_all(&root).expect("create terminal workspace");
         fs::write(root.join("README.md"), "task 011 terminal workspace").expect("write readme");
-        let activation = crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+        let activation =
+            crate::workspace::activate_workspace_at(&root).expect("activate workspace");
 
         let scope =
             terminal_scope_from_request(None).expect("resolve terminal scope from workspace");

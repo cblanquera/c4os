@@ -171,6 +171,87 @@ describe("TASK-011 terminal slice", () => {
     await page.close();
   });
 
+  it("runs explicit command prompts through the read-only agent terminal", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+    const calls = [];
+    await installTask011Tauri(page, calls, { useRealXterm: true });
+
+    await page.goto(`${server.origin}/#chat-session`);
+    await page.locator(".composer-dock .prompt-box").fill("run ls");
+    await page.locator(".composer-dock .send-button").click();
+    await page.getByRole("button", { name: "Terminal" }).click();
+
+    await page.locator("[data-agent-terminal]", { hasText: "README.md" }).waitFor();
+    await page.locator("[data-agent-terminal]", { hasText: "$ ls" }).waitFor();
+    await page.locator(".xterm-screen", { hasText: "alpha prompt" }).waitFor();
+    assert.doesNotMatch(await page.locator(".xterm-screen").innerText(), /README\.md/);
+    assert.equal(await page.locator("[data-agent-terminal] textarea, [data-agent-terminal] input, [data-agent-terminal] [contenteditable='true']").count(), 0);
+
+    const commandCall = calls.find((call) => call.command === "run_terminal_command");
+    assert.deepEqual(commandCall.payload.request, {
+      command: "ls",
+      sessionId: "alpha",
+      terminalKind: "agent"
+    });
+
+    await page.close();
+  });
+
+  it("repaints the mounted agent terminal after an explicit command prompt", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+    const calls = [];
+    await installTask011Tauri(page, calls, { useRealXterm: true });
+
+    await page.goto(`${server.origin}/#chat-session`);
+    await page.getByRole("button", { name: "Terminal" }).click();
+    await page.locator("[data-agent-terminal]").waitFor();
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /README\.md/);
+
+    await page.locator(".composer-dock .prompt-box").fill("run ls");
+    await page.locator(".composer-dock .send-button").click();
+
+    await page.locator("[data-agent-terminal]", { hasText: "$ ls" }).waitFor();
+    await page.locator("[data-agent-terminal]", { hasText: "README.md" }).waitFor();
+    assert.doesNotMatch(await page.locator(".xterm-screen").innerText(), /README\.md/);
+
+    await page.close();
+  });
+
+  it("visually separates the agent console and keeps the latest agent output visible", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+    const calls = [];
+    await installTask011Tauri(page, calls, { useRealXterm: true, longAgentOutput: true });
+
+    await page.goto(`${server.origin}/#chat-session`);
+    await page.getByRole("button", { name: "Terminal" }).click();
+
+    const contrast = await page.evaluate(() => {
+      const user = getComputedStyle(document.querySelector(".terminal-tool")).backgroundColor;
+      const agent = getComputedStyle(document.querySelector("[data-agent-terminal]")).backgroundColor;
+      const rgb = (value) => value.match(/\d+/g).slice(0, 3).map(Number);
+      const luminance = (value) => rgb(value).reduce((sum, channel) => sum + channel, 0);
+      return { agent, agentLuminance: luminance(agent), user, userLuminance: luminance(user) };
+    });
+    assert.ok(contrast.agentLuminance > contrast.userLuminance, JSON.stringify(contrast));
+
+    await page.locator(".composer-dock .prompt-box").fill("run ls");
+    await page.locator(".composer-dock .send-button").click();
+    await page.locator("[data-agent-terminal]", { hasText: "final-agent-line" }).waitFor();
+
+    const scrollState = await page.locator("[data-agent-terminal]").evaluate((node) => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      scrollTop: node.scrollTop
+    }));
+    assert.ok(scrollState.scrollHeight > scrollState.clientHeight, JSON.stringify(scrollState));
+    assert.ok(
+      scrollState.scrollTop + scrollState.clientHeight >= scrollState.scrollHeight - 2,
+      JSON.stringify(scrollState)
+    );
+
+    await page.close();
+  });
+
 });
 
 async function installTask011Tauri(page, calls, options = {}) {
@@ -279,6 +360,50 @@ async function installTask011Tauri(page, calls, options = {}) {
           if (command === "load_session") {
             window.__task011ActiveSession = invokePayload.request.sessionId;
             return sessions.get(invokePayload.request.sessionId);
+          }
+          if (command === "send_prompt") {
+            const session = sessions.get(invokePayload.sessionId || "alpha");
+            session.thread = {
+              user: invokePayload.prompt,
+              agent: "Explicit command request recorded.",
+              extra: "Connector run events completed successfully.",
+              tool: "Agent command terminal",
+              run: "completed"
+            };
+            session.turns.push({ id: `${session.id}-turn-${session.turns.length + 1}`, ...session.thread });
+            return {
+              prompt: invokePayload.prompt,
+              run: "completed",
+              agent: session.thread.agent,
+              model: "model/alpha",
+              session,
+              events: []
+            };
+          }
+          if (command === "run_terminal_command") {
+            const request = invokePayload.request;
+            const session = sessions.get(request.sessionId || "alpha");
+            const output = initOptions.longAgentOutput
+              ? Array.from({ length: 80 }, (_, index) => `agent-output-line-${index + 1}`).join("\n") + "\nfinal-agent-line\n"
+              : "README.md\nfrontend\n";
+            session.terminal.agentTerminal.output = `$ ${request.command}\n${output}`;
+            session.terminal.agentTerminal.cwd = "/workspace";
+            session.terminal.actions.push({
+              id: `terminal-action-${session.terminal.actions.length + 1}`,
+              sessionId: session.id,
+              terminalKind: request.terminalKind,
+              command: request.command,
+              cwd: "/workspace",
+              status: "completed",
+              output: session.terminal.agentTerminal.output,
+              exitCode: 0
+            });
+            return {
+              command: request.command,
+              output: session.terminal.agentTerminal.output,
+              terminal: session.terminal,
+              action: session.terminal.actions.at(-1)
+            };
           }
           if (command === "start_terminal_session") {
             if (initOptions.failTerminalStart) throw new Error("No trusted workspace root is active");

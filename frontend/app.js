@@ -239,6 +239,7 @@ async function sendFromComposerControl(control) {
   await minimumPendingFrame();
   await pending;
   if (shouldCreateSession) appStore.setComposerValue(surface, "model", null);
+  updateAgentTerminalDom();
   updateTurnDom(threadTurns[threadTurns.length - 1]);
 }
 
@@ -281,6 +282,7 @@ async function bindTerminalEmulator() {
   const host = document.querySelector("[data-terminal-emulator]");
   if (!host) return;
   bindTerminalAgentResize();
+  updateAgentTerminalDom();
   const sessionId = workspace.sessionId || "";
   const key = `${sessionId}:user`;
   if (terminalInstance && terminalKey === key && host.querySelector(".xterm")) return;
@@ -458,6 +460,16 @@ function writeTerminalOutputEvent(event) {
     terminalState.userTerminal.output = `${terminalState.userTerminal.output || ""}${text}`;
     terminalState.output = terminalState.userTerminal.output;
   }
+}
+
+function updateAgentTerminalDom() {
+  const pane = document.querySelector("[data-agent-terminal]");
+  if (!pane) return;
+  const title = pane.querySelector(".terminal-agent-title");
+  const transcript = pane.querySelector(".terminal-agent-transcript");
+  if (title) title.textContent = terminalState.agentTerminal?.title || "Agent command terminal";
+  if (transcript) transcript.textContent = terminalState.agentTerminal?.output || terminalState.agentTerminal?.summary || "";
+  pane.scrollTop = pane.scrollHeight;
 }
 
 function bindTerminalAgentResize() {

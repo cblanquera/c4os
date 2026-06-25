@@ -24,6 +24,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
 - `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
 - `.agents/development/progress/items/TASK-011-terminal-slice.md`
+- `.agents/development/progress/items/TASK-011A-agent-command-terminal-bridge.md`
 
 ## Scope Rules
 
@@ -55,6 +56,8 @@ Start `TASK-012` from `.agents/specs/mvp/tasks.md` and preserve the verified
 TASK-011 Terminal slice: the existing right-panel Terminal tab renders an
 `@xterm/xterm` transcript backed by C4OS-owned `portable-pty` Tauri
 commands/events, while user terminal and agent command terminal state remain
-product-owned and distinct. Prompt-driven agent command execution into the
-bottom agent terminal is desired follow-up work and remains blocked on explicit
-approval-policy and action/audit-record wiring.
+product-owned and distinct. Also preserve verified TASK-011A behavior:
+explicit command prompts such as `run ls` execute through backend-owned trusted
+workspace command execution and write command, cwd, status, exit code, output,
+session id, and `terminalKind: "agent"` into the bottom read-only Agent command
+terminal. Broad approval-policy hardening remains TASK-016.

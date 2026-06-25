@@ -189,6 +189,23 @@ function appendTerminalOutput(current, next) {
   return current?.trim() ? `${current.trimEnd()}\n${next}` : next;
 }
 
+function explicitCommandFromPrompt(prompt) {
+  const text = String(prompt || "").trim();
+  const patterns = [
+    /^please\s+run\s+(.+)$/i,
+    /^run\s+(.+)$/i,
+    /^please\s+execute\s+(.+)$/i,
+    /^execute\s+(.+)$/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const command = match[1].trim().replace(/^`|`$/g, "").trim();
+    if (command) return command;
+  }
+  return "";
+}
+
 export function beginConnectorStateLoad() {
   connectorState.error = null;
 
@@ -276,6 +293,12 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     });
     if (payload?.session) {
       applySessionRecord(payload.session);
+    }
+    const explicitCommand = explicitCommandFromPrompt(prompt);
+    if (explicitCommand) {
+      const commandResult = await runConnectorTerminalCommand(explicitCommand, "agent");
+      appendWorkLog(activeTurn, `Agent command terminal: ${explicitCommand}`);
+      if (commandResult?.action?.status) appendWorkLog(activeTurn, `Command ${commandResult.action.status}`);
     }
     applyRuntimeEventsFromPayload(payload, activeTurn, options);
     if (payload.agent) activeTurn.agent = payload.agent;

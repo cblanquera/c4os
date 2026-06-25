@@ -199,8 +199,13 @@ where
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| store.sessions[index].selected_model.clone());
     let runtime = C4osRuntimeAdapter::run_chat(&request.prompt, &selected_model, emit)?;
+    let explicit_command = explicit_command_from_prompt(&request.prompt);
 
     apply_runtime_result(&mut store.sessions[index], &request.prompt, runtime);
+    if let Some(command) = explicit_command {
+        let execution = run_trusted_workspace_command(&command)?;
+        apply_terminal_command_result(&mut store.sessions[index], "agent", execution);
+    }
     let session = store.sessions[index].clone();
     save_store(&store);
 
@@ -354,20 +359,26 @@ pub fn run_session_terminal_command(
     command: &str,
     terminal_kind: &str,
 ) -> Result<(TerminalState, TerminalActionRecord), String> {
-    let root = crate::workspace::active_workspace_root()
-        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
-    let command = command.trim();
-    if command.is_empty() {
-        return Err("Terminal command is required".into());
-    }
-    let terminal_kind = normalized_terminal_kind(terminal_kind);
     let mut store = load_store();
     let session = store
         .sessions
         .iter_mut()
         .find(|session| session.id == session_id)
         .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
+    let execution = run_trusted_workspace_command(command)?;
+    let (_terminal, record) = apply_terminal_command_result(session, terminal_kind, execution);
+    let terminal = session.terminal.clone();
+    save_store(&store);
+    Ok((terminal, record))
+}
 
+fn run_trusted_workspace_command(command: &str) -> Result<TerminalCommandExecution, String> {
+    let root = crate::workspace::active_workspace_root()
+        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("Terminal command is required".into());
+    }
     let output = Command::new("sh")
         .arg("-lc")
         .arg(command)
@@ -395,15 +406,29 @@ pub fn run_session_terminal_command(
         }
     );
 
-    let cwd = root.to_string_lossy().into_owned();
+    Ok(TerminalCommandExecution {
+        command: command.into(),
+        cwd: root.to_string_lossy().into_owned(),
+        status: status.into(),
+        command_block,
+        exit_code,
+    })
+}
+
+fn apply_terminal_command_result(
+    session: &mut C4osSessionRecord,
+    terminal_kind: &str,
+    execution: TerminalCommandExecution,
+) -> (TerminalState, TerminalActionRecord) {
+    let terminal_kind = normalized_terminal_kind(terminal_kind);
     let pane = if terminal_kind == "agent" {
         &mut session.terminal.agent_terminal
     } else {
         &mut session.terminal.user_terminal
     };
-    pane.cwd = cwd.clone();
+    pane.cwd = execution.cwd.clone();
     pane.running = false;
-    pane.output = append_terminal_output(&pane.output, &command_block);
+    pane.output = append_terminal_output(&pane.output, &execution.command_block);
     if terminal_kind == "user" {
         session.terminal.output = pane.output.clone();
     }
@@ -414,16 +439,23 @@ pub fn run_session_terminal_command(
         id: format!("terminal-action-{}", session.terminal.actions.len() + 1),
         session_id: session.id.clone(),
         terminal_kind,
-        command: command.into(),
-        cwd,
-        status: status.into(),
+        command: execution.command,
+        cwd: execution.cwd,
+        status: execution.status,
         output: pane.output.clone(),
-        exit_code,
+        exit_code: execution.exit_code,
     };
     session.terminal.actions.push(record.clone());
-    let terminal = session.terminal.clone();
-    save_store(&store);
-    Ok((terminal, record))
+    (session.terminal.clone(), record)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TerminalCommandExecution {
+    command: String,
+    cwd: String,
+    status: String,
+    command_block: String,
+    exit_code: Option<i32>,
 }
 
 fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: C4osRuntimeResult) {
@@ -530,6 +562,31 @@ fn normalized_terminal_kind(value: &str) -> String {
         "agent".into()
     } else {
         "user".into()
+    }
+}
+
+fn explicit_command_from_prompt(prompt: &str) -> Option<String> {
+    let text = prompt.trim();
+    let lowered = text.to_ascii_lowercase();
+    let command = lowered
+        .strip_prefix("please run ")
+        .map(|_| &text["please run ".len()..])
+        .or_else(|| lowered.strip_prefix("run ").map(|_| &text["run ".len()..]))
+        .or_else(|| {
+            lowered
+                .strip_prefix("please execute ")
+                .map(|_| &text["please execute ".len()..])
+        })
+        .or_else(|| {
+            lowered
+                .strip_prefix("execute ")
+                .map(|_| &text["execute ".len()..])
+        })?;
+    let command = command.trim().trim_matches('`').trim();
+    if command.is_empty() {
+        None
+    } else {
+        Some(command.into())
     }
 }
 
@@ -744,6 +801,60 @@ mod tests {
             .expect("serialize")
             .to_lowercase()
             .contains("opencode"));
+    }
+
+    #[test]
+    fn task_011a_explicit_prompt_command_updates_agent_terminal_records() {
+        reset_task_007_state("agent-command");
+        let root = std::env::temp_dir().join("c4os-task-011a-agent-command");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create command root");
+        fs::write(root.join("task-011a-file.txt"), "agent command").expect("write fixture");
+        let _activation =
+            crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+        let created = create_session(CreateSessionRequest {
+            project: Some("Runtime Session Repo".into()),
+            label: Some("Agent command chat".into()),
+            model: Some("model/alpha".into()),
+        });
+
+        let result = append_prompt(
+            SendPromptRequest {
+                session_id: Some(created.id.clone()),
+                project: None,
+                prompt: "run ls".into(),
+                model: None,
+            },
+            |_| {},
+        )
+        .expect("append explicit command prompt");
+
+        assert!(result
+            .session
+            .terminal
+            .agent_terminal
+            .output
+            .contains("task-011a-file.txt"));
+        assert!(!result
+            .session
+            .terminal
+            .user_terminal
+            .output
+            .contains("task-011a-file.txt"));
+        let action = result
+            .session
+            .terminal
+            .actions
+            .last()
+            .expect("terminal action recorded");
+        assert_eq!(action.terminal_kind, "agent");
+        assert_eq!(action.command, "ls");
+        let canonical_root = fs::canonicalize(&root).expect("canonical command root");
+        assert_eq!(action.cwd, canonical_root.to_string_lossy());
+        assert_eq!(action.status, "completed");
+        assert_eq!(action.exit_code, Some(0));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn reset_task_007_state(name: &str) {

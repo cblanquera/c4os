@@ -268,8 +268,8 @@ input, textarea, select { font-weight: 400; }
 .terminal-emulator .xterm { height: 100%; width: 100%; }
 .terminal-emulator .xterm-viewport { overflow-y: auto; }
 .basic-terminal-screen { box-sizing: border-box; color: #f4f4f0; font-family: var(--font-code); font-size: 14px; font-weight: 700; height: 100%; line-height: 1.2; outline: none; overflow: auto; padding: 4px 2px; white-space: pre-wrap; }
-.terminal-agent-pane { background: #151617; border-top: 1px solid #373a3c; color: #f4f4f0; min-height: 0; overflow: auto; padding: 10px 12px; }
-.terminal-agent-resize { background: #373a3c; }
+.terminal-agent-pane { background: #28292b; border-top: 1px solid #4b4d50; color: #f4f4f0; min-height: 0; overflow: auto; padding: 10px 12px; }
+.terminal-agent-resize { background: #4b4d50; }
 .terminal-agent-title { color: #a9b1aa; font: 700 12px var(--font-code); margin-bottom: 8px; }
 .terminal-agent-transcript { color: #f4f4f0; font: 700 13px/1.45 var(--font-code); margin: 0; white-space: pre-wrap; }
 .vertical-resize-handle { background: var(--line); cursor: row-resize; min-height: 7px; touch-action: none; }

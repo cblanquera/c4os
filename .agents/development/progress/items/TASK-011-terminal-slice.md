@@ -75,11 +75,10 @@ accepted replacement is `@xterm/xterm` for the terminal renderer plus
 - Approval-policy hardening remains TASK-016.
 - Settings, plugin, skill, and MCP records remain TASK-012.
 - Prompt-driven agent command execution is intentionally not part of TASK-011.
-  The bottom "Agent command terminal" is verified as a product-owned,
-  read-only output surface for this slice. A follow-up must wire C4OS prompt /
-  runtime command requests to backend-owned command execution, approval
-  policy, action/audit records, and bottom-pane output before prompts can run
-  commands such as `ls`, `npm test`, or project scripts.
+  TASK-011A now wires explicit prompt command requests such as `run ls` to
+  backend-owned trusted workspace command execution, product-owned terminal
+  action records, and the bottom read-only Agent command terminal. Broad
+  approval-policy hardening remains TASK-016.
 
 ## Verification Run
 
