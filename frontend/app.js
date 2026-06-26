@@ -232,7 +232,18 @@ async function sendFromComposerControl(control) {
       if (!shouldCreateSession) appendTurnToThread(turn);
     },
     onStateChange: (turn) => updateTurnDom(turn),
-    beforeComplete: minimumPendingFrame
+    onExplicitCommandStart: () => {
+      if (!shouldCreateSession) return;
+      setActiveToolForRoute("chat-session", "terminal");
+      if (routeFromHash() === "chat-session") {
+        document.querySelector(".tool-panel")?.replaceWith(renderToolPanel("terminal", "chat-session"));
+        bindToolTabs();
+        bindTerminalEmulator();
+        bindPanelLinks();
+      }
+    },
+    beforeComplete: minimumPendingFrame,
+    onTerminalStateChange: updateAgentTerminalDom
   });
   window.location.hash = "chat-session";
   if (shouldCreateSession) render();
@@ -465,11 +476,27 @@ function writeTerminalOutputEvent(event) {
 function updateAgentTerminalDom() {
   const pane = document.querySelector("[data-agent-terminal]");
   if (!pane) return;
+  const agentTerminal = agentTerminalViewForRoute(routeFromHash());
   const title = pane.querySelector(".terminal-agent-title");
   const transcript = pane.querySelector(".terminal-agent-transcript");
-  if (title) title.textContent = terminalState.agentTerminal?.title || "Agent command terminal";
-  if (transcript) transcript.textContent = terminalState.agentTerminal?.output || terminalState.agentTerminal?.summary || "";
+  if (title) title.textContent = agentTerminal.title || "Agent command terminal";
+  if (transcript) transcript.textContent = agentTerminal.output || agentTerminal.summary || "";
   pane.scrollTop = pane.scrollHeight;
+}
+
+function agentTerminalViewForRoute(route) {
+  if (route !== "chat-session") {
+    return {
+      title: "Agent command terminal",
+      output: "Agent command output is not running.",
+      summary: "Read-only agent command output."
+    };
+  }
+  return terminalState.agentTerminal || {
+    title: "Agent command terminal",
+    output: "",
+    summary: "Read-only agent command output."
+  };
 }
 
 function bindTerminalAgentResize() {
@@ -1460,7 +1487,7 @@ function renderToolPanel(active, route) {
         "data-tool-tab": key
       }, [icon(iconName), h("span", { text: label })])
     )),
-    active === "files" ? filesTool(fileView === "editor") : active === "terminal" ? terminalTool() : browserTool()
+    active === "files" ? filesTool(fileView === "editor") : active === "terminal" ? terminalTool(route) : browserTool()
   ]);
 }
 
@@ -1896,7 +1923,8 @@ function tokenize(content, rules) {
   return nodes.length ? nodes : [""];
 }
 
-function terminalTool() {
+function terminalTool(route) {
+  const agentTerminal = agentTerminalViewForRoute(route);
   return h("section", { class: "tool-body terminal-tool terminal-emulator-tool" }, [
     h("div", {
       class: "terminal-emulator",
@@ -1912,10 +1940,10 @@ function terminalTool() {
       "data-resize-stack": "terminal-agent"
     }),
     h("div", { class: "terminal-agent-pane", "data-agent-terminal": "true" }, [
-      h("div", { class: "terminal-agent-title", text: terminalState.agentTerminal?.title || "Agent command terminal" }),
+      h("div", { class: "terminal-agent-title", text: agentTerminal.title || "Agent command terminal" }),
       h("pre", {
         class: "terminal-agent-transcript",
-        text: terminalState.agentTerminal?.output || terminalState.agentTerminal?.summary || ""
+        text: agentTerminal.output || agentTerminal.summary || ""
       })
     ])
   ]);

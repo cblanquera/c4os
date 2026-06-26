@@ -62,6 +62,9 @@ where
         .map_err(|error| format!("Terminal PTY failed to open: {error}"))?;
     let shell = shell_program();
     let mut command = CommandBuilder::new(&shell);
+    if shell.ends_with("/zsh") {
+        command.arg("-f");
+    }
     command.arg("-i");
     command.cwd(root);
     command.env("C4OS_TRUSTED_ROOT", root.to_string_lossy().as_ref());

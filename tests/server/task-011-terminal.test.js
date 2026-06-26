@@ -29,6 +29,17 @@ describe("TASK-011 terminal backend boundary", () => {
     assert.match(ptySource, /CommandBuilder::new/);
   });
 
+  it("starts zsh without sourcing user startup files that can print setup errors", async () => {
+    const ptySource = await readFile(new URL("../../backend/src/terminal_pty.rs", import.meta.url), "utf8");
+
+    assert.match(ptySource, /command\.arg\("-f"\)/);
+    assert.match(ptySource, /command\.arg\("-i"\)/);
+    assert.ok(
+      ptySource.indexOf('command.arg("-f")') < ptySource.indexOf('command.arg("-i")'),
+      "zsh fast mode must be set before interactive mode"
+    );
+  });
+
   it("keeps user and agent terminal panes distinct in product-owned state", async () => {
     const mockDataSource = await readFile(new URL("../../backend/src/mock_data.rs", import.meta.url), "utf8");
     const dataSource = await readFile(new URL("../../frontend/data.js", import.meta.url), "utf8");

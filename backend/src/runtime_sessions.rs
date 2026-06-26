@@ -199,13 +199,7 @@ where
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| store.sessions[index].selected_model.clone());
     let runtime = C4osRuntimeAdapter::run_chat(&request.prompt, &selected_model, emit)?;
-    let explicit_command = explicit_command_from_prompt(&request.prompt);
-
     apply_runtime_result(&mut store.sessions[index], &request.prompt, runtime);
-    if let Some(command) = explicit_command {
-        let execution = run_trusted_workspace_command(&command)?;
-        apply_terminal_command_result(&mut store.sessions[index], "agent", execution);
-    }
     let session = store.sessions[index].clone();
     save_store(&store);
 
@@ -242,6 +236,7 @@ pub fn project_sessions(project: &str) -> Vec<ProjectSessionRecord> {
     load_store()
         .sessions
         .into_iter()
+        .rev()
         .filter(|session| session.project == project)
         .map(|session| ProjectSessionRecord {
             id: session.id,
@@ -428,7 +423,11 @@ fn apply_terminal_command_result(
     };
     pane.cwd = execution.cwd.clone();
     pane.running = false;
-    pane.output = append_terminal_output(&pane.output, &execution.command_block);
+    pane.output = if terminal_kind == "agent" {
+        execution.command_block.clone()
+    } else {
+        append_terminal_output(&pane.output, &execution.command_block)
+    };
     if terminal_kind == "user" {
         session.terminal.output = pane.output.clone();
     }
@@ -562,31 +561,6 @@ fn normalized_terminal_kind(value: &str) -> String {
         "agent".into()
     } else {
         "user".into()
-    }
-}
-
-fn explicit_command_from_prompt(prompt: &str) -> Option<String> {
-    let text = prompt.trim();
-    let lowered = text.to_ascii_lowercase();
-    let command = lowered
-        .strip_prefix("please run ")
-        .map(|_| &text["please run ".len()..])
-        .or_else(|| lowered.strip_prefix("run ").map(|_| &text["run ".len()..]))
-        .or_else(|| {
-            lowered
-                .strip_prefix("please execute ")
-                .map(|_| &text["please execute ".len()..])
-        })
-        .or_else(|| {
-            lowered
-                .strip_prefix("execute ")
-                .map(|_| &text["execute ".len()..])
-        })?;
-    let command = command.trim().trim_matches('`').trim();
-    if command.is_empty() {
-        None
-    } else {
-        Some(command.into())
     }
 }
 
@@ -810,6 +784,11 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create command root");
         fs::write(root.join("task-011a-file.txt"), "agent command").expect("write fixture");
+        Command::new("git")
+            .arg("init")
+            .current_dir(&root)
+            .output()
+            .expect("initialize git fixture");
         let _activation =
             crate::workspace::activate_workspace_at(&root).expect("activate workspace");
         let created = create_session(CreateSessionRequest {
@@ -818,7 +797,7 @@ mod tests {
             model: Some("model/alpha".into()),
         });
 
-        let result = append_prompt(
+        let prompt_result = append_prompt(
             SendPromptRequest {
                 session_id: Some(created.id.clone()),
                 project: None,
@@ -829,30 +808,78 @@ mod tests {
         )
         .expect("append explicit command prompt");
 
-        assert!(result
+        assert!(!prompt_result
             .session
             .terminal
             .agent_terminal
             .output
             .contains("task-011a-file.txt"));
-        assert!(!result
+        assert!(!prompt_result
             .session
             .terminal
             .user_terminal
             .output
             .contains("task-011a-file.txt"));
-        let action = result
-            .session
-            .terminal
-            .actions
-            .last()
-            .expect("terminal action recorded");
+
+        let (_terminal, action) = run_session_terminal_command(&created.id, "ls", "agent")
+            .expect("run explicit agent command");
         assert_eq!(action.terminal_kind, "agent");
         assert_eq!(action.command, "ls");
         let canonical_root = fs::canonicalize(&root).expect("canonical command root");
         assert_eq!(action.cwd, canonical_root.to_string_lossy());
         assert_eq!(action.status, "completed");
         assert_eq!(action.exit_code, Some(0));
+        let restored = load_session(&created.id).expect("load command session");
+        assert!(restored
+            .terminal
+            .agent_terminal
+            .output
+            .contains("task-011a-file.txt"));
+        assert!(!restored
+            .terminal
+            .user_terminal
+            .output
+            .contains("task-011a-file.txt"));
+
+        append_prompt(
+            SendPromptRequest {
+                session_id: Some(created.id.clone()),
+                project: None,
+                prompt: "run pwd".into(),
+                model: None,
+            },
+            |_| {},
+        )
+        .expect("append second explicit command prompt");
+        let (second_terminal, _second_action) =
+            run_session_terminal_command(&created.id, "pwd", "agent")
+                .expect("run second agent command");
+
+        assert!(second_terminal.agent_terminal.output.contains("$ pwd"));
+        assert!(!second_terminal.agent_terminal.output.contains("$ ls"));
+
+        append_prompt(
+            SendPromptRequest {
+                session_id: Some(created.id.clone()),
+                project: None,
+                prompt: "run pwd and git status".into(),
+                model: None,
+            },
+            |_| {},
+        )
+        .expect("append combined explicit command prompt");
+        let (combined_terminal, _combined_action) =
+            run_session_terminal_command(&created.id, "pwd && git status", "agent")
+                .expect("run combined command");
+
+        assert!(combined_terminal
+            .agent_terminal
+            .output
+            .contains("$ pwd && git status"));
+        assert!(combined_terminal
+            .agent_terminal
+            .output
+            .contains("On branch"));
 
         let _ = fs::remove_dir_all(root);
     }

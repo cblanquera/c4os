@@ -31,6 +31,21 @@ describe("TASK-005 OpenRouter chat session review slice", () => {
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /test result: ok/);
   });
+
+  it("keeps native prompt execution off the synchronous command path for realtime events", async () => {
+    const commandsSource = await readFile(new URL("../../backend/src/commands.rs", import.meta.url), "utf8");
+
+    assert.match(commandsSource, /pub async fn send_prompt/);
+    assert.match(commandsSource, /tauri::async_runtime::spawn_blocking/);
+    assert.match(commandsSource, /app\.emit\("c4os:\/\/runtime-event"/);
+  });
+
+  it("lists project chat sessions newest first for the left navigation", async () => {
+    const sessionsSource = await readFile(new URL("../../backend/src/runtime_sessions.rs", import.meta.url), "utf8");
+
+    assert.match(sessionsSource, /pub fn project_sessions/);
+    assert.match(sessionsSource, /\.rev\(\)/);
+  });
 });
 
 function run(command, args) {

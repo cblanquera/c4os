@@ -1,9 +1,39 @@
 import { h } from "./dom.js";
 
 export function renderMarkdown(text) {
-  const blocks = String(text || "").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const blocks = markdownBlocks(String(text || ""));
   if (blocks.length === 0) return [h("p", { text: "" })];
-  return blocks.flatMap(renderBlock);
+  return blocks.flatMap((block) => block.kind === "code" ? renderCodeBlock(block) : renderBlock(block.text));
+}
+
+function markdownBlocks(text) {
+  const blocks = [];
+  const fence = /```([^\n`]*)\n?([\s\S]*?)```/g;
+  let cursor = 0;
+  for (const match of text.matchAll(fence)) {
+    appendTextBlocks(blocks, text.slice(cursor, match.index));
+    blocks.push({
+      kind: "code",
+      language: match[1].trim(),
+      text: match[2].replace(/\n$/, "")
+    });
+    cursor = match.index + match[0].length;
+  }
+  appendTextBlocks(blocks, text.slice(cursor));
+  return blocks;
+}
+
+function appendTextBlocks(blocks, text) {
+  blocks.push(...text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean).map((block) => ({
+    kind: "text",
+    text: block
+  })));
+}
+
+function renderCodeBlock(block) {
+  return [h("pre", {}, [
+    h("code", { class: block.language ? `language-${block.language}` : null, text: block.text })
+  ])];
 }
 
 function renderBlock(block) {

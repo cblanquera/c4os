@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-21
+Updated: 2026-06-26
 Source Note: Normalized from accepted decisions, constraints, MVP guardrails, and context routing. Detailed decisions are preserved under `.agents/references/context/work-orders/`.
 
 ## Purpose
@@ -75,6 +75,7 @@ Use these statuses for work-order records:
 | WO-003 | proposed | Validate remaining Browser isolation, Terminal ownership, and credentialed OpenCode permission-request behavior before relying on those claims for freeze. | Technical Specs |
 | WO-004 | deferred | Add Pi as a first implementation adapter. | Runtime adapter validation |
 | WO-005 | deferred | Add Browser downloads, remote shells, SSH, containers, terminal multiplexing, or agent auto-run. | Future feature scope |
+| WO-006 | proposed | Define the runtime tool gateway contract before broad approval hardening: runtime requests tools through generic events, C4OS owns authority/execution, and per-session tool config maps tool identities to enabled state, access, and approval policy. | Technical Specs, TASK-016 |
 
 ## Implementation Guardrails
 
@@ -90,3 +91,6 @@ Use these statuses for work-order records:
 - Browser implementation must reconcile desktop browsing, local-file browsing, project-scoped profiles, request-scoped agent browsing, and audit records without privileged bridge exposure.
 - Terminal implementation must preserve backend ownership, deterministic command allowlist, approval policy, command audit records, renderer backpressure, and cross-platform PTY behavior.
 - Credentialed OpenCode prompt execution and live permission-request capture still need validation because the earlier proof avoided provider credentials and token spend.
+- Runtime tool execution should be formalized before broad approval-policy work:
+  prompt planning belongs to the runtime, tool execution belongs to C4OS, and
+  the current explicit prompt command parser is transitional.

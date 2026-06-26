@@ -132,6 +132,7 @@ pub struct BrowserOpenResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalCommandRequest {
     pub command: Option<String>,
     pub session_id: Option<String>,
@@ -207,31 +208,44 @@ pub fn load_workspace() -> WorkspacePayload {
 }
 
 #[tauri::command]
-pub fn send_prompt<R: Runtime>(
+pub async fn send_prompt<R: Runtime>(
     app: AppHandle<R>,
     prompt: String,
     session_id: Option<String>,
     project: Option<String>,
     model: Option<String>,
 ) -> AgentRunResponse {
-    let request = SendPromptRequest {
-        session_id,
-        project,
-        prompt: prompt.clone(),
-        model,
-    };
-    append_prompt(request, |event| {
-        let _ = app.emit("c4os://runtime-event", event);
+    tauri::async_runtime::spawn_blocking(move || {
+        let request = SendPromptRequest {
+            session_id,
+            project,
+            prompt: prompt.clone(),
+            model,
+        };
+        append_prompt(request, |event| {
+            let _ = app.emit("c4os://runtime-event", event);
+        })
+        .map(|result| AgentRunResponse {
+            prompt: result.prompt,
+            run: result.run,
+            agent: result.agent,
+            model: result.model,
+            session: result.session,
+            events: result.events,
+        })
+        .unwrap_or_else(|error| failed_agent_run_response(prompt, error))
     })
-    .map(|result| AgentRunResponse {
-        prompt: result.prompt,
-        run: result.run,
-        agent: result.agent,
-        model: result.model,
-        session: result.session,
-        events: result.events,
+    .await
+    .unwrap_or_else(|error| {
+        failed_agent_run_response(
+            "Prompt execution failed".into(),
+            format!("Native prompt task failed: {error}"),
+        )
     })
-    .unwrap_or_else(|error| AgentRunResponse {
+}
+
+fn failed_agent_run_response(prompt: String, error: String) -> AgentRunResponse {
+    AgentRunResponse {
         prompt,
         run: error.clone(),
         agent: "The OpenRouter request did not complete.".into(),
@@ -248,7 +262,7 @@ pub fn send_prompt<R: Runtime>(
             text: error,
             sequence: 1,
         }],
-    })
+    }
 }
 
 #[tauri::command]
@@ -1292,6 +1306,23 @@ mod tests {
             .terminal
             .output
             .contains("fake agent run channel connected"));
+    }
+
+    #[test]
+    fn task_011_terminal_command_request_accepts_frontend_camel_case() {
+        let request: TerminalCommandRequest = serde_json::from_value(serde_json::json!({
+            "command": "git status",
+            "sessionId": "c4os-session-run-git-status",
+            "terminalKind": "agent"
+        }))
+        .expect("deserialize terminal command request");
+
+        assert_eq!(request.command.as_deref(), Some("git status"));
+        assert_eq!(
+            request.session_id.as_deref(),
+            Some("c4os-session-run-git-status")
+        );
+        assert_eq!(request.terminal_kind.as_deref(), Some("agent"));
     }
 
     #[test]

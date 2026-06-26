@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-21
+Updated: 2026-06-26
 Source Note: Normalized from product-model, runtime-adapter, and constraints context. Detailed technical records are preserved under `.agents/references/context/technical-specs/`.
 
 ## Purpose
@@ -79,6 +79,24 @@ OpenCode is the first implementation target behind a thin C4OS-owned runtime ada
 
 OpenCode proof findings are preserved in `.agents/references/context/technical-specs/runtime-adapter.md`. Credentialed model-backed prompt execution and live permission-request capture still need validation because the proof avoided provider credentials and token spend.
 
+Runtime-driven tool execution should use a formal C4OS tool gateway instead of
+frontend natural-language command parsing. The target flow is: send the prompt
+to the runtime, stream runtime events in real time, let the runtime request
+tools through a generic tool-call contract, execute approved tools through
+C4OS-owned authority boundaries, stream tool output back to the runtime and UI,
+then persist the final response and run records. This is MCP-shaped, but C4OS
+must remain the host/gateway that owns execution, approval, persistence, and
+trusted-root enforcement.
+
+Per-session tool configuration should map tool identities such as
+`terminal.run`, `files.read`, `files.write`, `browser.open`, and
+`artifact.preview` to enabled state, access level, and approval policy. Runtime
+events should use lifecycle names such as `tool_call_requested`,
+`tool_call_started`, `tool_output_delta`, `tool_call_completed`, and
+`final_response`; event names are not tool identities. Tool implementations may
+define default and maximum approval levels, and session config may narrow but
+must not silently widen tool authority.
+
 ## Security And Trust
 
 - Project-local operations require explicit trusted-root containment.
@@ -98,6 +116,11 @@ The implementation must not ignore the failed direct Tauri `WebviewWindow` proof
 ## Terminal Constraints
 
 Terminal sessions are backend-owned; renderer code must not spawn arbitrary shells directly. Terminal implementation requires trusted-root cwd validation, deterministic command allowlist, approval policy, sanitized environment, backend-owned lifecycle, bounded renderer event transport, backpressure handling, audit persistence, and cross-platform PTY/ConPTY confirmation.
+
+The TASK-011A/TASK-011B explicit prompt command bridge is transitional polish.
+It must not become the long-term command-planning mechanism. Future command
+selection should come from runtime tool-call requests and flow through the
+C4OS tool gateway.
 
 ## Implementation Locations
 

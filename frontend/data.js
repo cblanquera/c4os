@@ -200,10 +200,16 @@ function explicitCommandFromPrompt(prompt) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (!match) continue;
-    const command = match[1].trim().replace(/^`|`$/g, "").trim();
+    const command = normalizeExplicitCommand(match[1].trim().replace(/^`|`$/g, "").trim());
     if (command) return command;
   }
   return "";
+}
+
+function normalizeExplicitCommand(command) {
+  return String(command || "")
+    .trim()
+    .replace(/\s+\band\s+(?=(cargo|cat|echo|git|ls|node|npm|pwd|python3?|rg|yarn)\b)/gi, " && ");
 }
 
 export function beginConnectorStateLoad() {
@@ -256,10 +262,39 @@ export async function sendConnectorPrompt(prompt, options = {}) {
 
   connectorState.runPending = true;
   const activeTurn = createPendingTurn(prompt || threadState.user);
+  const explicitCommand = explicitCommandFromPrompt(prompt);
+  let explicitCommandPromise = null;
+  const startExplicitCommand = () => {
+    if (!explicitCommand || explicitCommandPromise) return;
+    explicitCommandPromise = runConnectorTerminalCommand(explicitCommand, "agent")
+      .then((result) => {
+        options.onTerminalStateChange?.();
+        return result;
+      });
+    explicitCommandPromise.catch(() => null);
+    options.onTerminalStateChange?.();
+  };
 
   try {
     if (options.createSession) {
       captureActiveSessionState();
+      ensureSessionForPrompt(prompt);
+      activateSessionState(workspace.project, workspace.session, {
+        model: options.model || workspace.model,
+        reset: true,
+        sessionId: workspace.sessionId,
+        skipCapture: true,
+        terminal: emptySessionTerminalState(),
+        turns: []
+      });
+      threadTurns.push(activeTurn);
+      syncThreadStateFromTurn(activeTurn);
+      options.onTurnCreated?.(activeTurn);
+      if (explicitCommand) {
+        stageConnectorTerminalCommand(explicitCommand, "agent");
+        options.onExplicitCommandStart?.(explicitCommand);
+        options.onTerminalStateChange?.();
+      }
       const label = sessionLabel(prompt);
       const created = connectorState.connector.createSession
         ? await connectorState.connector.createSession(workspace.project, options.model || workspace.model, label)
@@ -270,17 +305,25 @@ export async function sendConnectorPrompt(prompt, options = {}) {
         reset: true,
         sessionId: workspace.sessionId,
         skipCapture: true,
-        turns: []
+        terminal: created?.terminal || emptySessionTerminalState(),
+        turns: [activeTurn]
       });
+      replaceArray(threadTurns, [activeTurn]);
+      syncThreadStateFromTurn(activeTurn);
+      if (explicitCommand) {
+        startExplicitCommand();
+      }
     }
-    threadTurns.push(activeTurn);
-    syncThreadStateFromTurn(activeTurn);
-    options.onTurnCreated?.(activeTurn);
+    if (!threadTurns.includes(activeTurn)) {
+      threadTurns.push(activeTurn);
+      syncThreadStateFromTurn(activeTurn);
+      options.onTurnCreated?.(activeTurn);
+    }
+    if (!options.createSession && explicitCommand) {
+      options.onExplicitCommandStart?.(explicitCommand);
+      startExplicitCommand();
+    }
 
-    if (options.createSession && connectorState.connector.createSession) {
-      // Session creation is intentionally handled before the pending turn so
-      // the runtime append targets the backend-owned C4OS session id.
-    }
     const payload = await connectorState.connector.sendPrompt(prompt, {
       project: workspace.project,
       sessionId: workspace.sessionId,
@@ -292,11 +335,12 @@ export async function sendConnectorPrompt(prompt, options = {}) {
       }
     });
     if (payload?.session) {
-      applySessionRecord(payload.session);
+      applySessionRecord(payload.session, { preserveTerminal: Boolean(explicitCommand), preserveTurns: true });
     }
-    const explicitCommand = explicitCommandFromPrompt(prompt);
     if (explicitCommand) {
-      const commandResult = await runConnectorTerminalCommand(explicitCommand, "agent");
+      const commandResult = explicitCommandPromise
+        ? await explicitCommandPromise
+        : await runConnectorTerminalCommand(explicitCommand, "agent");
       appendWorkLog(activeTurn, `Agent command terminal: ${explicitCommand}`);
       if (commandResult?.action?.status) appendWorkLog(activeTurn, `Command ${commandResult.action.status}`);
     }
@@ -307,20 +351,24 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     activeTurn.run = runLabelFromPayload(payload, activeTurn);
   } catch (error) {
     const message = connectorErrorMessage(error);
-    activeTurn.agent = "The connector run did not complete.";
-    activeTurn.extra = "Connector failure details are shown in the work log.";
-    activeTurn.tool = "Thinking stopped";
+    const setupRequired = isProviderSetupRequiredMessage(message);
+    activeTurn.agent = setupRequired ? "Provider setup required." : "The connector run did not complete.";
+    activeTurn.extra = setupRequired
+      ? "Configure the selected provider/model before this run can continue."
+      : "Connector failure details are shown in the work log.";
+    activeTurn.tool = setupRequired ? "Setup required" : "Thinking stopped";
     activeTurn.run = message;
     appendWorkLog(activeTurn, message);
     activeTurn.failed = true;
+    if (explicitCommandPromise) await explicitCommandPromise.catch(() => null);
     options.onStateChange?.(activeTurn);
   } finally {
+    connectorState.runPending = false;
     await options.beforeComplete?.(activeTurn);
     activeTurn.pending = false;
     activeTurn.completedAt = Date.now();
     activeTurn.workExpanded = Boolean(activeTurn.failed);
     syncThreadStateFromTurn(activeTurn);
-    connectorState.runPending = false;
     options.onStateChange?.(activeTurn);
     captureActiveSessionState();
   }
@@ -477,7 +525,8 @@ export async function runConnectorTerminalCommand(command, terminalKind = "user"
   if (!trimmed) return null;
   const normalizedKind = terminalKind === "agent" ? "agent" : "user";
   const pane = normalizedKind === "agent" ? terminalState.agentTerminal : terminalState.userTerminal;
-  pane.running = true;
+  const requestSessionId = workspace.sessionId || "";
+  stageConnectorTerminalCommand(trimmed, normalizedKind);
 
   try {
     if (!connectorState.connector.available || !connectorState.connector.runTerminalCommand) {
@@ -488,9 +537,12 @@ export async function runConnectorTerminalCommand(command, terminalKind = "user"
     }
 
     const response = await connectorState.connector.runTerminalCommand(trimmed, {
-      sessionId: workspace.sessionId,
+      sessionId: requestSessionId,
       terminalKind: normalizedKind
     });
+    if (requestSessionId && workspace.sessionId && requestSessionId !== workspace.sessionId) {
+      return response;
+    }
     assignObject(terminalState, response.terminal || terminalState);
     captureActiveSessionState();
     return response;
@@ -501,6 +553,20 @@ export async function runConnectorTerminalCommand(command, terminalKind = "user"
   } finally {
     pane.running = false;
   }
+}
+
+function stageConnectorTerminalCommand(command, terminalKind = "user") {
+  const trimmed = String(command || "").trim();
+  if (!trimmed) return false;
+  const normalizedKind = terminalKind === "agent" ? "agent" : "user";
+  const pane = normalizedKind === "agent" ? terminalState.agentTerminal : terminalState.userTerminal;
+  pane.running = true;
+  pane.output = normalizedKind === "agent"
+    ? `$ ${trimmed}\nRunning...`
+    : appendTerminalOutput(pane.output, `$ ${trimmed}\nRunning...`);
+  if (normalizedKind === "user") terminalState.output = terminalState.userTerminal?.output || terminalState.output;
+  captureActiveSessionState();
+  return true;
 }
 
 export function editConnectorFile(content) {
@@ -678,6 +744,10 @@ function connectorErrorMessage(error) {
   return "The connector failed before returning error details. Check the desktop app terminal for the backend error.";
 }
 
+function isProviderSetupRequiredMessage(message) {
+  return /setup required|provider setup|api key|key not configured|missing (an? )?api key|model .*not configured/i.test(String(message || ""));
+}
+
 function applyRuntimeEvent(event = {}, turn = threadState) {
   const text = String(event.text || "").trim();
   if (!text) return;
@@ -739,7 +809,7 @@ function runLabelFromPayload(payload = {}, turn = {}) {
 
 function ensureSessionForPrompt(prompt, created = null) {
   const label = created?.title || sessionLabel(prompt);
-  const id = created?.title && created?.id ? created.id : `local-${providerIdFromLabel(label)}`;
+  const id = created?.id || `local-${providerIdFromLabel(label)}`;
   workspace.session = label;
   workspace.sessionId = id;
   const project = projects.find((record) => record.name === workspace.project);
@@ -792,6 +862,7 @@ export function activateSessionState(project, session, options = {}) {
     sessionState.bySurface[key] = sessionSnapshot({
       model: options.model ?? workspace.model,
       sessionId: workspace.sessionId,
+      terminal: options.terminal,
       turns: options.turns || []
     });
   }
@@ -814,20 +885,20 @@ function captureActiveSessionState() {
   });
 }
 
-function applySessionSnapshot(snapshot) {
+function applySessionSnapshot(snapshot, options = {}) {
   workspace.model = snapshot.model || "";
   workspace.sessionId = snapshot.sessionId || workspace.sessionId || "";
   assignObject(browserState, cloneValue(snapshot.browser));
   replaceArray(artifactState, cloneValue(snapshot.artifacts || []));
   assignObject(filesState, cloneValue(snapshot.files));
-  assignObject(terminalState, cloneValue(snapshot.terminal));
+  if (!options.preserveTerminal) assignObject(terminalState, cloneValue(snapshot.terminal));
   assignObject(threadState, cloneValue(snapshot.thread));
-  replaceArray(threadTurns, cloneValue(snapshot.turns));
+  if (!options.preserveTurns) replaceArray(threadTurns, cloneValue(snapshot.turns));
 }
 
 function applySessionRecord(record, options = {}) {
   if (!record) return;
-  const turns = Array.isArray(record.turns) && record.turns.length > 0
+  const recordTurns = Array.isArray(record.turns) && record.turns.length > 0
     ? record.turns.map((turn, index) => ({
         id: turn.id || `${record.id}-turn-${index + 1}`,
         user: turn.user,
@@ -844,6 +915,7 @@ function applySessionRecord(record, options = {}) {
         pending: false
       }))
     : (record.thread?.user || record.thread?.agent ? [turnFromThreadState(record.thread, `${record.id}-turn`)] : []);
+  const turns = options.preserveTurns ? threadTurns : recordTurns;
 
   if (!options.skipWorkspace) {
     workspace.project = record.project || workspace.project;
@@ -865,7 +937,10 @@ function applySessionRecord(record, options = {}) {
     toolState.fileViewBySurface ||= {};
     toolState.fileViewBySurface[key] = "editor";
   }
-  applySessionSnapshot(sessionState.bySurface[key]);
+  applySessionSnapshot(sessionState.bySurface[key], {
+    preserveTerminal: options.preserveTerminal,
+    preserveTurns: options.preserveTurns
+  });
 }
 
 function applyFileState(response = {}) {
@@ -910,6 +985,29 @@ function sessionSnapshot(overrides = {}) {
     terminal: cloneValue(overrides.terminal || terminalState),
     thread: cloneValue(overrides.thread || threadStateFromTurns(turns)),
     turns
+  };
+}
+
+function emptySessionTerminalState() {
+  return {
+    output: "",
+    title: "Terminal",
+    summary: "",
+    userTerminal: {
+      output: "",
+      title: "User terminal",
+      summary: "Interactive user command surface.",
+      cwd: "",
+      running: false
+    },
+    agentTerminal: {
+      output: "Agent command output is not running.",
+      title: "Agent command terminal",
+      summary: "Read-only agent command output.",
+      cwd: "",
+      running: false
+    },
+    actions: []
   };
 }
 
