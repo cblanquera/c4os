@@ -67,7 +67,9 @@ harness. TASK-004 implements `openWorkspace()` for the Tauri backend path:
 ### loadWorkspace()
 
 - Fake workspace trust and trusted-root state.
-- Fake provider, model, runtime, settings, plugin, skill, and MCP records.
+- Fake provider, model, runtime, and settings records. Plugin, skill, and MCP
+  rows use the app-owned TASK-012 extension record shape, but runtime impact
+  remains disabled.
 - Fake Files records, editable file content, artifacts/previews, Browser state,
   and Terminal output.
 - Fake approvals, local memory, action records, workspace descriptors, and
@@ -92,7 +94,8 @@ harness. TASK-004 implements `openWorkspace()` for the Tauri backend path:
 ## Behavior Summary
 
 - Fake workspace trust and trusted-root state.
-- Fake provider, model, runtime, settings, plugin, skill, and MCP records.
+- Fake provider, model, runtime, and settings records. Extension records use
+  the TASK-012 app-owned shape and remain inert.
 - Fake session creation and fake structured thread/run events.
 - Fake agent processing, success, failure, and waiting transitions.
 - Fake Files records, editable file content, artifacts/previews, Browser state,

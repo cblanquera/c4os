@@ -57,17 +57,15 @@ export const settingsItems = [
   ["MCP Servers", "settings-mcp", "server"]
 ];
 
-// Plugin directory rows are local catalog fixtures for visual review only.
+// Extension rows are app-owned records; runtime access stays disabled until a
+// later explicit enablement slice.
 export const pluginCatalog = [
-  "GitHub",
-  "Slack",
-  "Notion",
-  "Linear",
-  "Gmail",
-  "Google Calendar",
-  "Google Drive",
-  "Figma",
-  "Vercel"
+  extensionRecord("plugin", "github", "GitHub", {
+    provenance: "Installed from Built by C4OS",
+    scopes: ["repo:read", "pull_request:read"],
+    toolAccess: ["review_threads"],
+    audit: ["Installed by workspace owner"]
+  })
 ];
 
 // Marketplaces are selectable plugin-directory sources. Built by C4OS is the
@@ -76,22 +74,24 @@ export const pluginMarketplaces = [
   { label: "Built by C4OS", summary: "Default marketplace", active: true }
 ];
 
-// Skill rows are fixture records for the r04 Skills settings route.
+// Skill rows use the same extension record contract as plugins and MCP.
 export const skillCatalog = [
-  "Ab Testing",
-  "Ad Creative",
-  "Ads",
-  "Ai Seo",
-  "Analytics",
-  "Aso",
-  "ChrisAI Agents"
+  extensionRecord("skill", "chrisai-agents", "ChrisAI Agents", {
+    provenance: "Installed from project .agents skills",
+    scopes: ["project"],
+    sharedData: ["current transcript", "selected files"],
+    audit: ["Enabled state reviewed"]
+  })
 ];
 
-// MCP rows are fixture records for the r04 MCP Servers settings route.
+// MCP rows are explicit connection records and are never invoked implicitly.
 export const mcpServers = [
-  "node_repl",
-  "openaiDeveloperDocs",
-  "stackpress_blog_mcp"
+  extensionRecord("mcp", "docs-mcp", "Docs MCP", {
+    provenance: "Connected from workspace settings",
+    scopes: ["project"],
+    toolAccess: ["read_docs"],
+    audit: ["Connection recorded"]
+  })
 ];
 
 export const browserState = {
@@ -175,6 +175,24 @@ export const sessionState = {
 
 function replaceArray(target, next) {
   target.splice(0, target.length, ...next);
+}
+
+function extensionRecord(kind, id, label, overrides = {}) {
+  return {
+    id,
+    kind,
+    label,
+    summary: overrides.summary || `${label} app-owned extension record`,
+    provenance: overrides.provenance || "Installed from C4OS settings",
+    scopes: overrides.scopes || ["project"],
+    workspaceScope: overrides.workspaceScope || "workspace",
+    projectScope: overrides.projectScope || "project",
+    sharedData: overrides.sharedData || ["workspace metadata"],
+    runtimeAccess: "disabled",
+    toolAccess: overrides.toolAccess || [],
+    enabled: false,
+    audit: overrides.audit || ["Record created"]
+  };
 }
 
 function assignObject(target, next) {
@@ -809,7 +827,8 @@ function runLabelFromPayload(payload = {}, turn = {}) {
 
 function ensureSessionForPrompt(prompt, created = null) {
   const label = created?.title || sessionLabel(prompt);
-  const id = created?.id || `local-${providerIdFromLabel(label)}`;
+  const hasConnectorSessionRecord = Boolean(created?.title || created?.thread || created?.turns || created?.terminal);
+  let id = hasConnectorSessionRecord && created?.id ? created.id : `local-${providerIdFromLabel(label)}`;
   workspace.session = label;
   workspace.sessionId = id;
   const project = projects.find((record) => record.name === workspace.project);
@@ -817,6 +836,11 @@ function ensureSessionForPrompt(prompt, created = null) {
   if (!project) {
     projects.unshift({ name: workspace.project, sessions: [sessionRecord] });
     return;
+  }
+  if (project.sessions.some((session) => sessionIdOf(session) === id && sessionLabelOf(session) !== label)) {
+    id = `${id}-${providerIdFromLabel(label)}`;
+    workspace.sessionId = id;
+    sessionRecord.id = id;
   }
   project.sessions = [
     sessionRecord,
@@ -835,10 +859,10 @@ function applyConnectorWorkspace(payload) {
   replaceArray(projects, payload.projects);
   replaceArray(providers, payload.providers);
   replaceArray(models, payload.models);
-  replaceArray(pluginCatalog, payload.pluginCatalog);
+  replaceArray(pluginCatalog, normalizeExtensionRecords(payload.pluginCatalog, "plugin"));
   replaceArray(pluginMarketplaces, payload.pluginMarketplaces);
-  replaceArray(skillCatalog, payload.skillCatalog);
-  replaceArray(mcpServers, payload.mcpServers);
+  replaceArray(skillCatalog, normalizeExtensionRecords(payload.skillCatalog, "skill"));
+  replaceArray(mcpServers, normalizeExtensionRecords(payload.mcpServers, "mcp"));
   assignObject(browserState, payload.browser);
   replaceArray(artifactState, payload.artifacts || []);
   assignObject(filesState, payload.files);
@@ -848,6 +872,31 @@ function applyConnectorWorkspace(payload) {
   if (activeRecord) applySessionRecord(activeRecord, { skipWorkspace: true });
   else replaceArray(threadTurns, workspace.session ? [turnFromThreadState(threadState, "connector-turn")] : []);
   captureActiveSessionState();
+}
+
+function normalizeExtensionRecords(records = [], kind = "plugin") {
+  return records.map((record) => {
+    if (record && typeof record === "object") {
+      return {
+        id: record.id || providerIdFromLabel(record.label || kind),
+        kind: record.kind || kind,
+        label: record.label || record.id || kind,
+        summary: record.summary || `${record.label || record.id || kind} extension record`,
+        provenance: record.provenance || "Installed from connector records",
+        scopes: Array.isArray(record.scopes) ? record.scopes : ["project"],
+        workspaceScope: record.workspaceScope || "workspace",
+        projectScope: record.projectScope || "project",
+        sharedData: Array.isArray(record.sharedData) ? record.sharedData : ["workspace metadata"],
+        runtimeAccess: record.runtimeAccess || "disabled",
+        toolAccess: Array.isArray(record.toolAccess) ? record.toolAccess : [],
+        enabled: record.enabled === true,
+        audit: Array.isArray(record.audit) ? record.audit : ["Record created"]
+      };
+    }
+    return extensionRecord(kind, providerIdFromLabel(record), String(record || kind), {
+      provenance: "Imported from legacy connector payload"
+    });
+  });
 }
 
 export function activateSessionState(project, session, options = {}) {

@@ -1,3 +1,4 @@
+use crate::extensions::{extension_records, ExtensionList};
 use crate::files::{list_files_state, read_file_state, save_file_state};
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{
@@ -182,14 +183,6 @@ pub struct TerminalCommandResponse {
 struct TerminalCommandScope {
     id: String,
     terminal: TerminalState,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionList {
-    pub plugins: Vec<String>,
-    pub skills: Vec<String>,
-    pub mcp_servers: Vec<String>,
 }
 
 #[tauri::command]
@@ -477,12 +470,7 @@ pub fn open_browser_preview(session_id: Option<String>) -> BrowserState {
 
 #[tauri::command]
 pub fn list_extensions() -> ExtensionList {
-    let workspace = mock_workspace();
-    ExtensionList {
-        plugins: workspace.plugin_catalog,
-        skills: workspace.skill_catalog,
-        mcp_servers: workspace.mcp_servers,
-    }
+    extension_records()
 }
 
 #[tauri::command]
@@ -1281,10 +1269,7 @@ mod tests {
     fn command_inventory_returns_task_002_mock_payloads() {
         assert_eq!(load_workspace().workspace.project, "Mock Workspace Alpha");
         assert_eq!(open_browser_preview(None).title, "Mock rendered page");
-        assert_eq!(
-            list_extensions().mcp_servers,
-            vec!["mock_node_repl", "mock_docs_mcp"]
-        );
+        assert_eq!(list_extensions().mcp_servers[0].label, "Docs MCP");
     }
 
     #[test]

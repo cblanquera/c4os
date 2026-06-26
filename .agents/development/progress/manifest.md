@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-012
+Status: ready-for-task-013
 Updated: 2026-06-26
 
 ## Active Stream
@@ -26,6 +26,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-011-terminal-slice.md`
 - `.agents/development/progress/items/TASK-011A-agent-command-terminal-bridge.md`
 - `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
+- `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
 
 ## Scope Rules
 
@@ -53,38 +54,18 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-011B is verified. Continue with `TASK-012` from
+TASK-012 is verified. Continue with `TASK-013` from
 `.agents/specs/mvp/tasks.md` without renumbering frozen MVP tasks. Preserve the
-verified TASK-011 Terminal slice: the existing right-panel Terminal tab renders
-an `@xterm/xterm` transcript backed by C4OS-owned `portable-pty` Tauri
-commands/events, while user terminal and agent command terminal state remain
-product-owned and distinct. Also preserve verified TASK-011A behavior: explicit
-command prompts such as `run ls` execute through backend-owned trusted
-workspace command execution and write command, cwd, status, exit code, output,
-session id, and `terminalKind: "agent"` into the bottom read-only Agent command
-terminal. Preserve verified TASK-011B behavior: new-session prompt submission
-immediately creates/selects the new chat item, switches into the transcript,
-shows the submitted user turn first, and renders a clear working/streaming or
-provider-setup-required assistant state. New-session Terminal must not inherit
-another chat's Agent command terminal output, project chat navigation is
-newest-first, and explicit agent commands should show their active running
-state and start the command bridge before the assistant response resolves.
-Agent command terminal output is latest-command-only; user terminal output
-remains transcript-based. Late terminal command responses must be ignored when
-their captured session id no longer matches the active chat session. Explicit
-command prompt reconciliation must preserve the locally active Agent terminal
-when a stale session snapshot returns, and simple prompts like
-`run pwd and git status` should execute as `pwd && git status`. New-session
-explicit command prompts should select the Terminal tool before the
-chat-session shell renders; existing chat sessions preserve the user's current
-right-panel tool. `run_terminal_command` is the sole backend owner of Agent
-command terminal mutations; `send_prompt` / `append_prompt` must not mutate or
-return explicit-command Agent terminal output. The native Tauri
-`run_terminal_command` request must accept the frontend's camelCase
-`sessionId` and `terminalKind` fields so explicit command prompts are recorded
-as Agent terminal actions, not user terminal actions. The explicit prompt
-command parser is transitional; do not expand it into natural-language command
-planning. Future command/tool planning should move to a formal runtime tool
-gateway where runtime events request stable tool identities, per-session tool
-config controls enabled state/access/approval, and C4OS owns execution and
-authority. Broad approval-policy hardening remains TASK-016.
+verified TASK-011 Terminal slice, TASK-011A Agent command terminal bridge, and
+TASK-011B new-session transition behavior. Preserve TASK-012 Settings IA order:
+Providers, Models, Runtimes, Configuration, Plugins, Skills, MCP Servers.
+Plugin, skill, and MCP records are now app-owned records with provenance,
+scopes, workspace/project scope, shared data, runtime/tool access, enabled
+state, and audit details. Runtime impact remains disabled until explicit
+enablement. Do not implement extension invocation, runtime tool gateway, broad
+approval-policy hardening, memory, audit hardening, TASK-016 security policy,
+or expansion of the transitional explicit prompt parser during TASK-013.
+TASK-013 should focus on concurrent session/run isolation across trusted
+folders and restart/resume behavior for transcripts, runtime references,
+provider/model context, artifacts, Browser/file/terminal/extension action
+records, and continuation run state.

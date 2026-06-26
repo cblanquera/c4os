@@ -2215,11 +2215,20 @@ function plugins() {
           ])
         ])
       ]),
-      h("div", { class: "plugin-grid" }, pluginCatalog.map((name) => h("article", { class: "plugin-card" }, [
-        h("div", { class: "plugin-logo" }, [h("span", { text: name.slice(0, 2) })]),
-        h("div", { class: "plugin-copy" }, [h("strong", { text: name }), h("span", { text: "Frontend-local catalog fixture" })]),
-        iconButton(`Add ${name}`, "add", "icon-button plugin-add-button", { "data-plugin-connect": name })
-      ])))
+      pluginCatalog.length === 0 ? extensionEmptyState(
+        "No plugins installed",
+        "Add a marketplace when plugin installation is available for this workspace."
+      ) : h("div", { class: "plugin-grid" }, pluginCatalog.map((record) => {
+        const label = extensionLabel(record);
+        return h("article", { class: "plugin-card", "data-extension-record": extensionId(record) }, [
+          h("div", { class: "plugin-logo" }, [h("span", { text: pluginInitials(label) })]),
+          h("div", { class: "plugin-copy" }, [
+            h("strong", { text: label }),
+            extensionMeta(record)
+          ]),
+          iconButton(`Add ${label}`, "add", "icon-button plugin-add-button", { "data-plugin-connect": label })
+        ]);
+      }))
     ]),
     pluginDialog(),
     marketplaceDialog()
@@ -2234,11 +2243,17 @@ function skills() {
     settingsTitle("Skills", "Manage installed skills and per-project availability."),
     h("div", { class: "skills-panel" }, [
       h("label", { class: "skills-search" }, [icon("search"), h("input", { type: "search", placeholder: "Search skills" })]),
-      h("div", { class: "skills-list" }, skillCatalog.map((name) => h("article", { class: "skill-row" }, [
-        h("button", { class: "skill-open", type: "button", "data-skill-open": name }, [h("span", { class: "skill-mark" }, [icon("file")]), h("span", { class: "skill-copy" }, [h("strong", { text: name }), h("span", { text: "Project availability fixture" })])]),
-        h("span", { class: "skill-scope", text: name === "ChrisAI Agents" ? "Project" : "Personal" }),
-        h("button", { class: "skill-switch", type: "button", "aria-label": "Skill enabled" }, [h("span")])
-      ])))
+      skillCatalog.length === 0 ? extensionEmptyState(
+        "No skills installed",
+        "Skills will appear here after a project or workspace skill folder is connected."
+      ) : h("div", { class: "skills-list" }, skillCatalog.map((record) => {
+        const label = extensionLabel(record);
+        return h("article", { class: "skill-row", "data-extension-record": extensionId(record) }, [
+          h("button", { class: "skill-open", type: "button", "data-skill-open": label }, [h("span", { class: "skill-mark" }, [icon("file")]), h("span", { class: "skill-copy" }, [h("strong", { text: label }), extensionMeta(record)])]),
+          h("span", { class: "skill-scope", text: `${extensionScope(record)} scope` }),
+          h("button", { class: "skill-switch", type: "button", "aria-label": extensionEnabled(record) ? "Skill enabled" : "Skill disabled", "aria-pressed": String(extensionEnabled(record)) }, [h("span")])
+        ]);
+      }))
     ]),
     skillDialog()
   ]);
@@ -2256,9 +2271,71 @@ function mcp() {
         button("Add server", "button primary", "add", { "data-mcp-add": true })
       ])
     ]),
-    h("section", { class: "mcp-section" }, [h("h2", { text: "Servers" }), h("div", { class: "mcp-list" }, mcpServers.map((name) => dataRow(name, "External tool connection fixture", iconButton(`${name} settings`, "settings"), true)))]),
+    h("section", { class: "mcp-section" }, [
+      h("h2", { text: "Servers" }),
+      mcpServers.length === 0 ? extensionEmptyState(
+        "No MCP servers connected",
+        "Connect a server when MCP connection persistence is available."
+      ) : h("div", { class: "mcp-list" }, mcpServers.map((record) => dataRow(
+      extensionLabel(record),
+      extensionSummary(record),
+      iconButton(`${extensionLabel(record)} settings`, "settings"),
+      {
+        kind: "extension",
+        label: `${extensionLabel(record)} ${extensionEnabled(record) ? "enabled" : "disabled"}`,
+        enabled: extensionEnabled(record)
+      }
+    )))
+    ]),
     mcpDialog()
   ]);
+}
+
+function extensionEmptyState(title, copy) {
+  return h("div", { class: "settings-empty", role: "status" }, [
+    h("strong", { text: title }),
+    h("span", { text: copy })
+  ]);
+}
+
+function extensionId(record) {
+  return record?.id || extensionLabel(record).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function extensionLabel(record) {
+  return typeof record === "string" ? record : record?.label || "Extension";
+}
+
+function extensionEnabled(record) {
+  return record?.enabled === true;
+}
+
+function extensionScope(record) {
+  const scopes = Array.isArray(record?.scopes) ? record.scopes : [];
+  if (scopes.includes("project")) return "Project";
+  if (scopes.includes("workspace")) return "Workspace";
+  return record?.projectScope ? "Project" : "Workspace";
+}
+
+function extensionSummary(record) {
+  if (typeof record === "string") return "Imported extension record";
+  const parts = [
+    record.provenance,
+    `${extensionScope(record)} scope`,
+    `Shared data: ${extensionList(record.sharedData)}`,
+    `Tool access: ${extensionList(record.toolAccess)}`,
+    `Runtime ${record.runtimeAccess || "disabled"}`,
+    `Audit: ${extensionList(record.audit)}`
+  ];
+  return parts.filter(Boolean).join(" - ");
+}
+
+function extensionMeta(record) {
+  return h("span", { text: extensionSummary(record) });
+}
+
+function extensionList(values) {
+  return Array.isArray(values) && values.length > 0 ? values.join(", ") : "none";
 }
 
 //--------------------------------------------------------------------//

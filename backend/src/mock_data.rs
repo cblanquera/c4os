@@ -8,10 +8,10 @@ pub struct WorkspacePayload {
     pub projects: Vec<ProjectRecord>,
     pub providers: Vec<ProviderRecord>,
     pub models: Vec<ModelRecord>,
-    pub plugin_catalog: Vec<String>,
+    pub plugin_catalog: Vec<crate::extensions::ExtensionRecord>,
     pub plugin_marketplaces: Vec<PluginMarketplace>,
-    pub skill_catalog: Vec<String>,
-    pub mcp_servers: Vec<String>,
+    pub skill_catalog: Vec<crate::extensions::ExtensionRecord>,
+    pub mcp_servers: Vec<crate::extensions::ExtensionRecord>,
     pub browser: BrowserState,
     pub artifacts: Vec<ArtifactRecord>,
     pub files: FilesState,
@@ -206,18 +206,14 @@ pub fn mock_workspace() -> WorkspacePayload {
         ],
         providers: vec![],
         models: vec![],
-        plugin_catalog: vec!["Mock GitHub".into(), "Mock Slack".into(), "Mock Linear".into()],
+        plugin_catalog: crate::extensions::plugin_records(),
         plugin_marketplaces: vec![PluginMarketplace {
             label: "Mock C4OS Marketplace".into(),
             summary: "Mock configured marketplace".into(),
             active: true,
         }],
-        skill_catalog: vec![
-            "Mock Skill Routing".into(),
-            "Mock Code Review".into(),
-            "Mock Browser QA".into(),
-        ],
-        mcp_servers: vec!["mock_node_repl".into(), "mock_docs_mcp".into()],
+        skill_catalog: crate::extensions::skill_records(),
+        mcp_servers: crate::extensions::mcp_server_records(),
         browser: BrowserState {
             url: "http://127.0.0.1:43123/mock-preview".into(),
             title: "Mock rendered page".into(),
@@ -293,10 +289,7 @@ mod tests {
 
         assert_eq!(payload["workspace"]["project"], "Mock Workspace Alpha");
         assert_eq!(payload["workspace"]["branch"], "mock/task-002");
-        assert_eq!(
-            payload["pluginCatalog"],
-            json!(["Mock GitHub", "Mock Slack", "Mock Linear"])
-        );
+        assert_eq!(payload["pluginCatalog"][0]["label"], json!("GitHub"));
         assert_eq!(
             payload["browser"]["summary"],
             "Mock Browser state from tests/server."

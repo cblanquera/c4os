@@ -324,6 +324,8 @@ input, textarea, select { font-weight: 400; }
 .marketplace-menu-divider { border-top: 1px solid var(--line); margin: 6px 4px; }
 .marketplace-add-option { color: var(--accent); font-weight: 800; justify-content: flex-start; }
 .plugin-grid { column-gap: 34px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); row-gap: 16px; }
+.settings-empty { align-items: start; background: var(--field); border: 1px dashed var(--line-strong); border-radius: var(--radius); color: var(--ink-soft); display: grid; gap: 6px; margin-top: 16px; min-height: 112px; padding: 22px; }
+.settings-empty strong { color: var(--ink); font-size: 15px; }
 .plugin-card { align-items: center; display: grid; gap: 12px; grid-template-columns: 40px minmax(0, 1fr) 32px; min-height: 56px; }
 .plugin-logo, .skill-mark { align-items: center; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius-sm); display: inline-flex; font-weight: 900; height: 40px; justify-content: center; width: 40px; }
 .plugin-copy strong, .plugin-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

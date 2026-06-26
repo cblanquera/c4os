@@ -20,12 +20,33 @@ export function createMockWorkspace() {
       { label: "mock-reviewer", provider: "Mock OpenRouter" },
       { label: "mock-local-small", provider: "Mock OpenAI" }
     ],
-    pluginCatalog: ["Mock GitHub", "Mock Slack", "Mock Linear"],
+    pluginCatalog: [
+      extensionRecord("plugin", "github", "GitHub", {
+        provenance: "Installed from Built by C4OS",
+        scopes: ["repo:read", "pull_request:read"],
+        toolAccess: ["review_threads"],
+        audit: ["Installed by workspace owner"]
+      })
+    ],
     pluginMarketplaces: [
       { label: "Mock C4OS Marketplace", summary: "Mock configured marketplace", active: true }
     ],
-    skillCatalog: ["Mock Skill Routing", "Mock Code Review", "Mock Browser QA"],
-    mcpServers: ["mock_node_repl", "mock_docs_mcp"],
+    skillCatalog: [
+      extensionRecord("skill", "chrisai-agents", "ChrisAI Agents", {
+        provenance: "Installed from project .agents skills",
+        scopes: ["project"],
+        sharedData: ["current transcript", "selected files"],
+        audit: ["Enabled state reviewed"]
+      })
+    ],
+    mcpServers: [
+      extensionRecord("mcp", "docs-mcp", "Docs MCP", {
+        provenance: "Connected from workspace settings",
+        scopes: ["project"],
+        toolAccess: ["read_docs"],
+        audit: ["Connection recorded"]
+      })
+    ],
     browser: {
       url: "http://127.0.0.1:43123/mock-preview",
       title: "Mock rendered page",
@@ -61,5 +82,23 @@ export function createMockWorkspace() {
       tool: "Mock project instructions loaded",
       run: "Mock agent ready"
     }
+  };
+}
+
+function extensionRecord(kind, id, label, overrides = {}) {
+  return {
+    id,
+    kind,
+    label,
+    summary: `${label} app-owned extension record`,
+    provenance: overrides.provenance,
+    scopes: overrides.scopes || ["project"],
+    workspaceScope: "Mock Workspace Alpha",
+    projectScope: "Mock Workspace Alpha",
+    sharedData: overrides.sharedData || ["workspace metadata"],
+    runtimeAccess: "disabled",
+    toolAccess: overrides.toolAccess || [],
+    enabled: false,
+    audit: overrides.audit || ["Record created"]
   };
 }

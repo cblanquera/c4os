@@ -37,6 +37,7 @@ Use this as the technical gate. It summarizes product-owned system concepts, run
 | Entity model, workspace descriptors, sessions, runs, secrets | `.agents/references/context/technical-specs/product-model.md` | Use for data model and ownership questions. |
 | OpenCode/Pi proof findings, adapter boundary, runtime implications | `.agents/references/context/technical-specs/runtime-adapter.md` | Use for runtime selection or adapter work. |
 | Trust, credential, Browser, Terminal, extension, and validation constraints | `.agents/references/context/technical-specs/constraints.md` | Use for safety-sensitive implementation or review. |
+| Skill, plugin, and MCP discovery/loading contract | `.agents/references/context/technical-specs/extension-loading.md` | Use before implementing extension install, discovery, loading, enablement, or invocation. |
 | Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where technical facts came from. |
 
 ## Summary
@@ -106,6 +107,9 @@ must not silently widen tool authority.
 - Secrets are secure references, not raw values in workspace files, general app tables, transcripts, or normal app data.
 - Generated or untrusted HTML must render without provider credentials, arbitrary workspace file access, shell state, or privileged app APIs.
 - Extensions are disabled by default before they affect runtime execution, model context, tools, or app-owned state.
+- Skill, plugin, and MCP discovery/loading should read metadata first and defer
+  full instruction loading, hook execution, MCP launch, and runtime access until
+  explicit enablement through app-owned records.
 
 ## Browser Constraints
 

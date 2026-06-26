@@ -76,6 +76,7 @@ Use these statuses for work-order records:
 | WO-004 | deferred | Add Pi as a first implementation adapter. | Runtime adapter validation |
 | WO-005 | deferred | Add Browser downloads, remote shells, SSH, containers, terminal multiplexing, or agent auto-run. | Future feature scope |
 | WO-006 | proposed | Define the runtime tool gateway contract before broad approval hardening: runtime requests tools through generic events, C4OS owns authority/execution, and per-session tool config maps tool identities to enabled state, access, and approval policy. | Technical Specs, TASK-016 |
+| WO-007 | proposed | Define extension discovery/loading before extension enablement or invocation: skills are `SKILL.md` folders, plugins are manifest bundles, MCP servers are explicit connections, and discovery records metadata without runtime impact. | Technical Specs, TASK-012, post-TASK-014 extension work |
 
 ## Implementation Guardrails
 

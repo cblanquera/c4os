@@ -8,8 +8,8 @@ TASK-004 activates the first real user flow by letting `open_workspace` create
 or load a non-secret `.c4os/workspace.json` descriptor for a local project
 folder and return that real workspace identity to the accepted r04 shell.
 
-This does not claim real provider, runtime, Browser, terminal, extension,
-security, approval, action, artifact, memory, or deep persistence behavior.
+This does not claim real provider, runtime extension invocation, security,
+approval, action, memory, or deep persistence behavior.
 
 ## Commands
 
@@ -21,8 +21,10 @@ security, approval, action, artifact, memory, or deep persistence behavior.
 - `create_session` creates C4OS-owned session records.
 - `read_file` and `save_file` enforce trusted-root Files behavior for the
   active workspace.
-- `run_terminal_command`, `open_browser_preview`, and `list_extensions` remain
-  Rust mock handlers matching the TASK-002 connector method inventory.
+- `run_terminal_command` and `open_browser_preview` expose the current
+  backend-owned Terminal and Browser preview records. `list_extensions` returns
+  app-owned plugin, skill, and MCP records with runtime access disabled until
+  explicit enablement.
 
 ## Workspace Descriptor
 
