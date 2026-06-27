@@ -32,7 +32,11 @@ pub struct WorkspaceSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectRecord {
+    #[serde(default)]
+    pub id: String,
     pub name: String,
+    #[serde(rename = "rootPath", default)]
+    pub root_path: String,
     pub sessions: Vec<ProjectSessionRecord>,
 }
 
@@ -180,7 +184,9 @@ pub fn mock_workspace() -> WorkspacePayload {
         },
         projects: vec![
             ProjectRecord {
+                id: "mock-workspace-alpha".into(),
                 name: "Mock Workspace Alpha".into(),
+                root_path: String::new(),
                 sessions: vec![
                     ProjectSessionRecord {
                         id: "mock-integration-run".into(),
@@ -193,14 +199,18 @@ pub fn mock_workspace() -> WorkspacePayload {
                 ],
             },
             ProjectRecord {
+                id: "mock-agent-lab".into(),
                 name: "Mock Agent Lab".into(),
+                root_path: String::new(),
                 sessions: vec![ProjectSessionRecord {
                     id: "harness-rehearsal".into(),
                     label: "Harness rehearsal".into(),
                 }],
             },
             ProjectRecord {
+                id: "mock-docs-workbench".into(),
                 name: "Mock Docs Workbench".into(),
+                root_path: String::new(),
                 sessions: vec![],
             },
         ],

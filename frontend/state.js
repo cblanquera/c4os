@@ -28,7 +28,7 @@ export const appStore = {
   turns: threadTurns,
   workspace,
   activeSessionKey() {
-    return sessionSurfaceKey(workspace.project, workspace.sessionId || workspace.session || "untitled");
+    return sessionSurfaceKey(activeProjectIdentity(), workspace.sessionId || workspace.session || "untitled");
   },
   setRoute(route) {
     this.route = route;
@@ -43,8 +43,8 @@ export const appStore = {
     this.tools.fileViewBySurface[surface] = view;
     return view;
   },
-  setActiveSession(project, session) {
-    return activateSessionState(project, session);
+  setActiveSession(project, session, options = {}) {
+    return activateSessionState(project, session, options);
   },
   composerFor(surface) {
     this.composer.bySurface[surface] ||= {
@@ -78,4 +78,8 @@ export const appStore = {
 
 export function sessionSurfaceKey(project, session) {
   return `chat:${project}:${session}`;
+}
+
+function activeProjectIdentity() {
+  return workspace.projectId || workspace.rootPath || workspace.project;
 }

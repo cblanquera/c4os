@@ -2,8 +2,8 @@ use crate::extensions::{extension_records, ExtensionList};
 use crate::files::{list_files_state, read_file_state, save_file_state};
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{
-    mock_workspace, ArtifactRecord, BrowserState, TerminalPaneState, TerminalState,
-    WorkspacePayload,
+    mock_workspace, ArtifactRecord, BrowserState, ProjectRecord, TerminalPaneState, TerminalState,
+    WorkspacePayload, WorkspaceSummary,
 };
 use crate::openrouter::RuntimeEvent;
 use crate::provider_models::{
@@ -19,10 +19,11 @@ use crate::provider_models::{
 use crate::runtime_sessions::{
     active_session, append_prompt, create_session as create_c4os_session,
     create_session_artifact_preview, load_session as load_c4os_session, project_sessions,
-    run_session_terminal_command, sessions as c4os_sessions,
-    set_session_browser as set_c4os_session_browser, set_session_files as set_c4os_session_files,
-    set_session_model as set_c4os_session_model, BrowserActionRecord, C4osSessionRecord,
-    CreateSessionRequest, SendPromptRequest, TerminalActionRecord,
+    run_session_terminal_command, session_workspace_root as c4os_session_workspace_root,
+    sessions as c4os_sessions, set_session_browser as set_c4os_session_browser,
+    set_session_files as set_c4os_session_files, set_session_model as set_c4os_session_model,
+    BrowserActionRecord, C4osSessionRecord, CreateSessionRequest, SendPromptRequest,
+    TerminalActionRecord,
 };
 use crate::terminal_pty::{
     read_terminal, resize_terminal, start_terminal, stop_terminal, write_terminal,
@@ -187,7 +188,9 @@ struct TerminalCommandScope {
 
 #[tauri::command]
 pub fn load_workspace() -> WorkspacePayload {
-    let mut payload = mock_workspace();
+    let mut payload = active_workspace_descriptor()
+        .map(|descriptor| workspace_payload_for_descriptor(&descriptor))
+        .unwrap_or_else(mock_workspace);
     apply_runtime_session_payload(&mut payload);
     payload.providers = provider_profiles()
         .into_iter()
@@ -292,8 +295,8 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
         content: None,
         session_id: None,
     });
-    let root =
-        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let session_id = active_file_session_id(request.session_id);
+    let root = file_command_root(session_id.as_deref())?;
     let path = request.path.unwrap_or_default();
     let state = if path.trim().is_empty() {
         list_files_state(&root, None)?
@@ -302,7 +305,7 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
     } else {
         read_file_state(&root, &path)?
     };
-    if let Some(session_id) = active_file_session_id(request.session_id) {
+    if let Some(session_id) = session_id {
         let _ = set_c4os_session_files(&session_id, state.clone());
     }
     Ok(FileReadResponse {
@@ -320,15 +323,15 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
 #[tauri::command]
 pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, String> {
     let request = request.ok_or_else(|| "File save request is required".to_string())?;
-    let root =
-        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let session_id = active_file_session_id(request.session_id);
+    let root = file_command_root(session_id.as_deref())?;
     let path = request
         .path
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "File path is required".to_string())?;
     let content = request.content.unwrap_or_default();
     let state = save_file_state(&root, &path, &content)?;
-    if let Some(session_id) = active_file_session_id(request.session_id) {
+    if let Some(session_id) = session_id {
         let _ = set_c4os_session_files(&session_id, state.clone());
     }
     Ok(FileSaveResponse {
@@ -450,7 +453,10 @@ pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, 
     if target.is_empty() {
         return Err("Browser target is required".into());
     }
-    let (browser, action) = browser_state_for_target(&session, target, &actor)?;
+    let root = c4os_session_workspace_root(&session.id)
+        .or_else(active_workspace_root)
+        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
+    let (browser, action) = browser_state_for_target(&session, &root, target, &actor)?;
     let action_record =
         set_c4os_session_browser(&session.id, browser.clone(), &actor, action, target)?;
     Ok(BrowserOpenResponse {
@@ -552,8 +558,30 @@ fn open_workspace_response(activation: WorkspaceActivation) -> WorkspaceOpenResp
     }
 }
 
+fn workspace_payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload {
+    let mut payload = mock_workspace();
+    payload.workspace = WorkspaceSummary {
+        project: descriptor.name.clone(),
+        session: String::new(),
+        branch: "main".into(),
+        model: DEFAULT_MODEL.into(),
+        session_id: String::new(),
+    };
+    payload.projects = vec![ProjectRecord {
+        id: descriptor.id.clone(),
+        name: descriptor.name.clone(),
+        root_path: descriptor.root_path.clone(),
+        sessions: vec![],
+    }];
+    payload.files = list_files_state(Path::new(&descriptor.root_path), None).unwrap_or_else(|_| {
+        payload.files.breadcrumbs = vec![descriptor.name.clone()];
+        payload.files.clone()
+    });
+    payload
+}
+
 fn apply_runtime_session_payload(payload: &mut WorkspacePayload) {
-    let sessions = c4os_sessions();
+    let sessions = active_workspace_sessions();
     payload.sessions = sessions.clone();
     for project in &mut payload.projects {
         project.sessions = project_sessions(&project.name);
@@ -581,6 +609,24 @@ fn active_file_session_id(request_session_id: Option<String>) -> Option<String> 
     request_session_id
         .filter(|value| !value.trim().is_empty())
         .or_else(|| active_session().map(|session| session.id))
+}
+
+fn active_workspace_sessions() -> Vec<C4osSessionRecord> {
+    let sessions = c4os_sessions();
+    let Some(descriptor) = active_workspace_descriptor() else {
+        return sessions;
+    };
+    sessions
+        .into_iter()
+        .filter(|session| session.workspace_id == descriptor.id)
+        .collect()
+}
+
+fn file_command_root(session_id: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(root) = session_id.and_then(c4os_session_workspace_root) {
+        return Ok(root);
+    }
+    active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())
 }
 
 fn terminal_scope_from_request(session_id: Option<String>) -> Result<TerminalCommandScope, String> {
@@ -643,10 +689,11 @@ fn normalized_browser_actor(actor: Option<&str>) -> String {
 
 fn browser_state_for_target(
     session: &C4osSessionRecord,
+    root: &Path,
     target: &str,
     actor: &str,
 ) -> Result<(BrowserState, &'static str), String> {
-    if let Some(public_url) = normalize_public_browser_url(target) {
+    if let Some(public_url) = normalize_public_browser_url(root, target) {
         return Ok((
             BrowserState {
                 url: public_url.clone(),
@@ -662,7 +709,7 @@ fn browser_state_for_target(
         ));
     }
 
-    let file = resolve_browser_file_target(target, actor)?;
+    let file = resolve_browser_file_target(root, target, actor)?;
     if !file.is_file() {
         return Err("Browser local target must be a trusted project file".into());
     }
@@ -708,7 +755,7 @@ fn local_browser_extension(file: &Path) -> Option<String> {
         .map(|extension| extension.to_ascii_lowercase())
 }
 
-fn normalize_public_browser_url(target: &str) -> Option<String> {
+fn normalize_public_browser_url(root: &Path, target: &str) -> Option<String> {
     if target.starts_with("http://") || target.starts_with("https://") {
         return Some(target.into());
     }
@@ -717,7 +764,6 @@ fn normalize_public_browser_url(target: &str) -> Option<String> {
         return None;
     }
 
-    let root = active_workspace_root()?;
     if root.join(target).exists() {
         return None;
     }
@@ -741,9 +787,7 @@ fn looks_like_public_host(target: &str) -> bool {
         })
 }
 
-fn resolve_browser_file_target(target: &str, actor: &str) -> Result<PathBuf, String> {
-    let root =
-        active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())?;
+fn resolve_browser_file_target(root: &Path, target: &str, actor: &str) -> Result<PathBuf, String> {
     if actor == "agent" {
         return crate::files::trusted_path(&root, target);
     }
@@ -1311,6 +1355,107 @@ mod tests {
     }
 
     #[test]
+    fn task_013_file_and_browser_commands_use_session_root_after_workspace_switch() {
+        crate::runtime_sessions::reset_session_store_for_test("task-013-command-roots");
+        let first_root = task_013_root("first-command-root");
+        let second_root = task_013_root("second-command-root");
+        fs::create_dir_all(&first_root).expect("create first command root");
+        fs::create_dir_all(&second_root).expect("create second command root");
+        fs::write(first_root.join("README.md"), "first workspace").expect("write first readme");
+        fs::write(second_root.join("README.md"), "second workspace").expect("write second readme");
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(first_root.to_string_lossy().into_owned()),
+        }))
+        .expect("open first workspace");
+        let session = create_session(
+            None,
+            Some("Root-bound session".into()),
+            Some("model/root".into()),
+        );
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(second_root.to_string_lossy().into_owned()),
+        }))
+        .expect("open second workspace");
+
+        let file = read_file(Some(FileRequest {
+            path: Some("README.md".into()),
+            content: None,
+            session_id: Some(session.id.clone()),
+        }))
+        .expect("read file through first session root");
+        assert_eq!(file.content, "first workspace");
+
+        let browser = open_browser(BrowserOpenRequest {
+            session_id: Some(session.id.clone()),
+            target: "README.md".into(),
+            actor: Some("agent".into()),
+            clear_request: true,
+        })
+        .expect("open browser through first session root");
+        assert!(browser.browser.local_path.contains("first-command-root"));
+        assert!(!browser.browser.local_path.contains("second-command-root"));
+
+        let _ = fs::remove_dir_all(first_root);
+        let _ = fs::remove_dir_all(second_root);
+    }
+
+    #[test]
+    fn task_013_workspace_payload_resumes_only_active_workspace_sessions() {
+        crate::runtime_sessions::reset_session_store_for_test("task-013-payload");
+        let first_root = task_013_root("first-payload-root");
+        let second_root = task_013_root("second-payload-root");
+        fs::create_dir_all(&first_root).expect("create first payload root");
+        fs::create_dir_all(&second_root).expect("create second payload root");
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(first_root.to_string_lossy().into_owned()),
+        }))
+        .expect("open first payload workspace");
+        let first = create_session(
+            None,
+            Some("First payload session".into()),
+            Some("model/first".into()),
+        );
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(second_root.to_string_lossy().into_owned()),
+        }))
+        .expect("open second payload workspace");
+        let second = create_session(
+            None,
+            Some("Second payload session".into()),
+            Some("model/second".into()),
+        );
+
+        let second_payload = load_workspace();
+        assert_eq!(second_payload.workspace.session_id, second.id);
+        assert_eq!(second_payload.projects[0].sessions.len(), 1);
+        assert_eq!(second_payload.projects[0].sessions[0].id, second.id);
+        assert!(second_payload
+            .sessions
+            .iter()
+            .all(|session| session.workspace_id == second.workspace_id));
+
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(first_root.to_string_lossy().into_owned()),
+        }))
+        .expect("reopen first payload workspace");
+        let first_payload = load_workspace();
+        assert_eq!(first_payload.workspace.session_id, first.id);
+        assert_eq!(first_payload.projects[0].sessions.len(), 1);
+        assert_eq!(first_payload.projects[0].sessions[0].id, first.id);
+        assert!(first_payload
+            .sessions
+            .iter()
+            .all(|session| session.workspace_id == first.workspace_id));
+
+        let _ = fs::remove_dir_all(first_root);
+        let _ = fs::remove_dir_all(second_root);
+    }
+
+    #[test]
     fn task_004_open_workspace_returns_real_descriptor_backed_payload() {
         let root = std::env::temp_dir().join("c4os-task-004-command");
         let _ = std::fs::remove_dir_all(&root);
@@ -1338,6 +1483,12 @@ mod tests {
 
     fn task_011_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("c4os-task-011-{name}"));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+
+    fn task_013_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("c4os-task-013-{name}"));
         let _ = fs::remove_dir_all(&root);
         root
     }

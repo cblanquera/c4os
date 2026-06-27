@@ -1,7 +1,7 @@
 # Progress Manifest
 
-Status: ready-for-task-013
-Updated: 2026-06-26
+Status: ready-for-task-014
+Updated: 2026-06-27
 
 ## Active Stream
 
@@ -27,6 +27,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-011A-agent-command-terminal-bridge.md`
 - `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
 - `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
+- `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
 
 ## Scope Rules
 
@@ -54,18 +55,19 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-012 is verified. Continue with `TASK-013` from
-`.agents/specs/mvp/tasks.md` without renumbering frozen MVP tasks. Preserve the
-verified TASK-011 Terminal slice, TASK-011A Agent command terminal bridge, and
-TASK-011B new-session transition behavior. Preserve TASK-012 Settings IA order:
-Providers, Models, Runtimes, Configuration, Plugins, Skills, MCP Servers.
-Plugin, skill, and MCP records are now app-owned records with provenance,
-scopes, workspace/project scope, shared data, runtime/tool access, enabled
-state, and audit details. Runtime impact remains disabled until explicit
-enablement. Do not implement extension invocation, runtime tool gateway, broad
-approval-policy hardening, memory, audit hardening, TASK-016 security policy,
-or expansion of the transitional explicit prompt parser during TASK-013.
-TASK-013 should focus on concurrent session/run isolation across trusted
-folders and restart/resume behavior for transcripts, runtime references,
-provider/model context, artifacts, Browser/file/terminal/extension action
-records, and continuation run state.
+TASK-013 is verified, including built-app manual QA for same-name trusted
+folders, restart/resume, OpenRouter-backed model context, and the preserved
+Terminal split. Continue with `TASK-014` from
+`.agents/specs/mvp/tasks.md` without renumbering frozen MVP tasks. Preserve
+trusted-folder session/run isolation and restart/resume behavior for
+transcripts, runtime references, provider/model context, artifacts, Browser,
+Files, Terminal, and inert extension records. Preserve the verified TASK-011
+Terminal slice, TASK-011A Agent command terminal bridge, TASK-011B new-session
+transition behavior, and TASK-012 Settings IA order: Providers, Models,
+Runtimes, Configuration, Plugins, Skills, MCP Servers. TASK-014 should add
+app-owned local memory, action records, and audit records needed by the MVP
+surfaces while keeping them separate from raw provider state, workspace
+descriptors, and runtime-local storage. Keep extension invocation, runtime tool
+gateway work, broad approval-policy hardening, TASK-016 security policy, and
+transitional explicit prompt parser expansion out of TASK-014 unless the user
+explicitly widens scope.

@@ -16,6 +16,8 @@ pub struct C4osWorkspaceRecord {
     pub id: String,
     pub project: String,
     pub branch: String,
+    #[serde(default)]
+    pub root_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,6 +25,8 @@ pub struct C4osWorkspaceRecord {
 pub struct C4osSessionRecord {
     pub id: String,
     pub workspace_id: String,
+    #[serde(default)]
+    pub workspace_root: String,
     pub project: String,
     pub title: String,
     pub selected_model: String,
@@ -150,17 +154,19 @@ static STORE: OnceLock<Mutex<SessionStore>> = OnceLock::new();
 
 pub fn create_session(request: CreateSessionRequest) -> C4osSessionRecord {
     let mut store = load_store();
+    let workspace = current_workspace_record(&store);
+    store.workspace = workspace.clone();
     let project = request
         .project
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| store.workspace.project.clone());
+        .unwrap_or_else(|| workspace.project.clone());
     let title = request
         .label
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "New chat session".into());
     let selected_model = request.model.unwrap_or_default();
     let id = unique_session_id(&store, &title);
-    let mut session = empty_session(&store.workspace, &id, &project, &title, &selected_model);
+    let mut session = empty_session(&workspace, &id, &project, &title, &selected_model);
     session.thread = ThreadState {
         user: title.clone(),
         agent: "Session created. Send a prompt to start the runtime.".into(),
@@ -233,11 +239,13 @@ pub fn sessions() -> Vec<C4osSessionRecord> {
 }
 
 pub fn project_sessions(project: &str) -> Vec<ProjectSessionRecord> {
-    load_store()
+    let store = load_store();
+    let workspace = current_workspace_record(&store);
+    store
         .sessions
         .into_iter()
         .rev()
-        .filter(|session| session.project == project)
+        .filter(|session| session.workspace_id == workspace.id && session.project == project)
         .map(|session| ProjectSessionRecord {
             id: session.id,
             label: session.title,
@@ -246,7 +254,12 @@ pub fn project_sessions(project: &str) -> Vec<ProjectSessionRecord> {
 }
 
 pub fn active_session() -> Option<C4osSessionRecord> {
-    load_store().sessions.into_iter().next()
+    let store = load_store();
+    let workspace = current_workspace_record(&store);
+    store
+        .sessions
+        .into_iter()
+        .find(|session| session.workspace_id == workspace.id)
 }
 
 pub fn set_session_model(session_id: &str, model: &str) -> Result<(), String> {
@@ -360,16 +373,18 @@ pub fn run_session_terminal_command(
         .iter_mut()
         .find(|session| session.id == session_id)
         .ok_or_else(|| format!("Unknown C4OS session '{session_id}'"))?;
-    let execution = run_trusted_workspace_command(command)?;
+    let root = session_workspace_root_for_record(session)?;
+    let execution = run_trusted_workspace_command(command, &root)?;
     let (_terminal, record) = apply_terminal_command_result(session, terminal_kind, execution);
     let terminal = session.terminal.clone();
     save_store(&store);
     Ok((terminal, record))
 }
 
-fn run_trusted_workspace_command(command: &str) -> Result<TerminalCommandExecution, String> {
-    let root = crate::workspace::active_workspace_root()
-        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
+fn run_trusted_workspace_command(
+    command: &str,
+    root: &std::path::Path,
+) -> Result<TerminalCommandExecution, String> {
     let command = command.trim();
     if command.is_empty() {
         return Err("Terminal command is required".into());
@@ -512,13 +527,19 @@ fn empty_session(
     selected_model: &str,
 ) -> C4osSessionRecord {
     let fallback = mock_workspace();
-    let files = crate::workspace::active_workspace_root()
-        .and_then(|root| crate::files::list_files_state(&root, None).ok())
+    let workspace_root = workspace_root_path(workspace);
+    let files = workspace_root
+        .as_ref()
+        .and_then(|root| crate::files::list_files_state(root, None).ok())
         .unwrap_or_else(|| fallback.files.clone());
     let mut browser = fallback.browser;
-    browser.profile_id = format!("browser-profile-{}", stable_id(project));
+    browser.profile_id = format!(
+        "browser-profile-{}-{}",
+        stable_id(&workspace.id),
+        stable_id(project)
+    );
     let mut terminal = fallback.terminal;
-    if let Some(root) = crate::workspace::active_workspace_root() {
+    if let Some(root) = workspace_root.as_ref() {
         let cwd = root.to_string_lossy().into_owned();
         terminal.user_terminal.cwd = cwd.clone();
         terminal.agent_terminal.cwd = cwd;
@@ -526,6 +547,7 @@ fn empty_session(
     C4osSessionRecord {
         id: id.into(),
         workspace_id: workspace.id.clone(),
+        workspace_root: workspace.root_path.trim().to_string(),
         project: project.into(),
         title: title.into(),
         selected_model: selected_model.into(),
@@ -553,7 +575,54 @@ fn empty_session(
 }
 
 pub fn browser_profile_id(session: &C4osSessionRecord) -> String {
-    format!("browser-profile-{}", stable_id(&session.project))
+    format!(
+        "browser-profile-{}-{}",
+        stable_id(&session.workspace_id),
+        stable_id(&session.project)
+    )
+}
+
+pub fn session_workspace_root(session_id: &str) -> Option<PathBuf> {
+    load_session(session_id).and_then(|session| session_workspace_root_for_record(&session).ok())
+}
+
+pub fn active_workspace_session_ids() -> Vec<String> {
+    let store = load_store();
+    let workspace = current_workspace_record(&store);
+    store
+        .sessions
+        .into_iter()
+        .filter(|session| session.workspace_id == workspace.id)
+        .map(|session| session.id)
+        .collect()
+}
+
+fn current_workspace_record(store: &SessionStore) -> C4osWorkspaceRecord {
+    if let Some(descriptor) = crate::workspace::active_workspace_descriptor() {
+        return C4osWorkspaceRecord {
+            id: descriptor.id,
+            project: descriptor.name,
+            branch: "main".into(),
+            root_path: descriptor.root_path,
+        };
+    }
+    store.workspace.clone()
+}
+
+fn workspace_root_path(workspace: &C4osWorkspaceRecord) -> Option<PathBuf> {
+    if workspace.root_path.trim().is_empty() {
+        return crate::workspace::active_workspace_root();
+    }
+    Some(PathBuf::from(&workspace.root_path))
+}
+
+fn session_workspace_root_for_record(session: &C4osSessionRecord) -> Result<PathBuf, String> {
+    if !session.workspace_root.trim().is_empty() {
+        return fs::canonicalize(&session.workspace_root)
+            .map_err(|error| format!("Cannot resolve session workspace root: {error}"));
+    }
+    crate::workspace::active_workspace_root()
+        .ok_or_else(|| "No trusted workspace root is active".to_string())
 }
 
 fn normalized_terminal_kind(value: &str) -> String {
@@ -607,6 +676,7 @@ fn default_store() -> SessionStore {
             id: stable_id(&workspace.project),
             project: workspace.project,
             branch: workspace.branch,
+            root_path: String::new(),
         },
         sessions: Vec::new(),
     }
@@ -616,6 +686,18 @@ fn store_path() -> PathBuf {
     std::env::var("C4OS_SESSION_STORE")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir().join("c4os-task-007-sessions.json"))
+}
+
+#[cfg(test)]
+pub(crate) fn reset_session_store_for_test(name: &str) {
+    let path = std::env::temp_dir().join(format!("c4os-{name}.json"));
+    std::env::set_var("C4OS_SESSION_STORE", path);
+    let mut store = STORE
+        .get_or_init(|| Mutex::new(default_store()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    *store = default_store();
+    let _ = fs::remove_file(store_path());
 }
 
 fn unique_session_id(store: &SessionStore, title: &str) -> String {
@@ -884,14 +966,91 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn task_013_sessions_are_isolated_by_trusted_workspace_root() {
+        reset_task_007_state("workspace-isolation");
+        let first_root = task_013_workspace_root("first");
+        let second_root = task_013_workspace_root("second");
+        fs::create_dir_all(&first_root).expect("create first workspace");
+        fs::create_dir_all(&second_root).expect("create second workspace");
+        fs::write(first_root.join("workspace-file.txt"), "first").expect("write first fixture");
+        fs::write(second_root.join("workspace-file.txt"), "second").expect("write second fixture");
+
+        crate::workspace::activate_workspace_at(&first_root).expect("activate first workspace");
+        let first = create_session(CreateSessionRequest {
+            project: None,
+            label: Some("Shared title".into()),
+            model: Some("model/first".into()),
+        });
+
+        crate::workspace::activate_workspace_at(&second_root).expect("activate second workspace");
+        let second = create_session(CreateSessionRequest {
+            project: None,
+            label: Some("Shared title".into()),
+            model: Some("model/second".into()),
+        });
+
+        assert_ne!(first.workspace_id, second.workspace_id);
+        assert_ne!(first.id, second.id);
+        assert_eq!(project_sessions("shared").len(), 1);
+        assert_eq!(project_sessions("shared")[0].id, second.id);
+
+        crate::workspace::activate_workspace_at(&first_root).expect("reactivate first workspace");
+        assert_eq!(project_sessions("shared").len(), 1);
+        assert_eq!(project_sessions("shared")[0].id, first.id);
+
+        let _ = fs::remove_dir_all(first_root);
+        let _ = fs::remove_dir_all(second_root);
+    }
+
+    #[test]
+    fn task_013_terminal_command_uses_session_workspace_after_switching_roots() {
+        reset_task_007_state("terminal-root");
+        let first_root = task_013_workspace_root("terminal-first");
+        let second_root = task_013_workspace_root("terminal-second");
+        fs::create_dir_all(&first_root).expect("create first terminal workspace");
+        fs::create_dir_all(&second_root).expect("create second terminal workspace");
+        fs::write(first_root.join("root-marker.txt"), "first").expect("write first marker");
+        fs::write(second_root.join("root-marker.txt"), "second").expect("write second marker");
+
+        crate::workspace::activate_workspace_at(&first_root).expect("activate first terminal root");
+        let first = create_session(CreateSessionRequest {
+            project: None,
+            label: Some("Root-bound command".into()),
+            model: Some("model/first".into()),
+        });
+
+        crate::workspace::activate_workspace_at(&second_root)
+            .expect("activate second terminal root");
+        let (_terminal, action) =
+            run_session_terminal_command(&first.id, "cat root-marker.txt", "agent")
+                .expect("run command against first session root");
+
+        let canonical_first = fs::canonicalize(&first_root).expect("canonical first root");
+        assert_eq!(action.cwd, canonical_first.to_string_lossy());
+        assert!(action.output.contains("first"));
+        assert!(!action.output.contains("second"));
+
+        let restored = load_session(&first.id).expect("restore first session");
+        assert_eq!(restored.terminal.actions.len(), 1);
+        assert_eq!(
+            restored.terminal.actions[0].cwd,
+            canonical_first.to_string_lossy()
+        );
+
+        let _ = fs::remove_dir_all(first_root);
+        let _ = fs::remove_dir_all(second_root);
+    }
+
     fn reset_task_007_state(name: &str) {
-        let path = std::env::temp_dir().join(format!("c4os-task-007-{name}.json"));
-        std::env::set_var("C4OS_SESSION_STORE", path);
-        let mut store = STORE
-            .get_or_init(|| Mutex::new(default_store()))
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        *store = default_store();
-        let _ = fs::remove_file(store_path());
+        reset_session_store_for_test(&format!("task-007-{name}"));
+    }
+
+    fn task_013_workspace_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir()
+            .join(format!("c4os-task-013-{name}"))
+            .join("shared");
+        let _ = fs::remove_dir_all(root.parent().expect("workspace parent"));
+        root
     }
 }

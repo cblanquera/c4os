@@ -160,7 +160,9 @@ fn payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> WorkspacePayload 
         session_id: "".into(),
     };
     payload.projects = vec![ProjectRecord {
+        id: descriptor.id.clone(),
         name: descriptor.name.clone(),
+        root_path: descriptor.root_path.clone(),
         sessions: vec![],
     }];
     payload.files = crate::files::list_files_state(Path::new(&descriptor.root_path), None)

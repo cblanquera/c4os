@@ -23,7 +23,9 @@ export const routes = new Set([
 // Frontend fallback state keeps routes renderable before a connector hydrates
 // the shell from server or native app state.
 export const workspace = {
+  projectId: "",
   project: "Project Alpha",
+  rootPath: "",
   session: "Integration planning",
   branch: "main",
   model: "",
@@ -248,7 +250,7 @@ export function beginConnectorStateLoad() {
     });
 }
 
-export async function openConnectorWorkspace(path) {
+export async function openConnectorWorkspace(path, options = {}) {
   if (!connectorState.connector.available || !connectorState.connector.openWorkspace) return;
 
   connectorState.error = null;
@@ -257,7 +259,7 @@ export async function openConnectorWorkspace(path) {
   try {
     const response = await connectorState.connector.openWorkspace(path);
     const payload = response.payload || response;
-    applyConnectorWorkspace(payload);
+    applyConnectorWorkspace(payload, { mergeProjects: options.mergeProjects === true });
     return payload;
   } catch (error) {
     connectorState.error = error.message;
@@ -831,10 +833,15 @@ function ensureSessionForPrompt(prompt, created = null) {
   let id = hasConnectorSessionRecord && created?.id ? created.id : `local-${providerIdFromLabel(label)}`;
   workspace.session = label;
   workspace.sessionId = id;
-  const project = projects.find((record) => record.name === workspace.project);
+  const project = projects.find((record) => projectIdentity(record) === activeProjectIdentity());
   const sessionRecord = { id, label };
   if (!project) {
-    projects.unshift({ name: workspace.project, sessions: [sessionRecord] });
+    projects.unshift({
+      id: workspace.projectId || "",
+      name: workspace.project,
+      rootPath: workspace.rootPath || "",
+      sessions: [sessionRecord]
+    });
     return;
   }
   if (project.sessions.some((session) => sessionIdOf(session) === id && sessionLabelOf(session) !== label)) {
@@ -853,10 +860,13 @@ function sessionLabel(prompt) {
   return text.length > 48 ? `${text.slice(0, 45)}...` : text;
 }
 
-function applyConnectorWorkspace(payload) {
+function applyConnectorWorkspace(payload, options = {}) {
   assignObject(workspace, payload.workspace);
   replaceArray(persistentSessions, payload.sessions || []);
-  replaceArray(projects, payload.projects);
+  replaceArray(projects, options.mergeProjects ? mergedProjectList(payload.projects || []) : payload.projects);
+  const activeProject = (payload.projects || []).find((project) => project?.name === workspace.project) || (payload.projects || [])[0];
+  workspace.projectId = activeProject?.id || workspace.projectId || "";
+  workspace.rootPath = activeProject?.rootPath || activeProject?.root_path || workspace.rootPath || "";
   replaceArray(providers, payload.providers);
   replaceArray(models, payload.models);
   replaceArray(pluginCatalog, normalizeExtensionRecords(payload.pluginCatalog, "plugin"));
@@ -872,6 +882,44 @@ function applyConnectorWorkspace(payload) {
   if (activeRecord) applySessionRecord(activeRecord, { skipWorkspace: true });
   else replaceArray(threadTurns, workspace.session ? [turnFromThreadState(threadState, "connector-turn")] : []);
   captureActiveSessionState();
+}
+
+function mergedProjectList(nextProjects = []) {
+  const byIdentity = new Map();
+  const nextByIdentity = new Map();
+  for (const project of projects) {
+    const key = projectIdentity(project);
+    if (key) byIdentity.set(key, project);
+  }
+  for (const project of nextProjects) {
+    const key = projectIdentity(project);
+    if (key) nextByIdentity.set(key, project);
+  }
+  const prependedProjects = nextProjects.filter((project) => {
+    const key = projectIdentity(project);
+    return key && !byIdentity.has(key);
+  });
+  return [
+    ...prependedProjects,
+    ...projects.map((project) => {
+      const key = projectIdentity(project);
+      return key && nextByIdentity.has(key) ? nextByIdentity.get(key) : project;
+    })
+  ].map((project) => {
+    const key = projectIdentity(project);
+    if (!key) return project;
+    const existing = byIdentity.get(key);
+    if (!existing) return project;
+    return {
+      ...existing,
+      ...project,
+      sessions: Array.isArray(project.sessions) ? project.sessions : existing.sessions
+    };
+  });
+}
+
+function projectIdentity(project) {
+  return project?.id || project?.rootPath || project?.root_path || project?.name || "";
 }
 
 function normalizeExtensionRecords(records = [], kind = "plugin") {
@@ -903,10 +951,12 @@ export function activateSessionState(project, session, options = {}) {
   if (!options.skipCapture) captureActiveSessionState();
 
   workspace.project = project;
+  if (options.projectId !== undefined) workspace.projectId = options.projectId || "";
+  if (options.rootPath !== undefined) workspace.rootPath = options.rootPath || "";
   workspace.session = sessionLabelOf(session);
   const nextSessionId = options.sessionId !== undefined ? options.sessionId : sessionIdOf(session);
   workspace.sessionId = nextSessionId || "";
-  const key = sessionKey(project, workspace.session, workspace.sessionId);
+  const key = sessionKey(activeProjectIdentity(), workspace.session, workspace.sessionId);
   if (options.reset || !sessionState.bySurface[key]) {
     sessionState.bySurface[key] = sessionSnapshot({
       model: options.model ?? workspace.model,
@@ -922,7 +972,7 @@ export function activateSessionState(project, session, options = {}) {
 
 function captureActiveSessionState() {
   if (!workspace.project || !workspace.session) return;
-  sessionState.bySurface[sessionKey(workspace.project, workspace.session, workspace.sessionId)] = sessionSnapshot({
+  sessionState.bySurface[sessionKey(activeProjectIdentity(), workspace.session, workspace.sessionId)] = sessionSnapshot({
     browser: browserState,
     artifacts: artifactState,
     files: filesState,
@@ -971,7 +1021,7 @@ function applySessionRecord(record, options = {}) {
     workspace.session = record.title || workspace.session;
     workspace.sessionId = record.id || workspace.sessionId;
   }
-  const key = sessionKey(record.project || workspace.project, record.title || workspace.session, record.id || workspace.sessionId);
+  const key = sessionKey(activeProjectIdentity(), record.title || workspace.session, record.id || workspace.sessionId);
   sessionState.bySurface[key] = sessionSnapshot({
     browser: record.browser,
     artifacts: record.artifacts || [],
@@ -1085,6 +1135,10 @@ function threadStateFromTurns(turns) {
 
 function sessionKey(project, session, sessionId = "") {
   return `chat:${project}:${sessionId || session || "untitled"}`;
+}
+
+function activeProjectIdentity() {
+  return workspace.projectId || workspace.rootPath || workspace.project;
 }
 
 function cloneValue(value) {

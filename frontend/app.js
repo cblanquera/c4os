@@ -60,6 +60,7 @@ let terminalKey = "";
 let terminalOutputUnlisten = null;
 let terminalOutputVersion = 0;
 let terminalOutputPollTimer = null;
+let workspaceOpenBound = false;
 
 //--------------------------------------------------------------------//
 // Shared UI primitives
@@ -111,7 +112,7 @@ function render() {
     lastAppRouteBeforeSettings = previousRoute;
   }
   if (route === "new-session" && previousRoute === "chat-session") {
-    const surface = `new:${workspace.project}`;
+    const surface = `new:${activeProjectIdentity()}`;
     appStore.composer.bySurface[surface] = {
       ...appStore.composerFor(surface),
       model: null,
@@ -548,10 +549,17 @@ function bindSessionRows() {
     control.dataset.boundSessionTarget = "true";
     control.addEventListener("click", (event) => {
       event.preventDefault();
-      appStore.setActiveSession(control.dataset.projectTarget, {
-        id: control.dataset.sessionId || "",
-        label: control.dataset.sessionTarget
-      });
+      appStore.setActiveSession(
+        control.dataset.projectTarget,
+        {
+          id: control.dataset.sessionId || "",
+          label: control.dataset.sessionTarget
+        },
+        {
+          projectId: control.dataset.projectId || "",
+          rootPath: control.dataset.projectRootPath || ""
+        }
+      );
       const finalize = () => {
         window.location.hash = "chat-session";
         updateShellSessionDom();
@@ -566,9 +574,16 @@ function bindSessionRows() {
   document.querySelectorAll("[data-project-target]:not([data-session-target])").forEach((control) => {
     if (control.dataset.boundProjectTarget) return;
     control.dataset.boundProjectTarget = "true";
-    control.addEventListener("click", (event) => {
+    control.addEventListener("click", async (event) => {
       event.preventDefault();
-      workspace.project = control.dataset.projectTarget;
+      const rootPath = control.dataset.projectRootPath || "";
+      if (rootPath && connectorState.connector.available) {
+        await openConnectorWorkspace(rootPath, { mergeProjects: true });
+      } else {
+        workspace.project = control.dataset.projectTarget;
+        workspace.projectId = control.dataset.projectId || "";
+        workspace.rootPath = rootPath;
+      }
       window.location.hash = "new-session";
       render();
     });
@@ -1025,7 +1040,7 @@ function updateShellSessionDom() {
   document.body.dataset.route = "chat-session";
   shell.querySelector(".topbar strong").textContent = workspace.session;
   shell.querySelectorAll(".project-row").forEach((row) => {
-    row.classList.toggle("is-active", row.dataset.projectTarget === workspace.project);
+    row.classList.toggle("is-active", projectDatasetIdentity(row.dataset) === activeProjectIdentity());
   });
   shell.querySelectorAll(".session-row").forEach((row) => {
     row.classList.toggle("is-active", (row.dataset.sessionId || row.dataset.sessionTarget) === (workspace.sessionId || workspace.session));
@@ -1063,16 +1078,21 @@ function applyShellState() {
 
 function bindWorkspaceOpen() {
   if (!connectorState.connector.available) return;
-  document.querySelectorAll("[data-open-workspace]").forEach((control) => {
-    control.addEventListener("click", async () => {
-      try {
-        await openConnectorWorkspace();
-        window.location.hash = "new-session";
-        render();
-      } catch {
-        render();
-      }
-    });
+  if (workspaceOpenBound) return;
+  workspaceOpenBound = true;
+  document.body.addEventListener("click", async (event) => {
+    const control = event.target.closest?.("[data-open-workspace]");
+    if (!control) return;
+    event.preventDefault();
+    try {
+      await openConnectorWorkspace(undefined, {
+        mergeProjects: control.dataset.openWorkspace === "append"
+      });
+      window.location.hash = "new-session";
+      render();
+    } catch {
+      render();
+    }
   });
 }
 
@@ -1154,8 +1174,8 @@ function setActiveToolForRoute(route, tool) {
 }
 
 function toolSurfaceKey(route) {
-  if (route === "chat-session") return sessionSurfaceKey(workspace.project, workspace.sessionId || workspace.session || "untitled");
-  if (route === "new-session" || route === "providers-popover" || route === "models-popover") return `new:${workspace.project}`;
+  if (route === "chat-session") return sessionSurfaceKey(activeProjectIdentity(), workspace.sessionId || workspace.session || "untitled");
+  if (route === "new-session" || route === "providers-popover" || route === "models-popover") return `new:${activeProjectIdentity()}`;
   return `route:${route}`;
 }
 
@@ -1166,22 +1186,25 @@ function defaultToolForRoute(route) {
 }
 
 function composerSurfaceKey() {
-  return routeFromHash() === "chat-session" ? appStore.activeSessionKey() : `new:${workspace.project}`;
+  return routeFromHash() === "chat-session" ? appStore.activeSessionKey() : `new:${activeProjectIdentity()}`;
 }
 
 /**
  * Render project/session navigation for the left shell panel.
  */
 function renderSidebar(chat) {
+  const activeProject = activeProjectIdentity();
   return h("aside", { class: "sidebar", "aria-label": "Projects" }, [
     h("label", { class: "search-field" }, [icon("search"), h("span", { class: "sr-only", text: "Search projects" }), h("input", { type: "search", placeholder: "Search projects" })]),
     h("div", { class: "nav-section" }, [
-      h("div", { class: "section-head" }, [h("span", { text: "Projects" }), iconButton("Add Project", "add")]),
+      h("div", { class: "section-head" }, [h("span", { text: "Projects" }), iconButton("Add Project", "add", "icon-button", { "data-open-workspace": "append" })]),
       ...projects.flatMap((project) => [
         h("a", {
-          class: `project-row${project.name === workspace.project && !chat ? " is-active" : ""}`,
+          class: `project-row${projectIdentity(project) === activeProject && !chat ? " is-active" : ""}`,
           href: "#new-session",
-          "data-project-target": project.name
+          "data-project-target": project.name,
+          "data-project-id": project.id || "",
+          "data-project-root-path": project.rootPath || project.root_path || ""
         }, [icon("folder"), h("span", { text: project.name }), h("span", { class: "row-tools" }, [icon("pencil"), icon("trash")])]),
         ...project.sessions.map((session) => {
           const label = sessionLabel(session);
@@ -1190,6 +1213,8 @@ function renderSidebar(chat) {
           class: `session-row${chat && (id || label) === (workspace.sessionId || workspace.session) ? " is-active" : ""}`,
           href: "#chat-session",
           "data-project-target": project.name,
+          "data-project-id": project.id || "",
+          "data-project-root-path": project.rootPath || project.root_path || "",
           "data-session-target": label,
           "data-session-id": id
         }, [h("span", { text: label })]);
@@ -1206,6 +1231,18 @@ function sessionLabel(session) {
 
 function sessionId(session) {
   return typeof session === "string" ? "" : session?.id || session?.sessionId || "";
+}
+
+function projectIdentity(project) {
+  return project?.id || project?.rootPath || project?.root_path || project?.name || "";
+}
+
+function activeProjectIdentity() {
+  return workspace.projectId || workspace.rootPath || workspace.project;
+}
+
+function projectDatasetIdentity(dataset) {
+  return dataset.projectId || dataset.projectRootPath || dataset.projectTarget || "";
 }
 
 /**

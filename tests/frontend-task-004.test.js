@@ -191,7 +191,151 @@ describe("TASK-004 first real user-flow frontend activation", () => {
     await page.getByRole("link", { name: /Build the onboarding test harness/ }).waitFor();
     await page.getByText("Mock agent completed the requested transition.").waitFor();
   });
+
+  it("opens another trusted project from the Projects add button", async () => {
+    await page.close();
+    page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+    await page.addInitScript(() => {
+      const shellPayload = {
+        workspace: {
+          project: "payable",
+          session: "",
+          branch: "main",
+          model: "mock-fast-coder"
+        },
+        projects: [{ id: "c4os-ws-payable-a", name: "payable", rootPath: "/tmp/server/projects/payable", sessions: [] }],
+        providers: [],
+        models: [{ label: "mock-fast-coder", provider: "Mock OpenRouter", active: true }],
+        pluginCatalog: [],
+        pluginMarketplaces: [],
+        skillCatalog: [],
+        mcpServers: [],
+        browser: { url: "http://127.0.0.1/mock", title: "Mock rendered page", summary: "Mock Browser state" },
+        artifacts: [],
+        files: { roots: [], breadcrumbs: ["payable"], lines: [] },
+        terminal: { output: "mock terminal", title: "Mock terminal", summary: "Mock output" },
+        thread: {
+          user: "Open trusted local workspace.",
+          agent: "Workspace is ready.",
+          extra: "Only workspace identity is real.",
+          tool: "Workspace descriptor loaded",
+          run: "Ready for first session"
+        }
+      };
+      const secondPayload = {
+        ...shellPayload,
+        workspace: {
+          project: "payable",
+          session: "",
+          branch: "main",
+          model: "mock-fast-coder"
+        },
+        projects: [{ id: "c4os-ws-payable-b", name: "payable", rootPath: "/tmp/server/projects/shoppable/payable", sessions: [] }],
+        files: { roots: [], breadcrumbs: ["payable"], lines: [] }
+      };
+      window.__TASK_004_CALLS__ = [];
+      window.__TAURI__ = {
+        core: {
+          invoke: async (command, payload) => {
+            window.__TASK_004_CALLS__.push({ command, payload });
+            if (command === "load_workspace") return shellPayload;
+            if (command === "open_workspace") {
+              if (payload?.request?.path === "/tmp/server/projects/payable") {
+                return {
+                  path: "/tmp/server/projects/payable",
+                  trusted: true,
+                  workspace: shellPayload.workspace,
+                  payload: shellPayload
+                };
+              }
+              return {
+                path: "/tmp/server/projects/shoppable/payable",
+                trusted: true,
+                workspace: secondPayload.workspace,
+                payload: secondPayload
+              };
+            }
+            if (command === "create_session") {
+              return {
+                id: "session-first-payable-root",
+                workspaceId: "c4os-ws-payable-a",
+                project: "payable",
+                title: "C4OS QA first payable root",
+                selectedModel: payload?.model || "mock-fast-coder",
+                browser: secondPayload.browser,
+                artifacts: [],
+                files: shellPayload.files,
+                terminal: secondPayload.terminal,
+                thread: {
+                  user: "C4OS QA first payable root",
+                  agent: "Session created.",
+                  extra: "Session belongs to the first payable root.",
+                  tool: "Session initialized",
+                  run: "Waiting for first prompt"
+                },
+                turns: [],
+                messages: [],
+                runs: [],
+                runtimeReference: { id: "runtime-first", label: "Mock", adapter: "mock" }
+              };
+            }
+            if (command === "send_prompt") {
+              return {
+                agent: "Mock agent completed the requested transition.",
+                run: "Connector run completed",
+                model: payload?.model || "mock-fast-coder"
+              };
+            }
+            return { ok: true };
+          }
+        }
+      };
+    });
+
+    await page.goto(`${server.origin}/#new-session`);
+    await page.locator(".topbar strong", { hasText: "payable" }).waitFor();
+
+    await page.getByRole("button", { name: "Add Project" }).click();
+    await page.locator(".topbar strong", { hasText: "payable" }).waitFor();
+    await page.getByText("What should we build in payable?").waitFor();
+    const projectNames = await page.locator(".project-row").evaluateAll((rows) => rows.map((row) => row.textContent.trim()));
+
+    assert.deepEqual(projectNames, ["payable", "payable"]);
+
+    await page.locator(".project-row").nth(1).click();
+    await page.getByText("What should we build in payable?").waitFor();
+    assert.deepEqual(await projectRootOrder(page), [
+      "/tmp/server/projects/shoppable/payable",
+      "/tmp/server/projects/payable"
+    ]);
+
+    await page.locator(".prompt-box").fill("C4OS QA first payable root");
+    await page.getByRole("button", { name: "Send Prompt" }).click();
+    await page.getByRole("link", { name: "C4OS QA first payable root" }).waitFor();
+    assert.deepEqual(await projectRootOrder(page), [
+      "/tmp/server/projects/shoppable/payable",
+      "/tmp/server/projects/payable"
+    ]);
+
+    assert.deepEqual(
+      await page.evaluate(() => window.__TASK_004_CALLS__.map((call) => ({
+        command: call.command,
+        path: call.payload?.request?.path || ""
+      }))),
+      [
+        { command: "load_workspace", path: "" },
+        { command: "open_workspace", path: "" },
+        { command: "open_workspace", path: "/tmp/server/projects/payable" },
+        { command: "create_session", path: "" },
+        { command: "send_prompt", path: "" }
+      ]
+    );
+  });
 });
+
+async function projectRootOrder(page) {
+  return page.locator(".project-row").evaluateAll((rows) => rows.map((row) => row.dataset.projectRootPath));
+}
 
 async function visibleControlNames(page) {
   return page.evaluate(() => {

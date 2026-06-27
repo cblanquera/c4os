@@ -39,6 +39,20 @@ Read the workflow that matches the task:
 - `creatives/` contains creative direction, asset, and guideline artifacts only when creative work is created or approved.
 - `.agents/development/progress/` should exist only after implementation or active execution tracking begins.
 
+## QA And Acceptance Boundary
+
+Agents must not ask the user to perform incremental QA for implementation
+behavior that the agent can reasonably verify in the local app. Before marking
+an implementation item ready for stakeholder acceptance, run the relevant
+automated checks and, when the behavior is visible in the desktop product,
+perform a manual built-app QA pass through `workflows/manual-qa.md`.
+
+Use the user as a stakeholder acceptance reviewer after agent verification is
+complete, not as the first tester for routine navigation, persistence,
+workspace switching, Browser, Files, Terminal, provider/model, or settings
+behavior. If manual QA cannot be run, record the blocker explicitly in the
+progress item and do not present the behavior as accepted or ready.
+
 ## Context And References
 
 Use `.agents/context/` for compact, accepted, reusable product truth that future agents should read first. Keep it limited to the five major documents:
