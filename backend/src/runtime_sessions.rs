@@ -358,6 +358,14 @@ pub fn set_session_browser(
         status: "recorded".into(),
     };
     session.browser_actions.push(record.clone());
+    crate::records::record_browser_action(
+        &session.workspace_id,
+        &session.id,
+        actor,
+        action,
+        target,
+        &record.status,
+    );
     save_store(&store);
     Ok(record)
 }
@@ -452,7 +460,7 @@ fn apply_terminal_command_result(
     let record = TerminalActionRecord {
         id: format!("terminal-action-{}", session.terminal.actions.len() + 1),
         session_id: session.id.clone(),
-        terminal_kind,
+        terminal_kind: terminal_kind.clone(),
         command: execution.command,
         cwd: execution.cwd,
         status: execution.status,
@@ -460,6 +468,14 @@ fn apply_terminal_command_result(
         exit_code: execution.exit_code,
     };
     session.terminal.actions.push(record.clone());
+    crate::records::record_terminal_action(
+        &session.workspace_id,
+        &session.id,
+        &terminal_kind,
+        "run",
+        &record.command,
+        &record.status,
+    );
     (session.terminal.clone(), record)
 }
 

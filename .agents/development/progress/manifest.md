@@ -1,7 +1,7 @@
 # Progress Manifest
 
-Status: ready-for-task-014
-Updated: 2026-06-27
+Status: ready-for-task-015
+Updated: 2026-06-30
 
 ## Active Stream
 
@@ -28,10 +28,12 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
 - `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
 - `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
+- `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
+- `.agents/development/progress/items/TASK-014-local-memory-action-audit-records.md`
 
 ## Active Item
 
-- `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
+- None. Next item is `TASK-015` from `.agents/specs/mvp/tasks.md`.
 
 ## Scope Rules
 
@@ -59,15 +61,16 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-013 and TASK-013A are accepted. TASK-013 is verified, including built-app
-manual QA for same-name trusted folders, restart/resume, OpenRouter-backed
-model context, and the preserved Terminal split. TASK-013A hardens desktop QA
-with deterministic workspace-file bootstrapping, workspace file open/save,
-provider/model persistence across restart, real recent workspaces, and manual
-QA workflow updates. Continue with `TASK-014` from
-`.agents/specs/mvp/tasks.md`. Preserve trusted folder session/run isolation and
-restart/resume behavior from TASK-013. Keep local memory, broad action records,
-audit records, extension invocation, runtime tool gateway work, broad
-approval-policy hardening, TASK-016 security policy, and transitional explicit
-prompt parser expansion out of TASK-014 unless the user explicitly widens
-scope.
+TASK-014 is accepted. Local memory records, action records, and audit records
+now have an app-owned backend persistence boundary separate from provider
+state, workspace descriptors, and runtime-local storage. Browser, Files,
+Terminal, provider/model, workspace-file, trusted-folder isolation, and
+restart/resume behavior were preserved, including the deterministic QA boot
+path through `npm run backend:run:qa -- --workspace-file
+tests/projects/workspace.c4os.json`.
+
+Continue with `TASK-015` from `.agents/specs/mvp/tasks.md`: pause at feature
+complete before TASK-016 security and approval hardening begins. TASK-015
+should summarize the completed feature list, current acceptance evidence, and
+remaining mocks or shortcuts, then ask for stakeholder acceptance before
+starting security-policy implementation.

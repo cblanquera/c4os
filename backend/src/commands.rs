@@ -16,6 +16,12 @@ use crate::provider_models::{
     ProviderProfile, ProviderProfileSaveRequest, SessionModelSelection,
     SessionModelSelectionRequest, DEFAULT_MODEL,
 };
+use crate::records::{
+    list_action_records as app_action_records, list_audit_records as app_audit_records,
+    list_local_memory_records as app_local_memory_records, record_file_action,
+    save_local_memory_record as save_app_local_memory_record, ActionRecord, AuditRecord,
+    LocalMemoryRecord, SaveLocalMemoryRequest,
+};
 use crate::runtime_sessions::{
     active_session, append_prompt, create_session as create_c4os_session,
     create_session_artifact_preview, load_session as load_c4os_session, project_sessions,
@@ -459,6 +465,15 @@ pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, Strin
     let state = save_file_state(&root, &path, &content)?;
     if let Some(session_id) = session_id {
         let _ = set_c4os_session_files(&session_id, state.clone());
+        if let Some(workspace) = active_workspace_descriptor() {
+            record_file_action(
+                &workspace.id,
+                Some(&session_id),
+                "save",
+                &state.current_path,
+                "saved",
+            );
+        }
     }
     Ok(FileSaveResponse {
         path: state.current_path,
@@ -565,12 +580,7 @@ pub fn stop_terminal_session(request: TerminalSessionRequest) -> Result<(), Stri
 
 #[tauri::command]
 pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, String> {
-    let session = request
-        .session_id
-        .as_deref()
-        .and_then(load_c4os_session)
-        .or_else(active_session)
-        .ok_or_else(|| "A C4OS session is required before opening Browser state".to_string())?;
+    let session = browser_session_from_request(request.session_id)?;
     let actor = normalized_browser_actor(request.actor.as_deref());
     if actor == "agent" && !request.clear_request {
         return Err("Agent Browser access must be clearly requested for this request".into());
@@ -581,6 +591,7 @@ pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, 
     }
     let root = c4os_session_workspace_root(&session.id)
         .or_else(active_workspace_root)
+        .or_else(|| public_browser_target_without_root(target).then(PathBuf::new))
         .ok_or_else(|| "No trusted workspace root is active".to_string())?;
     let (browser, action) = browser_state_for_target(&session, &root, target, &actor)?;
     let action_record =
@@ -591,6 +602,29 @@ pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, 
     })
 }
 
+fn browser_session_from_request(
+    request_session_id: Option<String>,
+) -> Result<C4osSessionRecord, String> {
+    if let Some(session) = request_session_id
+        .filter(|value| !value.trim().is_empty())
+        .as_deref()
+        .and_then(load_c4os_session)
+    {
+        return Ok(session);
+    }
+    if let Some(session) = active_session() {
+        return Ok(session);
+    }
+    let descriptor = active_workspace_descriptor().ok_or_else(|| {
+        "A trusted workspace is required before opening Browser state".to_string()
+    })?;
+    Ok(create_c4os_session(CreateSessionRequest {
+        project: Some(descriptor.name),
+        label: Some("Browser session".into()),
+        model: None,
+    }))
+}
+
 #[tauri::command]
 pub fn open_browser_preview(session_id: Option<String>) -> BrowserState {
     session_id
@@ -598,6 +632,28 @@ pub fn open_browser_preview(session_id: Option<String>) -> BrowserState {
         .and_then(load_c4os_session)
         .map(|session| session.browser)
         .unwrap_or_else(|| mock_workspace().browser)
+}
+
+#[tauri::command]
+pub fn list_local_memory_records() -> Vec<LocalMemoryRecord> {
+    app_local_memory_records()
+}
+
+#[tauri::command]
+pub fn save_local_memory_record(
+    request: SaveLocalMemoryRequest,
+) -> Result<LocalMemoryRecord, String> {
+    save_app_local_memory_record(request)
+}
+
+#[tauri::command]
+pub fn list_action_records() -> Vec<ActionRecord> {
+    app_action_records()
+}
+
+#[tauri::command]
+pub fn list_audit_records() -> Vec<AuditRecord> {
+    app_audit_records()
 }
 
 #[tauri::command]
@@ -894,6 +950,12 @@ fn normalize_public_browser_url(root: &Path, target: &str) -> Option<String> {
     }
 
     None
+}
+
+fn public_browser_target_without_root(target: &str) -> bool {
+    target.starts_with("http://")
+        || target.starts_with("https://")
+        || looks_like_public_host(target)
 }
 
 fn looks_like_public_host(target: &str) -> bool {
@@ -1370,6 +1432,46 @@ mod tests {
         assert!(agent_outside.contains("outside trusted root"));
 
         let _ = fs::remove_file(outside_root);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_010a_browser_address_works_from_trusted_workspace_before_chat_session() {
+        crate::runtime_sessions::reset_session_store_for_test("task-010a-workspace-browser");
+        let root = std::env::temp_dir().join("c4os-task-010a-workspace-browser");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(root.join("preview.html"), "<h1>Local preview</h1>").expect("write preview");
+        let canonical_preview = fs::canonicalize(root.join("preview.html")).expect("canonical");
+        open_workspace(Some(WorkspaceOpenRequest {
+            path: Some(root.to_string_lossy().into_owned()),
+        }))
+        .expect("open workspace");
+
+        let public = open_browser(BrowserOpenRequest {
+            session_id: None,
+            target: "https://example.com/manual".into(),
+            actor: Some("user".into()),
+            clear_request: false,
+        })
+        .expect("open public browser target from workspace");
+        assert_eq!(public.browser.url, "https://example.com/manual");
+        assert_eq!(public.browser.preview_mode, "public");
+        assert_eq!(public.action.actor, "user");
+
+        let local = open_browser(BrowserOpenRequest {
+            session_id: None,
+            target: "preview.html".into(),
+            actor: Some("user".into()),
+            clear_request: false,
+        })
+        .expect("open local browser target from workspace");
+        assert_eq!(
+            local.browser.url,
+            format!("file://{}", canonical_preview.to_string_lossy())
+        );
+        assert_eq!(local.browser.preview_mode, "local-file");
+
         let _ = fs::remove_dir_all(root);
     }
 

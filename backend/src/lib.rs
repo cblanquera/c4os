@@ -6,6 +6,7 @@ pub mod mock_data;
 pub mod native_browser;
 pub mod openrouter;
 pub mod provider_models;
+pub mod records;
 pub mod runtime_adapter;
 pub mod runtime_sessions;
 pub mod terminal_pty;
@@ -44,6 +45,10 @@ where
             commands::resize_terminal_session,
             commands::stop_terminal_session,
             commands::open_browser_preview,
+            commands::list_local_memory_records,
+            commands::save_local_memory_record,
+            commands::list_action_records,
+            commands::list_audit_records,
             commands::list_extensions,
             commands::list_provider_profiles,
             commands::save_provider_profile,
