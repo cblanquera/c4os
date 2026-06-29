@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: in-progress-task-013A
+Status: ready-for-task-014
 Updated: 2026-06-27
 
 ## Active Stream
@@ -59,14 +59,15 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-013 is verified, including built-app manual QA for same-name trusted
-folders, restart/resume, OpenRouter-backed model context, and the preserved
-Terminal split. Complete `TASK-013A` before continuing with `TASK-014` from
-`.agents/specs/mvp/tasks.md`. TASK-013A hardens desktop QA by adding
-deterministic workspace bootstrapping, workspace file open/save, provider/model
-persistence across restart, and manual QA workflow updates. Preserve trusted
-folder session/run isolation and restart/resume behavior from TASK-013. Keep
-local memory, broad action records, audit records, extension invocation,
-runtime tool gateway work, broad approval-policy hardening, TASK-016 security
-policy, and transitional explicit prompt parser expansion out of TASK-013A
-unless the user explicitly widens scope.
+TASK-013 and TASK-013A are accepted. TASK-013 is verified, including built-app
+manual QA for same-name trusted folders, restart/resume, OpenRouter-backed
+model context, and the preserved Terminal split. TASK-013A hardens desktop QA
+with deterministic workspace-file bootstrapping, workspace file open/save,
+provider/model persistence across restart, real recent workspaces, and manual
+QA workflow updates. Continue with `TASK-014` from
+`.agents/specs/mvp/tasks.md`. Preserve trusted folder session/run isolation and
+restart/resume behavior from TASK-013. Keep local memory, broad action records,
+audit records, extension invocation, runtime tool gateway work, broad
+approval-policy hardening, TASK-016 security policy, and transitional explicit
+prompt parser expansion out of TASK-014 unless the user explicitly widens
+scope.

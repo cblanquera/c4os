@@ -1,7 +1,7 @@
 # TASK-013A Desktop QA Bootstrap And Workspace/Provider Persistence
 
-Status: in_progress
-Updated: 2026-06-29
+Status: accepted
+Updated: 2026-06-30
 
 ## Source
 
@@ -214,6 +214,9 @@ continues with local memory and audit records.
   tests/projects/workspace.c4os.json` and confirmed the app opened
   `#new-session` with `project-a` active and both `project-a` and `project-b`
   in the project sidebar.
+- Stakeholder acceptance recorded on 2026-06-30 after workspace open/save,
+  recent-workspace display, relative workspace-file roots, and the checked-in
+  QA boot fixture were confirmed working.
 
 ## Notes
 
