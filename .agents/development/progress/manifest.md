@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-015
+Status: ready-for-wo-006-runtime-tool-gateway-refactor
 Updated: 2026-06-30
 
 ## Active Stream
@@ -30,10 +30,12 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
 - `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
 - `.agents/development/progress/items/TASK-014-local-memory-action-audit-records.md`
+- `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
 
 ## Active Item
 
-- None. Next item is `TASK-015` from `.agents/specs/mvp/tasks.md`.
+- None. Next item is
+  `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`.
 
 ## Scope Rules
 
@@ -61,16 +63,13 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-014 is accepted. Local memory records, action records, and audit records
-now have an app-owned backend persistence boundary separate from provider
-state, workspace descriptors, and runtime-local storage. Browser, Files,
-Terminal, provider/model, workspace-file, trusted-folder isolation, and
-restart/resume behavior were preserved, including the deterministic QA boot
-path through `npm run backend:run:qa -- --workspace-file
-tests/projects/workspace.c4os.json`.
+TASK-015 is accepted. The feature-complete package summarizes the completed MVP
+feature list, acceptance evidence by task and surface, remaining mocks or
+shortcuts, and the explicit pre-`TASK-016` boundary.
 
-Continue with `TASK-015` from `.agents/specs/mvp/tasks.md`: pause at feature
-complete before TASK-016 security and approval hardening begins. TASK-015
-should summarize the completed feature list, current acceptance evidence, and
-remaining mocks or shortcuts, then ask for stakeholder acceptance before
-starting security-policy implementation.
+Before `TASK-016`, run
+`.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`.
+This refactor should formalize runtime-driven tool execution through the
+C4OS-owned tool gateway so security and approval hardening targets the correct
+internal execution boundary instead of the transitional explicit command
+parser.
