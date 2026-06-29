@@ -18,16 +18,32 @@ inspected, mark the item blocked or partially verified with the exact reason.
    `npm run backend:build`
 2. Launch the debug desktop app with logs attached:
    `npm run backend:run`
+   This script builds the backend and syncs the current debug binary into
+   `backend/target/debug/C4OS.app/Contents/MacOS/C4OS` before launch so
+   Computer Use does not attach to stale app-wrapper code.
    For agent-only QA with an isolated session store, use:
    `npm run backend:run:qa`
+   To bypass the start-screen folder picker for routine deterministic agent QA,
+   use the checked-in workspace-file fixture:
+   `npm run backend:run:qa -- --workspace-file tests/projects/workspace.c4os.json`
+   This fixture uses relative project roots resolved from the workspace file
+   folder and should open `#new-session` with `project-a` active and
+   `project-a` / `project-b` listed in the left project sidebar.
+   For task-specific project folders, pass an explicit launch flag:
+   `npm run backend:run:qa -- --workspace /absolute/project/path`
+   or:
+   `npm run backend:run:qa -- --workspace-file /absolute/path/review-workspace.c4os.json`
+   Use isolated provider stores when testing provider/model persistence:
+   `C4OS_PROVIDER_STORE=/tmp/c4os-provider-settings.json`
+   and:
+   `C4OS_PROVIDER_KEY_STORE=/tmp/c4os-provider-keys.json`
 3. If a built app must be opened directly, use:
    `open -n backend/target/debug/C4OS.app`
    Only use this after confirming the wrapper binary reflects the current
    build; prefer `npm run backend:run` or `npm run backend:run:qa` otherwise.
-   A stale wrapper can keep serving old frontend/cache-token behavior even
-   after `npm run backend:build` updates `backend/target/debug/c4os-backend`.
-   Before using Computer Use against `backend/target/debug/C4OS.app`, verify
-   the wrapper executable or refresh it from the rebuilt backend binary.
+   Before using Computer Use against `backend/target/debug/C4OS.app` directly,
+   verify the wrapper executable timestamp or launch once through the npm run
+   script to refresh it.
 
 Prefer `npm run backend:run` when backend stdout/stderr logs are required.
 Use `npm run backend:run:qa` when QA should avoid the normal session store while
@@ -39,20 +55,32 @@ use it as the acceptance path until that script is repaired.
 ## App Navigation
 
 1. Confirm the window title is `C4OS` and the URL is `tauri://localhost`.
-2. Confirm the start screen heading says `Open a folder to start working`.
-3. Use a deterministic path first: click a recent workspace such as
-   `Mock Workspace Alpha`.
-4. Confirm the app reaches `#new-session` and the heading says
+2. Human launches without `--workspace` or `--workspace-file` should start at
+   the start screen. For routine agent QA, prefer a deterministic boot path
+   with `npm run backend:run:qa -- --workspace-file
+   tests/projects/workspace.c4os.json` and confirm the app reaches
+   `#new-session` without requiring the native folder picker.
+3. When the task specifically covers first-run behavior, confirm the start
+   screen heading says `Open a folder to start working`. If real recent
+   workspaces exist, the right card heading should say `Recent Workspaces`;
+   if no recent workspaces exist, the right card should be hidden and the start
+   content should be centered.
+4. For picker-specific tests, use `Open Folder` and record the selected folder.
+5. Confirm the app reaches `#new-session` and the heading says
    `What should we build in <workspace>?`.
-5. To load the main chat screen, click an existing session in the left sidebar,
+   For the checked-in workspace fixture, confirm the heading says
+   `What should we build in project-a?` and the left sidebar lists both
+   `project-a` and `project-b`.
+6. To load the main chat screen, click an existing session in the left sidebar,
    or enter a prompt and click `Send Prompt` when the task requires creating a
    first session.
-6. Confirm the app reaches `#chat-session`, the center panel shows session
+7. Confirm the app reaches `#chat-session`, the center panel shows session
    messages, and Browser / Files / Terminal remain in the right-panel contract.
 
-Use `Open Folder` only when the acceptance question requires the native trusted
-folder flow. Record the selected folder and any `.c4os/workspace.json` side
-effect in the QA notes.
+Use native `Open Folder` only when the acceptance question requires the trusted
+folder picker flow. Record the selected folder, workspace launch flag or
+workspace file, provider store paths, and any `.c4os/workspace.json` side effect
+in the QA notes.
 
 ## Logs And Inspector
 
@@ -75,6 +103,9 @@ Record:
 - route/screen sequence reached
 - visible pass/fail observations
 - exact folders/projects/sessions used when testing workspace isolation
+- workspace bootstrap method: picker, `--workspace`, or `--workspace-file`
+- provider settings/key store paths used for persistence checks, without raw
+  secrets
 - backend/stdout log result, even when empty
 - inspector availability and any renderer console errors
 - screenshots only when the UI behavior is in dispute or hard to describe

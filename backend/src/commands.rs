@@ -2,7 +2,7 @@ use crate::extensions::{extension_records, ExtensionList};
 use crate::files::{list_files_state, read_file_state, save_file_state};
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{
-    mock_workspace, ArtifactRecord, BrowserState, ProjectRecord, TerminalPaneState, TerminalState,
+    mock_workspace, ArtifactRecord, BrowserState, TerminalPaneState, TerminalState,
     WorkspacePayload, WorkspaceSummary,
 };
 use crate::openrouter::RuntimeEvent;
@@ -30,8 +30,10 @@ use crate::terminal_pty::{
     TerminalOutputEvent, TerminalResize,
 };
 use crate::workspace::{
-    activate_workspace, active_workspace_descriptor, active_workspace_root, WorkspaceActivation,
-    WorkspaceDescriptor,
+    activate_workspace, active_workspace_descriptor, active_workspace_root,
+    bootstrap_workspace_from_launch_flag, open_workspace_file as open_workspace_file_record,
+    project_records_for_descriptor, recent_project_records,
+    save_workspace_file as save_workspace_file_record, WorkspaceActivation, WorkspaceDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,6 +69,11 @@ pub struct WorkspaceOpenResponse {
     pub workspace: crate::mock_data::WorkspaceSummary,
     pub descriptor: WorkspaceDescriptor,
     pub payload: WorkspacePayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceFileRequest {
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -188,9 +195,10 @@ struct TerminalCommandScope {
 
 #[tauri::command]
 pub fn load_workspace() -> WorkspacePayload {
+    let _ = bootstrap_workspace_from_launch_flag();
     let mut payload = active_workspace_descriptor()
         .map(|descriptor| workspace_payload_for_descriptor(&descriptor))
-        .unwrap_or_else(mock_workspace);
+        .unwrap_or_else(no_trusted_workspace_payload);
     apply_runtime_session_payload(&mut payload);
     payload.providers = provider_profiles()
         .into_iter()
@@ -200,6 +208,33 @@ pub fn load_workspace() -> WorkspacePayload {
         .into_iter()
         .map(model_record_from_provider_model)
         .collect();
+    payload
+}
+
+fn no_trusted_workspace_payload() -> WorkspacePayload {
+    let mut payload = mock_workspace();
+    payload.workspace = WorkspaceSummary {
+        project: String::new(),
+        session: String::new(),
+        branch: String::new(),
+        model: DEFAULT_MODEL.into(),
+        session_id: String::new(),
+    };
+    payload.projects = recent_project_records();
+    payload.sessions = Vec::new();
+    payload.files.breadcrumbs = Vec::new();
+    payload.files.roots = Vec::new();
+    payload.files.lines = Vec::new();
+    payload.files.content = String::new();
+    payload.files.saved_content = String::new();
+    payload.files.current_path = String::new();
+    payload.thread = crate::mock_data::ThreadState {
+        user: String::new(),
+        agent: "No trusted workspace is active.".into(),
+        extra: "Open a folder or launch agent QA with an explicit workspace flag.".into(),
+        tool: "Waiting for trusted workspace".into(),
+        run: "Start screen".into(),
+    };
     payload
 }
 
@@ -267,6 +302,97 @@ pub fn open_workspace(
 ) -> Result<WorkspaceOpenResponse, String> {
     let activation = activate_workspace(request.and_then(|input| input.path))?;
     Ok(open_workspace_response(activation))
+}
+
+#[tauri::command]
+pub fn open_workspace_file<R: Runtime>(
+    app: AppHandle<R>,
+    request: Option<WorkspaceFileRequest>,
+) -> Result<WorkspaceOpenResponse, String> {
+    let activation = open_workspace_file_record(workspace_file_path(app, request)?)?;
+    Ok(open_workspace_response(activation))
+}
+
+#[tauri::command]
+pub fn save_workspace_file<R: Runtime>(
+    app: AppHandle<R>,
+    request: Option<WorkspaceFileRequest>,
+) -> Result<WorkspaceDescriptor, String> {
+    save_workspace_file_record(workspace_save_file_path(app, request)?)
+}
+
+fn workspace_file_path<R: Runtime>(
+    app: AppHandle<R>,
+    request: Option<WorkspaceFileRequest>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = request
+        .and_then(|input| input.path)
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+    {
+        return Ok(path);
+    }
+
+    choose_workspace_file_on_main(app)?.ok_or_else(|| "No workspace file selected".to_string())
+}
+
+fn workspace_save_file_path<R: Runtime>(
+    app: AppHandle<R>,
+    request: Option<WorkspaceFileRequest>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = request
+        .and_then(|input| input.path)
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+    {
+        return Ok(path);
+    }
+
+    choose_save_workspace_file_on_main(app)?.ok_or_else(|| "No workspace file selected".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn choose_workspace_file_on_main<R: Runtime>(app: AppHandle<R>) -> Result<Option<PathBuf>, String> {
+    run_path_dialog_on_main(app, crate::workspace::choose_workspace_file_on_main)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn choose_workspace_file_on_main<R: Runtime>(
+    _app: AppHandle<R>,
+) -> Result<Option<PathBuf>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn choose_save_workspace_file_on_main<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<PathBuf>, String> {
+    run_path_dialog_on_main(app, crate::workspace::choose_save_workspace_file_on_main)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn choose_save_workspace_file_on_main<R: Runtime>(
+    _app: AppHandle<R>,
+) -> Result<Option<PathBuf>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn run_path_dialog_on_main<R: Runtime, F>(
+    app: AppHandle<R>,
+    dialog: F,
+) -> Result<Option<PathBuf>, String>
+where
+    F: FnOnce() -> Option<PathBuf> + Send + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(dialog());
+    })
+    .map_err(|error| format!("Cannot open workspace dialog: {error}"))?;
+    receiver
+        .recv()
+        .map_err(|error| format!("Workspace dialog did not return a path: {error}"))
 }
 
 #[tauri::command]
@@ -567,12 +693,7 @@ fn workspace_payload_for_descriptor(descriptor: &WorkspaceDescriptor) -> Workspa
         model: DEFAULT_MODEL.into(),
         session_id: String::new(),
     };
-    payload.projects = vec![ProjectRecord {
-        id: descriptor.id.clone(),
-        name: descriptor.name.clone(),
-        root_path: descriptor.root_path.clone(),
-        sessions: vec![],
-    }];
+    payload.projects = project_records_for_descriptor(descriptor);
     payload.files = list_files_state(Path::new(&descriptor.root_path), None).unwrap_or_else(|_| {
         payload.files.breadcrumbs = vec![descriptor.name.clone()];
         payload.files.clone()
@@ -1311,7 +1432,9 @@ mod tests {
 
     #[test]
     fn command_inventory_returns_task_002_mock_payloads() {
-        assert_eq!(load_workspace().workspace.project, "Mock Workspace Alpha");
+        let payload = load_workspace();
+        assert_eq!(payload.workspace.project, "");
+        assert!(payload.projects.is_empty());
         assert_eq!(open_browser_preview(None).title, "Mock rendered page");
         assert_eq!(list_extensions().mcp_servers[0].label, "Docs MCP");
     }

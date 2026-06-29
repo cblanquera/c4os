@@ -111,6 +111,12 @@ pub fn menu_contract() -> MenuContract {
 }
 
 pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    #[cfg(target_os = "macos")]
+    let app_menu = SubmenuBuilder::with_id(app, "app", "C4OS")
+        .about(None)
+        .separator()
+        .quit()
+        .build()?;
     let open_workspace = TauriMenuItem::with_id(
         app,
         "file.openWorkspace",
@@ -158,7 +164,10 @@ pub fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::me
         .paste()
         .build()?;
 
-    MenuBuilder::new(app).item(&file).item(&edit).build()
+    let builder = MenuBuilder::new(app);
+    #[cfg(target_os = "macos")]
+    let builder = builder.item(&app_menu);
+    builder.item(&file).item(&edit).build()
 }
 
 pub fn apply_native_menu_state<R: Runtime>(
@@ -198,14 +207,12 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::Men
         "file.openWorkspace" | "file.saveWorkspace" | "file.saveFile" | "file.revertFile"
     ) {
         let _ = app.emit("c4os://native-menu", id);
-        if matches!(id, "file.saveFile" | "file.revertFile") {
-            if let Ok(serialized_id) = serde_json::to_string(id) {
-                let script = format!(
-                    "globalThis.__c4osNativeMenuCommand && globalThis.__c4osNativeMenuCommand({serialized_id});"
-                );
-                for webview in app.webview_windows().values() {
-                    let _ = webview.eval(script.clone());
-                }
+        if let Ok(serialized_id) = serde_json::to_string(id) {
+            let script = format!(
+                "globalThis.__c4osNativeMenuCommand && globalThis.__c4osNativeMenuCommand({serialized_id});"
+            );
+            for webview in app.webview_windows().values() {
+                let _ = webview.eval(script.clone());
             }
         }
     }

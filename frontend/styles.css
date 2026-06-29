@@ -60,10 +60,12 @@ input, textarea, select { font-weight: 400; }
 /* App start */
 
 .start-view { align-items: center; display: grid; gap: clamp(44px, 7vw, 110px); grid-template-columns: minmax(420px, 1fr) minmax(420px, 0.86fr); height: 100%; overflow: auto; padding: 48px clamp(48px, 7.8vw, 140px); }
+.start-view.is-empty { grid-template-columns: minmax(0, 620px); justify-content: center; text-align: center; }
 .start-copy h1, .empty-workspace h1, .settings-title h1 { font-family: var(--font-display); letter-spacing: 0; line-height: 1.05; margin: 0; }
 .start-copy h1 { font-size: clamp(44px, 3.15vw, 64px); max-width: 780px; }
 .start-copy .lead { font-size: 20px; margin-top: 20px; }
 .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 42px; }
+.start-view.is-empty .action-row { justify-content: center; }
 .recent-panel { background: var(--field); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; }
 .recent-panel h2 { font-size: 24px; margin: 0 0 16px; }
 .workspace-row { align-items: center; background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--accent-2); border-radius: var(--radius-sm); display: flex; justify-content: space-between; min-height: 76px; padding: 0 18px; }

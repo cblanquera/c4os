@@ -8,7 +8,8 @@ describe("TASK-003 Rust/Tauri backend scaffold", () => {
     const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 
     assert.equal(packageJson.scripts["backend:build"], "cargo build --manifest-path backend/Cargo.toml");
-    assert.equal(packageJson.scripts["backend:run"], "cargo run --manifest-path backend/Cargo.toml");
+    assert.equal(packageJson.scripts["backend:run"], "node scripts/run-backend.js");
+    assert.equal(packageJson.scripts["backend:run:qa"], "node scripts/run-backend.js --qa");
     assert.equal(packageJson.scripts["backend:test"], "cargo test --manifest-path backend/Cargo.toml");
   });
 
@@ -50,6 +51,7 @@ describe("TASK-003 Rust/Tauri backend scaffold", () => {
     assert.match(menuSource, /pub fn apply_native_menu_state/);
     assert.match(menuSource, /MenuBuilder::new/);
     assert.match(menuSource, /SubmenuBuilder::with_id/);
+    assert.match(menuSource, /with_id\(app, "app", "C4OS"\)/);
     assert.match(menuSource, /menu\.get\("file"\)/);
     assert.match(menuSource, /file\s*\n\s*\.get\("file\.saveFile"\)/);
     assert.match(menuSource, /file\s*\n\s*\.get\("file\.revertFile"\)/);

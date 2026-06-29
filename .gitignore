@@ -2,3 +2,4 @@
 node_modules/
 backend/target/
 backend/gen/
+tests/projects/*/.c4os/

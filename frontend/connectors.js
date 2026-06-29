@@ -99,6 +99,12 @@ function tauriConnector(config) {
     async openWorkspace(path) {
       return invoke("open_workspace", { request: { path } });
     },
+    async openWorkspaceFile(path) {
+      return invoke("open_workspace_file", { request: path ? { path } : null });
+    },
+    async saveWorkspaceFile(path) {
+      return invoke("save_workspace_file", { request: path ? { path } : null });
+    },
     async createSession(project, model, label) {
       return invoke("create_session", { project, model, label });
     },

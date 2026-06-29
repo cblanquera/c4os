@@ -269,6 +269,38 @@ export async function openConnectorWorkspace(path, options = {}) {
   }
 }
 
+export async function openConnectorWorkspaceFile(path) {
+  if (!connectorState.connector.available || !connectorState.connector.openWorkspaceFile) return;
+
+  connectorState.error = null;
+  connectorState.loading = true;
+
+  try {
+    const response = await connectorState.connector.openWorkspaceFile(path);
+    const payload = response.payload || response;
+    applyConnectorWorkspace(payload);
+    return payload;
+  } catch (error) {
+    connectorState.error = error.message;
+    throw error;
+  } finally {
+    connectorState.loading = false;
+  }
+}
+
+export async function saveConnectorWorkspaceFile(path) {
+  if (!connectorState.connector.available || !connectorState.connector.saveWorkspaceFile) return null;
+
+  connectorState.error = null;
+
+  try {
+    return await connectorState.connector.saveWorkspaceFile(path);
+  } catch (error) {
+    connectorState.error = error.message;
+    throw error;
+  }
+}
+
 export async function loadConnectorSession(sessionId) {
   if (!sessionId || !connectorState.connector.available || !connectorState.connector.loadSession) return null;
   const record = await connectorState.connector.loadSession(sessionId);
@@ -864,9 +896,11 @@ function applyConnectorWorkspace(payload, options = {}) {
   assignObject(workspace, payload.workspace);
   replaceArray(persistentSessions, payload.sessions || []);
   replaceArray(projects, options.mergeProjects ? mergedProjectList(payload.projects || []) : payload.projects);
-  const activeProject = (payload.projects || []).find((project) => project?.name === workspace.project) || (payload.projects || [])[0];
-  workspace.projectId = activeProject?.id || workspace.projectId || "";
-  workspace.rootPath = activeProject?.rootPath || activeProject?.root_path || workspace.rootPath || "";
+  const activeProject = workspace.project
+    ? (payload.projects || []).find((project) => project?.name === workspace.project) || (payload.projects || [])[0]
+    : null;
+  workspace.projectId = activeProject?.id || (workspace.project ? workspace.projectId : "");
+  workspace.rootPath = activeProject?.rootPath || activeProject?.root_path || (workspace.project ? workspace.rootPath : "");
   replaceArray(providers, payload.providers);
   replaceArray(models, payload.models);
   replaceArray(pluginCatalog, normalizeExtensionRecords(payload.pluginCatalog, "plugin"));

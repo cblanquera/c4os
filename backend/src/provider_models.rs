@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
@@ -100,7 +102,15 @@ static PROVIDER_KEYS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new()
 static MODELS: OnceLock<Mutex<Vec<ProviderModel>>> = OnceLock::new();
 static PROVIDERS_TOUCHED: OnceLock<Mutex<bool>> = OnceLock::new();
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSettingsStore {
+    providers: Vec<ProviderProfile>,
+    models: Vec<ProviderModel>,
+}
+
 pub fn provider_profiles() -> Vec<ProviderProfile> {
+    load_provider_settings_from_disk();
     let saved = providers_store()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -178,12 +188,14 @@ pub fn save_provider_profile(
         });
         saved.push(profile.clone());
     }
+    save_provider_settings_to_disk();
 
     if key_present {
         provider_keys()
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .insert(id, request.api_key);
+        save_provider_keys_to_disk();
     }
 
     #[cfg(not(test))]
@@ -194,6 +206,8 @@ pub fn save_provider_profile(
                 .unwrap_or_else(|error| error.into_inner());
             saved_models.retain(|model| model.provider_id != profile.id);
             saved_models.extend(discovered);
+            drop(saved_models);
+            save_provider_settings_to_disk();
         }
     }
 
@@ -203,30 +217,37 @@ pub fn save_provider_profile(
 pub fn delete_provider_profile(
     request: ProviderDeleteRequest,
 ) -> Result<ProviderDeleteResponse, String> {
-    let mut saved = providers_store()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    *providers_touched()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner()) = true;
-    let before = saved.len();
-    saved.retain(|provider| provider.id != request.provider_id);
+    let provider_id = request.provider_id;
+    let deleted = {
+        let mut saved = providers_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *providers_touched()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = true;
+        let before = saved.len();
+        saved.retain(|provider| provider.id != provider_id);
+        before != saved.len()
+    };
     provider_keys()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .remove(&request.provider_id);
+        .remove(&provider_id);
     models_store()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .retain(|model| model.provider_id != request.provider_id);
+        .retain(|model| model.provider_id != provider_id);
+    save_provider_settings_to_disk();
+    save_provider_keys_to_disk();
 
     Ok(ProviderDeleteResponse {
-        provider_id: request.provider_id,
-        deleted: before != saved.len(),
+        provider_id,
+        deleted,
     })
 }
 
 pub fn configured_provider_api_key() -> Option<String> {
+    load_provider_keys_from_disk();
     provider_keys()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -243,6 +264,7 @@ pub fn provider_api_key_configured() -> bool {
 }
 
 pub fn provider_models() -> Vec<ProviderModel> {
+    load_provider_settings_from_disk();
     let saved = models_store()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -250,39 +272,47 @@ pub fn provider_models() -> Vec<ProviderModel> {
 }
 
 pub fn set_model_enabled(request: ModelEnablementRequest) -> Result<ProviderModel, String> {
-    let mut saved = models_store()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let updated = {
+        let mut saved = models_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
 
-    let model = saved
-        .iter_mut()
-        .find(|model| model.id == request.model_id)
-        .ok_or_else(|| format!("Unknown model '{}'", request.model_id))?;
+        let model = saved
+            .iter_mut()
+            .find(|model| model.id == request.model_id)
+            .ok_or_else(|| format!("Unknown model '{}'", request.model_id))?;
 
-    model.enabled = request.enabled;
-    if !model.enabled {
-        model.active = false;
-    }
-    Ok(model.clone())
+        model.enabled = request.enabled;
+        if !model.enabled {
+            model.active = false;
+        }
+        model.clone()
+    };
+    save_provider_settings_to_disk();
+    Ok(updated)
 }
 
 pub fn set_provider_enabled(request: ProviderEnablementRequest) -> Result<ProviderProfile, String> {
-    let mut saved = providers_store()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if saved.is_empty() {
-        *providers_touched()
+    let updated = {
+        let mut saved = providers_store()
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = true;
-    }
+            .unwrap_or_else(|error| error.into_inner());
+        if saved.is_empty() {
+            *providers_touched()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = true;
+        }
 
-    let provider = saved
-        .iter_mut()
-        .find(|provider| provider.id == request.provider_id)
-        .ok_or_else(|| format!("Unknown provider '{}'", request.provider_id))?;
+        let provider = saved
+            .iter_mut()
+            .find(|provider| provider.id == request.provider_id)
+            .ok_or_else(|| format!("Unknown provider '{}'", request.provider_id))?;
 
-    provider.enabled = request.enabled;
-    Ok(provider.clone())
+        provider.enabled = request.enabled;
+        provider.clone()
+    };
+    save_provider_settings_to_disk();
+    Ok(updated)
 }
 
 pub fn select_session_model(
@@ -416,6 +446,130 @@ fn models_store() -> &'static Mutex<Vec<ProviderModel>> {
 
 fn provider_keys() -> &'static Mutex<HashMap<String, String>> {
     PROVIDER_KEYS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn load_provider_settings_from_disk() {
+    let should_load = !*providers_touched()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if !should_load {
+        return;
+    }
+    let Some(path) = provider_settings_path() else {
+        return;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(settings) = serde_json::from_str::<ProviderSettingsStore>(&raw) else {
+        return;
+    };
+    *providers_store()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = settings.providers;
+    *models_store()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = settings.models;
+    *providers_touched()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = true;
+}
+
+fn save_provider_settings_to_disk() {
+    let settings = ProviderSettingsStore {
+        providers: providers_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone(),
+        models: models_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone(),
+    };
+    if let Ok(serialized) = serde_json::to_string_pretty(&settings) {
+        let Some(path) = provider_settings_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, format!("{serialized}\n"));
+    }
+}
+
+fn load_provider_keys_from_disk() {
+    if !provider_keys()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .is_empty()
+    {
+        return;
+    }
+    let Some(path) = provider_key_store_path() else {
+        return;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(keys) = serde_json::from_str::<HashMap<String, String>>(&raw) else {
+        return;
+    };
+    *provider_keys()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = keys;
+}
+
+fn save_provider_keys_to_disk() {
+    let keys = provider_keys()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    if let Ok(serialized) = serde_json::to_string_pretty(&keys) {
+        let Some(path) = provider_key_store_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, format!("{serialized}\n"));
+    }
+}
+
+fn provider_settings_path() -> Option<PathBuf> {
+    match std::env::var("C4OS_PROVIDER_STORE") {
+        Ok(path) if !path.trim().is_empty() => Some(PathBuf::from(path)),
+        #[cfg(not(test))]
+        _ => Some(std::env::temp_dir().join("c4os-provider-settings.json")),
+        #[cfg(test)]
+        _ => None,
+    }
+}
+
+fn provider_key_store_path() -> Option<PathBuf> {
+    match std::env::var("C4OS_PROVIDER_KEY_STORE") {
+        Ok(path) if !path.trim().is_empty() => Some(PathBuf::from(path)),
+        #[cfg(not(test))]
+        _ => Some(std::env::temp_dir().join("c4os-provider-keys.json")),
+        #[cfg(test)]
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn replace_provider_models_for_test(next: Vec<ProviderModel>) {
+    *models_store()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = next;
+    *providers_touched()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = true;
+    save_provider_settings_to_disk();
+}
+
+#[cfg(test)]
+fn reload_provider_settings_for_test() {
+    load_provider_settings_from_disk();
+    load_provider_keys_from_disk();
 }
 
 #[cfg(test)]
@@ -652,6 +806,96 @@ mod tests {
             configured_provider_api_key().as_deref(),
             Some("review-only-secret")
         );
+    }
+
+    #[test]
+    fn task_013a_persists_provider_models_and_key_reference_across_restart() {
+        reset_task_006_state();
+        let store_root = std::env::temp_dir().join("c4os-task-013a-provider-store");
+        let _ = std::fs::remove_dir_all(&store_root);
+        std::fs::create_dir_all(&store_root).expect("create provider store root");
+        std::env::set_var(
+            "C4OS_PROVIDER_STORE",
+            store_root
+                .join("providers.json")
+                .to_string_lossy()
+                .to_string(),
+        );
+        std::env::set_var(
+            "C4OS_PROVIDER_KEY_STORE",
+            store_root
+                .join("provider-keys.json")
+                .to_string_lossy()
+                .to_string(),
+        );
+
+        let profile = save_provider_profile(ProviderProfileSaveRequest {
+            provider_id: Some(DEFAULT_PROVIDER_ID.into()),
+            kind: "OpenRouter".into(),
+            label: "OpenRouter Personal".into(),
+            base_url: DEFAULT_PROVIDER_BASE_URL.into(),
+            api_key: "review-only-secret".into(),
+        })
+        .expect("save provider profile");
+        replace_provider_models_for_test(vec![
+            ProviderModel {
+                id: "gemini-flash-lite".into(),
+                label: DEFAULT_MODEL.into(),
+                provider_id: profile.id.clone(),
+                provider: profile.label.clone(),
+                enabled: true,
+                active: true,
+                source: "manual".into(),
+            },
+            ProviderModel {
+                id: "manual-review-model".into(),
+                label: "manual/review-model".into(),
+                provider_id: profile.id.clone(),
+                provider: profile.label.clone(),
+                enabled: false,
+                active: false,
+                source: "manual".into(),
+            },
+        ]);
+        set_model_enabled(ModelEnablementRequest {
+            model_id: "manual-review-model".into(),
+            enabled: true,
+        })
+        .expect("enable model");
+        set_provider_enabled(ProviderEnablementRequest {
+            provider_id: profile.id.clone(),
+            enabled: false,
+        })
+        .expect("disable provider");
+
+        let settings_raw = std::fs::read_to_string(store_root.join("providers.json"))
+            .expect("read provider settings");
+        assert!(!settings_raw.contains("review-only-secret"));
+        assert!(!settings_raw.contains("apiKey"));
+
+        reset_task_006_state();
+        reload_provider_settings_for_test();
+
+        let restored_provider = provider_profiles()
+            .into_iter()
+            .find(|record| record.id == DEFAULT_PROVIDER_ID)
+            .expect("restored provider");
+        let restored_model = provider_models()
+            .into_iter()
+            .find(|record| record.id == "manual-review-model")
+            .expect("restored model");
+
+        assert_eq!(restored_provider.enabled, false);
+        assert_eq!(restored_provider.key_status.state, "present");
+        assert_eq!(restored_model.enabled, true);
+        assert_eq!(
+            configured_provider_api_key().as_deref(),
+            Some("review-only-secret")
+        );
+
+        std::env::remove_var("C4OS_PROVIDER_STORE");
+        std::env::remove_var("C4OS_PROVIDER_KEY_STORE");
+        let _ = std::fs::remove_dir_all(store_root);
     }
 
     fn reset_task_006_state() {

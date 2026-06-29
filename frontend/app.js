@@ -11,6 +11,7 @@ import {
   openConnectorBrowser,
   openConnectorFile,
   openConnectorWorkspace,
+  openConnectorWorkspaceFile,
   pluginCatalog,
   pluginMarketplaces,
   projects,
@@ -19,6 +20,7 @@ import {
   deleteConnectorProviderProfile,
   saveConnectorProviderProfile,
   saveConnectorFile,
+  saveConnectorWorkspaceFile,
   restoreConnectorExplorerScope,
   runConnectorTerminalCommand,
   selectConnectorSessionModel,
@@ -956,8 +958,28 @@ function bindNativeFileMenu() {
 }
 
 async function handleNativeFileMenuCommand(id) {
+  if (id === "file.openWorkspace") await openWorkspaceFileFromMenu();
+  if (id === "file.saveWorkspace") await saveWorkspaceFileFromMenu();
   if (id === "file.saveFile") await saveActiveFile();
   if (id === "file.revertFile") await revertActiveFile();
+}
+
+async function openWorkspaceFileFromMenu() {
+  try {
+    await openConnectorWorkspaceFile();
+    window.location.hash = "new-session";
+    render();
+  } catch {
+    render();
+  }
+}
+
+async function saveWorkspaceFileFromMenu() {
+  try {
+    await saveConnectorWorkspaceFile();
+  } catch {
+    render();
+  }
 }
 
 function bindNativeFileFocusTracking() {
@@ -1081,13 +1103,24 @@ function bindWorkspaceOpen() {
   if (workspaceOpenBound) return;
   workspaceOpenBound = true;
   document.body.addEventListener("click", async (event) => {
+    const fileControl = event.target.closest?.("[data-open-workspace-file]");
+    if (fileControl) {
+      event.preventDefault();
+      await openWorkspaceFileFromMenu();
+      return;
+    }
+
     const control = event.target.closest?.("[data-open-workspace]");
     if (!control) return;
     event.preventDefault();
     try {
-      await openConnectorWorkspace(undefined, {
+    if (control.dataset.workspaceFilePath) {
+      await openConnectorWorkspaceFile(control.dataset.workspaceFilePath);
+    } else {
+      await openConnectorWorkspace(control.dataset.workspacePath || undefined, {
         mergeProjects: control.dataset.openWorkspace === "append"
       });
+    }
       window.location.hash = "new-session";
       render();
     } catch {
@@ -1106,7 +1139,8 @@ function bindWorkspaceOpen() {
 function renderStart() {
   const recentProjects = connectorState.connector.available
     ? projects.slice(0, 3)
-    : ["Project Alpha", "Agent Lab", "Docs Workbench"].map((name) => ({ name }));
+    : [];
+  const hasRecentProjects = recentProjects.length > 0;
   const title = connectorState.loading
     ? "Loading workspace state"
     : connectorState.error
@@ -1115,7 +1149,7 @@ function renderStart() {
   const lead = connectorState.error
     ? connectorState.error
     : "Local files, instructions, skills, runtime policy, approvals, and workspace state stay unavailable until a trusted project folder scopes the session.";
-  return h("main", { id: "main", class: "start-view", "data-screen": "app-start", tabindex: "-1" }, [
+  return h("main", { id: "main", class: `start-view${hasRecentProjects ? "" : " is-empty"}`, "data-screen": "app-start", tabindex: "-1" }, [
     h("section", { class: "start-copy" }, [
       h("p", { class: "kicker", text: "No trusted project folder" }),
       h("h1", { text: title }),
@@ -1123,20 +1157,33 @@ function renderStart() {
       h("div", { class: "action-row" }, [
         button("Open Folder", "button primary", null, { "data-open-workspace": "" }),
         button("Clone Repository"),
-        button("Open Workspace File"),
+        button("Open Workspace File", "button secondary", null, { "data-open-workspace-file": "" }),
         link("settings-providers", "button secondary", [icon("settings"), h("span", { text: "Settings" })], { "data-settings-entry": "" })
       ])
     ]),
-    h("section", { class: "recent-panel", "aria-labelledby": "recent-title" }, [
-      h("h2", { id: "recent-title", text: "Recent Folder-Backed Workspaces" }),
+    hasRecentProjects ? h("section", { class: "recent-panel", "aria-labelledby": "recent-title" }, [
+      h("h2", { id: "recent-title", text: "Recent Workspaces" }),
       ...recentProjects.map((project, index) =>
         link("new-session", "workspace-row", [
           h("strong", { text: project.name }),
           h("span", { text: ["Trusted", "2 roots", "Saved"][index] })
-        ])
+        ], {
+          "data-open-workspace": "",
+          "data-workspace-path": project.rootPath || project.root_path || "",
+          "data-workspace-file-path": project.workspaceFilePath || project.workspace_file_path || ""
+        })
       )
-    ])
+    ]) : null
   ]);
+}
+
+function routeBootstrappedWorkspace() {
+  const route = routeFromHash();
+  if (route !== "app-start") return false;
+  if (!connectorState.connector.available || connectorState.loading || connectorState.error) return false;
+  if (!workspace.rootPath) return false;
+  window.location.hash = workspace.session ? "chat-session" : "new-session";
+  return true;
 }
 
 /**
@@ -2556,5 +2603,7 @@ window.addEventListener("hashchange", render);
 const boot = beginConnectorStateLoad();
 render();
 if (boot) {
-  boot.then(render);
+  boot.then(() => {
+    if (!routeBootstrappedWorkspace()) render();
+  });
 }

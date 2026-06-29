@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-014
+Status: in-progress-task-013A
 Updated: 2026-06-27
 
 ## Active Stream
@@ -28,6 +28,10 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
 - `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
 - `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
+
+## Active Item
+
+- `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
 
 ## Scope Rules
 
@@ -57,17 +61,12 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 TASK-013 is verified, including built-app manual QA for same-name trusted
 folders, restart/resume, OpenRouter-backed model context, and the preserved
-Terminal split. Continue with `TASK-014` from
-`.agents/specs/mvp/tasks.md` without renumbering frozen MVP tasks. Preserve
-trusted-folder session/run isolation and restart/resume behavior for
-transcripts, runtime references, provider/model context, artifacts, Browser,
-Files, Terminal, and inert extension records. Preserve the verified TASK-011
-Terminal slice, TASK-011A Agent command terminal bridge, TASK-011B new-session
-transition behavior, and TASK-012 Settings IA order: Providers, Models,
-Runtimes, Configuration, Plugins, Skills, MCP Servers. TASK-014 should add
-app-owned local memory, action records, and audit records needed by the MVP
-surfaces while keeping them separate from raw provider state, workspace
-descriptors, and runtime-local storage. Keep extension invocation, runtime tool
-gateway work, broad approval-policy hardening, TASK-016 security policy, and
-transitional explicit prompt parser expansion out of TASK-014 unless the user
-explicitly widens scope.
+Terminal split. Complete `TASK-013A` before continuing with `TASK-014` from
+`.agents/specs/mvp/tasks.md`. TASK-013A hardens desktop QA by adding
+deterministic workspace bootstrapping, workspace file open/save, provider/model
+persistence across restart, and manual QA workflow updates. Preserve trusted
+folder session/run isolation and restart/resume behavior from TASK-013. Keep
+local memory, broad action records, audit records, extension invocation,
+runtime tool gateway work, broad approval-policy hardening, TASK-016 security
+policy, and transitional explicit prompt parser expansion out of TASK-013A
+unless the user explicitly widens scope.

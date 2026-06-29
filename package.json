@@ -7,8 +7,8 @@
     "dev": "node tests/support/browser-harness/dev-server.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js tests/server/*.test.js",
     "backend:build": "cargo build --manifest-path backend/Cargo.toml",
-    "backend:run": "cargo run --manifest-path backend/Cargo.toml",
-    "backend:run:qa": "C4OS_SESSION_STORE=/tmp/c4os-task-011-qa-sessions.json cargo run --manifest-path backend/Cargo.toml",
+    "backend:run": "node scripts/run-backend.js",
+    "backend:run:qa": "node scripts/run-backend.js --qa",
     "backend:test": "cargo test --manifest-path backend/Cargo.toml",
     "acceptance:mvp": "node scripts/mvp-acceptance.js",
     "acceptance:desktop-wrapper": "node scripts/create-desktop-app-wrapper.js"

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "workspace",
+  "active": {
+    "schemaVersion": 1,
+    "name": "project-a",
+    "rootPath": "./project-a",
+    "trusted": true,
+    "createdAt": 1782129224,
+    "updatedAt": 1782771821
+  },
+  "projects": [
+    {
+      "schemaVersion": 1,
+      "name": "project-a",
+      "rootPath": "./project-a",
+      "trusted": true,
+      "createdAt": 1782129224,
+      "updatedAt": 1782771821
+    },
+    {
+      "schemaVersion": 1,
+      "name": "project-b",
+      "rootPath": "./project-b",
+      "trusted": true,
+      "createdAt": 1782722498,
+      "updatedAt": 1782771812
+    }
+  ]
+}
