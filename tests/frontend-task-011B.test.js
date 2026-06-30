@@ -124,6 +124,10 @@ describe("TASK-011B chat session transition polish", () => {
 
     await page.evaluate(() => window.__task011BResolveCreate());
     await page.evaluate(() => window.__task011BResolvePrompt());
+    await page.evaluate(async () => {
+      const data = await import("/data.js");
+      await data.runConnectorTerminalCommand("git status", "agent");
+    });
     await page.locator("[data-agent-terminal]", { hasText: "$ git status" }).waitFor();
     await page.locator("[data-agent-terminal]", { hasText: "On branch main" }).waitFor();
     assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
@@ -157,7 +161,7 @@ describe("TASK-011B chat session transition polish", () => {
     await page.close();
   });
 
-  it("switches the agent terminal to the active command while the command is running", async () => {
+  it("does not stage agent commands from prompt text while runtime is pending", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask011BTauri(page, { delayTerminalCommand: true, stalePromptTerminal: true });
 
@@ -168,21 +172,15 @@ describe("TASK-011B chat session transition polish", () => {
     await page.getByRole("button", { name: "Terminal" }).click();
     await page.evaluate(() => window.__task011BResolveCreate());
 
-    await page.locator("[data-agent-terminal]", { hasText: "$ git status" }).waitFor();
-    await page.locator("[data-agent-terminal]", { hasText: "Running..." }).waitFor();
-    await page.waitForFunction(() => window.__task011BTerminalCommandStarted === true);
+    await page.locator("[data-agent-terminal]").waitFor();
+    assert.equal(await page.evaluate(() => window.__task011BTerminalCommandStarted), false);
     assert.equal(await page.getByText("Transition response complete.").count(), 0);
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ git status/);
 
     await page.evaluate(() => window.__task011BResolvePrompt());
 
-    await page.locator("[data-agent-terminal]", { hasText: "$ git status" }).waitFor();
-    await page.locator("[data-agent-terminal]", { hasText: "Running..." }).waitFor();
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
-
-    await page.evaluate(() => window.__task011BResolveTerminalCommand());
-    await page.locator("[data-agent-terminal]", { hasText: "On branch main" }).waitFor();
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
+    assert.deepEqual(await page.evaluate(() => window.__task011BTerminalCommands), []);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ git status/);
 
     await page.close();
   });
@@ -215,7 +213,7 @@ describe("TASK-011B chat session transition polish", () => {
     await page.close();
   });
 
-  it("keeps an existing thread explicit command visible when the prompt session snapshot is stale", async () => {
+  it("does not let prompt session snapshots trigger agent terminal commands", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask011BTauri(page, { delayTerminalCommand: true, stalePromptTerminal: true });
 
@@ -225,42 +223,36 @@ describe("TASK-011B chat session transition polish", () => {
 
     await page.locator(".composer-dock .prompt-box").fill("run git status");
     await page.locator(".composer-dock .send-button").click();
-    await page.locator("[data-agent-terminal]", { hasText: "$ git status" }).waitFor();
-    await page.locator("[data-agent-terminal]", { hasText: "Running..." }).waitFor();
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
 
     await page.evaluate(() => window.__task011BResolvePrompt());
     await page.waitForFunction(() => window.__task011BPromptStarted === true);
     await page.waitForTimeout(50);
-    assert.match(await page.locator("[data-agent-terminal]").innerText(), /\$ git status/);
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
-
-    await page.evaluate(() => window.__task011BResolveTerminalCommand());
-    await page.locator("[data-agent-terminal]", { hasText: "On branch main" }).waitFor();
-    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ pwd/);
+    assert.equal(await page.evaluate(() => window.__task011BTerminalCommands.length), 0);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ git status/);
+    await page.locator("[data-agent-terminal]", { hasText: "No structured agent terminal calls for this run." }).waitFor();
 
     await page.close();
   });
 
-  it("normalizes two explicit commands in one message before starting the agent terminal bridge", async () => {
+  it("does not normalize prose into shell commands before runtime tool requests", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask011BTauri(page);
 
     await page.goto(`${server.origin}/#new-session`);
-    await page.locator(".prompt-box").fill("run pwd and git status");
+    await page.locator(".prompt-box").fill("run ls -al and tell me what the last commit was");
     await page.getByRole("button", { name: "Send Prompt" }).click();
     await page.waitForURL(/#chat-session$/);
     await page.getByRole("button", { name: "Terminal" }).click();
     await page.evaluate(() => window.__task011BResolveCreate());
     await page.evaluate(() => window.__task011BResolvePrompt());
-    await page.locator("[data-agent-terminal]", { hasText: "$ pwd && git status" }).waitFor();
 
-    assert.deepEqual(await page.evaluate(() => window.__task011BTerminalCommands), ["pwd && git status"]);
+    assert.deepEqual(await page.evaluate(() => window.__task011BTerminalCommands), []);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ ls -al/);
 
     await page.close();
   });
 
-  it("selects the Terminal tool for a new-session explicit command prompt", async () => {
+  it("does not select Terminal from prompt text before runtime requests terminal.run", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask011BTauri(page);
 
@@ -270,8 +262,8 @@ describe("TASK-011B chat session transition polish", () => {
     await page.waitForURL(/#chat-session$/);
 
     await page.getByRole("button", { name: "Terminal" }).waitFor();
-    assert.equal(await page.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed"), "true");
-    await page.locator("[data-agent-terminal]", { hasText: "$ git status && ls -al" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Browser" }).getAttribute("aria-pressed"), "true");
+    assert.deepEqual(await page.evaluate(() => window.__task011BTerminalCommands), []);
 
     await page.close();
   });

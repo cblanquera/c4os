@@ -10,6 +10,7 @@ pub mod records;
 pub mod runtime_adapter;
 pub mod runtime_sessions;
 pub mod terminal_pty;
+pub mod tool_gateway;
 pub mod workspace;
 
 pub fn run() {

@@ -209,29 +209,6 @@ function appendTerminalOutput(current, next) {
   return current?.trim() ? `${current.trimEnd()}\n${next}` : next;
 }
 
-function explicitCommandFromPrompt(prompt) {
-  const text = String(prompt || "").trim();
-  const patterns = [
-    /^please\s+run\s+(.+)$/i,
-    /^run\s+(.+)$/i,
-    /^please\s+execute\s+(.+)$/i,
-    /^execute\s+(.+)$/i
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (!match) continue;
-    const command = normalizeExplicitCommand(match[1].trim().replace(/^`|`$/g, "").trim());
-    if (command) return command;
-  }
-  return "";
-}
-
-function normalizeExplicitCommand(command) {
-  return String(command || "")
-    .trim()
-    .replace(/\s+\band\s+(?=(cargo|cat|echo|git|ls|node|npm|pwd|python3?|rg|yarn)\b)/gi, " && ");
-}
-
 export function beginConnectorStateLoad() {
   connectorState.error = null;
 
@@ -314,18 +291,8 @@ export async function sendConnectorPrompt(prompt, options = {}) {
 
   connectorState.runPending = true;
   const activeTurn = createPendingTurn(prompt || threadState.user);
-  const explicitCommand = explicitCommandFromPrompt(prompt);
-  let explicitCommandPromise = null;
-  const startExplicitCommand = () => {
-    if (!explicitCommand || explicitCommandPromise) return;
-    explicitCommandPromise = runConnectorTerminalCommand(explicitCommand, "agent")
-      .then((result) => {
-        options.onTerminalStateChange?.();
-        return result;
-      });
-    explicitCommandPromise.catch(() => null);
-    options.onTerminalStateChange?.();
-  };
+  resetAgentTerminalForRuntimeRun();
+  options.onTerminalStateChange?.();
 
   try {
     if (options.createSession) {
@@ -339,14 +306,10 @@ export async function sendConnectorPrompt(prompt, options = {}) {
         terminal: emptySessionTerminalState(),
         turns: []
       });
+      resetAgentTerminalForRuntimeRun();
       threadTurns.push(activeTurn);
       syncThreadStateFromTurn(activeTurn);
       options.onTurnCreated?.(activeTurn);
-      if (explicitCommand) {
-        stageConnectorTerminalCommand(explicitCommand, "agent");
-        options.onExplicitCommandStart?.(explicitCommand);
-        options.onTerminalStateChange?.();
-      }
       const label = sessionLabel(prompt);
       const created = connectorState.connector.createSession
         ? await connectorState.connector.createSession(workspace.project, options.model || workspace.model, label)
@@ -360,20 +323,14 @@ export async function sendConnectorPrompt(prompt, options = {}) {
         terminal: created?.terminal || emptySessionTerminalState(),
         turns: [activeTurn]
       });
+      resetAgentTerminalForRuntimeRun();
       replaceArray(threadTurns, [activeTurn]);
       syncThreadStateFromTurn(activeTurn);
-      if (explicitCommand) {
-        startExplicitCommand();
-      }
     }
     if (!threadTurns.includes(activeTurn)) {
       threadTurns.push(activeTurn);
       syncThreadStateFromTurn(activeTurn);
       options.onTurnCreated?.(activeTurn);
-    }
-    if (!options.createSession && explicitCommand) {
-      options.onExplicitCommandStart?.(explicitCommand);
-      startExplicitCommand();
     }
 
     const payload = await connectorState.connector.sendPrompt(prompt, {
@@ -387,14 +344,7 @@ export async function sendConnectorPrompt(prompt, options = {}) {
       }
     });
     if (payload?.session) {
-      applySessionRecord(payload.session, { preserveTerminal: Boolean(explicitCommand), preserveTurns: true });
-    }
-    if (explicitCommand) {
-      const commandResult = explicitCommandPromise
-        ? await explicitCommandPromise
-        : await runConnectorTerminalCommand(explicitCommand, "agent");
-      appendWorkLog(activeTurn, `Agent command terminal: ${explicitCommand}`);
-      if (commandResult?.action?.status) appendWorkLog(activeTurn, `Command ${commandResult.action.status}`);
+      applySessionRecord(payload.session, { preserveTerminal: true, preserveTurns: true });
     }
     applyRuntimeEventsFromPayload(payload, activeTurn, options);
     if (payload.agent) activeTurn.agent = payload.agent;
@@ -412,9 +362,10 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     activeTurn.run = message;
     appendWorkLog(activeTurn, message);
     activeTurn.failed = true;
-    if (explicitCommandPromise) await explicitCommandPromise.catch(() => null);
     options.onStateChange?.(activeTurn);
   } finally {
+    settleAgentTerminalForRuntimeRun();
+    options.onTerminalStateChange?.();
     connectorState.runPending = false;
     await options.beforeComplete?.(activeTurn);
     activeTurn.pending = false;
@@ -424,6 +375,23 @@ export async function sendConnectorPrompt(prompt, options = {}) {
     options.onStateChange?.(activeTurn);
     captureActiveSessionState();
   }
+}
+
+function resetAgentTerminalForRuntimeRun() {
+  terminalState.agentTerminal ||= {};
+  terminalState.agentTerminal.title = "Agent command terminal";
+  terminalState.agentTerminal.summary = "Read-only agent command output.";
+  terminalState.agentTerminal.output = "Waiting for runtime tool calls...";
+  terminalState.agentTerminal.running = true;
+  captureActiveSessionState();
+}
+
+function settleAgentTerminalForRuntimeRun() {
+  const pane = terminalState.agentTerminal;
+  if (!pane?.running || pane.output !== "Waiting for runtime tool calls...") return;
+  pane.output = "No structured agent terminal calls for this run.";
+  pane.running = false;
+  captureActiveSessionState();
 }
 
 export async function setConnectorModelEnabled(modelId, enabled) {

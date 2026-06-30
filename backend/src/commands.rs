@@ -1,5 +1,5 @@
 use crate::extensions::{extension_records, ExtensionList};
-use crate::files::{list_files_state, read_file_state, save_file_state};
+use crate::files::list_files_state;
 use crate::menu::{evaluate_menu_state, menu_contract, FocusState, MenuContract, MenuState};
 use crate::mock_data::{
     mock_workspace, ArtifactRecord, BrowserState, TerminalPaneState, TerminalState,
@@ -18,22 +18,23 @@ use crate::provider_models::{
 };
 use crate::records::{
     list_action_records as app_action_records, list_audit_records as app_audit_records,
-    list_local_memory_records as app_local_memory_records, record_file_action,
+    list_local_memory_records as app_local_memory_records,
     save_local_memory_record as save_app_local_memory_record, ActionRecord, AuditRecord,
     LocalMemoryRecord, SaveLocalMemoryRequest,
 };
 use crate::runtime_sessions::{
     active_session, append_prompt, create_session as create_c4os_session,
-    create_session_artifact_preview, load_session as load_c4os_session, project_sessions,
-    run_session_terminal_command, session_workspace_root as c4os_session_workspace_root,
-    sessions as c4os_sessions, set_session_browser as set_c4os_session_browser,
-    set_session_files as set_c4os_session_files, set_session_model as set_c4os_session_model,
-    BrowserActionRecord, C4osSessionRecord, CreateSessionRequest, SendPromptRequest,
-    TerminalActionRecord,
+    load_session as load_c4os_session, project_sessions, sessions as c4os_sessions,
+    set_session_model as set_c4os_session_model, BrowserActionRecord, C4osSessionRecord,
+    CreateSessionRequest, SendPromptRequest, TerminalActionRecord,
 };
 use crate::terminal_pty::{
     read_terminal, resize_terminal, start_terminal, stop_terminal, write_terminal,
     TerminalOutputEvent, TerminalResize,
+};
+use crate::tool_gateway::{
+    dispatch_tool_call, ToolCallPayload, ToolCallRequest, TOOL_ARTIFACT_PREVIEW, TOOL_BROWSER_OPEN,
+    TOOL_FILES_LIST, TOOL_FILES_READ, TOOL_FILES_WRITE, TOOL_TERMINAL_RUN,
 };
 use crate::workspace::{
     activate_workspace, active_workspace_descriptor, active_workspace_root,
@@ -427,19 +428,22 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
         content: None,
         session_id: None,
     });
-    let session_id = active_file_session_id(request.session_id);
-    let root = file_command_root(session_id.as_deref())?;
     let path = request.path.unwrap_or_default();
-    let state = if path.trim().is_empty() {
-        list_files_state(&root, None)?
-    } else if crate::files::trusted_path(&root, &path)?.is_dir() {
-        list_files_state(&root, Some(&path))?
+    let tool = if path.trim().is_empty() {
+        TOOL_FILES_LIST
     } else {
-        read_file_state(&root, &path)?
+        TOOL_FILES_READ
     };
-    if let Some(session_id) = session_id {
-        let _ = set_c4os_session_files(&session_id, state.clone());
-    }
+    let response = dispatch_tool_call(ToolCallRequest {
+        tool: tool.into(),
+        session_id: request.session_id,
+        actor: Some("agent".into()),
+        args: serde_json::json!({ "path": path }),
+        session_config: None,
+    })?;
+    let ToolCallPayload::Files { state, .. } = response.payload else {
+        return Err("Gateway returned an unexpected file response".into());
+    };
     Ok(FileReadResponse {
         path: state.current_path,
         content: state.content,
@@ -455,29 +459,24 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
 #[tauri::command]
 pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, String> {
     let request = request.ok_or_else(|| "File save request is required".to_string())?;
-    let session_id = active_file_session_id(request.session_id);
-    let root = file_command_root(session_id.as_deref())?;
     let path = request
         .path
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "File path is required".to_string())?;
     let content = request.content.unwrap_or_default();
-    let state = save_file_state(&root, &path, &content)?;
-    if let Some(session_id) = session_id {
-        let _ = set_c4os_session_files(&session_id, state.clone());
-        if let Some(workspace) = active_workspace_descriptor() {
-            record_file_action(
-                &workspace.id,
-                Some(&session_id),
-                "save",
-                &state.current_path,
-                "saved",
-            );
-        }
-    }
+    let response = dispatch_tool_call(ToolCallRequest {
+        tool: TOOL_FILES_WRITE.into(),
+        session_id: request.session_id,
+        actor: Some("agent".into()),
+        args: serde_json::json!({ "path": path, "content": content }),
+        session_config: None,
+    })?;
+    let ToolCallPayload::Files { state, saved } = response.payload else {
+        return Err("Gateway returned an unexpected file save response".into());
+    };
     Ok(FileSaveResponse {
         path: state.current_path,
-        saved: true,
+        saved,
         content: state.content,
         saved_content: state.saved_content,
         lines: state.lines,
@@ -492,13 +491,16 @@ pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, Strin
 pub fn create_artifact_preview(
     request: ArtifactPreviewRequest,
 ) -> Result<ArtifactPreviewResponse, String> {
-    let session_id = request
-        .session_id
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| active_session().map(|session| session.id))
-        .ok_or_else(|| "A C4OS session is required before previewing an artifact".to_string())?;
-    let (artifact, browser) =
-        create_session_artifact_preview(&session_id, &request.title, &request.html)?;
+    let response = dispatch_tool_call(ToolCallRequest {
+        tool: TOOL_ARTIFACT_PREVIEW.into(),
+        session_id: request.session_id,
+        actor: Some("agent".into()),
+        args: serde_json::json!({ "title": request.title, "html": request.html }),
+        session_config: None,
+    })?;
+    let ToolCallPayload::ArtifactPreview { artifact, browser } = response.payload else {
+        return Err("Gateway returned an unexpected artifact response".into());
+    };
     Ok(ArtifactPreviewResponse { artifact, browser })
 }
 
@@ -508,15 +510,19 @@ pub fn run_terminal_command(
 ) -> Result<TerminalCommandResponse, String> {
     let request = request.ok_or_else(|| "Terminal command request is required".to_string())?;
     let command = request.command.unwrap_or_default();
-    let session_id = request
-        .session_id
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| active_session().map(|session| session.id))
-        .ok_or_else(|| "A C4OS session is required before running Terminal commands".to_string())?;
     let terminal_kind = request.terminal_kind.unwrap_or_else(|| "user".into());
-    let (terminal, action) = run_session_terminal_command(&session_id, &command, &terminal_kind)?;
+    let response = dispatch_tool_call(ToolCallRequest {
+        tool: TOOL_TERMINAL_RUN.into(),
+        session_id: request.session_id,
+        actor: Some(terminal_kind.clone()),
+        args: serde_json::json!({ "command": command, "terminalKind": terminal_kind }),
+        session_config: None,
+    })?;
+    let ToolCallPayload::Terminal { terminal, action } = response.payload else {
+        return Err("Gateway returned an unexpected terminal response".into());
+    };
     Ok(TerminalCommandResponse {
-        command,
+        command: action.command.clone(),
         output: action.output.clone(),
         terminal,
         action,
@@ -580,49 +586,20 @@ pub fn stop_terminal_session(request: TerminalSessionRequest) -> Result<(), Stri
 
 #[tauri::command]
 pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, String> {
-    let session = browser_session_from_request(request.session_id)?;
-    let actor = normalized_browser_actor(request.actor.as_deref());
-    if actor == "agent" && !request.clear_request {
-        return Err("Agent Browser access must be clearly requested for this request".into());
-    }
-    let target = request.target.trim();
-    if target.is_empty() {
-        return Err("Browser target is required".into());
-    }
-    let root = c4os_session_workspace_root(&session.id)
-        .or_else(active_workspace_root)
-        .or_else(|| public_browser_target_without_root(target).then(PathBuf::new))
-        .ok_or_else(|| "No trusted workspace root is active".to_string())?;
-    let (browser, action) = browser_state_for_target(&session, &root, target, &actor)?;
-    let action_record =
-        set_c4os_session_browser(&session.id, browser.clone(), &actor, action, target)?;
-    Ok(BrowserOpenResponse {
-        browser,
-        action: action_record,
-    })
-}
-
-fn browser_session_from_request(
-    request_session_id: Option<String>,
-) -> Result<C4osSessionRecord, String> {
-    if let Some(session) = request_session_id
-        .filter(|value| !value.trim().is_empty())
-        .as_deref()
-        .and_then(load_c4os_session)
-    {
-        return Ok(session);
-    }
-    if let Some(session) = active_session() {
-        return Ok(session);
-    }
-    let descriptor = active_workspace_descriptor().ok_or_else(|| {
-        "A trusted workspace is required before opening Browser state".to_string()
+    let response = dispatch_tool_call(ToolCallRequest {
+        tool: TOOL_BROWSER_OPEN.into(),
+        session_id: request.session_id,
+        actor: request.actor,
+        args: serde_json::json!({
+            "target": request.target,
+            "clearRequest": request.clear_request
+        }),
+        session_config: None,
     })?;
-    Ok(create_c4os_session(CreateSessionRequest {
-        project: Some(descriptor.name),
-        label: Some("Browser session".into()),
-        model: None,
-    }))
+    let ToolCallPayload::Browser { browser, action } = response.payload else {
+        return Err("Gateway returned an unexpected Browser response".into());
+    };
+    Ok(BrowserOpenResponse { browser, action })
 }
 
 #[tauri::command]
@@ -782,12 +759,6 @@ fn apply_runtime_session_payload(payload: &mut WorkspacePayload) {
     }
 }
 
-fn active_file_session_id(request_session_id: Option<String>) -> Option<String> {
-    request_session_id
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| active_session().map(|session| session.id))
-}
-
 fn active_workspace_sessions() -> Vec<C4osSessionRecord> {
     let sessions = c4os_sessions();
     let Some(descriptor) = active_workspace_descriptor() else {
@@ -797,13 +768,6 @@ fn active_workspace_sessions() -> Vec<C4osSessionRecord> {
         .into_iter()
         .filter(|session| session.workspace_id == descriptor.id)
         .collect()
-}
-
-fn file_command_root(session_id: Option<&str>) -> Result<PathBuf, String> {
-    if let Some(root) = session_id.and_then(c4os_session_workspace_root) {
-        return Ok(root);
-    }
-    active_workspace_root().ok_or_else(|| "No trusted workspace root is active".to_string())
 }
 
 fn terminal_scope_from_request(session_id: Option<String>) -> Result<TerminalCommandScope, String> {
@@ -855,151 +819,6 @@ fn normalized_terminal_actor(actor: Option<&str>) -> String {
         "agent" => "agent".into(),
         _ => "user".into(),
     }
-}
-
-fn normalized_browser_actor(actor: Option<&str>) -> String {
-    match actor.unwrap_or("user").trim().to_ascii_lowercase().as_str() {
-        "agent" => "agent".into(),
-        _ => "user".into(),
-    }
-}
-
-fn browser_state_for_target(
-    session: &C4osSessionRecord,
-    root: &Path,
-    target: &str,
-    actor: &str,
-) -> Result<(BrowserState, &'static str), String> {
-    if let Some(public_url) = normalize_public_browser_url(root, target) {
-        return Ok((
-            BrowserState {
-                url: public_url.clone(),
-                title: browser_title_from_url(&public_url),
-                summary: "Public page opened in the project-scoped Browser surface.".into(),
-                artifact_id: String::new(),
-                preview_mode: "public".into(),
-                profile_id: crate::runtime_sessions::browser_profile_id(session),
-                local_path: String::new(),
-                html: String::new(),
-            },
-            "open-public-url",
-        ));
-    }
-
-    let file = resolve_browser_file_target(root, target, actor)?;
-    if !file.is_file() {
-        return Err("Browser local target must be a trusted project file".into());
-    }
-    let html = local_browser_dom_preview_content(&file)?;
-    let local_path = file.to_string_lossy().into_owned();
-    Ok((
-        BrowserState {
-            url: format!("file://{local_path}"),
-            title: target
-                .rsplit('/')
-                .next()
-                .filter(|value| !value.is_empty())
-                .unwrap_or("Local file")
-                .into(),
-            summary: "Trusted project file opened through Files authority.".into(),
-            artifact_id: String::new(),
-            preview_mode: "local-file".into(),
-            profile_id: crate::runtime_sessions::browser_profile_id(session),
-            local_path,
-            html,
-        },
-        "open-local-file",
-    ))
-}
-
-fn local_browser_dom_preview_content(file: &Path) -> Result<String, String> {
-    if local_browser_file_is_markdown(file) {
-        return std::fs::read_to_string(file).map_err(|error| format!("Cannot read file: {error}"));
-    }
-    Ok(String::new())
-}
-
-fn local_browser_file_is_markdown(file: &Path) -> bool {
-    matches!(
-        local_browser_extension(file).as_deref(),
-        Some("md" | "markdown")
-    )
-}
-
-fn local_browser_extension(file: &Path) -> Option<String> {
-    file.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase())
-}
-
-fn normalize_public_browser_url(root: &Path, target: &str) -> Option<String> {
-    if target.starts_with("http://") || target.starts_with("https://") {
-        return Some(target.into());
-    }
-
-    if target.contains('/') || target.starts_with('.') || target.starts_with('~') {
-        return None;
-    }
-
-    if root.join(target).exists() {
-        return None;
-    }
-
-    if looks_like_public_host(target) {
-        return Some(format!("https://{target}/"));
-    }
-
-    None
-}
-
-fn public_browser_target_without_root(target: &str) -> bool {
-    target.starts_with("http://")
-        || target.starts_with("https://")
-        || looks_like_public_host(target)
-}
-
-fn looks_like_public_host(target: &str) -> bool {
-    let value = target.trim();
-    value.contains('.')
-        && !value.contains(char::is_whitespace)
-        && value.split('.').all(|part| {
-            !part.is_empty()
-                && part
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        })
-}
-
-fn resolve_browser_file_target(root: &Path, target: &str, actor: &str) -> Result<PathBuf, String> {
-    if actor == "agent" {
-        return crate::files::trusted_path(&root, target);
-    }
-
-    let path = file_path_from_browser_target(target);
-    let candidate = if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    };
-    std::fs::canonicalize(&candidate).map_err(|error| format!("Cannot resolve file path: {error}"))
-}
-
-fn file_path_from_browser_target(target: &str) -> PathBuf {
-    if let Some(path) = target.strip_prefix("file://") {
-        return PathBuf::from(path);
-    }
-    Path::new(target).to_path_buf()
-}
-
-fn browser_title_from_url(target: &str) -> String {
-    target
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Public page")
-        .into()
 }
 
 fn provider_record_from_profile(profile: ProviderProfile) -> crate::mock_data::ProviderRecord {

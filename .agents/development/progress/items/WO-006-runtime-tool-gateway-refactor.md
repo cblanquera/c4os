@@ -1,6 +1,6 @@
 # WO-006 Runtime Tool Gateway Refactor
 
-Status: ready
+Status: accepted
 Updated: 2026-06-30
 
 ## Source
@@ -91,3 +91,79 @@ the current Terminal command path can use without changing the accepted UI.
 `TASK-016` can then harden trusted roots, approvals, Browser authority,
 Terminal policy, extension gates, and audit logs against the gateway-backed
 surface instead of hardening the transitional parser directly.
+
+## Implementation Output
+
+- Added `backend/src/tool_gateway.rs` as the C4OS-owned runtime tool gateway.
+- Registered the backend module through `backend/src/lib.rs`.
+- Defined stable tool identities:
+  - `terminal.run`
+  - `files.list`
+  - `files.read`
+  - `files.write`
+  - `browser.open`
+  - `artifact.preview`
+- Defined lifecycle event names separately from tool identities:
+  - `tool_call_requested`
+  - `tool_call_started`
+  - `tool_output_delta`
+  - `tool_call_completed`
+  - `tool_call_rejected`
+- Added gateway contract records for `ToolCallRequest`, `ToolCallResponse`,
+  `ToolCallPayload`, `ToolApproval`, `ToolAccess`, `ToolDefinition`,
+  `ToolPermission`, and `SessionToolConfig`.
+- Implemented per-session tool config evaluation for enabled state, access
+  match, explicit deny, and maximum approval widening rejection. Session config
+  can narrow authority but cannot silently widen beyond the tool definition.
+- Routed existing command entry points through `dispatch_tool_call`:
+  - `read_file`
+  - `save_file`
+  - `create_artifact_preview`
+  - `run_terminal_command`
+  - `open_browser`
+- Removed duplicated command-layer Files/Browser/Terminal helper ownership from
+  `backend/src/commands.rs`; those implementations now live behind the gateway.
+- Preserved accepted user-facing behavior for Files, Browser, artifact preview,
+  Terminal, Agent command terminal, chat transition, and session restoration.
+- Removed frontend prompt-text terminal parsing from the accepted chat path.
+  Chat prompts are sent to the runtime; terminal execution should occur only
+  when the runtime/tool-gateway path requests `terminal.run` through the
+  gateway-backed `run_terminal_command` bridge.
+- Runtime runs now clear stale Agent command terminal output at prompt start
+  and settle to `No structured agent terminal calls for this run.` when the
+  runtime produces no structured terminal tool request. Assistant prose or
+  markdown that merely contains command-looking output is not mirrored into the
+  Agent terminal.
+
+## Verification
+
+- `node --test --test-concurrency=1 tests/server/wo-006-tool-gateway.test.js`
+  - 2 passed.
+- `cargo test --manifest-path backend/Cargo.toml wo_006 -- --test-threads=1`
+  - 3 passed.
+- `node --test --test-concurrency=1 tests/server/task-005-openrouter-chat.test.js tests/server/task-008-files.test.js tests/server/task-010b-native-browser.test.js tests/server/task-011-terminal.test.js tests/server/task-014-records.test.js tests/server/wo-006-tool-gateway.test.js`
+  - 15 passed.
+- `cargo test --manifest-path backend/Cargo.toml -- --test-threads=1`
+  - 59 passed.
+- `node --test --test-concurrency=1 tests/frontend-task-005.test.js tests/frontend-task-005A.test.js tests/frontend-task-007.test.js tests/frontend-task-008.test.js tests/frontend-task-010A.test.js tests/frontend-task-010B.test.js tests/frontend-task-010C.test.js tests/frontend-task-011.test.js tests/frontend-task-011B.test.js`
+  - 61 passed with local loopback permission for the browser harness after the
+    parser-removal regression fix.
+
+## Accepted Boundary
+
+Stakeholder acceptance recorded on 2026-06-30. WO-006 is accepted as the
+pre-`TASK-016` refactor boundary.
+
+Known deferred gap: the current provider/runtime path can still return
+command-looking output as assistant prose or markdown instead of structured
+`terminal.run` tool-call events. C4OS intentionally does not mirror that prose
+into the Agent terminal. A later runtime-tool execution item must make the
+runtime emit structured tool lifecycle events, have C4OS execute
+`terminal.run` through the gateway, and stream/persist the resulting output so
+the Agent terminal reflects real tool calls.
+
+## Next Step
+
+Proceed to `TASK-016`. Security and approval hardening should target the
+formal `tool_gateway` boundary and must not reintroduce one-off runtime-to-app
+interaction paths.

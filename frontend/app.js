@@ -235,16 +235,6 @@ async function sendFromComposerControl(control) {
       if (!shouldCreateSession) appendTurnToThread(turn);
     },
     onStateChange: (turn) => updateTurnDom(turn),
-    onExplicitCommandStart: () => {
-      if (!shouldCreateSession) return;
-      setActiveToolForRoute("chat-session", "terminal");
-      if (routeFromHash() === "chat-session") {
-        document.querySelector(".tool-panel")?.replaceWith(renderToolPanel("terminal", "chat-session"));
-        bindToolTabs();
-        bindTerminalEmulator();
-        bindPanelLinks();
-      }
-    },
     beforeComplete: minimumPendingFrame,
     onTerminalStateChange: updateAgentTerminalDom
   });

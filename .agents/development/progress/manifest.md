@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-wo-006-runtime-tool-gateway-refactor
+Status: ready-for-task-016-security-approval-hardening
 Updated: 2026-06-30
 
 ## Active Stream
@@ -31,11 +31,12 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
 - `.agents/development/progress/items/TASK-014-local-memory-action-audit-records.md`
 - `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
+- `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
 
 ## Active Item
 
 - None. Next item is
-  `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`.
+  `.agents/specs/mvp/tasks.md` `TASK-016`.
 
 ## Scope Rules
 
@@ -63,13 +64,16 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-015 is accepted. The feature-complete package summarizes the completed MVP
-feature list, acceptance evidence by task and surface, remaining mocks or
-shortcuts, and the explicit pre-`TASK-016` boundary.
+WO-006 is accepted. Runtime-driven app interactions now have a formal
+C4OS-owned tool gateway with stable tool identities, lifecycle event names,
+per-session tool config shape, default/max approval semantics, and dispatch for
+Files, Browser, artifact preview, and Terminal command execution.
 
-Before `TASK-016`, run
-`.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`.
-This refactor should formalize runtime-driven tool execution through the
-C4OS-owned tool gateway so security and approval hardening targets the correct
-internal execution boundary instead of the transitional explicit command
-parser.
+Proceed to `.agents/specs/mvp/tasks.md` `TASK-016`. Security and approval
+hardening should target `backend/src/tool_gateway.rs` and must not reintroduce
+one-off runtime-to-app interaction paths or restore frontend prompt-text
+terminal parsing. Command planning belongs to the runtime; C4OS should execute
+only structured tool requests through the gateway. The remaining Agent terminal
+gap is deferred: runtime/provider output that is only assistant prose is not
+mirrored into Terminal until a structured runtime `terminal.run` tool-event
+path exists.

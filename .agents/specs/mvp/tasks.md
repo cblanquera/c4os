@@ -441,6 +441,17 @@ descriptor safety, secure key storage, isolated HTML preview, Browser authority
 rules, terminal command policy, extension enablement gates, and audit logs
 against the now feature-complete product surface.
 
+TASK-016 must provision a formal tool approval configuration store for the
+runtime tool gateway. The storage model must include project/workspace-level
+defaults scoped to the trusted project folder, optional per-session overrides
+that can narrow or request policy changes for a chat session, and a run-scoped
+effective-policy snapshot persisted with tool/action/audit records. The config
+shape should map stable tool identities such as `terminal.run`, `files.read`,
+`files.write`, `browser.open`, and `artifact.preview` to enabled state, access
+level, and approval policy. Workspace/project defaults are the source of truth
+for folder-scoped trust; session overrides must not silently widen beyond tool
+maximum authority or workspace policy.
+
 This phase should harden real behavior, not merely document expected policy.
 
 ### TASK-017: Complete Remaining Integration And Release Readiness
@@ -450,6 +461,13 @@ Depends on: TASK-016
 Complete any remaining required implementation, integration, migration,
 packaging, QA, accessibility, restart/resume, failure-state, and acceptance-test
 work needed for a release-ready MVP.
+
+TASK-017 must resolve the deferred runtime tool-output reflection gap: provider
+or runtime command execution must arrive as structured C4OS tool lifecycle
+events such as `tool_call_requested`, `tool_output_delta`, and
+`tool_call_completed`, with `terminal.run` executed through the gateway and
+reflected in the Agent terminal. Assistant prose or markdown that merely
+contains command output is not a valid Agent terminal source of truth.
 
 Run backend, frontend, integration, and MVP acceptance verification. Do not
 claim product completion until all acceptance criteria pass with real behavior

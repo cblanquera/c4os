@@ -171,33 +171,27 @@ describe("TASK-011 terminal slice", () => {
     await page.close();
   });
 
-  it("runs explicit command prompts through the read-only agent terminal", async () => {
+  it("does not parse chat prompts into agent terminal commands before runtime tool requests", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     const calls = [];
     await installTask011Tauri(page, calls, { useRealXterm: true });
 
     await page.goto(`${server.origin}/#chat-session`);
-    await page.locator(".composer-dock .prompt-box").fill("run ls");
+    await page.locator(".composer-dock .prompt-box").fill("run ls -al and tell me what changed");
     await page.locator(".composer-dock .send-button").click();
     await page.getByRole("button", { name: "Terminal" }).click();
 
-    await page.locator("[data-agent-terminal]", { hasText: "README.md" }).waitFor();
-    await page.locator("[data-agent-terminal]", { hasText: "$ ls" }).waitFor();
     await page.locator(".xterm-screen", { hasText: "alpha prompt" }).waitFor();
-    assert.doesNotMatch(await page.locator(".xterm-screen").innerText(), /README\.md/);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ ls -al/);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /README\.md/);
+    await page.locator(".xterm-screen", { hasText: "alpha prompt" }).waitFor();
     assert.equal(await page.locator("[data-agent-terminal] textarea, [data-agent-terminal] input, [data-agent-terminal] [contenteditable='true']").count(), 0);
-
-    const commandCall = calls.find((call) => call.command === "run_terminal_command");
-    assert.deepEqual(commandCall.payload.request, {
-      command: "ls",
-      sessionId: "alpha",
-      terminalKind: "agent"
-    });
+    assert.equal(calls.some((call) => call.command === "run_terminal_command"), false);
 
     await page.close();
   });
 
-  it("repaints the mounted agent terminal after an explicit command prompt", async () => {
+  it("preserves the mounted agent terminal until runtime emits a tool request", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     const calls = [];
     await installTask011Tauri(page, calls, { useRealXterm: true });
@@ -210,9 +204,12 @@ describe("TASK-011 terminal slice", () => {
     await page.locator(".composer-dock .prompt-box").fill("run ls");
     await page.locator(".composer-dock .send-button").click();
 
-    await page.locator("[data-agent-terminal]", { hasText: "$ ls" }).waitFor();
-    await page.locator("[data-agent-terminal]", { hasText: "README.md" }).waitFor();
+    await page.waitForFunction(() => window.__task011Calls.some((call) => call.command === "send_prompt"));
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /\$ ls/);
+    assert.doesNotMatch(await page.locator("[data-agent-terminal]").innerText(), /README\.md/);
+    await page.locator("[data-agent-terminal]", { hasText: "No structured agent terminal calls for this run." }).waitFor();
     assert.doesNotMatch(await page.locator(".xterm-screen").innerText(), /README\.md/);
+    assert.equal(calls.some((call) => call.command === "run_terminal_command"), false);
 
     await page.close();
   });
@@ -234,8 +231,11 @@ describe("TASK-011 terminal slice", () => {
     });
     assert.ok(contrast.agentLuminance > contrast.userLuminance, JSON.stringify(contrast));
 
-    await page.locator(".composer-dock .prompt-box").fill("run ls");
-    await page.locator(".composer-dock .send-button").click();
+    await page.evaluate(async () => {
+      const data = await import("/data.js");
+      await data.runConnectorTerminalCommand("ls", "agent");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
     await page.locator("[data-agent-terminal]", { hasText: "final-agent-line" }).waitFor();
 
     const scrollState = await page.locator("[data-agent-terminal]").evaluate((node) => ({

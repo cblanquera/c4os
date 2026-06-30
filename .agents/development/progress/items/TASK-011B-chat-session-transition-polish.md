@@ -149,11 +149,14 @@ user turn, and renders a clear run/working/streaming or setup-required state.
   explicit command prompt reconciles a stale session snapshot in an existing
   thread, and normalizes simple multi-command prompts such as
   `run pwd and git status` to `pwd && git status` before both frontend command
-  bridge execution and backend persistence.
+  bridge execution and backend persistence. This parser behavior was later
+  superseded by the WO-006/runtime-gateway correction below; do not restore it.
 - Eighth follow-up selects the Terminal tool for new-session explicit command
   prompts before the chat-session shell renders, so command output is visible
-  instead of hidden behind the Browser tab. Existing chat sessions keep the
-  user's current right-panel tool selection.
+  instead of hidden behind the Browser tab. This prompt-text auto-selection was
+  later superseded by the WO-006/runtime-gateway correction below; do not
+  restore it. Existing chat sessions keep the user's current right-panel tool
+  selection.
 - Ninth follow-up makes `run_terminal_command` the only backend path that
   mutates Agent command terminal output. `send_prompt` / `append_prompt` now
   persist chat runtime state only, preventing explicit-command chat responses
@@ -163,16 +166,16 @@ user turn, and renders a clear run/working/streaming or setup-required state.
   `TerminalCommandRequest`. Native manual QA caught that the frontend command
   bridge was otherwise defaulting to `terminalKind: "user"` even when tests
   using internal snake_case paths passed.
-- Post-verification design note: the explicit prompt command parser is
-  accepted only as transitional TASK-011B polish. The intended durable model is
-  a runtime tool gateway where the prompt is sent to the runtime, the runtime
-  streams status/tool-call/final-response events, and C4OS executes approved
-  tools through product-owned authority boundaries. The reusable contract
-  should map per-session tool config by tool identity such as `terminal.run`,
-  `files.read`, `files.write`, or `browser.open`, not by lifecycle event name.
-  Tool implementations can define default and maximum approval levels; session
-  config can narrow authority but must not silently widen it. This is
-  documented in `.agents/context/technical-specs.md`,
+- Post-verification correction: the explicit prompt command parser must not be
+  treated as accepted behavior. Chat prompts are sent to the runtime, and the
+  runtime/tool-gateway path is responsible for requesting `terminal.run` or any
+  other tool. C4OS executes approved tools through product-owned authority
+  boundaries. The reusable contract should map per-session tool config by tool
+  identity such as `terminal.run`, `files.read`, `files.write`, or
+  `browser.open`, not by lifecycle event name. Tool implementations can define
+  default and maximum approval levels; session config can narrow authority but
+  must not silently widen it. This is documented in
+  `.agents/context/technical-specs.md`,
   `.agents/references/context/technical-specs/runtime-adapter.md`, and
   `.agents/context/work-orders.md`, and should be handled before or during
   TASK-016 rather than added casually to TASK-012.
@@ -180,6 +183,6 @@ user turn, and renders a clear run/working/streaming or setup-required state.
 ## Next Step
 
 After TASK-011B is accepted, continue with `.agents/specs/mvp/tasks.md`
-`TASK-012` without renumbering frozen MVP tasks. Do not expand the simple
-explicit command parser as part of TASK-012; keep runtime tool gateway work
-deferred to the documented follow-up.
+`TASK-012` without renumbering frozen MVP tasks. Do not restore or expand the
+removed explicit command parser; command planning belongs to the runtime
+tool-gateway path.
