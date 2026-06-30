@@ -166,6 +166,31 @@ pub fn record_file_action(
     )
 }
 
+pub fn record_security_audit(
+    workspace_id: &str,
+    session_id: Option<&str>,
+    category: &str,
+    summary: &str,
+    resource: &str,
+    status: &str,
+) -> AuditRecord {
+    let mut store = load_store();
+    let timestamp = now_unix_seconds();
+    let record = AuditRecord {
+        id: format!("audit-{}", store.audit.len() + 1),
+        workspace_id: normalized_id(workspace_id),
+        session_id: session_id.and_then(|value| normalized_optional(Some(value.into()))),
+        category: normalized_label(category, "security"),
+        summary: bounded_target(summary),
+        resource: bounded_target(resource),
+        status: normalized_label(status, "recorded"),
+        created_at: timestamp,
+    };
+    store.audit.push(record.clone());
+    save_store(&store);
+    record
+}
+
 fn record_action_and_audit(
     workspace_id: &str,
     session_id: Option<&str>,

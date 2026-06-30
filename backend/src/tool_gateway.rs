@@ -7,6 +7,7 @@ use crate::runtime_sessions::{
     set_session_browser as set_c4os_session_browser, set_session_files as set_c4os_session_files,
     BrowserActionRecord, C4osSessionRecord, CreateSessionRequest, TerminalActionRecord,
 };
+use crate::security::{enforce_tool_request, ToolEnforcementInput};
 use crate::workspace::{active_workspace_descriptor, active_workspace_root};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,6 +77,8 @@ pub struct ToolCallRequest {
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
     pub actor: Option<String>,
     #[serde(default)]
     pub args: Value,
@@ -121,7 +124,15 @@ pub struct ToolCallResponse {
 
 pub fn dispatch_tool_call(request: ToolCallRequest) -> Result<ToolCallResponse, String> {
     let definition = tool_definition(&request.tool)?;
-    evaluate_tool_config(&definition, request.session_config.as_ref())?;
+    // Security records the run-scoped effective_tool_policy_snapshot here.
+    enforce_tool_request(ToolEnforcementInput {
+        definition: &definition,
+        session_id: request.session_id.as_deref(),
+        run_id: request.run_id.as_deref(),
+        actor: request.actor.as_deref(),
+        args: &request.args,
+        session_config: request.session_config.as_ref(),
+    })?;
     let tool = request.tool.clone();
     let mut events = vec![lifecycle_event(
         EVENT_TOOL_CALL_REQUESTED,
@@ -200,6 +211,7 @@ pub fn tool_definition(tool: &str) -> Result<ToolDefinition, String> {
     Ok(definition)
 }
 
+#[cfg(test)]
 fn evaluate_tool_config(
     definition: &ToolDefinition,
     config: Option<&SessionToolConfig>,
@@ -541,6 +553,7 @@ fn lifecycle_event(kind: &str, tool: &str, text: &str) -> ToolCallLifecycleEvent
     }
 }
 
+#[cfg(test)]
 fn approval_rank(approval: &ToolApproval) -> u8 {
     match approval {
         ToolApproval::Deny => 0,
@@ -569,6 +582,7 @@ mod tests {
         let request = ToolCallRequest {
             tool: TOOL_TERMINAL_RUN.into(),
             session_id: Some("missing-session".into()),
+            run_id: None,
             actor: Some("agent".into()),
             args: serde_json::json!({ "command": "git status", "terminalKind": "agent" }),
             session_config: Some(SessionToolConfig { tools }),
@@ -592,6 +606,7 @@ mod tests {
         let request = ToolCallRequest {
             tool: TOOL_FILES_READ.into(),
             session_id: None,
+            run_id: None,
             actor: Some("agent".into()),
             args: serde_json::json!({ "path": "" }),
             session_config: Some(SessionToolConfig { tools }),
@@ -616,5 +631,48 @@ mod tests {
         let config = SessionToolConfig { tools };
 
         evaluate_tool_config(&definition, Some(&config)).expect("narrowed approval is allowed");
+    }
+
+    #[test]
+    fn task_016_user_browser_file_targets_may_open_any_local_file() {
+        let root = std::env::temp_dir().join("c4os-task-016-browser-root");
+        let outside = std::env::temp_dir().join("c4os-task-016-browser-outside.html");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create browser root");
+        std::fs::write(&outside, "<h1>outside</h1>").expect("write outside fixture");
+
+        let file = resolve_browser_file_target(
+            &root,
+            &format!("file://{}", outside.to_string_lossy()),
+            "user",
+        )
+        .expect("user local file outside workspace");
+
+        assert_eq!(
+            file,
+            outside.canonicalize().expect("canonical outside file")
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_file(outside);
+    }
+
+    #[test]
+    fn task_016_agent_browser_file_targets_remain_trusted_root_scoped() {
+        let root = std::env::temp_dir().join("c4os-task-016-agent-browser-root");
+        let outside = std::env::temp_dir().join("c4os-task-016-agent-browser-outside.html");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create browser root");
+        std::fs::write(&outside, "<h1>outside</h1>").expect("write outside fixture");
+
+        let error = resolve_browser_file_target(
+            &root,
+            &format!("file://{}", outside.to_string_lossy()),
+            "agent",
+        )
+        .expect_err("agent outside local file rejected");
+
+        assert!(!error.trim().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_file(outside);
     }
 }

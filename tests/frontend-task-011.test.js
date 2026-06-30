@@ -49,7 +49,9 @@ describe("TASK-011 terminal slice", () => {
     await page.locator(".xterm-screen", { hasText: "user-task-011" }).waitFor();
 
     await page.waitForFunction(() => window.__task011TerminalWrites.join("").includes("user-task-011"));
-    const terminalCommands = calls.filter((call) => call.command !== "load_workspace").map((call) => call.command);
+    const terminalCommands = calls
+      .filter((call) => !["load_workspace", "native_menu_state"].includes(call.command))
+      .map((call) => call.command);
     assert.equal(terminalCommands[0], "start_terminal_session");
     assert.ok(terminalCommands.includes("resize_terminal_session"));
     assert.ok(terminalCommands.slice(1).every((command) => [

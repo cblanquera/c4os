@@ -111,9 +111,11 @@ struct ProviderSettingsStore {
 
 pub fn provider_profiles() -> Vec<ProviderProfile> {
     load_provider_settings_from_disk();
-    let saved = providers_store()
+    load_provider_keys_from_disk();
+    let mut saved = providers_store()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
+    reconcile_provider_key_statuses(&mut saved);
     saved.clone()
 }
 
@@ -475,6 +477,42 @@ fn load_provider_settings_from_disk() {
         .unwrap_or_else(|error| error.into_inner()) = true;
 }
 
+fn reconcile_provider_key_statuses(providers: &mut [ProviderProfile]) {
+    let env_key_present = std::env::var("OPENROUTER_API_KEY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let stored_keys = provider_keys()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+
+    for provider in providers {
+        let stored_key_present = stored_keys
+            .get(&provider.id)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        if stored_key_present {
+            provider.key_status = ApiKeyStatus {
+                state: "present".into(),
+                source: provider.key_status.source.clone(),
+            };
+            provider.status = "Key configured".into();
+        } else if env_key_present {
+            provider.key_status = ApiKeyStatus {
+                state: "present".into(),
+                source: "environment".into(),
+            };
+            provider.status = "Key configured".into();
+        } else {
+            provider.key_status = ApiKeyStatus {
+                state: "missing".into(),
+                source: provider.key_status.source.clone(),
+            };
+            provider.status = "Key not configured".into();
+        }
+    }
+}
+
 fn save_provider_settings_to_disk() {
     let settings = ProviderSettingsStore {
         providers: providers_store()
@@ -548,11 +586,18 @@ fn provider_settings_path() -> Option<PathBuf> {
 fn provider_key_store_path() -> Option<PathBuf> {
     match std::env::var("C4OS_PROVIDER_KEY_STORE") {
         Ok(path) if !path.trim().is_empty() => Some(PathBuf::from(path)),
-        #[cfg(not(test))]
-        _ => Some(std::env::temp_dir().join("c4os-provider-keys.json")),
-        #[cfg(test)]
-        _ => None,
+        _ => Some(default_provider_key_store_path()),
     }
+}
+
+fn default_provider_key_store_path() -> PathBuf {
+    #[cfg(test)]
+    if let Ok(path) = std::env::var("C4OS_TEST_PROVIDER_KEY_STORE_DEFAULT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    std::env::temp_dir().join("c4os-provider-keys.json")
 }
 
 #[cfg(test)]
@@ -873,7 +918,7 @@ mod tests {
         assert!(!settings_raw.contains("review-only-secret"));
         assert!(!settings_raw.contains("apiKey"));
 
-        reset_task_006_state();
+        reset_task_006_memory_only();
         reload_provider_settings_for_test();
 
         let restored_provider = provider_profiles()
@@ -898,7 +943,132 @@ mod tests {
         let _ = std::fs::remove_dir_all(store_root);
     }
 
+    #[test]
+    fn task_016_default_key_store_preserves_provider_access_across_restart() {
+        reset_task_006_state();
+        std::env::remove_var("C4OS_PROVIDER_KEY_STORE");
+        let isolated_default =
+            std::env::temp_dir().join("c4os-task-016-default-provider-key-store.json");
+        std::env::set_var(
+            "C4OS_TEST_PROVIDER_KEY_STORE_DEFAULT",
+            isolated_default.to_string_lossy().to_string(),
+        );
+        let _ = std::fs::remove_file(&isolated_default);
+
+        save_provider_profile(ProviderProfileSaveRequest {
+            provider_id: Some(DEFAULT_PROVIDER_ID.into()),
+            kind: "OpenRouter".into(),
+            label: "OpenRouter Personal".into(),
+            base_url: DEFAULT_PROVIDER_BASE_URL.into(),
+            api_key: "review-only-secret".into(),
+        })
+        .expect("save provider profile");
+
+        reset_task_006_memory_only();
+        reload_provider_settings_for_test();
+
+        assert_eq!(
+            configured_provider_api_key().as_deref(),
+            Some("review-only-secret")
+        );
+        std::env::remove_var("C4OS_TEST_PROVIDER_KEY_STORE_DEFAULT");
+        let _ = std::fs::remove_file(isolated_default);
+    }
+
+    #[test]
+    fn task_016_provider_status_reflects_missing_secure_key_store() {
+        reset_task_006_state();
+        let store_root = std::env::temp_dir().join("c4os-task-016-missing-provider-key-store");
+        let _ = std::fs::remove_dir_all(&store_root);
+        std::fs::create_dir_all(&store_root).expect("create provider store root");
+        let settings_path = store_root.join("providers.json");
+        let key_store_path = store_root.join("provider-keys.json");
+        std::env::set_var(
+            "C4OS_PROVIDER_STORE",
+            settings_path.to_string_lossy().to_string(),
+        );
+        std::env::set_var(
+            "C4OS_PROVIDER_KEY_STORE",
+            key_store_path.to_string_lossy().to_string(),
+        );
+        std::env::remove_var("OPENROUTER_API_KEY");
+
+        let stale_settings = ProviderSettingsStore {
+            providers: vec![ProviderProfile {
+                id: DEFAULT_PROVIDER_ID.into(),
+                label: "OpenRouter Personal".into(),
+                kind: "OpenAI-compatible".into(),
+                base_url: DEFAULT_PROVIDER_BASE_URL.into(),
+                endpoint: DEFAULT_PROVIDER_BASE_URL.into(),
+                status: "Key configured".into(),
+                key_status: ApiKeyStatus {
+                    state: "present".into(),
+                    source: "session".into(),
+                },
+                enabled: true,
+                supports_discovery: true,
+            }],
+            models: vec![ProviderModel {
+                id: "sakana-fugu-ultra".into(),
+                label: "sakana/fugu-ultra".into(),
+                provider_id: DEFAULT_PROVIDER_ID.into(),
+                provider: "OpenRouter Personal".into(),
+                enabled: true,
+                active: true,
+                source: "manual".into(),
+            }],
+        };
+        std::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&stale_settings).expect("serialize stale settings"),
+        )
+        .expect("write stale settings");
+        let _ = std::fs::remove_file(&key_store_path);
+
+        reset_task_006_memory_only();
+        let restored_provider = provider_profiles()
+            .into_iter()
+            .find(|record| record.id == DEFAULT_PROVIDER_ID)
+            .expect("restored provider");
+
+        assert_eq!(restored_provider.status, "Key not configured");
+        assert_eq!(restored_provider.key_status.state, "missing");
+        assert_eq!(provider_models()[0].label, "sakana/fugu-ultra");
+        assert_eq!(configured_provider_api_key(), None);
+
+        std::env::remove_var("C4OS_PROVIDER_STORE");
+        std::env::remove_var("C4OS_PROVIDER_KEY_STORE");
+        let _ = std::fs::remove_dir_all(store_root);
+    }
+
     fn reset_task_006_state() {
+        let isolated_key_store = std::env::temp_dir().join("c4os-task-006-provider-keys.json");
+        std::env::set_var(
+            "C4OS_PROVIDER_KEY_STORE",
+            isolated_key_store.to_string_lossy().to_string(),
+        );
+        std::env::remove_var("C4OS_TEST_PROVIDER_KEY_STORE_DEFAULT");
+        if let Some(path) = provider_key_store_path() {
+            let _ = std::fs::remove_file(path);
+        }
+        providers_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        provider_keys()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        models_store()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        *providers_touched()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = false;
+    }
+
+    fn reset_task_006_memory_only() {
         providers_store()
             .lock()
             .unwrap_or_else(|error| error.into_inner())

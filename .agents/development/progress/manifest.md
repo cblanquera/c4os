@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-016-security-approval-hardening
+Status: ready-for-task-017-integration-release-readiness
 Updated: 2026-06-30
 
 ## Active Stream
@@ -32,11 +32,12 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-014-local-memory-action-audit-records.md`
 - `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
 - `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
+- `.agents/development/progress/items/TASK-016-security-approval-policies.md`
 
 ## Active Item
 
 - None. Next item is
-  `.agents/specs/mvp/tasks.md` `TASK-016`.
+  `.agents/specs/mvp/tasks.md` `TASK-017`.
 
 ## Scope Rules
 
@@ -64,16 +65,14 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-WO-006 is accepted. Runtime-driven app interactions now have a formal
-C4OS-owned tool gateway with stable tool identities, lifecycle event names,
-per-session tool config shape, default/max approval semantics, and dispatch for
-Files, Browser, artifact preview, and Terminal command execution.
+TASK-016 is approved. Security and approval hardening now routes gateway tool
+requests through backend-owned policy storage, effective-policy snapshots,
+explicit approval gates, trusted-root Browser/File authority, terminal command
+policy, extension runtime gates, secure key-storage policy, and app-owned audit
+records.
 
-Proceed to `.agents/specs/mvp/tasks.md` `TASK-016`. Security and approval
-hardening should target `backend/src/tool_gateway.rs` and must not reintroduce
-one-off runtime-to-app interaction paths or restore frontend prompt-text
-terminal parsing. Command planning belongs to the runtime; C4OS should execute
-only structured tool requests through the gateway. The remaining Agent terminal
-gap is deferred: runtime/provider output that is only assistant prose is not
-mirrored into Terminal until a structured runtime `terminal.run` tool-event
-path exists.
+Proceed to `.agents/specs/mvp/tasks.md` `TASK-017` for remaining integration
+and release readiness. TASK-017 must resolve the deferred WO-008 gap:
+runtime/provider command execution needs structured C4OS tool lifecycle events
+such as `tool_call_requested`, `tool_output_delta`, and `tool_call_completed`.
+Assistant prose or markdown remains an invalid Agent terminal source of truth.

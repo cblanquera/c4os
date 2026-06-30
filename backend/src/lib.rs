@@ -9,6 +9,7 @@ pub mod provider_models;
 pub mod records;
 pub mod runtime_adapter;
 pub mod runtime_sessions;
+pub mod security;
 pub mod terminal_pty;
 pub mod tool_gateway;
 pub mod workspace;
@@ -50,6 +51,8 @@ where
             commands::save_local_memory_record,
             commands::list_action_records,
             commands::list_audit_records,
+            commands::load_tool_approval_policy,
+            commands::save_tool_approval_policy,
             commands::list_extensions,
             commands::list_provider_profiles,
             commands::save_provider_profile,

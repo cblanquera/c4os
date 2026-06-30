@@ -28,6 +28,10 @@ use crate::runtime_sessions::{
     set_session_model as set_c4os_session_model, BrowserActionRecord, C4osSessionRecord,
     CreateSessionRequest, SendPromptRequest, TerminalActionRecord,
 };
+use crate::security::{
+    load_tool_approval_policy as load_tool_approval_policy_record,
+    save_tool_approval_policy as save_tool_approval_policy_record, ToolApprovalPolicyStore,
+};
 use crate::terminal_pty::{
     read_terminal, resize_terminal, start_terminal, stop_terminal, write_terminal,
     TerminalOutputEvent, TerminalResize,
@@ -36,6 +40,8 @@ use crate::tool_gateway::{
     dispatch_tool_call, ToolCallPayload, ToolCallRequest, TOOL_ARTIFACT_PREVIEW, TOOL_BROWSER_OPEN,
     TOOL_FILES_LIST, TOOL_FILES_READ, TOOL_FILES_WRITE, TOOL_TERMINAL_RUN,
 };
+// TASK-013 root/session helpers now live behind the gateway:
+// file_command_root and browser_state_for_target(&session, &root, ...).
 use crate::workspace::{
     activate_workspace, active_workspace_descriptor, active_workspace_root,
     bootstrap_workspace_from_launch_flag, open_workspace_file as open_workspace_file_record,
@@ -437,6 +443,7 @@ pub fn read_file(request: Option<FileRequest>) -> Result<FileReadResponse, Strin
     let response = dispatch_tool_call(ToolCallRequest {
         tool: tool.into(),
         session_id: request.session_id,
+        run_id: None,
         actor: Some("agent".into()),
         args: serde_json::json!({ "path": path }),
         session_config: None,
@@ -467,8 +474,14 @@ pub fn save_file(request: Option<FileRequest>) -> Result<FileSaveResponse, Strin
     let response = dispatch_tool_call(ToolCallRequest {
         tool: TOOL_FILES_WRITE.into(),
         session_id: request.session_id,
+        run_id: None,
         actor: Some("agent".into()),
-        args: serde_json::json!({ "path": path, "content": content }),
+        args: serde_json::json!({
+            "path": path,
+            "content": content,
+            "approved": true,
+            "approvalReason": "explicit-user-file-save"
+        }),
         session_config: None,
     })?;
     let ToolCallPayload::Files { state, saved } = response.payload else {
@@ -494,8 +507,14 @@ pub fn create_artifact_preview(
     let response = dispatch_tool_call(ToolCallRequest {
         tool: TOOL_ARTIFACT_PREVIEW.into(),
         session_id: request.session_id,
+        run_id: None,
         actor: Some("agent".into()),
-        args: serde_json::json!({ "title": request.title, "html": request.html }),
+        args: serde_json::json!({
+            "title": request.title,
+            "html": request.html,
+            "approved": true,
+            "approvalReason": "explicit-artifact-preview"
+        }),
         session_config: None,
     })?;
     let ToolCallPayload::ArtifactPreview { artifact, browser } = response.payload else {
@@ -514,8 +533,14 @@ pub fn run_terminal_command(
     let response = dispatch_tool_call(ToolCallRequest {
         tool: TOOL_TERMINAL_RUN.into(),
         session_id: request.session_id,
+        run_id: None,
         actor: Some(terminal_kind.clone()),
-        args: serde_json::json!({ "command": command, "terminalKind": terminal_kind }),
+        args: serde_json::json!({
+            "command": command,
+            "terminalKind": terminal_kind,
+            "approved": true,
+            "approvalReason": "explicit-user-terminal-command"
+        }),
         session_config: None,
     })?;
     let ToolCallPayload::Terminal { terminal, action } = response.payload else {
@@ -589,6 +614,7 @@ pub fn open_browser(request: BrowserOpenRequest) -> Result<BrowserOpenResponse, 
     let response = dispatch_tool_call(ToolCallRequest {
         tool: TOOL_BROWSER_OPEN.into(),
         session_id: request.session_id,
+        run_id: None,
         actor: request.actor,
         args: serde_json::json!({
             "target": request.target,
@@ -631,6 +657,18 @@ pub fn list_action_records() -> Vec<ActionRecord> {
 #[tauri::command]
 pub fn list_audit_records() -> Vec<AuditRecord> {
     app_audit_records()
+}
+
+#[tauri::command]
+pub fn load_tool_approval_policy() -> ToolApprovalPolicyStore {
+    load_tool_approval_policy_record()
+}
+
+#[tauri::command]
+pub fn save_tool_approval_policy(
+    request: ToolApprovalPolicyStore,
+) -> Result<ToolApprovalPolicyStore, String> {
+    save_tool_approval_policy_record(request)
 }
 
 #[tauri::command]
@@ -1228,7 +1266,6 @@ mod tests {
         let outside_root = std::env::temp_dir().join("c4os-task-010a-outside-local.js");
         fs::write(&outside_root, "console.log('outside trusted root');")
             .expect("write outside file");
-        let canonical_outside = fs::canonicalize(&outside_root).expect("canonical outside file");
         let absolute = open_browser(BrowserOpenRequest {
             session_id: Some(session.id.clone()),
             target: outside_root.to_string_lossy().into_owned(),
@@ -1236,6 +1273,7 @@ mod tests {
             clear_request: false,
         })
         .expect("user may open absolute local file");
+        let canonical_outside = fs::canonicalize(&outside_root).expect("canonical outside file");
         assert_eq!(
             absolute.browser.url,
             format!("file://{}", canonical_outside.to_string_lossy())
@@ -1370,6 +1408,8 @@ mod tests {
 
     #[test]
     fn mock_file_and_terminal_commands_do_not_claim_real_io() {
+        crate::workspace::reset_active_workspace_for_test();
+        crate::runtime_sessions::reset_session_store_for_test("task-002-mock-boundary");
         assert!(read_file(None).is_err());
         assert!(save_file(None).is_err());
         assert!(run_terminal_command(None)

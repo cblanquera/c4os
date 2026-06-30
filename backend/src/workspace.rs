@@ -608,7 +608,7 @@ fn workspace_bootstrap_request() -> &'static Mutex<Option<WorkspaceBootstrapRequ
 }
 
 #[cfg(test)]
-fn reset_active_workspace_for_test() {
+pub(crate) fn reset_active_workspace_for_test() {
     *active_workspace()
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = None;

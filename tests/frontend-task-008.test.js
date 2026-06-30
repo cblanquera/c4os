@@ -165,6 +165,11 @@ describe("TASK-008 Files slice frontend behavior", () => {
     });
     await page.locator(".composer-dock .prompt-box").focus();
     await page.waitForFunction(() => window.__task008MenuStates.at(-1)?.focusState?.fileEditorOpen === false);
+    assert.deepEqual(await page.evaluate(() => window.__task008MenuStates.at(-1)?.focusState), {
+      editable: true,
+      fileEditorOpen: false,
+      fileCanSave: false
+    });
 
     await page.getByRole("button", { name: "src" }).click();
 

@@ -915,11 +915,12 @@ function updateFileEditorChrome(tool) {
 
 function updateNativeFileMenuState(fileEditorOpen, options = {}) {
   const force = Boolean(options.force);
-  if (!fileEditorOpen && !nativeFileEditorOpen && !force) return;
+  const editable = options.editable ?? fileEditorOpen;
+  if (!fileEditorOpen && !nativeFileEditorOpen && !editable && !force) return;
   if (!force && fileEditorOpen === nativeFileEditorOpen) return;
   nativeFileEditorOpen = fileEditorOpen;
   updateConnectorNativeMenuState({
-    editable: fileEditorOpen,
+    editable,
     fileEditorOpen,
     fileCanSave: fileEditorOpen
   }).catch(() => {});
@@ -977,14 +978,20 @@ function bindNativeFileFocusTracking() {
   nativeFileFocusBound = true;
   document.addEventListener("focusin", (event) => {
     const fileEditorFocused = Boolean(event.target?.closest?.("[data-file-editor]"));
-    if (fileEditorFocused || nativeFileEditorOpen || document.querySelector("[data-file-editor]")) {
-      updateNativeFileMenuState(fileEditorFocused, { force: true });
-    }
+    updateNativeFileMenuState(fileEditorFocused, {
+      editable: isNativeEditableTarget(event.target),
+      force: true
+    });
   });
 }
 
 function isFileEditorFocused() {
   return Boolean(document.activeElement?.closest?.("[data-file-editor]"));
+}
+
+function isNativeEditableTarget(target) {
+  if (!target?.closest) return false;
+  return Boolean(target.closest("input, textarea, [contenteditable='true'], [data-terminal-emulator], [data-browser-address-input]"));
 }
 
 function bindNativeFileShortcuts() {
