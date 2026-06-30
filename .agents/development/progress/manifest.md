@@ -1,6 +1,6 @@
 # Progress Manifest
 
-Status: ready-for-task-017-integration-release-readiness
+Status: task-017-integration-release-readiness-accepted
 Updated: 2026-06-30
 
 ## Active Stream
@@ -33,11 +33,11 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 - `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
 - `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
 - `.agents/development/progress/items/TASK-016-security-approval-policies.md`
+- `.agents/development/progress/items/TASK-017-integration-release-readiness.md`
 
 ## Active Item
 
-- None. Next item is
-  `.agents/specs/mvp/tasks.md` `TASK-017`.
+- None.
 
 ## Scope Rules
 
@@ -65,14 +65,16 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Next Step
 
-TASK-016 is approved. Security and approval hardening now routes gateway tool
-requests through backend-owned policy storage, effective-policy snapshots,
-explicit approval gates, trusted-root Browser/File authority, terminal command
-policy, extension runtime gates, secure key-storage policy, and app-owned audit
-records.
+TASK-017 is accepted for the deferred WO-008 structured runtime tool-output
+reflection gap. Provider/runtime `terminal.run` requests now flow through
+structured lifecycle events and the C4OS tool gateway, Agent terminal output is
+updated only from structured gateway terminal output, and unapproved
+runtime-originated terminal requests remain rejected by TASK-016 policy.
 
-Proceed to `.agents/specs/mvp/tasks.md` `TASK-017` for remaining integration
-and release readiness. TASK-017 must resolve the deferred WO-008 gap:
-runtime/provider command execution needs structured C4OS tool lifecycle events
-such as `tool_call_requested`, `tool_output_delta`, and `tool_call_completed`.
-Assistant prose or markdown remains an invalid Agent terminal source of truth.
+Credentialed built-app manual QA passed with OpenRouter using
+`google/gemini-2.5-flash-lite`. The first live pass exposed chunked provider
+tool-call arguments; the final verified path now assembles those chunks before
+dispatch. The visible Agent terminal reflected structured gateway output for
+`terminal.run` in the trusted `project-a` fixture. Prepare the MVP
+release-readiness closeout or the next packaging/signing work item if
+distribution packaging is required.

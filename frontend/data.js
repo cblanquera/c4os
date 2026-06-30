@@ -314,6 +314,7 @@ export async function sendConnectorPrompt(prompt, options = {}) {
       const created = connectorState.connector.createSession
         ? await connectorState.connector.createSession(workspace.project, options.model || workspace.model, label)
         : null;
+      upsertProjectSessionRecord(created);
       ensureSessionForPrompt(prompt, created);
       activateSessionState(workspace.project, workspace.session, {
         model: options.model || workspace.model,
@@ -344,7 +345,10 @@ export async function sendConnectorPrompt(prompt, options = {}) {
       }
     });
     if (payload?.session) {
-      applySessionRecord(payload.session, { preserveTerminal: true, preserveTurns: true });
+      applySessionRecord(payload.session, {
+        preserveTerminal: !sessionHasRuntimeAgentTerminal(payload.session),
+        preserveTurns: true
+      });
     }
     applyRuntimeEventsFromPayload(payload, activeTurn, options);
     if (payload.agent) activeTurn.agent = payload.agent;
@@ -392,6 +396,14 @@ function settleAgentTerminalForRuntimeRun() {
   pane.output = "No structured agent terminal calls for this run.";
   pane.running = false;
   captureActiveSessionState();
+}
+
+function sessionHasRuntimeAgentTerminal(session) {
+  const agentOutput = session?.terminal?.agentTerminal?.output || session?.terminal?.agent_terminal?.output || "";
+  const actions = session?.terminal?.actions || [];
+  return Boolean(agentOutput.trim()) && actions.some((action) => (
+    (action.terminalKind || action.terminal_kind || "") === "agent"
+  ));
 }
 
 export async function setConnectorModelEnabled(modelId, enabled) {
@@ -553,6 +565,7 @@ export async function runConnectorTerminalCommand(command, terminalKind = "user"
       pane.output = appendTerminalOutput(pane.output, `$ ${trimmed}\nConnector unavailable`);
       terminalState.output = terminalState.userTerminal?.output || terminalState.output;
       captureActiveSessionState();
+      notifyTerminalStateChange(normalizedKind);
       return { terminal: terminalState };
     }
 
@@ -565,13 +578,16 @@ export async function runConnectorTerminalCommand(command, terminalKind = "user"
     }
     assignObject(terminalState, response.terminal || terminalState);
     captureActiveSessionState();
+    notifyTerminalStateChange(normalizedKind);
     return response;
   } catch (error) {
     pane.output = appendTerminalOutput(pane.output, `$ ${trimmed}\n${connectorErrorMessage(error)}`);
     captureActiveSessionState();
+    notifyTerminalStateChange(normalizedKind);
     throw error;
   } finally {
     pane.running = false;
+    notifyTerminalStateChange(normalizedKind);
   }
 }
 
@@ -586,7 +602,15 @@ function stageConnectorTerminalCommand(command, terminalKind = "user") {
     : appendTerminalOutput(pane.output, `$ ${trimmed}\nRunning...`);
   if (normalizedKind === "user") terminalState.output = terminalState.userTerminal?.output || terminalState.output;
   captureActiveSessionState();
+  notifyTerminalStateChange(normalizedKind);
   return true;
+}
+
+function notifyTerminalStateChange(terminalKind) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("c4os:terminal-state-changed", {
+    detail: { terminalKind }
+  }));
 }
 
 export function editConnectorFile(content) {
@@ -851,7 +875,11 @@ function ensureSessionForPrompt(prompt, created = null) {
   }
   project.sessions = [
     sessionRecord,
-    ...project.sessions.filter((session) => sessionLabelOf(session) !== label && sessionIdOf(session) !== id)
+    ...project.sessions.filter((session) => {
+      const sessionId = sessionIdOf(session);
+      const localPlaceholder = sessionId.startsWith("local-");
+      return sessionId !== id && !(hasConnectorSessionRecord && localPlaceholder);
+    })
   ];
 }
 
@@ -1023,6 +1051,7 @@ function applySessionRecord(record, options = {}) {
     workspace.session = record.title || workspace.session;
     workspace.sessionId = record.id || workspace.sessionId;
   }
+  upsertProjectSessionRecord(record);
   const key = sessionKey(activeProjectIdentity(), record.title || workspace.session, record.id || workspace.sessionId);
   sessionState.bySurface[key] = sessionSnapshot({
     browser: record.browser,
@@ -1042,6 +1071,24 @@ function applySessionRecord(record, options = {}) {
     preserveTerminal: options.preserveTerminal,
     preserveTurns: options.preserveTurns
   });
+}
+
+function upsertProjectSessionRecord(record) {
+  const id = record?.id || record?.sessionId || "";
+  const label = record?.title || record?.label || "";
+  if (!id || !label) return;
+  const activeIdentity = activeProjectIdentity();
+  const project = projects.find((candidate) => (
+    projectIdentity(candidate) === activeIdentity || candidate.name === record.project
+  ));
+  if (!project) return;
+  project.sessions = [
+    { id, label },
+    ...project.sessions.filter((session) => {
+      const sessionId = sessionIdOf(session);
+      return sessionId !== id && !sessionId.startsWith("local-");
+    })
+  ];
 }
 
 function applyFileState(response = {}) {

@@ -1,6 +1,7 @@
 use crate::provider_models::{configured_provider_api_key, DEFAULT_MODEL};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
@@ -15,6 +16,10 @@ pub struct RuntimeEvent {
     pub kind: String,
     pub text: String,
     pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,6 +73,8 @@ where
         kind: "activity".into(),
         text: "Starting OpenRouter request.".into(),
         sequence: 1,
+        tool: None,
+        args: None,
     };
     emit(start.clone());
     let mut events = vec![start];
@@ -89,10 +96,13 @@ where
 
     let stdout = child.stdout.take().ok_or("Cannot read OpenRouter stream")?;
     let mut final_response = String::new();
+    let mut tool_state = ProviderToolCallState::default();
 
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|error| format!("Cannot read OpenRouter stream: {error}"))?;
-        for event in runtime_events_from_sse_line(&line, &mut sequence) {
+        for event in
+            runtime_events_from_sse_line_with_tool_state(&line, &mut sequence, &mut tool_state)
+        {
             if event.kind == "assistant" {
                 final_response.push_str(&event.text);
             }
@@ -113,6 +123,8 @@ where
         kind: "complete".into(),
         text: "OpenRouter stream complete".into(),
         sequence: sequence + 1,
+        tool: None,
+        args: None,
     };
     emit(complete.clone());
     events.push(complete);
@@ -141,10 +153,11 @@ pub fn chat_request_with_model(prompt: &str, model: &str) -> Value {
         "reasoning": {
             "enabled": true
         },
+        "tools": c4os_provider_tools(),
         "messages": [
             {
                 "role": "system",
-                "content": "You are C4OS, a local project workspace assistant. Explain your useful visible work briefly before the final answer when reasoning is available."
+                "content": "You are C4OS, a local project workspace assistant. Request C4OS tools with structured tool calls when workspace command output is needed; C4OS owns execution, approval, and terminal reflection. Explain useful visible work briefly before the final answer when reasoning is available."
             },
             {
                 "role": "user",
@@ -154,7 +167,55 @@ pub fn chat_request_with_model(prompt: &str, model: &str) -> Value {
     })
 }
 
+fn c4os_provider_tools() -> Value {
+    json!([
+        {
+            "type": "function",
+            "function": {
+                "name": crate::tool_gateway::TOOL_TERMINAL_RUN,
+                "description": "Request C4OS to run a trusted workspace terminal command through its tool gateway.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Shell command to request inside the trusted workspace."
+                        },
+                        "terminalKind": {
+                            "type": "string",
+                            "enum": ["agent"],
+                            "description": "Structured runtime command output is reflected only in the read-only Agent terminal."
+                        },
+                        "approved": {
+                            "type": "boolean",
+                            "description": "True only when C4OS prompt approval policy allows the requested command."
+                        },
+                        "approvalReason": {
+                            "type": "string",
+                            "description": "Approval evidence for the C4OS tool gateway audit record."
+                        }
+                    },
+                    "required": ["command", "terminalKind", "approved", "approvalReason"],
+                    "additionalProperties": false
+                }
+            }
+        }
+    ])
+}
+
 pub fn runtime_events_from_sse_line(line: &str, sequence: &mut u64) -> Vec<RuntimeEvent> {
+    runtime_events_from_sse_line_with_tool_state(
+        line,
+        sequence,
+        &mut ProviderToolCallState::default(),
+    )
+}
+
+fn runtime_events_from_sse_line_with_tool_state(
+    line: &str,
+    sequence: &mut u64,
+    tool_state: &mut ProviderToolCallState,
+) -> Vec<RuntimeEvent> {
     let Some(data) = line.strip_prefix("data:") else {
         return Vec::new();
     };
@@ -166,11 +227,10 @@ pub fn runtime_events_from_sse_line(line: &str, sequence: &mut u64) -> Vec<Runti
     let Ok(value) = serde_json::from_str::<Value>(data) else {
         return Vec::new();
     };
-    let Some(delta) = value
-        .get("choices")
-        .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice.get("delta"))
-    else {
+    let Some(choice) = value.get("choices").and_then(|choices| choices.get(0)) else {
+        return Vec::new();
+    };
+    let Some(delta) = choice.get("delta") else {
         return Vec::new();
     };
 
@@ -182,6 +242,8 @@ pub fn runtime_events_from_sse_line(line: &str, sequence: &mut u64) -> Vec<Runti
             kind: "reasoning".into(),
             text: reasoning,
             sequence: *sequence,
+            tool: None,
+            args: None,
         });
     }
 
@@ -192,8 +254,90 @@ pub fn runtime_events_from_sse_line(line: &str, sequence: &mut u64) -> Vec<Runti
                 kind: "assistant".into(),
                 text: content.into(),
                 sequence: *sequence,
+                tool: None,
+                args: None,
             });
         }
+    }
+
+    for tool_call in provider_tool_call_events(delta, choice, sequence, tool_state) {
+        events.push(tool_call);
+    }
+
+    events
+}
+
+#[derive(Default)]
+struct ProviderToolCallState {
+    pending: BTreeMap<usize, ProviderToolCallBuffer>,
+}
+
+#[derive(Default)]
+struct ProviderToolCallBuffer {
+    name: Option<String>,
+    arguments: String,
+}
+
+fn provider_tool_call_events(
+    delta: &Value,
+    choice: &Value,
+    sequence: &mut u64,
+    state: &mut ProviderToolCallState,
+) -> Vec<RuntimeEvent> {
+    let mut events = Vec::new();
+    if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+        for (fallback_index, tool_call) in tool_calls.iter().enumerate() {
+            let index = tool_call
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize)
+                .unwrap_or(fallback_index);
+            let buffer = state.pending.entry(index).or_default();
+            if let Some(function) = tool_call.get("function") {
+                if let Some(name) = function.get("name").and_then(Value::as_str) {
+                    if !name.trim().is_empty() {
+                        buffer.name = Some(name.into());
+                    }
+                }
+                if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+                    buffer.arguments.push_str(arguments);
+                }
+            }
+        }
+    }
+
+    let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
+    let ready_indexes = state
+        .pending
+        .iter()
+        .filter_map(|(index, buffer)| {
+            let complete_json = serde_json::from_str::<Value>(&buffer.arguments).ok();
+            if complete_json.is_some() || finish_reason == Some("tool_calls") {
+                Some(*index)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for index in ready_indexes {
+        let Some(buffer) = state.pending.remove(&index) else {
+            continue;
+        };
+        let Some(name) = buffer.name else {
+            continue;
+        };
+        let Ok(args) = serde_json::from_str::<Value>(&buffer.arguments) else {
+            continue;
+        };
+        *sequence += 1;
+        events.push(RuntimeEvent {
+            kind: crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED.into(),
+            text: "Provider requested C4OS tool execution.".into(),
+            sequence: *sequence,
+            tool: Some(name),
+            args: Some(args),
+        });
     }
 
     events
@@ -270,6 +414,83 @@ mod tests {
         assert_eq!(events[0].kind, "reasoning");
         assert_eq!(events[0].text, "Thinking out loud.");
         assert!(done.is_empty());
+    }
+
+    #[test]
+    fn task_017_normalizes_provider_tool_calls_to_c4os_lifecycle_events() {
+        let mut sequence = 0;
+        let events = runtime_events_from_sse_line(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"name":"terminal.run","arguments":"{\"command\":\"ls\",\"terminalKind\":\"agent\",\"approved\":true,\"approvalReason\":\"runtime-structured-terminal-run\"}"}}]}}]}"#,
+            &mut sequence,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].kind,
+            crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED
+        );
+        assert_eq!(
+            events[0].tool.as_deref(),
+            Some(crate::tool_gateway::TOOL_TERMINAL_RUN)
+        );
+        assert_eq!(events[0].args.as_ref().expect("args")["command"], "ls");
+        assert_eq!(
+            events[0].args.as_ref().expect("args")["terminalKind"],
+            "agent"
+        );
+        assert_eq!(events[0].sequence, 1);
+    }
+
+    #[test]
+    fn task_017_assembles_streamed_provider_tool_call_arguments_before_emitting() {
+        let mut sequence = 0;
+        let mut state = ProviderToolCallState::default();
+        let first = runtime_events_from_sse_line_with_tool_state(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"name":"terminal.run","arguments":"{\"command\":\""}}]}}]}"#,
+            &mut sequence,
+            &mut state,
+        );
+        let second = runtime_events_from_sse_line_with_tool_state(
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ls\",\"terminalKind\":\"agent\",\"approved\":true,\"approvalReason\":\"runtime-structured-terminal-run\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            &mut sequence,
+            &mut state,
+        );
+
+        assert!(first.is_empty());
+        assert_eq!(second.len(), 1);
+        assert_eq!(
+            second[0].kind,
+            crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED
+        );
+        assert_eq!(
+            second[0].tool.as_deref(),
+            Some(crate::tool_gateway::TOOL_TERMINAL_RUN)
+        );
+        assert_eq!(second[0].args.as_ref().expect("args")["command"], "ls");
+        assert_eq!(second[0].args.as_ref().expect("args")["approved"], true);
+    }
+
+    #[test]
+    fn task_017_openrouter_request_advertises_c4os_terminal_tool() {
+        let request = chat_request("List files");
+
+        assert_eq!(request["tools"][0]["type"], "function");
+        assert_eq!(
+            request["tools"][0]["function"]["name"],
+            crate::tool_gateway::TOOL_TERMINAL_RUN
+        );
+        assert_eq!(
+            request["tools"][0]["function"]["parameters"]["properties"]["terminalKind"]["enum"][0],
+            "agent"
+        );
+        assert_eq!(
+            request["tools"][0]["function"]["parameters"]["properties"]["approved"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            request["tools"][0]["function"]["parameters"]["required"][2],
+            "approved"
+        );
     }
 
     #[test]

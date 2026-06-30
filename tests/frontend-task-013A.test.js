@@ -203,7 +203,7 @@ describe("TASK-013A desktop QA bootstrap frontend routing", () => {
     await page.waitForURL(/#new-session$/);
     await page.locator(".topbar strong", { hasText: "project-a" }).waitFor();
     assert.deepEqual(
-      await page.evaluate(() => window.__TASK_013A_CALLS__),
+      await page.evaluate(() => window.__TASK_013A_CALLS__.filter((call) => call.command !== "native_menu_state")),
       [
         { command: "load_workspace", request: undefined },
         {

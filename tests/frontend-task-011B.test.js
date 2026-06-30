@@ -161,6 +161,32 @@ describe("TASK-011B chat session transition polish", () => {
     await page.close();
   });
 
+  it("keeps repeated prompt sessions as distinct sidebar rows", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+    await installTask011BTauri(page);
+
+    for (let index = 0; index < 2; index += 1) {
+      await page.goto(`${server.origin}/#new-session`);
+      await page.locator(".prompt-box").fill("repeat this prompt");
+      await page.getByRole("button", { name: "Send Prompt" }).click();
+      await page.evaluate(() => window.__task011BResolveCreate());
+      await page.evaluate(() => window.__task011BResolvePrompt());
+      await page.getByText("Transition response complete.").waitFor();
+    }
+
+    const repeatedRows = await page.locator(".session-row", { hasText: "repeat this prompt" }).evaluateAll((rows) => rows.map((row) => ({
+      id: row.getAttribute("data-session-id"),
+      label: row.textContent.trim()
+    })));
+
+    assert.equal(repeatedRows.length, 2);
+    const ids = repeatedRows.map((row) => row.id);
+    assert.equal(new Set(ids).size, 2);
+    assert.ok(ids.every((id) => /^session-\d+$/.test(id)));
+
+    await page.close();
+  });
+
   it("does not stage agent commands from prompt text while runtime is pending", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
     await installTask011BTauri(page, { delayTerminalCommand: true, stalePromptTerminal: true });

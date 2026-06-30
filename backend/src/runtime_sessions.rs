@@ -4,7 +4,13 @@ use crate::mock_data::{
 };
 use crate::openrouter::RuntimeEvent;
 use crate::runtime_adapter::{C4osRuntimeAdapter, C4osRuntimeResult};
+use crate::tool_gateway::{
+    dispatch_tool_call, ToolCallLifecycleEvent, ToolCallPayload, ToolCallRequest,
+    EVENT_TOOL_CALL_COMPLETED, EVENT_TOOL_CALL_REJECTED, EVENT_TOOL_CALL_REQUESTED,
+    EVENT_TOOL_OUTPUT_DELTA, TOOL_TERMINAL_RUN,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -493,6 +499,8 @@ fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: 
     let run_id = format!("c4os-run-{}", session.runs.len() + 1);
     let prompt_message_id = format!("c4os-message-{}-user", session.messages.len() + 1);
     let response_message_id = format!("c4os-message-{}-assistant", session.messages.len() + 2);
+    let events = runtime_events_with_structured_tool_results(session, &run_id, runtime.events);
+    let agent = agent_response_from_runtime_events(&runtime.agent, &events);
 
     session.messages.push(C4osMessageRecord {
         id: prompt_message_id.clone(),
@@ -505,7 +513,7 @@ fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: 
         id: response_message_id.clone(),
         session_id: session.id.clone(),
         role: "assistant".into(),
-        content: runtime.agent.clone(),
+        content: agent.clone(),
         run_id: Some(run_id.clone()),
     });
     session.runs.push(C4osRunRecord {
@@ -516,11 +524,11 @@ fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: 
         selected_model: runtime.model.clone(),
         status: runtime.run.clone(),
         runtime_reference_id: session.runtime_reference.id.clone(),
-        events: runtime.events,
+        events,
     });
     session.thread = ThreadState {
         user: prompt.into(),
-        agent: runtime.agent,
+        agent,
         extra: "C4OS-owned session, run, message, and runtime-reference records persisted for this prompt.".into(),
         tool: session.runtime_reference.label.clone(),
         run: runtime.run,
@@ -532,6 +540,113 @@ fn apply_runtime_result(session: &mut C4osSessionRecord, prompt: &str, runtime: 
         extra: session.thread.extra.clone(),
         tool: session.thread.tool.clone(),
         run: session.thread.run.clone(),
+    });
+}
+
+fn agent_response_from_runtime_events(agent: &str, events: &[RuntimeEvent]) -> String {
+    if agent.trim() != "OpenRouter returned no assistant content." {
+        return agent.into();
+    }
+    let outputs = events
+        .iter()
+        .filter(|event| event.kind == EVENT_TOOL_OUTPUT_DELTA)
+        .filter_map(|event| {
+            let text = event.text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        })
+        .collect::<Vec<_>>();
+    if outputs.is_empty() {
+        return agent.into();
+    }
+    format!(
+        "Structured terminal output:\n\n```text\n{}\n```",
+        outputs.join("\n")
+    )
+}
+
+fn runtime_events_with_structured_tool_results(
+    session: &mut C4osSessionRecord,
+    run_id: &str,
+    events: Vec<RuntimeEvent>,
+) -> Vec<RuntimeEvent> {
+    let mut next = events;
+    let mut sequence = next.iter().map(|event| event.sequence).max().unwrap_or(0);
+    let requested = next.clone();
+    for event in requested {
+        if !is_terminal_tool_request(&event) {
+            continue;
+        }
+        let args = event.args.clone().unwrap_or(Value::Null);
+        match dispatch_tool_call(ToolCallRequest {
+            tool: TOOL_TERMINAL_RUN.into(),
+            session_id: Some(session.id.clone()),
+            run_id: Some(run_id.into()),
+            actor: Some("agent".into()),
+            args,
+            session_config: None,
+        }) {
+            Ok(response) => {
+                for lifecycle in response.events {
+                    push_lifecycle_runtime_event(&mut next, &mut sequence, lifecycle);
+                }
+                if let ToolCallPayload::Terminal { terminal, action } = response.payload {
+                    session.terminal = terminal;
+                    sequence += 1;
+                    next.push(RuntimeEvent {
+                        kind: EVENT_TOOL_OUTPUT_DELTA.into(),
+                        text: action.output,
+                        sequence,
+                        tool: Some(TOOL_TERMINAL_RUN.into()),
+                        args: None,
+                    });
+                }
+                sequence += 1;
+                next.push(RuntimeEvent {
+                    kind: EVENT_TOOL_CALL_COMPLETED.into(),
+                    text: "C4OS completed structured terminal.run execution.".into(),
+                    sequence,
+                    tool: Some(TOOL_TERMINAL_RUN.into()),
+                    args: None,
+                });
+            }
+            Err(error) => {
+                sequence += 1;
+                next.push(RuntimeEvent {
+                    kind: EVENT_TOOL_CALL_REJECTED.into(),
+                    text: error,
+                    sequence,
+                    tool: Some(TOOL_TERMINAL_RUN.into()),
+                    args: None,
+                });
+            }
+        }
+    }
+    next
+}
+
+fn is_terminal_tool_request(event: &RuntimeEvent) -> bool {
+    event.kind == EVENT_TOOL_CALL_REQUESTED && event.tool.as_deref() == Some(TOOL_TERMINAL_RUN)
+}
+
+fn push_lifecycle_runtime_event(
+    events: &mut Vec<RuntimeEvent>,
+    sequence: &mut u64,
+    lifecycle: ToolCallLifecycleEvent,
+) {
+    if lifecycle.kind == EVENT_TOOL_CALL_REQUESTED || lifecycle.kind == EVENT_TOOL_CALL_COMPLETED {
+        return;
+    }
+    *sequence += 1;
+    events.push(RuntimeEvent {
+        kind: lifecycle.kind,
+        text: lifecycle.text,
+        sequence: *sequence,
+        tool: Some(lifecycle.tool),
+        args: None,
     });
 }
 
@@ -1056,6 +1171,162 @@ mod tests {
 
         let _ = fs::remove_dir_all(first_root);
         let _ = fs::remove_dir_all(second_root);
+    }
+
+    #[test]
+    fn task_017_runtime_terminal_tool_event_updates_agent_terminal_through_gateway() {
+        reset_task_007_state("structured-terminal-tool");
+        let root = std::env::temp_dir().join("c4os-task-017-structured-terminal-tool");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create command root");
+        fs::write(root.join("task-017-file.txt"), "structured event").expect("write fixture");
+        crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+        let mut session = create_session(CreateSessionRequest {
+            project: Some("Runtime Session Repo".into()),
+            label: Some("Structured terminal event".into()),
+            model: Some("model/alpha".into()),
+        });
+
+        apply_runtime_result(
+            &mut session,
+            "List files",
+            C4osRuntimeResult {
+                prompt: "List files".into(),
+                run: "structured run complete".into(),
+                agent: "Listed files.".into(),
+                model: "model/alpha".into(),
+                events: vec![RuntimeEvent {
+                    kind: crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED.into(),
+                    text: "Runtime requested C4OS tool execution.".into(),
+                    sequence: 1,
+                    tool: Some(crate::tool_gateway::TOOL_TERMINAL_RUN.into()),
+                    args: Some(serde_json::json!({
+                        "command": "ls",
+                        "terminalKind": "agent",
+                        "approved": true,
+                        "approvalReason": "runtime-structured-terminal-run"
+                    })),
+                }],
+            },
+        );
+
+        assert!(session
+            .terminal
+            .agent_terminal
+            .output
+            .contains("task-017-file.txt"));
+        assert!(!session
+            .terminal
+            .user_terminal
+            .output
+            .contains("task-017-file.txt"));
+        assert_eq!(session.terminal.actions.len(), 1);
+        assert_eq!(session.terminal.actions[0].terminal_kind, "agent");
+        assert_eq!(session.runs[0].events[0].kind, "tool_call_requested");
+        assert!(session.runs[0]
+            .events
+            .iter()
+            .any(|event| event.kind == "tool_output_delta"));
+        assert!(session.runs[0]
+            .events
+            .iter()
+            .any(|event| event.kind == "tool_call_completed"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_017_runtime_terminal_tool_event_without_approval_is_rejected() {
+        reset_task_007_state("structured-terminal-tool-rejected");
+        let root = std::env::temp_dir().join("c4os-task-017-structured-terminal-tool-rejected");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create command root");
+        fs::write(root.join("blocked-file.txt"), "blocked").expect("write fixture");
+        crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+        let mut session = create_session(CreateSessionRequest {
+            project: Some("Runtime Session Repo".into()),
+            label: Some("Rejected structured terminal event".into()),
+            model: Some("model/alpha".into()),
+        });
+
+        apply_runtime_result(
+            &mut session,
+            "List files without approval",
+            C4osRuntimeResult {
+                prompt: "List files without approval".into(),
+                run: "structured run rejected".into(),
+                agent: "Could not run command.".into(),
+                model: "model/alpha".into(),
+                events: vec![RuntimeEvent {
+                    kind: crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED.into(),
+                    text: "Runtime requested C4OS tool execution.".into(),
+                    sequence: 1,
+                    tool: Some(crate::tool_gateway::TOOL_TERMINAL_RUN.into()),
+                    args: Some(serde_json::json!({
+                        "command": "ls",
+                        "terminalKind": "agent"
+                    })),
+                }],
+            },
+        );
+
+        assert!(!session
+            .terminal
+            .agent_terminal
+            .output
+            .contains("blocked-file.txt"));
+        assert!(session.terminal.actions.is_empty());
+        assert!(session.runs[0]
+            .events
+            .iter()
+            .any(|event| event.kind == "tool_call_rejected"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn task_017_tool_only_terminal_run_reports_structured_output_in_chat() {
+        reset_task_007_state("structured-terminal-chat-output");
+        let root = std::env::temp_dir().join("c4os-task-017-structured-terminal-chat-output");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create command root");
+        crate::workspace::activate_workspace_at(&root).expect("activate workspace");
+        let mut session = create_session(CreateSessionRequest {
+            project: Some("Runtime Session Repo".into()),
+            label: Some("Structured terminal chat output".into()),
+            model: Some("model/alpha".into()),
+        });
+
+        apply_runtime_result(
+            &mut session,
+            "Run a terminal command",
+            C4osRuntimeResult {
+                prompt: "Run a terminal command".into(),
+                run: "OpenRouter stream complete".into(),
+                agent: "OpenRouter returned no assistant content.".into(),
+                model: "model/alpha".into(),
+                events: vec![RuntimeEvent {
+                    kind: crate::tool_gateway::EVENT_TOOL_CALL_REQUESTED.into(),
+                    text: "Runtime requested C4OS tool execution.".into(),
+                    sequence: 1,
+                    tool: Some(crate::tool_gateway::TOOL_TERMINAL_RUN.into()),
+                    args: Some(serde_json::json!({
+                        "command": "printf tool-chat-output",
+                        "terminalKind": "agent",
+                        "approved": true,
+                        "approvalReason": "runtime-structured-terminal-run"
+                    })),
+                }],
+            },
+        );
+
+        assert!(session.thread.agent.contains("tool-chat-output"));
+        assert!(session.messages[1].content.contains("tool-chat-output"));
+        assert!(!session.messages[1]
+            .content
+            .contains("OpenRouter returned no assistant content."));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn reset_task_007_state(name: &str) {

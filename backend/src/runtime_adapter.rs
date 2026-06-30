@@ -57,11 +57,15 @@ fn review_fallback(prompt: &str, model: &str) -> C4osRuntimeResult {
             kind: "activity".into(),
             text: "C4OS runtime adapter recorded the prompt.".into(),
             sequence: 1,
+            tool: None,
+            args: None,
         },
         RuntimeEvent {
             kind: "complete".into(),
             text: "C4OS runtime adapter fallback complete.".into(),
             sequence: 2,
+            tool: None,
+            args: None,
         },
     ];
 

@@ -241,8 +241,19 @@ async function sendFromComposerControl(control) {
   window.location.hash = "chat-session";
   if (shouldCreateSession) render();
   await minimumPendingFrame();
+  const pendingSessionSurface = shouldCreateSession ? appStore.activeSessionKey() : "";
   await pending;
   if (shouldCreateSession) appStore.setComposerValue(surface, "model", null);
+  if (shouldCreateSession) {
+    const reconciledSessionSurface = appStore.activeSessionKey();
+    if (pendingSessionSurface && pendingSessionSurface !== reconciledSessionSurface) {
+      const selectedTool = appStore.tools.bySurface[pendingSessionSurface];
+      if (selectedTool && !appStore.tools.bySurface[reconciledSessionSurface]) {
+        appStore.tools.bySurface[reconciledSessionSurface] = selectedTool;
+      }
+    }
+    render();
+  }
   updateAgentTerminalDom();
   updateTurnDom(threadTurns[threadTurns.length - 1]);
 }
@@ -2597,6 +2608,7 @@ function mcpInputGroup(title, placeholders, addLabel, twoColumn = false) {
 }
 
 window.addEventListener("hashchange", render);
+window.addEventListener("c4os:terminal-state-changed", updateAgentTerminalDom);
 const boot = beginConnectorStateLoad();
 render();
 if (boot) {

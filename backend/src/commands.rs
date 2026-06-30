@@ -305,6 +305,8 @@ fn failed_agent_run_response(prompt: String, error: String) -> AgentRunResponse 
             kind: "error".into(),
             text: error,
             sequence: 1,
+            tool: None,
+            args: None,
         }],
     }
 }
