@@ -1,0 +1,138 @@
+{
+  "qid": "025",
+  "title": "C4OS Grill Question 025 - Prompt Tag Routing",
+  "submitted": "2026-06-30T18:36:16.156Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-025-prompt-tag-routing-schema.json",
+  "answer_key": {
+    "What should `@` tags target in v1?": "Plugin resources and files, based on enabled plugins",
+    "What should `/` commands route to in v1?": "Agent CLI/runtime commands through the runtime/tool gateway",
+    "What should `$` tags target in v1?": "Skills only"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 025 - Prompt Tag Routing",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "at_tag_scope",
+        "label": "What should `@` tags target in v1?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: plugin resources and files, with available targets determined by enabled plugins. This matches the original task list and keeps files under the FS/IDE plugin path.",
+        "options": [
+          "Plugin resources and files, based on enabled plugins",
+          "Files only",
+          "Plugins only",
+          "All tools and resources",
+          "Other"
+        ]
+      },
+      {
+        "id": "slash_tag_scope",
+        "label": "What should `/` commands route to in v1?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: agent CLI/runtime commands exposed through the runtime/tool gateway, not arbitrary frontend parsing.",
+        "options": [
+          "Agent CLI/runtime commands through the runtime/tool gateway",
+          "C4OS command palette only",
+          "Plugin-provided commands only",
+          "Both C4OS commands and runtime commands",
+          "Other"
+        ]
+      },
+      {
+        "id": "dollar_tag_scope",
+        "label": "What should `$` tags target in v1?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: skills only, because this preserves the Codex-style skill invocation boundary.",
+        "options": [
+          "Skills only",
+          "Skills and plugin commands",
+          "Any reusable prompt/context object",
+          "Other"
+        ]
+      },
+      {
+        "id": "prompt_tag_routing_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify disabled plugin behavior, missing FS/IDE behavior, tag search UI, or how tags become runtime context."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "at_tag_scope",
+      "label": "What should `@` tags target in v1?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Plugin resources and files, based on enabled plugins",
+        "Files only",
+        "Plugins only",
+        "All tools and resources",
+        "Other"
+      ],
+      "help": "Recommended: plugin resources and files, with available targets determined by enabled plugins. This matches the original task list and keeps files under the FS/IDE plugin path.",
+      "answer": "Plugin resources and files, based on enabled plugins"
+    },
+    {
+      "id": "slash_tag_scope",
+      "label": "What should `/` commands route to in v1?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Agent CLI/runtime commands through the runtime/tool gateway",
+        "C4OS command palette only",
+        "Plugin-provided commands only",
+        "Both C4OS commands and runtime commands",
+        "Other"
+      ],
+      "help": "Recommended: agent CLI/runtime commands exposed through the runtime/tool gateway, not arbitrary frontend parsing.",
+      "answer": "Agent CLI/runtime commands through the runtime/tool gateway"
+    },
+    {
+      "id": "dollar_tag_scope",
+      "label": "What should `$` tags target in v1?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Skills only",
+        "Skills and plugin commands",
+        "Any reusable prompt/context object",
+        "Other"
+      ],
+      "help": "Recommended: skills only, because this preserves the Codex-style skill invocation boundary.",
+      "answer": "Skills only"
+    },
+    {
+      "id": "prompt_tag_routing_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify disabled plugin behavior, missing FS/IDE behavior, tag search UI, or how tags become runtime context.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 025 - Prompt Tag Routing\nSubmitted: 2026-06-30T18:36:16.156Z\n\nWhat should `@` tags target in v1?\nPlugin resources and files, based on enabled plugins\n\nWhat should `/` commands route to in v1?\nAgent CLI/runtime commands through the runtime/tool gateway\n\nWhat should `$` tags target in v1?\nSkills only\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 025 - Prompt Tag Routing\nSubmitted: 2026-06-30T18:36:16.156Z\n\nWhat should `@` tags target in v1?\nPlugin resources and files, based on enabled plugins\n\nWhat should `/` commands route to in v1?\nAgent CLI/runtime commands through the runtime/tool gateway\n\nWhat should `$` tags target in v1?\nSkills only\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1543,
+  "source_timestamp": "2026-06-30T18:36:19.794Z",
+  "source_message_id": null
+}

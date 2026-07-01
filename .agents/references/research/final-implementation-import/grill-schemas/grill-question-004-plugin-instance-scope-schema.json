@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 004 - Plugin Instance Scope",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "plugin_instance_scope",
+      "label": "What is the default state scope for tool-view plugins?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: per chat session, with plugin-specific persistence. This matches Browser/Terminal per-session behavior while allowing Settings/config to stay global.",
+      "options": [
+        "Per chat session",
+        "Per workspace",
+        "Per app install/global",
+        "Plugin decides its own scope",
+        "Other"
+      ]
+    },
+    {
+      "id": "multiple_instances",
+      "label": "Can the same plugin have multiple instances in one chat session?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: one instance per plugin per chat session for v1. Multiple different plugins can support the same tool, but one plugin should not multiply itself until there is a concrete workflow.",
+      "options": [
+        "One instance per plugin per chat session",
+        "Multiple instances per plugin per chat session",
+        "Plugin decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_instance_scope_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify exceptions for Browser, Terminal, Chat Debug, FS, IDE, or Settings."
+    }
+  ]
+}

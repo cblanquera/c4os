@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 009 - Workspace Registry Layout",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "workspace_registry_layout",
+      "label": "How should user-config-owned workspaces and projects be stored?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: app-level registry index plus one record per workspace. This keeps startup lookup simple while avoiding one giant mutable config file as workspace detail grows.",
+      "options": [
+        "App-level registry index plus one record per workspace",
+        "Single user config file containing all workspaces and projects",
+        "One file per workspace with no central registry index",
+        "Database only, no readable config files for registry state",
+        "Other"
+      ]
+    },
+    {
+      "id": "workspace_file_relationship",
+      "label": "How should saved workspace.c4os.json files relate to the user registry?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: importing a workspace file creates or updates user-config registry records; saving exports a descriptor from registry state.",
+      "options": [
+        "Import creates/updates registry records; save exports descriptor",
+        "Workspace files are live-linked to registry records",
+        "Workspace files are independent and bypass the user registry",
+        "Other"
+      ]
+    },
+    {
+      "id": "workspace_registry_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether chat/session indexes, project order, workspace name, collapse state, or search indexes belong in these files or app storage."
+    }
+  ]
+}

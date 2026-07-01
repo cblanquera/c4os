@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 009A - Workspace Chat Identity",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "workspace_chat_identity",
+      "label": "How should user-level chat sessions be associated with a loaded workspace file?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: use a workspace identity derived from the workspace file path plus an optional generated workspace ID saved inside the workspace file. This lets renamed/copied files be handled intentionally while keeping sessions out of the workspace file.",
+      "options": [
+        "Workspace file contains a generated workspace ID used to look up user-level chats",
+        "Workspace file path is the workspace identity",
+        "Workspace identity is derived from workspace name plus project folder list",
+        "Each project folder path owns its chats regardless of workspace file",
+        "Other"
+      ]
+    },
+    {
+      "id": "same_projects_multiple_workspaces",
+      "label": "If two workspace files contain the same project folders, should they share chats?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: no, each workspace file has its own relative chats unless the user explicitly duplicates/imports chat history.",
+      "options": [
+        "No, each workspace file has separate relative chats",
+        "Yes, same project folders share chats across workspace files",
+        "Project chats are shared but unassigned workspace chats are separate",
+        "Other"
+      ]
+    },
+    {
+      "id": "workspace_chat_identity_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify what should happen if a workspace file is renamed, copied, moved, or edited to add/remove project folders."
+    }
+  ]
+}

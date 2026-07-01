@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 035 - Chat Debug Visibility",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "chat_debug_default_visibility",
+      "label": "Should Chat Debug be enabled by default?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: disabled by default and developer-oriented. It can be enabled as a plugin when needed.",
+      "options": [
+        "Disabled by default; developer-oriented plugin",
+        "Enabled by default in development builds only",
+        "Enabled by default for all users",
+        "Hidden behind advanced Settings",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_history_scope",
+      "label": "What should Chat Debug show?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: current chat session live and historical tool events, with sensitive parameters redacted.",
+      "options": [
+        "Current chat session live and historical tool events with redaction",
+        "Live/current run activity only",
+        "All app-wide debug history",
+        "Only failed tool calls",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify export logs, approval decisions, tool parameters, app tool calls, sensitive redaction, or whether normal users should ever see this."
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 033 - File Icons Scope",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "file_icon_scope",
+      "label": "Which file icons should the IDE plugin support first?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: common code, config, markdown/document, image, archive, and folder icons. This gives useful coverage without trying to mirror a full IDE icon theme.",
+      "options": [
+        "Common code, config, markdown/document, image, archive, and folder icons",
+        "Full VS Code-like file icon theme",
+        "Only generic file and folder icons",
+        "Plugin/user-provided icon theme only",
+        "Other"
+      ]
+    },
+    {
+      "id": "hidden_file_visibility",
+      "label": "Should hidden files remain visible in the IDE File Explorer?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: preserve MVP behavior: hidden files visible except `.git` unless later narrowed.",
+      "options": [
+        "Hidden files visible except `.git`",
+        "Hide all dotfiles by default",
+        "Show all files including `.git`",
+        "User setting controls hidden files",
+        "Other"
+      ]
+    },
+    {
+      "id": "file_icons_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify specific extensions, folder icons, binary file handling, symlinks, or whether file icons should be themeable in v1."
+    }
+  ]
+}

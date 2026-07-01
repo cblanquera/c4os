@@ -1,0 +1,27 @@
+{
+  "title": "C4OS Grill Question 002 - Plugin Backend Authority",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "plugin_backend_authority",
+      "label": "How should C4OS app plugins access backend authority in v1?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: route user-impacting plugin actions through a C4OS gateway with plugin-scoped capabilities. This lets built-in plugins be installed but disabled, keeps approvals/audit centralized, and prevents Tauri command exposure from becoming the product authority model.",
+      "options": [
+        "C4OS gateway with plugin-scoped capabilities",
+        "Each app plugin owns direct Tauri command namespaces",
+        "Hybrid: direct read-only commands, gateway for mutating or sensitive actions",
+        "Undecided"
+      ]
+    },
+    {
+      "id": "plugin_backend_authority_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether disabled plugins must block backend calls, whether Tauri plugins are compiled/registered anyway, or whether any plugin actions can bypass the C4OS gateway."
+    }
+  ]
+}

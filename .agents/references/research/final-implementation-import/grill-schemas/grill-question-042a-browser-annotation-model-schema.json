@@ -1,0 +1,70 @@
+{
+  "title": "C4OS Grill Question 042A - Browser Annotation Attachment Model",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "browser_annotation_model",
+      "label": "Should C4OS follow the Codex-style Browser annotation model shown in the sample?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: yes. The sample shows an annotation toolbar, selected target outline, numbered marker, optional comment input, and attachment evidence.",
+      "options": [
+        "Yes; use Codex-style target outline, marker, comment, and evidence attachment",
+        "Use only screenshot plus comment, without element target metadata",
+        "Use only element target metadata, without screenshot evidence",
+        "Build a different C4OS-specific annotation model",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_annotation_attachment_contents",
+      "label": "What should a Browser annotation attachment include?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: include marker screenshot, selected target metadata, marker number, user comment, page URL, frame, selector/path, and viewport context.",
+      "options": [
+        "Screenshot, target metadata, marker number, comment, URL, frame, selector/path, and viewport",
+        "Screenshot, marker number, and comment only",
+        "Target metadata, marker number, and comment only",
+        "Screenshot only",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_annotation_capture_scope",
+      "label": "What screenshot scope should annotations attach by default?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: attach viewport evidence around the selected target. This matches the sample and keeps the attachment focused.",
+      "options": [
+        "Viewport evidence around the selected target",
+        "Full page screenshot",
+        "Cropped selected element only",
+        "Ask every annotation",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_annotation_after_send",
+      "label": "What happens to active annotations after send?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: persist the attachment evidence on the sent prompt, then clear active unsent annotations from the Browser surface.",
+      "options": [
+        "Persist on sent prompt attachments; clear active Browser annotations",
+        "Persist visually in Browser after send",
+        "Delete annotation records after send",
+        "Ask the user on send",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_annotation_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether multiple annotations can attach to one prompt, whether comments are optional, edit/delete behavior, or how annotation attachments appear in the prompt composer."
+    }
+  ]
+}

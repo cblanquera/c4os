@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 018 - Plugin Dependencies",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "plugin_dependency_declaration",
+      "label": "Where should C4OS app plugin dependencies be declared?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: `agents/c4os.yaml`, because dependencies affect C4OS shell activation and Settings states rather than Codex package installation.",
+      "options": [
+        "`agents/c4os.yaml`",
+        "`.codex-plugin/plugin.json`",
+        "Both, with Codex package dependencies in plugin.json and C4OS app dependencies in c4os.yaml",
+        "Plugin settings only",
+        "Other"
+      ]
+    },
+    {
+      "id": "dependency_activation_behavior",
+      "label": "What should happen when enabling a plugin with a disabled dependency?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: show dependency requirement and offer to enable required dependencies together. This fits IDE requiring FS.",
+      "options": [
+        "Show requirement and offer to enable dependencies together",
+        "Automatically enable dependencies",
+        "Block enablement until the user manually enables dependencies",
+        "Allow enablement but mark the plugin inactive until dependencies are active",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_dependencies_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify version constraints, optional dependencies, circular dependencies, or whether dependencies apply to tools, views, settings, or all plugin behavior."
+    }
+  ]
+}

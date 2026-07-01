@@ -1,0 +1,27 @@
+{
+  "title": "C4OS Grill Question 002B - Runtime Tool Discovery And Invocation",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "runtime_tool_discovery_invocation",
+      "label": "Without app plugins enabled, what can the runtime do with Tauri tools?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: runtime can discover tool metadata, but invocation requires app-shell policy or enabled app-plugin declaration. This preserves the MCP-like list_tools model while preventing dormant tools from becoming silently executable.",
+      "options": [
+        "Discover metadata only; invocation requires app-shell policy or enabled app-plugin declaration",
+        "Discover and invoke any registered backend tool if tool-level approval policy allows it",
+        "No discovery or invocation unless an app plugin is enabled",
+        "Other"
+      ]
+    },
+    {
+      "id": "runtime_tool_discovery_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether tool availability is global, per-session, per-workspace, per-plugin, or controlled by model/runtime adapter."
+    }
+  ]
+}

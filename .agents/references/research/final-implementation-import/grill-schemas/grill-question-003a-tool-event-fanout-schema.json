@@ -1,0 +1,40 @@
+{
+  "title": "C4OS Grill Question 003A - Tool Event Fanout",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "tool_event_fanout",
+      "label": "When multiple active plugin panels support a tool call, what should happen?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: one runtime tool call creates one C4OS tool event, then all active compatible plugin views receive it. This matches loading x.com in two active browser panels without letting each plugin independently multiply backend authority.",
+      "options": [
+        "One tool call event fans out to all active compatible plugin views",
+        "Each active compatible plugin invokes its own backend tool instance",
+        "Only the currently focused compatible plugin receives the tool event",
+        "Other"
+      ]
+    },
+    {
+      "id": "inactive_plugin_behavior",
+      "label": "What about enabled but hidden compatible plugins?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: hidden plugins do not receive view events by default. They can read persisted tool state later if opened, depending on plugin config.",
+      "options": [
+        "Hidden plugins do not receive view events by default",
+        "Enabled hidden plugins receive events too",
+        "Plugin config decides whether hidden views receive events",
+        "Other"
+      ]
+    },
+    {
+      "id": "tool_event_fanout_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify how this should work for Browser, Terminal, File Editor, Chat Debug, or other tool-backed views."
+    }
+  ]
+}

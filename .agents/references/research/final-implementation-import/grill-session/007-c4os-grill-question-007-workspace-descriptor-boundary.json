@@ -1,0 +1,108 @@
+{
+  "qid": "007",
+  "title": "C4OS Grill Question 007 - Workspace Descriptor Boundary",
+  "submitted": "2026-06-30T17:10:21.126Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-007-workspace-descriptor-boundary-schema.json",
+  "answer_key": {
+    "Should C4OS still have portable workspace descriptor files?": "Yes, explicit portable workspace files only; no automatic project-root folders",
+    "If descriptor files exist, what can they contain?": "Project folder references and shareable workspace settings only"
+  },
+  "notes_or_corrections": "You still should be able to load/save workspace files like in the mvp `workspace.c4os.json`. The main issue was how the MVP assigns project IDs (since project folder names are not unique). It relied on every project to have a `.c4os` folder so it can tag the project ID to that folder. I'm thinking a better way is to just create a map (id to folder) in a global config (or app level config). But if you have an even better idea let me know.",
+  "schema": {
+    "title": "C4OS Grill Question 007 - Workspace Descriptor Boundary",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "workspace_descriptor_boundary",
+        "label": "Should C4OS still have portable workspace descriptor files?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: yes, but only as explicit user-created/imported files, never automatic hidden project-root folders. Routine workspace/project registry state lives in the user config directory.",
+        "options": [
+          "Yes, explicit portable workspace files only; no automatic project-root folders",
+          "No, all workspace/project config lives only in the user config directory",
+          "Hybrid: user config by default, optional explicit workspace file export/import",
+          "Other"
+        ]
+      },
+      {
+        "id": "workspace_descriptor_contents",
+        "label": "If descriptor files exist, what can they contain?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: references and shareable settings only. No secrets, transcripts, artifact archives, approval logs, or private operational state.",
+        "options": [
+          "Project folder references and shareable workspace settings only",
+          "Full workspace config including plugin choices",
+          "Full portable archive including sessions and artifacts",
+          "Not applicable; no descriptor files",
+          "Other"
+        ]
+      },
+      {
+        "id": "workspace_descriptor_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify whether descriptor files are needed for import/export, collaboration, backups, or should be deferred entirely."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "workspace_descriptor_boundary",
+      "label": "Should C4OS still have portable workspace descriptor files?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, explicit portable workspace files only; no automatic project-root folders",
+        "No, all workspace/project config lives only in the user config directory",
+        "Hybrid: user config by default, optional explicit workspace file export/import",
+        "Other"
+      ],
+      "help": "Recommended: yes, but only as explicit user-created/imported files, never automatic hidden project-root folders. Routine workspace/project registry state lives in the user config directory.",
+      "answer": "Yes, explicit portable workspace files only; no automatic project-root folders"
+    },
+    {
+      "id": "workspace_descriptor_contents",
+      "label": "If descriptor files exist, what can they contain?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Project folder references and shareable workspace settings only",
+        "Full workspace config including plugin choices",
+        "Full portable archive including sessions and artifacts",
+        "Not applicable; no descriptor files",
+        "Other"
+      ],
+      "help": "Recommended: references and shareable settings only. No secrets, transcripts, artifact archives, approval logs, or private operational state.",
+      "answer": "Project folder references and shareable workspace settings only"
+    },
+    {
+      "id": "workspace_descriptor_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify whether descriptor files are needed for import/export, collaboration, backups, or should be deferred entirely.",
+      "answer": "You still should be able to load/save workspace files like in the mvp `workspace.c4os.json`. The main issue was how the MVP assigns project IDs (since project folder names are not unique). It relied on every project to have a `.c4os` folder so it can tag the project ID to that folder. I'm thinking a better way is to just create a map (id to folder) in a global config (or app level config). But if you have an even better idea let me know."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 007 - Workspace Descriptor Boundary\nSubmitted: 2026-06-30T17:10:21.126Z\n\nShould C4OS still have portable workspace descriptor files?\nYes, explicit portable workspace files only; no automatic project-root folders\n\nIf descriptor files exist, what can they contain?\nProject folder references and shareable workspace settings only\n\nNotes or corrections\nYou still should be able to load/save workspace files like in the mvp `workspace.c4os.json`. The main issue was how the MVP assigns project IDs (since project folder names are not unique). It relied on every project to have a `.c4os` folder so it can tag the project ID to that folder. I'm thinking a better way is to just create a map (id to folder) in a global config (or app level config). But if you have an even better idea let me know.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 007 - Workspace Descriptor Boundary\nSubmitted: 2026-06-30T17:10:21.126Z\n\nShould C4OS still have portable workspace descriptor files?\nYes, explicit portable workspace files only; no automatic project-root folders\n\nIf descriptor files exist, what can they contain?\nProject folder references and shareable workspace settings only\n\nNotes or corrections\nYou still should be able to load/save workspace files like in the mvp `workspace.c4os.json`. The main issue was how the MVP assigns project IDs (since project folder names are not unique). It relied on every project to have a `.c4os` folder so it can tag the project ID to that folder. I'm thinking a better way is to just create a map (id to folder) in a global config (or app level config). But if you have an even better idea let me know.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1008,
+  "source_timestamp": "2026-06-30T17:10:27.299Z",
+  "source_message_id": null
+}

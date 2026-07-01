@@ -1,0 +1,108 @@
+{
+  "qid": "026",
+  "title": "C4OS Grill Question 026 - Disabled Plugin Prompt Tags",
+  "submitted": "2026-06-30T18:38:31.555Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-026-disabled-plugin-tags-schema.json",
+  "answer_key": {
+    "What happens when a prompt tag references a disabled plugin or plugin resource?": "Hide disabled plugin resources completely",
+    "What happens when the plugin is enabled but dependency-blocked?": "Hide dependency-blocked resources"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 026 - Disabled Plugin Prompt Tags",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "disabled_plugin_tag_behavior",
+        "label": "What happens when a prompt tag references a disabled plugin or plugin resource?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: show the disabled result but block insertion, with a Settings link to enable the plugin. This keeps discovery useful without silently enabling plugins.",
+        "options": [
+          "Show disabled result but block insertion with link to enable plugin",
+          "Hide disabled plugin resources completely",
+          "Allow insertion, then fail at send time",
+          "Offer to enable the plugin inline from the tag menu",
+          "Other"
+        ]
+      },
+      {
+        "id": "missing_dependency_tag_behavior",
+        "label": "What happens when the plugin is enabled but dependency-blocked?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: show dependency-blocked state and block insertion until dependencies are fixed.",
+        "options": [
+          "Show dependency-blocked state and block insertion",
+          "Hide dependency-blocked resources",
+          "Allow insertion, then fail at send time",
+          "Other"
+        ]
+      },
+      {
+        "id": "disabled_plugin_tags_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify whether disabled skills, missing files, missing projects, or unavailable runtime commands should behave the same way."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "disabled_plugin_tag_behavior",
+      "label": "What happens when a prompt tag references a disabled plugin or plugin resource?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Show disabled result but block insertion with link to enable plugin",
+        "Hide disabled plugin resources completely",
+        "Allow insertion, then fail at send time",
+        "Offer to enable the plugin inline from the tag menu",
+        "Other"
+      ],
+      "help": "Recommended: show the disabled result but block insertion, with a Settings link to enable the plugin. This keeps discovery useful without silently enabling plugins.",
+      "answer": "Hide disabled plugin resources completely"
+    },
+    {
+      "id": "missing_dependency_tag_behavior",
+      "label": "What happens when the plugin is enabled but dependency-blocked?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Show dependency-blocked state and block insertion",
+        "Hide dependency-blocked resources",
+        "Allow insertion, then fail at send time",
+        "Other"
+      ],
+      "help": "Recommended: show dependency-blocked state and block insertion until dependencies are fixed.",
+      "answer": "Hide dependency-blocked resources"
+    },
+    {
+      "id": "disabled_plugin_tags_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify whether disabled skills, missing files, missing projects, or unavailable runtime commands should behave the same way.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 026 - Disabled Plugin Prompt Tags\nSubmitted: 2026-06-30T18:38:31.555Z\n\nWhat happens when a prompt tag references a disabled plugin or plugin resource?\nHide disabled plugin resources completely\n\nWhat happens when the plugin is enabled but dependency-blocked?\nHide dependency-blocked resources\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 026 - Disabled Plugin Prompt Tags\nSubmitted: 2026-06-30T18:38:31.555Z\n\nWhat happens when a prompt tag references a disabled plugin or plugin resource?\nHide disabled plugin resources completely\n\nWhat happens when the plugin is enabled but dependency-blocked?\nHide dependency-blocked resources\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1565,
+  "source_timestamp": "2026-06-30T18:38:36.327Z",
+  "source_message_id": null
+}

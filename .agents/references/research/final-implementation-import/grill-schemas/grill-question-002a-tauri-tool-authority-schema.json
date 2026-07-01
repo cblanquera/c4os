@@ -1,0 +1,27 @@
+{
+  "title": "C4OS Grill Question 002A - Tauri Tool Authority Boundary",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "tauri_tool_authority_boundary",
+      "label": "What does it mean for a Tauri tool to be dormant but available?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: tools are registered in the Tauri backend but require a C4OS app-shell or app-plugin enablement record before any user-impacting invocation. This keeps the backend robust while making plugin enablement enforceable.",
+      "options": [
+        "Registered backend tool, blocked until app shell or enabled app plugin grants access",
+        "Registered backend tool, callable by any enabled app plugin that declares the tool",
+        "Registered backend tool, callable by frontend if Tauri permission allows it",
+        "Other"
+      ]
+    },
+    {
+      "id": "tauri_tool_authority_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether app plugins declare desired tools, whether users approve tool access per plugin, and whether disabled plugins can ever call dormant tools."
+    }
+  ]
+}

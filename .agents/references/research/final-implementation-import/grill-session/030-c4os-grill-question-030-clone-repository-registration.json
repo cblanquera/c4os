@@ -1,0 +1,110 @@
+{
+  "qid": "030",
+  "title": "C4OS Grill Question 030 - Clone Repository Registration",
+  "submitted": "2026-06-30T18:50:22.941Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-030-clone-repository-registration-schema.json",
+  "answer_key": {
+    "How should Clone Repository execute?": "C4OS Tauri tool wraps system Git, then registers destination folder",
+    "After clone succeeds, what should C4OS do?": "Add cloned folder to current workspace and select it active"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 030 - Clone Repository Registration",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "clone_execution_path",
+        "label": "How should Clone Repository execute?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: through a C4OS Tauri tool that wraps system Git and then registers the destination folder in the current workspace. This keeps clone observable and consistent with tool policy.",
+        "options": [
+          "C4OS Tauri tool wraps system Git, then registers destination folder",
+          "Runtime/agent executes git clone through terminal",
+          "Frontend invokes a Tauri command directly without tool policy",
+          "External git GUI/deep link only",
+          "Other"
+        ]
+      },
+      {
+        "id": "clone_registration_behavior",
+        "label": "After clone succeeds, what should C4OS do?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: add the cloned folder to the current workspace and select it as active.",
+        "options": [
+          "Add cloned folder to current workspace and select it active",
+          "Add cloned folder but keep current project active",
+          "Prompt whether to add cloned folder",
+          "Only reveal cloned folder in file manager",
+          "Other"
+        ]
+      },
+      {
+        "id": "clone_repository_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify approval policy, destination validation, duplicate folders, existing non-empty folders, branch selection, or credential prompts."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "clone_execution_path",
+      "label": "How should Clone Repository execute?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "C4OS Tauri tool wraps system Git, then registers destination folder",
+        "Runtime/agent executes git clone through terminal",
+        "Frontend invokes a Tauri command directly without tool policy",
+        "External git GUI/deep link only",
+        "Other"
+      ],
+      "help": "Recommended: through a C4OS Tauri tool that wraps system Git and then registers the destination folder in the current workspace. This keeps clone observable and consistent with tool policy.",
+      "answer": "C4OS Tauri tool wraps system Git, then registers destination folder"
+    },
+    {
+      "id": "clone_registration_behavior",
+      "label": "After clone succeeds, what should C4OS do?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Add cloned folder to current workspace and select it active",
+        "Add cloned folder but keep current project active",
+        "Prompt whether to add cloned folder",
+        "Only reveal cloned folder in file manager",
+        "Other"
+      ],
+      "help": "Recommended: add the cloned folder to the current workspace and select it as active.",
+      "answer": "Add cloned folder to current workspace and select it active"
+    },
+    {
+      "id": "clone_repository_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify approval policy, destination validation, duplicate folders, existing non-empty folders, branch selection, or credential prompts.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 030 - Clone Repository Registration\nSubmitted: 2026-06-30T18:50:22.941Z\n\nHow should Clone Repository execute?\nC4OS Tauri tool wraps system Git, then registers destination folder\n\nAfter clone succeeds, what should C4OS do?\nAdd cloned folder to current workspace and select it active\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 030 - Clone Repository Registration\nSubmitted: 2026-06-30T18:50:22.941Z\n\nHow should Clone Repository execute?\nC4OS Tauri tool wraps system Git, then registers destination folder\n\nAfter clone succeeds, what should C4OS do?\nAdd cloned folder to current workspace and select it active\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1650,
+  "source_timestamp": "2026-06-30T18:50:28.574Z",
+  "source_message_id": null
+}

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-26
+Updated: 2026-07-02
 Source Note: Normalized from product-model, runtime-adapter, and constraints context. Detailed technical records are preserved under `.agents/references/context/technical-specs/`.
 
 ## Purpose
@@ -39,6 +39,7 @@ Use this as the technical gate. It summarizes product-owned system concepts, run
 | Trust, credential, Browser, Terminal, extension, and validation constraints | `.agents/references/context/technical-specs/constraints.md` | Use for safety-sensitive implementation or review. |
 | Skill, plugin, and MCP discovery/loading contract | `.agents/references/context/technical-specs/extension-loading.md` | Use before implementing extension install, discovery, loading, enablement, or invocation. |
 | Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where technical facts came from. |
+| Final-implementation replay sources | `.agents/references/research/final-implementation-source-inventory.md` | Use when tracing imported goals, grill answers, and research evidence. |
 
 ## Summary
 
@@ -97,6 +98,37 @@ events should use lifecycle names such as `tool_call_requested`,
 `final_response`; event names are not tool identities. Tool implementations may
 define default and maximum approval levels, and session config may narrow but
 must not silently widen tool authority.
+
+## Final Implementation Plugin And Tool Model
+
+C4OS app plugins are distinct from Tauri plugins. Built-in C4OS app plugins are
+installed with the default app, disabled by default, and modeled through
+Codex-compatible marketplace semantics. Installed plugin bundles live in a
+C4OS-owned cache; reinstall uses the marketplace source.
+
+C4OS exposes an app-owned tool gateway. Runtime discovery and tool invocation
+can occur without an enabled plugin view, subject to per-tool approval policy.
+App plugins declare tool contributions, consumers, settings, dependencies, and
+tool views in `agents/c4os.yaml`; plugin `c4os/` code implements bindings to
+preinstalled C4OS/Tauri native modules. C4OS owns default and maximum approval
+policy; plugins may request narrower defaults.
+
+One tool call becomes one C4OS tool event. The event fans out to enabled
+compatible plugin views, including hidden enabled views, without duplicating the
+backend invocation. Plugin state is per chat session with one instance per
+plugin per chat session.
+
+User-global `config.toml` is both user-editable and UI-editable. It owns
+runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool
+policy. Settings writes to it; parse errors keep the last valid config.
+
+User-directed reads/previews are allowed across the filesystem. Agent-initiated
+outside-project reads ask unless the user explicitly requested that
+file/location. Trusted-project writes are allowed when the current request
+implies project file work; destructive deletes, broad rewrites, and
+outside-project writes ask unless explicitly requested. Terminal commands ask by
+default with remembered safe-command rules; trusted-project git/worktree actions
+are allowed; network mutation and credential use ask.
 
 ## Security And Trust
 

@@ -1,0 +1,161 @@
+{
+  "qid": "042",
+  "title": "C4OS Grill Question 042 - Browser Capture, Annotation, And State",
+  "submitted": null,
+  "status": "no-submitted-intake-response-found",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-042-browser-capture-annotation-state-schema.json",
+  "answer_key": {},
+  "notes_or_corrections": "No submitted Intake response block for Question 042 was found in this chat context. The durable answer appears in Question 042A after the sample annotation evidence.",
+  "schema": {
+    "title": "C4OS Grill Question 042 - Browser Capture, Annotation, And State",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "browser_screenshot_scope",
+        "label": "What should Browser screenshots capture by default?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: capture the visible viewport by default because it matches what the user is annotating and reviewing; full-page can be a later explicit option.",
+        "options": [
+          "Visible viewport by default",
+          "Full page when possible",
+          "Ask every time",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "browser_annotation_shape",
+        "label": "What should Browser annotations contain?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: visual mark plus optional text comment and coordinates, so the prompt attachment is understandable by both user and runtime.",
+        "options": [
+          "Visual mark, optional text comment, and coordinates",
+          "Text comments only",
+          "Coordinates only",
+          "Freehand visual marks only",
+          "Other"
+        ]
+      },
+      {
+        "id": "browser_annotation_persistence",
+        "label": "Should Browser annotations persist after send?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: persist on the sent attachment record, then clear active unsent annotations from the Browser surface after send.",
+        "options": [
+          "Persist on sent attachment record; clear active surface annotations after send",
+          "Persist visually in the Browser surface after send",
+          "Do not persist after send",
+          "Ask the user on send",
+          "Other"
+        ]
+      },
+      {
+        "id": "browser_state_scope",
+        "label": "What is the Browser plugin state scope?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: per chat session, matching the accepted plugin instance and panel restore model.",
+        "options": [
+          "Per chat session",
+          "Per project",
+          "User-global shared Browser state",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "browser_capture_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify multi-tab state, screenshot filename/metadata, annotation edit/delete behavior, or whether full-page capture is required now."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "browser_screenshot_scope",
+      "label": "What should Browser screenshots capture by default?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Visible viewport by default",
+        "Full page when possible",
+        "Ask every time",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: capture the visible viewport by default because it matches what the user is annotating and reviewing; full-page can be a later explicit option.",
+      "answer": null
+    },
+    {
+      "id": "browser_annotation_shape",
+      "label": "What should Browser annotations contain?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Visual mark, optional text comment, and coordinates",
+        "Text comments only",
+        "Coordinates only",
+        "Freehand visual marks only",
+        "Other"
+      ],
+      "help": "Recommended: visual mark plus optional text comment and coordinates, so the prompt attachment is understandable by both user and runtime.",
+      "answer": null
+    },
+    {
+      "id": "browser_annotation_persistence",
+      "label": "Should Browser annotations persist after send?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Persist on sent attachment record; clear active surface annotations after send",
+        "Persist visually in the Browser surface after send",
+        "Do not persist after send",
+        "Ask the user on send",
+        "Other"
+      ],
+      "help": "Recommended: persist on the sent attachment record, then clear active unsent annotations from the Browser surface after send.",
+      "answer": null
+    },
+    {
+      "id": "browser_state_scope",
+      "label": "What is the Browser plugin state scope?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Per chat session",
+        "Per project",
+        "User-global shared Browser state",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: per chat session, matching the accepted plugin instance and panel restore model.",
+      "answer": null
+    },
+    {
+      "id": "browser_capture_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify multi-tab state, screenshot filename/metadata, annotation edit/delete behavior, or whether full-page capture is required now.",
+      "answer": "No submitted Intake response block for Question 042 was found in this chat context. The durable answer appears in Question 042A after the sample annotation evidence."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "no-submitted-intake-response-found-in-session-jsonl",
+    "raw_intake_response_scope": "No submitted intake response block found.",
+    "fidelity": "no submitted block found",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "No submitted intake response block found in the referenced Codex session JSONL. Superseded by Q042A.",
+  "raw_user_message": ""
+}

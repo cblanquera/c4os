@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 012 - Panel Visibility Persistence",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "panel_visibility_persistence",
+      "label": "Should currently open plugin panels persist after app restart?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: persist last visible panels globally, but not per workspace. This keeps the app feeling durable while respecting user-global plugin layout preferences.",
+      "options": [
+        "Yes, persist last visible left/right panels globally",
+        "Yes, persist per chat session",
+        "Yes, persist per workspace file",
+        "No, restart opens with no plugin panels visible",
+        "Other"
+      ]
+    },
+    {
+      "id": "panel_visibility_session_switch",
+      "label": "When switching chat sessions, should visible panels change?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: keep the same visible panels, but panel content follows the active chat session. This matches per-session plugin instances without making layout jump around.",
+      "options": [
+        "Keep visible panels; content follows the active chat session",
+        "Restore visible panels from each chat session",
+        "Close plugin panels on session switch",
+        "Other"
+      ]
+    },
+    {
+      "id": "panel_visibility_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether panel widths persist, whether hidden enabled views stay warm, or whether mobile/narrow windows should reset panels."
+    }
+  ]
+}

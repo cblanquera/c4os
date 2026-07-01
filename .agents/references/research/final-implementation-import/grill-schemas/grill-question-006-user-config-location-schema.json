@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 006 - User Config Location",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "user_config_location",
+      "label": "Where should C4OS user-global config live?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: literal home-level ~/.c4os on macOS/Linux, and an equivalent user-profile .c4os directory on Windows. This matches the original task list and keeps plugin/project/workspace config manually inspectable.",
+      "options": [
+        "Literal ~/.c4os-style directory on every platform",
+        "Platform-native app config directories",
+        "Hybrid: platform-native by default with ~/.c4os compatibility/export",
+        "Other"
+      ]
+    },
+    {
+      "id": "windows_path_preference",
+      "label": "For Windows, what should the equivalent be?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: %USERPROFILE%\\.c4os for symmetry with ~/.c4os, unless platform convention matters more than manual inspectability.",
+      "options": [
+        "%USERPROFILE%\\.c4os",
+        "%APPDATA%\\C4OS",
+        "%LOCALAPPDATA%\\C4OS",
+        "Use Tauri/native app config dir",
+        "Other"
+      ]
+    },
+    {
+      "id": "user_config_location_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether secrets are excluded, whether workspace/project registries live here, and whether workspace descriptor files still exist separately."
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 021 - Core Tool Approval Defaults",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "low_risk_defaults",
+      "label": "What should low-risk read/preview tools default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: allow for trusted project reads and artifact previews, ask for outside-project reads. This preserves project trust boundaries.",
+      "options": [
+        "Allow trusted project reads/previews; ask outside-project reads",
+        "Ask for all reads and previews",
+        "Allow all reads and previews",
+        "Deny outside-project reads with no ask path",
+        "Other"
+      ]
+    },
+    {
+      "id": "high_risk_defaults",
+      "label": "What should high-risk mutating tools default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: ask by default for file writes/deletes, terminal commands, git/worktree mutation, networked mutation, credential use, and plugin-provided mutating tools.",
+      "options": [
+        "Ask by default for all high-risk mutating tools",
+        "Deny by default for all high-risk mutating tools",
+        "Allow trusted-project file writes but ask terminal/git/network/credentials",
+        "Plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "approval_defaults_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify specific defaults for browser.open, browser.screenshot, files.read, files.write, terminal.run, git.branch, artifact.preview, plugin tools, or remember rules."
+    }
+  ]
+}

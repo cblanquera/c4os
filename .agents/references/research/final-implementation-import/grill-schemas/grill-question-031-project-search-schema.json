@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 031 - Project Search",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "project_search_scope",
+      "label": "What should Search Projects search in v1?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: projects and chat threads. Your original wording said basic search through chat threads, but a project search should also find project names/paths for navigation.",
+      "options": [
+        "Projects and chat threads",
+        "Chat threads only",
+        "Projects only",
+        "Projects, chat threads, and file names",
+        "Other"
+      ]
+    },
+    {
+      "id": "project_search_results_surface",
+      "label": "How should search results appear?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: center-screen takeover with an X close button, matching the original task list.",
+      "options": [
+        "Center-screen takeover with X close button",
+        "Popover under the search input",
+        "Dedicated Settings-style route",
+        "Left-panel inline filtered list only",
+        "Other"
+      ]
+    },
+    {
+      "id": "project_search_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether results include missing projects, removed projects, file content, attachments, archived/deleted chats, or cross-workspace project chats."
+    }
+  ]
+}

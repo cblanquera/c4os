@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 023 - Non-File Risk Tool Defaults",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "terminal_default",
+      "label": "What should terminal command execution default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: ask by default, with remember rules available for repeated safe commands. Terminal execution is high-authority even inside trusted projects.",
+      "options": [
+        "Ask by default; remember rules can allow repeated safe commands",
+        "Allow commands inside trusted project folders",
+        "Deny by default until terminal plugin is enabled",
+        "Plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "git_network_credentials_default",
+      "label": "What should git/worktree, network mutation, and credential use default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: ask by default for all three. These actions can mutate durable state, external systems, or secrets.",
+      "options": [
+        "Ask by default for git/worktree, network mutation, and credential use",
+        "Allow git/worktree inside trusted projects; ask network and credentials",
+        "Deny by default for credentials; ask git/worktree and network",
+        "Plugin/tool config decides separately",
+        "Other"
+      ]
+    },
+    {
+      "id": "non_file_risk_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify command allowlists, package installs, clone repository, branch creation, browser navigation, local network calls, or remember-rule limits."
+    }
+  ]
+}

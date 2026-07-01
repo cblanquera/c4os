@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 019 - Disabling Plugin Dependencies",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "disable_dependency_behavior",
+      "label": "What happens when a user disables a plugin that other enabled plugins depend on?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: block disabling until dependent plugins are manually disabled first. This mirrors the manual dependency-enable decision and prevents surprise cascading changes.",
+      "options": [
+        "Block disabling until dependent plugins are manually disabled first",
+        "Automatically disable dependent plugins",
+        "Allow disabling and mark dependents inactive/dependency-blocked",
+        "Show a confirmation listing dependents, then disable all together",
+        "Other"
+      ]
+    },
+    {
+      "id": "dependency_blocked_visibility",
+      "label": "How should dependency-blocked plugins appear in Settings?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: visible with disabled controls and a clear dependency-blocked reason.",
+      "options": [
+        "Visible with disabled controls and dependency-blocked reason",
+        "Hidden until dependencies are enabled",
+        "Visible and editable, but not activatable",
+        "Other"
+      ]
+    },
+    {
+      "id": "dependent_plugin_disable_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify behavior for active panels, tool event subscriptions, and per-chat plugin instances when a dependency is disabled."
+    }
+  ]
+}

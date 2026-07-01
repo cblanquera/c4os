@@ -1,0 +1,70 @@
+{
+  "title": "C4OS Grill Question 038 - Codex Plugin Compatibility Boundary",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "codex_plugin_subset",
+      "label": "What minimum Codex plugin subset should C4OS support?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: keep Codex package metadata in .codex-plugin/plugin.json, but use agents/c4os.yaml as the only C4OS app-shell contribution contract.",
+      "options": [
+        "Codex package metadata plus agents/c4os.yaml for C4OS shell contributions",
+        "Full Codex plugin compatibility",
+        "Only C4OS-specific plugins with no Codex plugin.json requirement",
+        "Codex skills only; no app plugin package compatibility",
+        "Other"
+      ]
+    },
+    {
+      "id": "bundled_plugin_lifecycle",
+      "label": "Should bundled built-in plugins be uninstallable?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: built-in plugins are always available from the app install but disabled by default unless the shell requires them. Users disable/enable, not uninstall.",
+      "options": [
+        "Disable-only; bundled plugins cannot be uninstalled",
+        "Uninstallable like user-installed plugins",
+        "Always enabled and not user-configurable",
+        "Removable from Settings but restored on app update",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_icon_format",
+      "label": "What icon format should plugin metadata support first?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: Lucide icon name first, with custom asset icons deferred. This matches the shell's icon-button UI direction.",
+      "options": [
+        "Lucide icon name first",
+        "Bundled SVG asset path first",
+        "Emoji/string icon first",
+        "Lucide name plus SVG asset path",
+        "Other"
+      ]
+    },
+    {
+      "id": "c4os_manifest_versioning",
+      "label": "How should C4OS handle agents/c4os.yaml version incompatibility?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: require a schemaVersion, disable incompatible plugins, and show the reason in Settings. Migration can be a later explicit capability.",
+      "options": [
+        "Require schemaVersion; disable incompatible plugins with visible reason",
+        "Best-effort load and ignore unknown fields",
+        "Automatically migrate plugin manifests",
+        "Reject app startup if a bundled plugin is incompatible",
+        "Other"
+      ]
+    },
+    {
+      "id": "codex_plugin_boundary_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify plugin root layout, app-installed versus user-installed plugins, validation rules, or what C4OS should borrow from Codex plugin.json."
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "qid": "041",
+  "title": "C4OS Grill Question 041 - Config TOML And Tool Policy",
+  "submitted": "2026-07-01T05:15:31.906Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-041-config-toml-and-tool-policy-schema.json",
+  "answer_key": {
+    "How should C4OS treat config.toml?": "Both user-editable and UI-editable",
+    "What scope should per-tool policy defaults use?": "User-global defaults with session-level narrowing",
+    "Which settings belong in config.toml first?": "Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy",
+    "When Settings UI and config.toml disagree, which wins?": "config.toml is source; Settings writes to it; parse errors keep last valid config"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 041 - Config TOML And Tool Policy",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "config_toml_edit_model",
+        "label": "How should C4OS treat config.toml?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: both user-editable and UI-editable, with Settings preserving unknown keys/comments where possible and surfacing parse errors clearly.",
+        "options": [
+          "Both user-editable and UI-editable",
+          "User-editable only",
+          "UI-editable only",
+          "Generated file; users should not edit directly",
+          "Other"
+        ]
+      },
+      {
+        "id": "tool_policy_scope",
+        "label": "What scope should per-tool policy defaults use?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: user-global defaults with session-level narrowing. This matches user-owned app settings while preventing a session from silently widening authority.",
+        "options": [
+          "User-global defaults with session-level narrowing",
+          "User-global only",
+          "Workspace-scoped defaults",
+          "Layered user, workspace, project, and session policy",
+          "Other"
+        ]
+      },
+      {
+        "id": "config_toml_content",
+        "label": "Which settings belong in config.toml first?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: keep config.toml useful for runtime, provider/model defaults, plugin marketplace sources, plugin enablement, and app-tool policy. Secrets stay in secure storage.",
+        "options": [
+          "Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy",
+          "Only runtime and provider/model defaults",
+          "Only app-tool approval policy",
+          "Everything except secrets",
+          "Other"
+        ]
+      },
+      {
+        "id": "config_precedence",
+        "label": "When Settings UI and config.toml disagree, which wins?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: config.toml is the persisted source; Settings edits write to it. Parse errors keep last valid config and show a blocking Settings error.",
+        "options": [
+          "config.toml is source; Settings writes to it; parse errors keep last valid config",
+          "Settings database wins and rewrites config.toml",
+          "Newest timestamp wins",
+          "Ask the user on every conflict",
+          "Other"
+        ]
+      },
+      {
+        "id": "config_toml_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify comments preservation, migration behavior, project/workspace overrides, secret references, managed policy, or whether this should follow Codex config more literally."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "config_toml_edit_model",
+      "label": "How should C4OS treat config.toml?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Both user-editable and UI-editable",
+        "User-editable only",
+        "UI-editable only",
+        "Generated file; users should not edit directly",
+        "Other"
+      ],
+      "help": "Recommended: both user-editable and UI-editable, with Settings preserving unknown keys/comments where possible and surfacing parse errors clearly.",
+      "answer": "Both user-editable and UI-editable"
+    },
+    {
+      "id": "tool_policy_scope",
+      "label": "What scope should per-tool policy defaults use?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "User-global defaults with session-level narrowing",
+        "User-global only",
+        "Workspace-scoped defaults",
+        "Layered user, workspace, project, and session policy",
+        "Other"
+      ],
+      "help": "Recommended: user-global defaults with session-level narrowing. This matches user-owned app settings while preventing a session from silently widening authority.",
+      "answer": "User-global defaults with session-level narrowing"
+    },
+    {
+      "id": "config_toml_content",
+      "label": "Which settings belong in config.toml first?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy",
+        "Only runtime and provider/model defaults",
+        "Only app-tool approval policy",
+        "Everything except secrets",
+        "Other"
+      ],
+      "help": "Recommended: keep config.toml useful for runtime, provider/model defaults, plugin marketplace sources, plugin enablement, and app-tool policy. Secrets stay in secure storage.",
+      "answer": "Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy"
+    },
+    {
+      "id": "config_precedence",
+      "label": "When Settings UI and config.toml disagree, which wins?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "config.toml is source; Settings writes to it; parse errors keep last valid config",
+        "Settings database wins and rewrites config.toml",
+        "Newest timestamp wins",
+        "Ask the user on every conflict",
+        "Other"
+      ],
+      "help": "Recommended: config.toml is the persisted source; Settings edits write to it. Parse errors keep last valid config and show a blocking Settings error.",
+      "answer": "config.toml is source; Settings writes to it; parse errors keep last valid config"
+    },
+    {
+      "id": "config_toml_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify comments preservation, migration behavior, project/workspace overrides, secret references, managed policy, or whether this should follow Codex config more literally.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 041 - Config TOML And Tool Policy\nSubmitted: 2026-07-01T05:15:31.906Z\n\nHow should C4OS treat config.toml?\nBoth user-editable and UI-editable\n\nWhat scope should per-tool policy defaults use?\nUser-global defaults with session-level narrowing\n\nWhich settings belong in config.toml first?\nRuntime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy\n\nWhen Settings UI and config.toml disagree, which wins?\nconfig.toml is source; Settings writes to it; parse errors keep last valid config\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 041 - Config TOML And Tool Policy\nSubmitted: 2026-07-01T05:15:31.906Z\n\nHow should C4OS treat config.toml?\nBoth user-editable and UI-editable\n\nWhat scope should per-tool policy defaults use?\nUser-global defaults with session-level narrowing\n\nWhich settings belong in config.toml first?\nRuntime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy\n\nWhen Settings UI and config.toml disagree, which wins?\nconfig.toml is source; Settings writes to it; parse errors keep last valid config\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2186,
+  "source_timestamp": "2026-07-01T05:15:35.814Z",
+  "source_message_id": null
+}

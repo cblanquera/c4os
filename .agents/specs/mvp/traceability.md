@@ -120,5 +120,5 @@ records remain planning records; active work lives in
 | `.agents/specs/research/viability-gaps.md` | `mvp-viability-gaps.md` |
 | `.agents/specs/research/implementation-checkpoint-plan.md` | checkpoint mapping and task sequencing |
 | `wireframes/ui-handoff-spec.md` | shell, composer, thread, tools, settings, placeholder guard |
-| `docs/adr/0001-browser-and-agent-authority.md` | Browser scope and authority |
-| `docs/adr/0002-extension-enablements-and-prompt-tags.md` | extension enablement and prompt tags |
+| `.agents/references/research/grill-session.md` | Browser scope and authority |
+| `.agents/specs/research/decisions.md` | extension enablement and prompt tags |

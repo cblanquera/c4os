@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 024 - Browser Tool Defaults",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "browser_navigation_default",
+      "label": "What should Browser navigation default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: allow user-directed public URL navigation and ask for agent-initiated logged-in or sensitive Browser actions. This keeps normal browsing easy while preserving agent authority boundaries.",
+      "options": [
+        "Allow user-directed public URL navigation; ask agent-initiated sensitive Browser actions",
+        "Allow all Browser navigation and actions",
+        "Ask for all Browser navigation",
+        "Browser plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_capture_default",
+      "label": "What should screenshots and annotations default to?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: user-triggered screenshots/annotations attach without asking; agent-triggered capture asks when it may expose logged-in or sensitive content.",
+      "options": [
+        "User-triggered capture attaches without asking; sensitive agent-triggered capture asks",
+        "All screenshots/annotations attach without asking",
+        "Ask before every screenshot or annotation attachment",
+        "Browser plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "browser_tool_defaults_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify public URLs, localhost/project previews, logged-in sessions, file URLs, document previews, screenshot attachment, and annotation attachment."
+    }
+  ]
+}

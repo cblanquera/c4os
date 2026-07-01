@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 028 - Branch Selection",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "branch_button_visibility",
+      "label": "When should the chat prompt branch button appear?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: only when the active project folder is a Git repository. This matches the original task list and avoids showing irrelevant controls.",
+      "options": [
+        "Only when the active project folder is a Git repository",
+        "Always visible, disabled when no Git repository exists",
+        "Only when the FS plugin and IDE plugin are both enabled",
+        "Plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "branch_change_behavior",
+      "label": "What should Choose/Create Branch do?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: create or select the project branch for future work, while existing chat thread branch remains read-only. This preserves the original requirement.",
+      "options": [
+        "Create/select project branch for future work; existing chat thread branch remains read-only",
+        "Change the current chat thread branch directly",
+        "Create a new chat session on the selected branch",
+        "Only display branch information; no branch changes",
+        "Other"
+      ]
+    },
+    {
+      "id": "branch_selection_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify nested repositories, worktrees, dirty state, branch creation permissions, or whether Git actions are allowed by default in trusted projects."
+    }
+  ]
+}

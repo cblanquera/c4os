@@ -1,0 +1,114 @@
+{
+  "qid": "005",
+  "title": "C4OS Grill Question 005 - Plugin Configuration Scope",
+  "submitted": "2026-06-30T16:55:06.127Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-005-plugin-config-scope-schema.json",
+  "answer_key": {
+    "Where should C4OS app plugin enablement live by default?": "User/global only",
+    "Where should panel side, icon order, and hidden/visible view config live?": "User/global only"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 005 - Plugin Configuration Scope",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "plugin_enablement_scope",
+        "label": "Where should C4OS app plugin enablement live by default?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: layered config with user defaults and workspace overrides. This lets the app install ship plugins disabled, lets a user opt into preferred plugins globally, and lets a workspace narrow or override plugin behavior.",
+        "options": [
+          "Layered: user defaults with workspace overrides",
+          "User/global only",
+          "Workspace only",
+          "Session only",
+          "Plugin decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "plugin_panel_config_scope",
+        "label": "Where should panel side, icon order, and hidden/visible view config live?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: same layered config as enablement, with session state only tracking which panels are currently open.",
+        "options": [
+          "Layered config for preferences; session state for currently open panels",
+          "User/global only",
+          "Workspace only",
+          "Session only",
+          "Plugin decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "plugin_config_scope_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify whether config should be stored under ~/.c4os, workspace descriptor files, project config, or another app-owned location."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "plugin_enablement_scope",
+      "label": "Where should C4OS app plugin enablement live by default?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Layered: user defaults with workspace overrides",
+        "User/global only",
+        "Workspace only",
+        "Session only",
+        "Plugin decides",
+        "Other"
+      ],
+      "help": "Recommended: layered config with user defaults and workspace overrides. This lets the app install ship plugins disabled, lets a user opt into preferred plugins globally, and lets a workspace narrow or override plugin behavior.",
+      "answer": "User/global only"
+    },
+    {
+      "id": "plugin_panel_config_scope",
+      "label": "Where should panel side, icon order, and hidden/visible view config live?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Layered config for preferences; session state for currently open panels",
+        "User/global only",
+        "Workspace only",
+        "Session only",
+        "Plugin decides",
+        "Other"
+      ],
+      "help": "Recommended: same layered config as enablement, with session state only tracking which panels are currently open.",
+      "answer": "User/global only"
+    },
+    {
+      "id": "plugin_config_scope_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify whether config should be stored under ~/.c4os, workspace descriptor files, project config, or another app-owned location.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 005 - Plugin Configuration Scope\nSubmitted: 2026-06-30T16:55:06.127Z\n\nWhere should C4OS app plugin enablement live by default?\nUser/global only\n\nWhere should panel side, icon order, and hidden/visible view config live?\nUser/global only\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 005 - Plugin Configuration Scope\nSubmitted: 2026-06-30T16:55:06.127Z\n\nWhere should C4OS app plugin enablement live by default?\nUser/global only\n\nWhere should panel side, icon order, and hidden/visible view config live?\nUser/global only\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 952,
+  "source_timestamp": "2026-06-30T16:55:10.915Z",
+  "source_message_id": null
+}

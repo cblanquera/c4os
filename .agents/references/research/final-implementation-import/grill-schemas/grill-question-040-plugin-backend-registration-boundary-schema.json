@@ -1,0 +1,70 @@
+{
+  "title": "C4OS Grill Question 040 - Plugin Backend Registration Boundary",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "backend_command_model",
+      "label": "How should C4OS expose plugin backend capabilities?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: C4OS exposes backend tools through one app-owned tool gateway, while plugins declare the tools they contribute or consume. This preserves approval policy and runtime discovery.",
+      "options": [
+        "App-owned tool gateway with plugin-declared tool contributions and consumers",
+        "Each plugin gets its own Tauri command namespace",
+        "Plugins call any registered Tauri command directly",
+        "Only bundled plugins can expose backend capabilities",
+        "Other"
+      ]
+    },
+    {
+      "id": "tool_registration_source",
+      "label": "Where should plugin tool contributions be declared?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: declare C4OS app-tool contributions in agents/c4os.yaml, then bind them to implementation under the plugin's c4os/ code.",
+      "options": [
+        "agents/c4os.yaml declares tools; plugin c4os/ code implements bindings",
+        ".codex-plugin/plugin.json declares all C4OS tools",
+        "Runtime discovers tools by scanning plugin code",
+        "Only core C4OS can declare tools",
+        "Other"
+      ]
+    },
+    {
+      "id": "native_backend_registration",
+      "label": "How should native backend registration work for marketplace plugins?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: marketplace plugins can request app-tool bindings, but only preinstalled C4OS/Tauri native modules are loaded unless the user approves a signed/native install model later.",
+      "options": [
+        "Marketplace plugins bind to preinstalled C4OS/Tauri native modules only",
+        "Marketplace plugins can ship and load native Tauri modules",
+        "Only bundled/default plugins can use native backend modules",
+        "No plugin can use native backend modules",
+        "Other"
+      ]
+    },
+    {
+      "id": "tool_approval_owner",
+      "label": "Who owns approval policy for plugin-contributed tools?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: C4OS owns default and maximum approval policy per tool; plugin manifests can request defaults but cannot silently widen authority.",
+      "options": [
+        "C4OS owns default and maximum approval policy; plugins can request narrower defaults",
+        "Plugin manifest owns approval policy",
+        "User config owns all approval policy with no C4OS maximum",
+        "Runtime adapter owns approval policy",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_backend_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify Tauri tool discovery, native install security, signed plugin expectations, tool IDs, app-tool naming, or marketplace plugin limitations."
+    }
+  ]
+}

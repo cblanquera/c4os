@@ -40,7 +40,15 @@ Choose one owner for each accepted fact:
 5. Update the owner document's `Reference Routing` table only when a new reference should be discoverable by future agents.
 6. Keep `.agents/context/` links limited to `.agents/context/` and `.agents/references/`; put source paths, external URLs, spec paths, progress paths, root artifact paths, and other provenance in `.agents/references/`.
 7. If the source adds goals, constraints, decisions, risks, or acceptance criteria, reconcile those into the relevant spec records.
-8. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
+8. Store spec decisions in the relevant spec's `decisions.md`. If the same
+   decision is needed by multiple specs, copy the relevant decision into each
+   affected spec and cite the same source.
+9. Keep shared reusable truth in `.agents/context/` and detailed rationale in
+   `.agents/references/`. Do not create root `docs/adr` records for agent
+   decisions.
+10. Specs may cite context and references, but must not depend on sibling specs
+    for project-wide truth.
+11. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
 
 ## Stop
 

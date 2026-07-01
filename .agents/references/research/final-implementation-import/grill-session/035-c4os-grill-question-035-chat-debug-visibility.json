@@ -1,0 +1,110 @@
+{
+  "qid": "035",
+  "title": "C4OS Grill Question 035 - Chat Debug Visibility",
+  "submitted": "2026-06-30T19:00:12.651Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-035-chat-debug-visibility-schema.json",
+  "answer_key": {
+    "Should Chat Debug be enabled by default?": "Disabled by default; developer-oriented plugin",
+    "What should Chat Debug show?": "Other"
+  },
+  "notes_or_corrections": "cli commands and results, tool use and tool events",
+  "schema": {
+    "title": "C4OS Grill Question 035 - Chat Debug Visibility",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "chat_debug_default_visibility",
+        "label": "Should Chat Debug be enabled by default?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: disabled by default and developer-oriented. It can be enabled as a plugin when needed.",
+        "options": [
+          "Disabled by default; developer-oriented plugin",
+          "Enabled by default in development builds only",
+          "Enabled by default for all users",
+          "Hidden behind advanced Settings",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_history_scope",
+        "label": "What should Chat Debug show?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: current chat session live and historical tool events, with sensitive parameters redacted.",
+        "options": [
+          "Current chat session live and historical tool events with redaction",
+          "Live/current run activity only",
+          "All app-wide debug history",
+          "Only failed tool calls",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify export logs, approval decisions, tool parameters, app tool calls, sensitive redaction, or whether normal users should ever see this."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "chat_debug_default_visibility",
+      "label": "Should Chat Debug be enabled by default?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Disabled by default; developer-oriented plugin",
+        "Enabled by default in development builds only",
+        "Enabled by default for all users",
+        "Hidden behind advanced Settings",
+        "Other"
+      ],
+      "help": "Recommended: disabled by default and developer-oriented. It can be enabled as a plugin when needed.",
+      "answer": "Disabled by default; developer-oriented plugin"
+    },
+    {
+      "id": "chat_debug_history_scope",
+      "label": "What should Chat Debug show?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Current chat session live and historical tool events with redaction",
+        "Live/current run activity only",
+        "All app-wide debug history",
+        "Only failed tool calls",
+        "Other"
+      ],
+      "help": "Recommended: current chat session live and historical tool events, with sensitive parameters redacted.",
+      "answer": "Other"
+    },
+    {
+      "id": "chat_debug_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify export logs, approval decisions, tool parameters, app tool calls, sensitive redaction, or whether normal users should ever see this.",
+      "answer": "cli commands and results, tool use and tool events"
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 035 - Chat Debug Visibility\nSubmitted: 2026-06-30T19:00:12.651Z\n\nShould Chat Debug be enabled by default?\nDisabled by default; developer-oriented plugin\n\nWhat should Chat Debug show?\nOther\n\nNotes or corrections\ncli commands and results, tool use and tool events",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 035 - Chat Debug Visibility\nSubmitted: 2026-06-30T19:00:12.651Z\n\nShould Chat Debug be enabled by default?\nDisabled by default; developer-oriented plugin\n\nWhat should Chat Debug show?\nOther\n\nNotes or corrections\ncli commands and results, tool use and tool events\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1756,
+  "source_timestamp": "2026-06-30T19:00:16.426Z",
+  "source_message_id": null
+}

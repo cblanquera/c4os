@@ -1,0 +1,108 @@
+{
+  "qid": "006",
+  "title": "C4OS Grill Question 006 - User Config Location",
+  "submitted": "2026-06-30T17:01:09.358Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-006-user-config-location-schema.json",
+  "answer_key": {
+    "Where should C4OS user-global config live?": "Other",
+    "For Windows, what should the equivalent be?": "Other"
+  },
+  "notes_or_corrections": "You can decide this. Follow industry standard for app config per user location depending on OS. Somewhat related: In the current MVP it puts project level config in `.c4os` folder in the project root, I didnt want to pollute project folders with an app hidden folder. I wanted it all in a config per user folder instead.",
+  "schema": {
+    "title": "C4OS Grill Question 006 - User Config Location",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "user_config_location",
+        "label": "Where should C4OS user-global config live?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: literal home-level ~/.c4os on macOS/Linux, and an equivalent user-profile .c4os directory on Windows. This matches the original task list and keeps plugin/project/workspace config manually inspectable.",
+        "options": [
+          "Literal ~/.c4os-style directory on every platform",
+          "Platform-native app config directories",
+          "Hybrid: platform-native by default with ~/.c4os compatibility/export",
+          "Other"
+        ]
+      },
+      {
+        "id": "windows_path_preference",
+        "label": "For Windows, what should the equivalent be?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: %USERPROFILE%\\.c4os for symmetry with ~/.c4os, unless platform convention matters more than manual inspectability.",
+        "options": [
+          "%USERPROFILE%\\.c4os",
+          "%APPDATA%\\C4OS",
+          "%LOCALAPPDATA%\\C4OS",
+          "Use Tauri/native app config dir",
+          "Other"
+        ]
+      },
+      {
+        "id": "user_config_location_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify whether secrets are excluded, whether workspace/project registries live here, and whether workspace descriptor files still exist separately."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "user_config_location",
+      "label": "Where should C4OS user-global config live?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Literal ~/.c4os-style directory on every platform",
+        "Platform-native app config directories",
+        "Hybrid: platform-native by default with ~/.c4os compatibility/export",
+        "Other"
+      ],
+      "help": "Recommended: literal home-level ~/.c4os on macOS/Linux, and an equivalent user-profile .c4os directory on Windows. This matches the original task list and keeps plugin/project/workspace config manually inspectable.",
+      "answer": "Other"
+    },
+    {
+      "id": "windows_path_preference",
+      "label": "For Windows, what should the equivalent be?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "%USERPROFILE%\\.c4os",
+        "%APPDATA%\\C4OS",
+        "%LOCALAPPDATA%\\C4OS",
+        "Use Tauri/native app config dir",
+        "Other"
+      ],
+      "help": "Recommended: %USERPROFILE%\\.c4os for symmetry with ~/.c4os, unless platform convention matters more than manual inspectability.",
+      "answer": "Other"
+    },
+    {
+      "id": "user_config_location_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify whether secrets are excluded, whether workspace/project registries live here, and whether workspace descriptor files still exist separately.",
+      "answer": "You can decide this. Follow industry standard for app config per user location depending on OS. Somewhat related: In the current MVP it puts project level config in `.c4os` folder in the project root, I didnt want to pollute project folders with an app hidden folder. I wanted it all in a config per user folder instead."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 006 - User Config Location\nSubmitted: 2026-06-30T17:01:09.358Z\n\nWhere should C4OS user-global config live?\nOther\n\nFor Windows, what should the equivalent be?\nOther\n\nNotes or corrections\nYou can decide this. Follow industry standard for app config per user location depending on OS. Somewhat related: In the current MVP it puts project level config in `.c4os` folder in the project root, I didnt want to pollute project folders with an app hidden folder. I wanted it all in a config per user folder instead.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 006 - User Config Location\nSubmitted: 2026-06-30T17:01:09.358Z\n\nWhere should C4OS user-global config live?\nOther\n\nFor Windows, what should the equivalent be?\nOther\n\nNotes or corrections\nYou can decide this. Follow industry standard for app config per user location depending on OS. Somewhat related: In the current MVP it puts project level config in `.c4os` folder in the project root, I didnt want to pollute project folders with an app hidden folder. I wanted it all in a config per user folder instead.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 980,
+  "source_timestamp": "2026-06-30T17:01:41.526Z",
+  "source_message_id": null
+}

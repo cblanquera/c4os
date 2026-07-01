@@ -27,7 +27,7 @@ records.
 ### RISK-003: Browser Scope Complexity
 
 Status: open for implementation
-Source: `docs/adr/0001-browser-and-agent-authority.md`, `.agents/specs/research/viability-gaps.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/viability-gaps.md`
 
 The Browser MVP exceeds a constrained preview-only surface. The implementation
 must reconcile project-scoped profiles, local file browsing, public browsing,
@@ -46,7 +46,7 @@ audited, and overrideable by workspace config.
 ### RISK-005: Extension Runtime Impact
 
 Status: open for implementation
-Source: `docs/adr/0002-extension-enablements-and-prompt-tags.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Plugins, skills, and MCP servers may affect tools, prompts, state, and runtime
 behavior. MVP records must show provenance, scopes, data sharing, runtime/tool

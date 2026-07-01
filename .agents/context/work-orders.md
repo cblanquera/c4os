@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-26
+Updated: 2026-07-02
 Source Note: Normalized from accepted decisions, constraints, MVP guardrails, and context routing. Detailed decisions are preserved under `.agents/references/context/work-orders/`.
 
 ## Purpose
@@ -39,6 +39,7 @@ Work Orders is the expandable prework surface for accepted work packages, sequen
 | MVP scope and guardrails behind a work order | `.agents/references/context/product-specs/mvp-feature-list.md` | Use before turning MVP work into tasks or progress. |
 | Pre-normalization context routing | `.agents/references/context/index-legacy.md` | Use only when auditing the normalization or checking old routing. |
 | Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where work-order facts came from. |
+| Final-implementation source inventory | `.agents/references/research/final-implementation-source-inventory.md` | Use for archive provenance, grill answer counts, and research evidence routing. |
 
 ## Status Values
 
@@ -78,6 +79,29 @@ Use these statuses for work-order records:
 | WO-006 | accepted | Define the runtime tool gateway contract before broad approval hardening: runtime requests tools through generic events, C4OS owns authority/execution, and per-session tool config maps tool identities to enabled state, access, and approval policy. | Technical Specs, TASK-016 |
 | WO-007 | proposed | Define extension discovery/loading before extension enablement or invocation: skills are `SKILL.md` folders, plugins are manifest bundles, MCP servers are explicit connections, and discovery records metadata without runtime impact. | Technical Specs, TASK-012, post-TASK-014 extension work |
 | WO-008 | deferred | Make runtime/provider tool execution emit structured C4OS tool lifecycle events so Agent terminal output reflects real `terminal.run` calls instead of assistant prose or markdown. C4OS should execute those calls through the tool gateway and stream/persist outputs as tool/action/audit records. | Runtime Tool Gateway, TASK-017 |
+
+## Final Implementation Planning Stream
+
+This stream is proposed planning only. No final-implementation spec is frozen,
+no progress item is active, and no product code should change until a bounded
+spec is frozen and execution is explicitly requested.
+
+| Order | Proposed Spec | Purpose |
+| --- | --- | --- |
+| 01 | `01-shell-plugin-architecture-refactor` | Persistent chat shell plus plugin/tool architecture boundary. |
+| 02 | `02-core-app-shell-ux` | Single-header shell, plugin panels, Settings route, and layout behavior. |
+| 03 | `03-plugin-system-settings-management` | Codex-compatible marketplace, plugin manifests, settings, dependencies, icons, lifecycle. |
+| 04 | `04-runtime-tool-policy` | Tool gateway, config.toml, Pi proof, approval policy, and tool taxonomy. |
+| 05 | `05-chat-prompt-interactions` | Approvals, branches, tags, attachments, and model adapter fallback. |
+| 06 | `06-file-system-plugin` | Workspaces, project registry, project chats, search, clone, removal, relink. |
+| 07 | `07-file-editor-plugin` | File explorer/editor, context menu, file operations, icons. |
+| 08 | `08-terminal-plugin` | User PTY panel per chat session and terminal UI preferences. |
+| 09 | `09-chat-debug-plugin` | Developer debug panel, tool/CLI history, redaction, no export. |
+| 10 | `10-browser-plugin` | Browser navigation/actions, screenshots, annotations, document-preview boundary. |
+| 11 | `11-skills-settings` | Bundled/user skills, skill creator, invalid states, `$` visibility. |
+
+Planning replay must reconcile every accepted grill QID from
+`.agents/references/research/final-implementation-import/grill-session/*.json`. Q042 is superseded by Q042A.
 
 ## Implementation Guardrails
 

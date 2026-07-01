@@ -1,0 +1,110 @@
+{
+  "qid": "021",
+  "title": "C4OS Grill Question 021 - Core Tool Approval Defaults",
+  "submitted": "2026-06-30T18:21:17.448Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-021-core-tool-defaults-schema.json",
+  "answer_key": {
+    "What should low-risk read/preview tools default to?": "Allow all reads and previews",
+    "What should high-risk mutating tools default to?": "Allow trusted-project file writes but ask terminal/git/network/credentials"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 021 - Core Tool Approval Defaults",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "low_risk_defaults",
+        "label": "What should low-risk read/preview tools default to?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: allow for trusted project reads and artifact previews, ask for outside-project reads. This preserves project trust boundaries.",
+        "options": [
+          "Allow trusted project reads/previews; ask outside-project reads",
+          "Ask for all reads and previews",
+          "Allow all reads and previews",
+          "Deny outside-project reads with no ask path",
+          "Other"
+        ]
+      },
+      {
+        "id": "high_risk_defaults",
+        "label": "What should high-risk mutating tools default to?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: ask by default for file writes/deletes, terminal commands, git/worktree mutation, networked mutation, credential use, and plugin-provided mutating tools.",
+        "options": [
+          "Ask by default for all high-risk mutating tools",
+          "Deny by default for all high-risk mutating tools",
+          "Allow trusted-project file writes but ask terminal/git/network/credentials",
+          "Plugin config decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "approval_defaults_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify specific defaults for browser.open, browser.screenshot, files.read, files.write, terminal.run, git.branch, artifact.preview, plugin tools, or remember rules."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "low_risk_defaults",
+      "label": "What should low-risk read/preview tools default to?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Allow trusted project reads/previews; ask outside-project reads",
+        "Ask for all reads and previews",
+        "Allow all reads and previews",
+        "Deny outside-project reads with no ask path",
+        "Other"
+      ],
+      "help": "Recommended: allow for trusted project reads and artifact previews, ask for outside-project reads. This preserves project trust boundaries.",
+      "answer": "Allow all reads and previews"
+    },
+    {
+      "id": "high_risk_defaults",
+      "label": "What should high-risk mutating tools default to?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Ask by default for all high-risk mutating tools",
+        "Deny by default for all high-risk mutating tools",
+        "Allow trusted-project file writes but ask terminal/git/network/credentials",
+        "Plugin config decides",
+        "Other"
+      ],
+      "help": "Recommended: ask by default for file writes/deletes, terminal commands, git/worktree mutation, networked mutation, credential use, and plugin-provided mutating tools.",
+      "answer": "Allow trusted-project file writes but ask terminal/git/network/credentials"
+    },
+    {
+      "id": "approval_defaults_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify specific defaults for browser.open, browser.screenshot, files.read, files.write, terminal.run, git.branch, artifact.preview, plugin tools, or remember rules.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 021 - Core Tool Approval Defaults\nSubmitted: 2026-06-30T18:21:17.448Z\n\nWhat should low-risk read/preview tools default to?\nAllow all reads and previews\n\nWhat should high-risk mutating tools default to?\nAllow trusted-project file writes but ask terminal/git/network/credentials\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 021 - Core Tool Approval Defaults\nSubmitted: 2026-06-30T18:21:17.448Z\n\nWhat should low-risk read/preview tools default to?\nAllow all reads and previews\n\nWhat should high-risk mutating tools default to?\nAllow trusted-project file writes but ask terminal/git/network/credentials\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1433,
+  "source_timestamp": "2026-06-30T18:21:23.444Z",
+  "source_message_id": null
+}

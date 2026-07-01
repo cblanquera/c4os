@@ -48,7 +48,7 @@ Source:
 - `proofs/native-browser-plugin/native-browser-plugin-evidence-2026-06-20.md`
 - `proofs/native-browser-wry/native-browser-wry-evidence-2026-06-20.md`
 - `proofs/native-browser-tauri/native-browser-tauri-evidence-2026-06-20.md`
-- `docs/adr/0001-browser-and-agent-authority.md`
+- `.agents/references/research/grill-session.md`
 
 Browser isolation proofs identified implementation risks, and the ADR promotes
 Browser into MVP as a user-owned desktop surface with audit boundaries.
@@ -80,7 +80,7 @@ IA, and placeholder-data guard.
 ### EVD-008: Extension ADR
 
 Status: accepted
-Source: `docs/adr/0002-extension-enablements-and-prompt-tags.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Confirms plugin, skill, and MCP install/connect are MVP, runtime impact requires
 explicit enablement, and prompt tags are `$skill`, `@plugin`, and `^mcp`.

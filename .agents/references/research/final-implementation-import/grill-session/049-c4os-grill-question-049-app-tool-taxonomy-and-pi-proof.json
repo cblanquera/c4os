@@ -1,0 +1,170 @@
+{
+  "qid": "049",
+  "title": "C4OS Grill Question 049 - App Tool Taxonomy And Pi Proof",
+  "submitted": "2026-07-01T09:52:44.730Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-049-app-tool-taxonomy-and-pi-proof-schema.json",
+  "answer_key": {
+    "Which app-tool taxonomy should be frozen before plugin details?": "Let each plugin define its own taxonomy independently",
+    "Which app-tool categories must be represented first?": "Only plugin-contributed tools",
+    "Which Pi capabilities are proof-critical?": "Prompt execution, streaming, tool-call interception, approval denial, and resume",
+    "Where should `/` prompt commands route?": "Runtime/tool gateway command handling with C4OS and plugin command definitions"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 049 - App Tool Taxonomy And Pi Proof",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "app_tool_taxonomy_freeze",
+        "label": "Which app-tool taxonomy should be frozen before plugin details?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: freeze categories and representative tool IDs, not every final tool. This gives policy/proof structure without pretending implementation details are complete.",
+        "options": [
+          "Freeze categories and representative tool IDs only",
+          "Freeze every final app tool ID before plugin specs continue",
+          "Defer app-tool taxonomy until implementation",
+          "Let each plugin define its own taxonomy independently",
+          "Other"
+        ]
+      },
+      {
+        "id": "app_tool_categories",
+        "label": "Which app-tool categories must be represented first?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: shell, runtime, files, git/worktree, terminal, browser, artifact/preview, plugin, skill, config, and marketplace.",
+        "options": [
+          "Shell, runtime, files, git/worktree, terminal, browser, artifact/preview, plugin, skill, config, marketplace",
+          "Only files, terminal, browser, and runtime",
+          "Only plugin-contributed tools",
+          "Only high-risk mutating tools",
+          "Other"
+        ]
+      },
+      {
+        "id": "pi_proof_capabilities",
+        "label": "Which Pi capabilities are proof-critical?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: all listed capabilities are proof-critical because the proof needs to reveal app-layer adjustments before implementation.",
+        "options": [
+          "Prompt execution, streaming, tool-call interception, approval denial, and resume",
+          "Prompt execution and streaming only",
+          "Tool-call interception and approval denial only",
+          "Resume only",
+          "Other"
+        ]
+      },
+      {
+        "id": "slash_command_route",
+        "label": "Where should `/` prompt commands route?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: route through runtime/tool gateway command handling, with C4OS and plugins contributing command definitions instead of a separate ad hoc palette path.",
+        "options": [
+          "Runtime/tool gateway command handling with C4OS and plugin command definitions",
+          "Runtime commands only",
+          "C4OS app tools only",
+          "Separate command palette model",
+          "Other"
+        ]
+      },
+      {
+        "id": "app_tool_taxonomy_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify specific tool IDs, naming conventions, whether marketplace tools are app tools, or how `/` commands should display in prompt suggestions."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "app_tool_taxonomy_freeze",
+      "label": "Which app-tool taxonomy should be frozen before plugin details?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Freeze categories and representative tool IDs only",
+        "Freeze every final app tool ID before plugin specs continue",
+        "Defer app-tool taxonomy until implementation",
+        "Let each plugin define its own taxonomy independently",
+        "Other"
+      ],
+      "help": "Recommended: freeze categories and representative tool IDs, not every final tool. This gives policy/proof structure without pretending implementation details are complete.",
+      "answer": "Let each plugin define its own taxonomy independently"
+    },
+    {
+      "id": "app_tool_categories",
+      "label": "Which app-tool categories must be represented first?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Shell, runtime, files, git/worktree, terminal, browser, artifact/preview, plugin, skill, config, marketplace",
+        "Only files, terminal, browser, and runtime",
+        "Only plugin-contributed tools",
+        "Only high-risk mutating tools",
+        "Other"
+      ],
+      "help": "Recommended: shell, runtime, files, git/worktree, terminal, browser, artifact/preview, plugin, skill, config, and marketplace.",
+      "answer": "Only plugin-contributed tools"
+    },
+    {
+      "id": "pi_proof_capabilities",
+      "label": "Which Pi capabilities are proof-critical?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Prompt execution, streaming, tool-call interception, approval denial, and resume",
+        "Prompt execution and streaming only",
+        "Tool-call interception and approval denial only",
+        "Resume only",
+        "Other"
+      ],
+      "help": "Recommended: all listed capabilities are proof-critical because the proof needs to reveal app-layer adjustments before implementation.",
+      "answer": "Prompt execution, streaming, tool-call interception, approval denial, and resume"
+    },
+    {
+      "id": "slash_command_route",
+      "label": "Where should `/` prompt commands route?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Runtime/tool gateway command handling with C4OS and plugin command definitions",
+        "Runtime commands only",
+        "C4OS app tools only",
+        "Separate command palette model",
+        "Other"
+      ],
+      "help": "Recommended: route through runtime/tool gateway command handling, with C4OS and plugins contributing command definitions instead of a separate ad hoc palette path.",
+      "answer": "Runtime/tool gateway command handling with C4OS and plugin command definitions"
+    },
+    {
+      "id": "app_tool_taxonomy_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify specific tool IDs, naming conventions, whether marketplace tools are app tools, or how `/` commands should display in prompt suggestions.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 049 - App Tool Taxonomy And Pi Proof\nSubmitted: 2026-07-01T09:52:44.730Z\n\nWhich app-tool taxonomy should be frozen before plugin details?\nLet each plugin define its own taxonomy independently\n\nWhich app-tool categories must be represented first?\nOnly plugin-contributed tools\n\nWhich Pi capabilities are proof-critical?\nPrompt execution, streaming, tool-call interception, approval denial, and resume\n\nWhere should `/` prompt commands route?\nRuntime/tool gateway command handling with C4OS and plugin command definitions\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 049 - App Tool Taxonomy And Pi Proof\nSubmitted: 2026-07-01T09:52:44.730Z\n\nWhich app-tool taxonomy should be frozen before plugin details?\nLet each plugin define its own taxonomy independently\n\nWhich app-tool categories must be represented first?\nOnly plugin-contributed tools\n\nWhich Pi capabilities are proof-critical?\nPrompt execution, streaming, tool-call interception, approval denial, and resume\n\nWhere should `/` prompt commands route?\nRuntime/tool gateway command handling with C4OS and plugin command definitions\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2628,
+  "source_timestamp": "2026-07-01T09:52:49.360Z",
+  "source_message_id": null
+}

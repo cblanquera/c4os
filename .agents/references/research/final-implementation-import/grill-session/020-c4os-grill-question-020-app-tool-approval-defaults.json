@@ -1,0 +1,110 @@
+{
+  "qid": "020",
+  "title": "C4OS Grill Question 020 - App Tool Approval Defaults",
+  "submitted": "2026-06-30T18:17:01.287Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-020-app-tool-approval-defaults-schema.json",
+  "answer_key": {
+    "How should C4OS define default approval policy?": "Per Tauri tool/app tool with default policy and max authority",
+    "Which first-pass approval categories should exist?": "allow, ask, deny, remember"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 020 - App Tool Approval Defaults",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "approval_policy_shape",
+        "label": "How should C4OS define default approval policy?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: per Tauri tool/app tool, with a default policy and max authority. This matches the existing technical specs and avoids one broad sandbox setting.",
+        "options": [
+          "Per Tauri tool/app tool with default policy and max authority",
+          "One global default approval policy for all tools",
+          "Per plugin only",
+          "Per runtime/model only",
+          "Other"
+        ]
+      },
+      {
+        "id": "default_policy_categories",
+        "label": "Which first-pass approval categories should exist?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: allow, ask, deny, and remember. This supports simple defaults plus user-approved saved rules.",
+        "options": [
+          "allow, ask, deny, remember",
+          "allow, ask, deny only",
+          "ask and deny only",
+          "Use Codex approval policy names exactly",
+          "Other"
+        ]
+      },
+      {
+        "id": "approval_defaults_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify default choices for browser.open, files.read, files.write, terminal.run, artifact.preview, git/worktree, network tools, or plugin-provided tools."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "approval_policy_shape",
+      "label": "How should C4OS define default approval policy?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Per Tauri tool/app tool with default policy and max authority",
+        "One global default approval policy for all tools",
+        "Per plugin only",
+        "Per runtime/model only",
+        "Other"
+      ],
+      "help": "Recommended: per Tauri tool/app tool, with a default policy and max authority. This matches the existing technical specs and avoids one broad sandbox setting.",
+      "answer": "Per Tauri tool/app tool with default policy and max authority"
+    },
+    {
+      "id": "default_policy_categories",
+      "label": "Which first-pass approval categories should exist?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "allow, ask, deny, remember",
+        "allow, ask, deny only",
+        "ask and deny only",
+        "Use Codex approval policy names exactly",
+        "Other"
+      ],
+      "help": "Recommended: allow, ask, deny, and remember. This supports simple defaults plus user-approved saved rules.",
+      "answer": "allow, ask, deny, remember"
+    },
+    {
+      "id": "approval_defaults_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify default choices for browser.open, files.read, files.write, terminal.run, artifact.preview, git/worktree, network tools, or plugin-provided tools.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 020 - App Tool Approval Defaults\nSubmitted: 2026-06-30T18:17:01.287Z\n\nHow should C4OS define default approval policy?\nPer Tauri tool/app tool with default policy and max authority\n\nWhich first-pass approval categories should exist?\nallow, ask, deny, remember\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 020 - App Tool Approval Defaults\nSubmitted: 2026-06-30T18:17:01.287Z\n\nHow should C4OS define default approval policy?\nPer Tauri tool/app tool with default policy and max authority\n\nWhich first-pass approval categories should exist?\nallow, ask, deny, remember\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1411,
+  "source_timestamp": "2026-06-30T18:17:05.647Z",
+  "source_message_id": null
+}

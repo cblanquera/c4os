@@ -1,0 +1,170 @@
+{
+  "qid": "047",
+  "title": "C4OS Grill Question 047 - Terminal Plugin Tool Boundary",
+  "submitted": "2026-07-01T05:53:34.498Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-047-terminal-plugin-tool-boundary-schema.json",
+  "answer_key": {
+    "Should the Terminal plugin expose only the user terminal panel or also runtime terminal app tools?": "User terminal panel only; runtime terminal tools stay C4OS tool-gateway owned",
+    "Where should runtime terminal tool activity be visible?": "Thread context plus Chat Debug; Terminal panel stays user PTY",
+    "Which terminal settings belong in config.toml versus Terminal plugin settings?": "config.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences",
+    "What environment should the user terminal start with?": "User login shell environment plus explicit documented C4OS variables"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 047 - Terminal Plugin Tool Boundary",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "terminal_plugin_scope",
+        "label": "Should the Terminal plugin expose only the user terminal panel or also runtime terminal app tools?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: Terminal plugin owns the user terminal panel; runtime terminal app tools are C4OS tool-gateway tools that may be displayed by Terminal/Chat Debug but are not the same as the user terminal.",
+        "options": [
+          "User terminal panel only; runtime terminal tools stay C4OS tool-gateway owned",
+          "Terminal plugin owns both user terminal and runtime terminal app tools",
+          "Runtime terminal tools require Terminal plugin enabled",
+          "No terminal app tools; only user terminal",
+          "Other"
+        ]
+      },
+      {
+        "id": "terminal_runtime_visibility",
+        "label": "Where should runtime terminal tool activity be visible?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: normal thread context plus Chat Debug; Terminal panel remains the user's interactive PTY.",
+        "options": [
+          "Thread context plus Chat Debug; Terminal panel stays user PTY",
+          "Terminal panel only",
+          "Chat Debug only",
+          "Thread context only",
+          "Other"
+        ]
+      },
+      {
+        "id": "terminal_config_split",
+        "label": "Which terminal settings belong in config.toml versus Terminal plugin settings?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: config.toml owns shell/env defaults and tool policy; plugin settings own panel placement and user terminal UI preferences.",
+        "options": [
+          "config.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences",
+          "All terminal settings belong in Terminal plugin settings",
+          "All terminal settings belong in config.toml",
+          "Shell/env in OS only; no C4OS config",
+          "Other"
+        ]
+      },
+      {
+        "id": "terminal_env_scope",
+        "label": "What environment should the user terminal start with?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: inherit the user's login shell environment with C4OS additions limited to explicit, documented variables.",
+        "options": [
+          "User login shell environment plus explicit documented C4OS variables",
+          "Sanitized minimal environment",
+          "Project-defined environment only",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "terminal_boundary_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify runtime command display, user terminal audit, shell selection, env mutation, config precedence, or whether terminal tool output can be mirrored into the user PTY."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "terminal_plugin_scope",
+      "label": "Should the Terminal plugin expose only the user terminal panel or also runtime terminal app tools?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "User terminal panel only; runtime terminal tools stay C4OS tool-gateway owned",
+        "Terminal plugin owns both user terminal and runtime terminal app tools",
+        "Runtime terminal tools require Terminal plugin enabled",
+        "No terminal app tools; only user terminal",
+        "Other"
+      ],
+      "help": "Recommended: Terminal plugin owns the user terminal panel; runtime terminal app tools are C4OS tool-gateway tools that may be displayed by Terminal/Chat Debug but are not the same as the user terminal.",
+      "answer": "User terminal panel only; runtime terminal tools stay C4OS tool-gateway owned"
+    },
+    {
+      "id": "terminal_runtime_visibility",
+      "label": "Where should runtime terminal tool activity be visible?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Thread context plus Chat Debug; Terminal panel stays user PTY",
+        "Terminal panel only",
+        "Chat Debug only",
+        "Thread context only",
+        "Other"
+      ],
+      "help": "Recommended: normal thread context plus Chat Debug; Terminal panel remains the user's interactive PTY.",
+      "answer": "Thread context plus Chat Debug; Terminal panel stays user PTY"
+    },
+    {
+      "id": "terminal_config_split",
+      "label": "Which terminal settings belong in config.toml versus Terminal plugin settings?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "config.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences",
+        "All terminal settings belong in Terminal plugin settings",
+        "All terminal settings belong in config.toml",
+        "Shell/env in OS only; no C4OS config",
+        "Other"
+      ],
+      "help": "Recommended: config.toml owns shell/env defaults and tool policy; plugin settings own panel placement and user terminal UI preferences.",
+      "answer": "config.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences"
+    },
+    {
+      "id": "terminal_env_scope",
+      "label": "What environment should the user terminal start with?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "User login shell environment plus explicit documented C4OS variables",
+        "Sanitized minimal environment",
+        "Project-defined environment only",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: inherit the user's login shell environment with C4OS additions limited to explicit, documented variables.",
+      "answer": "User login shell environment plus explicit documented C4OS variables"
+    },
+    {
+      "id": "terminal_boundary_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify runtime command display, user terminal audit, shell selection, env mutation, config precedence, or whether terminal tool output can be mirrored into the user PTY.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 047 - Terminal Plugin Tool Boundary\nSubmitted: 2026-07-01T05:53:34.498Z\n\nShould the Terminal plugin expose only the user terminal panel or also runtime terminal app tools?\nUser terminal panel only; runtime terminal tools stay C4OS tool-gateway owned\n\nWhere should runtime terminal tool activity be visible?\nThread context plus Chat Debug; Terminal panel stays user PTY\n\nWhich terminal settings belong in config.toml versus Terminal plugin settings?\nconfig.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences\n\nWhat environment should the user terminal start with?\nUser login shell environment plus explicit documented C4OS variables\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 047 - Terminal Plugin Tool Boundary\nSubmitted: 2026-07-01T05:53:34.498Z\n\nShould the Terminal plugin expose only the user terminal panel or also runtime terminal app tools?\nUser terminal panel only; runtime terminal tools stay C4OS tool-gateway owned\n\nWhere should runtime terminal tool activity be visible?\nThread context plus Chat Debug; Terminal panel stays user PTY\n\nWhich terminal settings belong in config.toml versus Terminal plugin settings?\nconfig.toml owns shell/env defaults and tool policy; plugin settings own panel/UI preferences\n\nWhat environment should the user terminal start with?\nUser login shell environment plus explicit documented C4OS variables\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2508,
+  "source_timestamp": "2026-07-01T05:53:39.348Z",
+  "source_message_id": null
+}

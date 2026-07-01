@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 014 - Settings Placement",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "settings_placement",
+      "label": "Where should Settings open in the plugin-first shell?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: center pane shell route. This avoids reintroducing right-panel tabs and gives Settings enough space for Plugins, Runtime, Configuration, Skills, and approval-policy screens.",
+      "options": [
+        "Center pane shell route",
+        "Modal overlay",
+        "Dedicated full-window settings mode",
+        "Plugin panel",
+        "Other"
+      ]
+    },
+    {
+      "id": "settings_navigation_behavior",
+      "label": "What happens to visible plugin panels when Settings opens?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: keep panels visible unless the user closes them. Settings becomes center content, not a panel-layout reset.",
+      "options": [
+        "Keep visible plugin panels open",
+        "Close all plugin panels",
+        "Close only panels that conflict with width",
+        "Restore per-chat panels when leaving Settings",
+        "Other"
+      ]
+    },
+    {
+      "id": "settings_placement_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether Settings is global, per-session, per-workspace, or whether some Settings pages should open as dialogs."
+    }
+  ]
+}

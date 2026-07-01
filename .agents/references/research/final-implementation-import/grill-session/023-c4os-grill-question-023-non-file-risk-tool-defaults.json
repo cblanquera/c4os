@@ -1,0 +1,110 @@
+{
+  "qid": "023",
+  "title": "C4OS Grill Question 023 - Non-File Risk Tool Defaults",
+  "submitted": "2026-06-30T18:32:12.378Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-023-non-file-risk-tool-defaults-schema.json",
+  "answer_key": {
+    "What should terminal command execution default to?": "Ask by default; remember rules can allow repeated safe commands",
+    "What should git/worktree, network mutation, and credential use default to?": "Allow git/worktree inside trusted projects; ask network and credentials"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 023 - Non-File Risk Tool Defaults",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "terminal_default",
+        "label": "What should terminal command execution default to?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: ask by default, with remember rules available for repeated safe commands. Terminal execution is high-authority even inside trusted projects.",
+        "options": [
+          "Ask by default; remember rules can allow repeated safe commands",
+          "Allow commands inside trusted project folders",
+          "Deny by default until terminal plugin is enabled",
+          "Plugin config decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "git_network_credentials_default",
+        "label": "What should git/worktree, network mutation, and credential use default to?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: ask by default for all three. These actions can mutate durable state, external systems, or secrets.",
+        "options": [
+          "Ask by default for git/worktree, network mutation, and credential use",
+          "Allow git/worktree inside trusted projects; ask network and credentials",
+          "Deny by default for credentials; ask git/worktree and network",
+          "Plugin/tool config decides separately",
+          "Other"
+        ]
+      },
+      {
+        "id": "non_file_risk_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify command allowlists, package installs, clone repository, branch creation, browser navigation, local network calls, or remember-rule limits."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "terminal_default",
+      "label": "What should terminal command execution default to?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Ask by default; remember rules can allow repeated safe commands",
+        "Allow commands inside trusted project folders",
+        "Deny by default until terminal plugin is enabled",
+        "Plugin config decides",
+        "Other"
+      ],
+      "help": "Recommended: ask by default, with remember rules available for repeated safe commands. Terminal execution is high-authority even inside trusted projects.",
+      "answer": "Ask by default; remember rules can allow repeated safe commands"
+    },
+    {
+      "id": "git_network_credentials_default",
+      "label": "What should git/worktree, network mutation, and credential use default to?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Ask by default for git/worktree, network mutation, and credential use",
+        "Allow git/worktree inside trusted projects; ask network and credentials",
+        "Deny by default for credentials; ask git/worktree and network",
+        "Plugin/tool config decides separately",
+        "Other"
+      ],
+      "help": "Recommended: ask by default for all three. These actions can mutate durable state, external systems, or secrets.",
+      "answer": "Allow git/worktree inside trusted projects; ask network and credentials"
+    },
+    {
+      "id": "non_file_risk_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify command allowlists, package installs, clone repository, branch creation, browser navigation, local network calls, or remember-rule limits.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 023 - Non-File Risk Tool Defaults\nSubmitted: 2026-06-30T18:32:12.378Z\n\nWhat should terminal command execution default to?\nAsk by default; remember rules can allow repeated safe commands\n\nWhat should git/worktree, network mutation, and credential use default to?\nAllow git/worktree inside trusted projects; ask network and credentials\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 023 - Non-File Risk Tool Defaults\nSubmitted: 2026-06-30T18:32:12.378Z\n\nWhat should terminal command execution default to?\nAsk by default; remember rules can allow repeated safe commands\n\nWhat should git/worktree, network mutation, and credential use default to?\nAllow git/worktree inside trusted projects; ask network and credentials\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1499,
+  "source_timestamp": "2026-06-30T18:32:16.717Z",
+  "source_message_id": null
+}

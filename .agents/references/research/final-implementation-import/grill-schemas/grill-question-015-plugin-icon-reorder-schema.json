@@ -1,0 +1,42 @@
+{
+  "title": "C4OS Grill Question 015 - Plugin Icon Reordering",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "plugin_icon_reorder_surface",
+      "label": "Where should users reorder plugin icons?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: Settings only for v1. Header drag/drop adds pointer and layout edge cases; Settings gives a clearer configuration surface.",
+      "options": [
+        "Settings only",
+        "Directly in the header only",
+        "Both Settings and direct header drag/drop",
+        "Plugin config file only",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_icon_side_change_surface",
+      "label": "Where should users change a plugin icon's left/right side?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: Settings only, because side placement is persistent user-global plugin configuration.",
+      "options": [
+        "Settings only",
+        "Directly in the header only",
+        "Both Settings and direct header drag/drop",
+        "Plugin config file only",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_icon_reorder_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether plugin icons need separators, pinned positions, hidden icons, or per-plugin default positions."
+    }
+  ]
+}

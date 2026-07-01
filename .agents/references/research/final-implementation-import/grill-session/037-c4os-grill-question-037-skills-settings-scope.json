@@ -1,0 +1,170 @@
+{
+  "qid": "037",
+  "title": "C4OS Grill Question 037 - Skills Settings Scope",
+  "submitted": "2026-06-30T19:12:18.481Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-037-skills-settings-scope-schema.json",
+  "answer_key": {
+    "Which skill creator implementation should be pre-populated?": "Bundled Codex-compatible skill creator skill",
+    "Which skill sources should Settings show in the first pass?": "Bundled and user-global skills first",
+    "Can plugin-provided skills be enabled separately from their parent plugin?": "No; plugin-provided skills follow parent plugin enablement",
+    "What metadata is required before a skill appears in `$` tagging?": "Name and enabled status only"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 037 - Skills Settings Scope",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "skill_creator_source",
+        "label": "Which skill creator implementation should be pre-populated?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: bundle the Codex-compatible skill creator skill as the default C4OS skill authoring helper.",
+        "options": [
+          "Bundled Codex-compatible skill creator skill",
+          "Install skill creator into user config on first run",
+          "Link to external Codex skill creator only",
+          "Defer skill creator pre-population",
+          "Other"
+        ]
+      },
+      {
+        "id": "skill_sources_first_pass",
+        "label": "Which skill sources should Settings show in the first pass?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: bundled and user-global skills first. Project-local skills depend on FS/workspace activation and can be added later.",
+        "options": [
+          "Bundled and user-global skills first",
+          "Bundled, user-global, and project-local skills",
+          "All skill sources including plugin-provided skills",
+          "Bundled skills only",
+          "Other"
+        ]
+      },
+      {
+        "id": "plugin_provided_skill_enablement",
+        "label": "Can plugin-provided skills be enabled separately from their parent plugin?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: plugin-provided skills follow parent plugin enablement in v1 to avoid split-brain extension state.",
+        "options": [
+          "No; plugin-provided skills follow parent plugin enablement",
+          "Yes; every skill has independent enablement",
+          "Only if the plugin declares independent skill enablement",
+          "Defer plugin-provided skills",
+          "Other"
+        ]
+      },
+      {
+        "id": "skill_tag_metadata",
+        "label": "What metadata is required before a skill appears in `$` tagging?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: require a readable name, description, source, and enabled status so tag suggestions are useful and auditable.",
+        "options": [
+          "Name, description, source, and enabled status",
+          "Name and enabled status only",
+          "Full manifest including icon, version, and permissions",
+          "Any folder containing SKILL.md",
+          "Other"
+        ]
+      },
+      {
+        "id": "skills_settings_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify skill provenance, invalid-skill UX, project-local visibility before FS is active, or whether skills should have their own approval policy."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "skill_creator_source",
+      "label": "Which skill creator implementation should be pre-populated?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Bundled Codex-compatible skill creator skill",
+        "Install skill creator into user config on first run",
+        "Link to external Codex skill creator only",
+        "Defer skill creator pre-population",
+        "Other"
+      ],
+      "help": "Recommended: bundle the Codex-compatible skill creator skill as the default C4OS skill authoring helper.",
+      "answer": "Bundled Codex-compatible skill creator skill"
+    },
+    {
+      "id": "skill_sources_first_pass",
+      "label": "Which skill sources should Settings show in the first pass?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Bundled and user-global skills first",
+        "Bundled, user-global, and project-local skills",
+        "All skill sources including plugin-provided skills",
+        "Bundled skills only",
+        "Other"
+      ],
+      "help": "Recommended: bundled and user-global skills first. Project-local skills depend on FS/workspace activation and can be added later.",
+      "answer": "Bundled and user-global skills first"
+    },
+    {
+      "id": "plugin_provided_skill_enablement",
+      "label": "Can plugin-provided skills be enabled separately from their parent plugin?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "No; plugin-provided skills follow parent plugin enablement",
+        "Yes; every skill has independent enablement",
+        "Only if the plugin declares independent skill enablement",
+        "Defer plugin-provided skills",
+        "Other"
+      ],
+      "help": "Recommended: plugin-provided skills follow parent plugin enablement in v1 to avoid split-brain extension state.",
+      "answer": "No; plugin-provided skills follow parent plugin enablement"
+    },
+    {
+      "id": "skill_tag_metadata",
+      "label": "What metadata is required before a skill appears in `$` tagging?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Name, description, source, and enabled status",
+        "Name and enabled status only",
+        "Full manifest including icon, version, and permissions",
+        "Any folder containing SKILL.md",
+        "Other"
+      ],
+      "help": "Recommended: require a readable name, description, source, and enabled status so tag suggestions are useful and auditable.",
+      "answer": "Name and enabled status only"
+    },
+    {
+      "id": "skills_settings_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify skill provenance, invalid-skill UX, project-local visibility before FS is active, or whether skills should have their own approval policy.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 037 - Skills Settings Scope\nSubmitted: 2026-06-30T19:12:18.481Z\n\nWhich skill creator implementation should be pre-populated?\nBundled Codex-compatible skill creator skill\n\nWhich skill sources should Settings show in the first pass?\nBundled and user-global skills first\n\nCan plugin-provided skills be enabled separately from their parent plugin?\nNo; plugin-provided skills follow parent plugin enablement\n\nWhat metadata is required before a skill appears in `$` tagging?\nName and enabled status only\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 037 - Skills Settings Scope\nSubmitted: 2026-06-30T19:12:18.481Z\n\nWhich skill creator implementation should be pre-populated?\nBundled Codex-compatible skill creator skill\n\nWhich skill sources should Settings show in the first pass?\nBundled and user-global skills first\n\nCan plugin-provided skills be enabled separately from their parent plugin?\nNo; plugin-provided skills follow parent plugin enablement\n\nWhat metadata is required before a skill appears in `$` tagging?\nName and enabled status only\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1904,
+  "source_timestamp": "2026-06-30T19:12:25.351Z",
+  "source_message_id": null
+}

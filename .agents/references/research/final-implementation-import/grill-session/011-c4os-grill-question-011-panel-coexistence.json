@@ -1,0 +1,108 @@
+{
+  "qid": "011",
+  "title": "C4OS Grill Question 011 - Panel Coexistence",
+  "submitted": "2026-06-30T17:33:38.624Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-011-panel-coexistence-schema.json",
+  "answer_key": {
+    "Can multiple plugin panels on the same side be visible at once?": "One visible plugin panel per side; same-side icons replace the visible panel",
+    "Can left and right plugin panels be visible at the same time?": "Yes, one left and one right panel can be visible together"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 011 - Panel Coexistence",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "same_side_panel_behavior",
+        "label": "Can multiple plugin panels on the same side be visible at once?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: one visible plugin panel per side. Clicking another plugin icon on the same side replaces the visible panel, while hidden enabled plugins can still receive tool events.",
+        "options": [
+          "One visible plugin panel per side; same-side icons replace the visible panel",
+          "Multiple same-side panels can stack or split",
+          "Only one plugin panel total can be visible across the whole shell",
+          "Plugin config decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "left_right_panel_behavior",
+        "label": "Can left and right plugin panels be visible at the same time?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: yes, one left and one right panel can be visible together, resizing toward the center pane minimum width.",
+        "options": [
+          "Yes, one left and one right panel can be visible together",
+          "No, opening one side closes the other",
+          "Plugin config decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "panel_coexistence_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify whether hidden enabled plugin views should keep state warm, whether panel visibility persists after restart, or whether same-side replacement should preserve scroll/state."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "same_side_panel_behavior",
+      "label": "Can multiple plugin panels on the same side be visible at once?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "One visible plugin panel per side; same-side icons replace the visible panel",
+        "Multiple same-side panels can stack or split",
+        "Only one plugin panel total can be visible across the whole shell",
+        "Plugin config decides",
+        "Other"
+      ],
+      "help": "Recommended: one visible plugin panel per side. Clicking another plugin icon on the same side replaces the visible panel, while hidden enabled plugins can still receive tool events.",
+      "answer": "One visible plugin panel per side; same-side icons replace the visible panel"
+    },
+    {
+      "id": "left_right_panel_behavior",
+      "label": "Can left and right plugin panels be visible at the same time?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, one left and one right panel can be visible together",
+        "No, opening one side closes the other",
+        "Plugin config decides",
+        "Other"
+      ],
+      "help": "Recommended: yes, one left and one right panel can be visible together, resizing toward the center pane minimum width.",
+      "answer": "Yes, one left and one right panel can be visible together"
+    },
+    {
+      "id": "panel_coexistence_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify whether hidden enabled plugin views should keep state warm, whether panel visibility persists after restart, or whether same-side replacement should preserve scroll/state.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 011 - Panel Coexistence\nSubmitted: 2026-06-30T17:33:38.624Z\n\nCan multiple plugin panels on the same side be visible at once?\nOne visible plugin panel per side; same-side icons replace the visible panel\n\nCan left and right plugin panels be visible at the same time?\nYes, one left and one right panel can be visible together\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 011 - Panel Coexistence\nSubmitted: 2026-06-30T17:33:38.624Z\n\nCan multiple plugin panels on the same side be visible at once?\nOne visible plugin panel per side; same-side icons replace the visible panel\n\nCan left and right plugin panels be visible at the same time?\nYes, one left and one right panel can be visible together\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1171,
+  "source_timestamp": "2026-06-30T17:33:47.120Z",
+  "source_message_id": null
+}

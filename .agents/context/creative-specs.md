@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-21
+Updated: 2026-07-02
 Source Note: Normalized from interface, product-experience, and UI handoff context. Detailed UI handoff material is preserved under `.agents/references/context/creative-specs/` and `.agents/references/context/ui-handoff/`.
 
 ## Purpose
@@ -51,6 +51,28 @@ C4OS should feel neutral, utilitarian, dense enough for repeated technical work,
 - Right panel: workspace tools with Browser, Files, and Terminal tabs.
 - Left and right panels are resizable and collapsible; center content flexes between them.
 - Top center bar includes left-panel collapse, current project/session title, and right-panel collapse.
+
+## Final Implementation Shell Layout
+
+The final implementation shell removes the start screen, right-panel tabs, and
+right-panel collapse icon. The persistent shell has one header, a center chat
+pane, Settings, and no right panel by default. Plugin icons render in fixed
+header slots on the side configured by plugin settings; primary click toggles
+the plugin panel, and icon order is controlled by header reorder.
+
+Only one plugin panel can be visible per side. Same-side plugin icons replace
+the visible panel. Left and right plugin panels can be visible together, with a
+640px minimum center pane. If panel resizing would shrink the center below
+640px, close the opposite-side panel first, then clamp expansion. Visible plugin
+panels persist per chat session and are restored when switching chats. Settings
+opens as a center route, closes all visible plugin panels, and restores the
+chat's panel state when leaving Settings.
+
+Plugin settings are rendered in Settings > Plugins from plugin-declared schema
+fields: `string`, `text`, `boolean`, `number`, and enum arrays. Shell-reserved
+keys include `panel`, `enabled`, and `iconOrder`. Plugin SVG icons must come
+from installed bundle assets by relative path and render as sanitized static SVG
+in fixed-size slots with fallback on failure.
 
 ## Native App Menu
 

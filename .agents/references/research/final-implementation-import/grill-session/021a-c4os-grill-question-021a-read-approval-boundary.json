@@ -1,0 +1,108 @@
+{
+  "qid": "021A",
+  "title": "C4OS Grill Question 021A - Read Approval Boundary",
+  "submitted": "2026-06-30T18:27:56.730Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-021a-read-boundary-schema.json",
+  "answer_key": {
+    "When you say allow all reads and previews, what boundary applies?": "Allow all filesystem reads without asking",
+    "Should previews follow the same boundary as reads?": "Yes, previews follow the same boundary as reads"
+  },
+  "notes_or_corrections": "This will be the 3rd time I mentioned this, so i hope it's recorded this time. This app will be installed on a personal computer for personal consumption. It should be assumed that if a user wants to read any file on their computer, they should be allowed to. same goes if a user asks an agent to read a file. If an agent tries to read a file outside of the project folder and the user did not explicitly ask for it to be read, then the app should ask for permissions.",
+  "schema": {
+    "title": "C4OS Grill Question 021A - Read Approval Boundary",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "read_approval_boundary",
+        "label": "When you say allow all reads and previews, what boundary applies?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: allow reads/previews inside trusted project folders and user-selected files, but ask for arbitrary outside-project filesystem reads. This preserves existing trust records while keeping previews ergonomic.",
+        "options": [
+          "Allow trusted project reads and user-selected files; ask arbitrary outside-project reads",
+          "Allow all filesystem reads without asking",
+          "Allow all reads only after FS plugin is enabled",
+          "Plugin config decides per tool",
+          "Other"
+        ]
+      },
+      {
+        "id": "preview_boundary",
+        "label": "Should previews follow the same boundary as reads?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: yes. A preview is still content access, so it should follow the same trusted-root or user-selected file boundary.",
+        "options": [
+          "Yes, previews follow the same boundary as reads",
+          "No, previews are always allowed",
+          "No, previews are stricter than reads",
+          "Other"
+        ]
+      },
+      {
+        "id": "read_boundary_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify behavior for Browser URL reads, local file previews, screenshots, attachments, hidden files, or project files in missing/read-only projects."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "read_approval_boundary",
+      "label": "When you say allow all reads and previews, what boundary applies?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Allow trusted project reads and user-selected files; ask arbitrary outside-project reads",
+        "Allow all filesystem reads without asking",
+        "Allow all reads only after FS plugin is enabled",
+        "Plugin config decides per tool",
+        "Other"
+      ],
+      "help": "Recommended: allow reads/previews inside trusted project folders and user-selected files, but ask for arbitrary outside-project filesystem reads. This preserves existing trust records while keeping previews ergonomic.",
+      "answer": "Allow all filesystem reads without asking"
+    },
+    {
+      "id": "preview_boundary",
+      "label": "Should previews follow the same boundary as reads?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, previews follow the same boundary as reads",
+        "No, previews are always allowed",
+        "No, previews are stricter than reads",
+        "Other"
+      ],
+      "help": "Recommended: yes. A preview is still content access, so it should follow the same trusted-root or user-selected file boundary.",
+      "answer": "Yes, previews follow the same boundary as reads"
+    },
+    {
+      "id": "read_boundary_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify behavior for Browser URL reads, local file previews, screenshots, attachments, hidden files, or project files in missing/read-only projects.",
+      "answer": "This will be the 3rd time I mentioned this, so i hope it's recorded this time. This app will be installed on a personal computer for personal consumption. It should be assumed that if a user wants to read any file on their computer, they should be allowed to. same goes if a user asks an agent to read a file. If an agent tries to read a file outside of the project folder and the user did not explicitly ask for it to be read, then the app should ask for permissions."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 021A - Read Approval Boundary\nSubmitted: 2026-06-30T18:27:56.730Z\n\nWhen you say allow all reads and previews, what boundary applies?\nAllow all filesystem reads without asking\n\nShould previews follow the same boundary as reads?\nYes, previews follow the same boundary as reads\n\nNotes or corrections\nThis will be the 3rd time I mentioned this, so i hope it's recorded this time. This app will be installed on a personal computer for personal consumption. It should be assumed that if a user wants to read any file on their computer, they should be allowed to. same goes if a user asks an agent to read a file. If an agent tries to read a file outside of the project folder and the user did not explicitly ask for it to be read, then the app should ask for permissions.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 021A - Read Approval Boundary\nSubmitted: 2026-06-30T18:27:56.730Z\n\nWhen you say allow all reads and previews, what boundary applies?\nAllow all filesystem reads without asking\n\nShould previews follow the same boundary as reads?\nYes, previews follow the same boundary as reads\n\nNotes or corrections\nThis will be the 3rd time I mentioned this, so i hope it's recorded this time. This app will be installed on a personal computer for personal consumption. It should be assumed that if a user wants to read any file on their computer, they should be allowed to. same goes if a user asks an agent to read a file. If an agent tries to read a file outside of the project folder and the user did not explicitly ask for it to be read, then the app should ask for permissions.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1455,
+  "source_timestamp": "2026-06-30T18:28:05.659Z",
+  "source_message_id": null
+}

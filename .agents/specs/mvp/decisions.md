@@ -44,7 +44,7 @@ keychain or equivalent secure storage.
 
 ### DEC-006: Browser Is User-Owned Desktop Surface
 
-Source: `docs/adr/0001-browser-and-agent-authority.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Browser is MVP as a user-owned desktop Browser with project-scoped profile,
 local file browsing, public browsing, request-scoped agent browsing, logged-in
@@ -67,14 +67,14 @@ that workspace config can override or extend.
 
 ### DEC-009: Extension Impact Requires Enablement
 
-Source: `docs/adr/0002-extension-enablements-and-prompt-tags.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Plugins, skills, and MCP servers may be installed or connected in MVP, but they
 can affect runtime execution only after explicit per-extension enablement.
 
 ### DEC-010: Prompt Extension Tags
 
-Source: `docs/adr/0002-extension-enablements-and-prompt-tags.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Chat prompt syntax uses `$skill`, `@plugin`, and `^mcp`. MCP invocation is
 explicit only; skills and plugins may also use enabled routing.

@@ -1,0 +1,108 @@
+{
+  "qid": "019",
+  "title": "C4OS Grill Question 019 - Disabling Plugin Dependencies",
+  "submitted": "2026-06-30T18:14:50.750Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-019-dependent-plugin-disable-schema.json",
+  "answer_key": {
+    "What happens when a user disables a plugin that other enabled plugins depend on?": "Automatically disable dependent plugins",
+    "How should dependency-blocked plugins appear in Settings?": "Visible with disabled controls and dependency-blocked reason"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 019 - Disabling Plugin Dependencies",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "disable_dependency_behavior",
+        "label": "What happens when a user disables a plugin that other enabled plugins depend on?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: block disabling until dependent plugins are manually disabled first. This mirrors the manual dependency-enable decision and prevents surprise cascading changes.",
+        "options": [
+          "Block disabling until dependent plugins are manually disabled first",
+          "Automatically disable dependent plugins",
+          "Allow disabling and mark dependents inactive/dependency-blocked",
+          "Show a confirmation listing dependents, then disable all together",
+          "Other"
+        ]
+      },
+      {
+        "id": "dependency_blocked_visibility",
+        "label": "How should dependency-blocked plugins appear in Settings?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: visible with disabled controls and a clear dependency-blocked reason.",
+        "options": [
+          "Visible with disabled controls and dependency-blocked reason",
+          "Hidden until dependencies are enabled",
+          "Visible and editable, but not activatable",
+          "Other"
+        ]
+      },
+      {
+        "id": "dependent_plugin_disable_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify behavior for active panels, tool event subscriptions, and per-chat plugin instances when a dependency is disabled."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "disable_dependency_behavior",
+      "label": "What happens when a user disables a plugin that other enabled plugins depend on?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Block disabling until dependent plugins are manually disabled first",
+        "Automatically disable dependent plugins",
+        "Allow disabling and mark dependents inactive/dependency-blocked",
+        "Show a confirmation listing dependents, then disable all together",
+        "Other"
+      ],
+      "help": "Recommended: block disabling until dependent plugins are manually disabled first. This mirrors the manual dependency-enable decision and prevents surprise cascading changes.",
+      "answer": "Automatically disable dependent plugins"
+    },
+    {
+      "id": "dependency_blocked_visibility",
+      "label": "How should dependency-blocked plugins appear in Settings?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Visible with disabled controls and dependency-blocked reason",
+        "Hidden until dependencies are enabled",
+        "Visible and editable, but not activatable",
+        "Other"
+      ],
+      "help": "Recommended: visible with disabled controls and a clear dependency-blocked reason.",
+      "answer": "Visible with disabled controls and dependency-blocked reason"
+    },
+    {
+      "id": "dependent_plugin_disable_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify behavior for active panels, tool event subscriptions, and per-chat plugin instances when a dependency is disabled.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 019 - Disabling Plugin Dependencies\nSubmitted: 2026-06-30T18:14:50.750Z\n\nWhat happens when a user disables a plugin that other enabled plugins depend on?\nAutomatically disable dependent plugins\n\nHow should dependency-blocked plugins appear in Settings?\nVisible with disabled controls and dependency-blocked reason\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 019 - Disabling Plugin Dependencies\nSubmitted: 2026-06-30T18:14:50.750Z\n\nWhat happens when a user disables a plugin that other enabled plugins depend on?\nAutomatically disable dependent plugins\n\nHow should dependency-blocked plugins appear in Settings?\nVisible with disabled controls and dependency-blocked reason\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 1389,
+  "source_timestamp": "2026-06-30T18:15:11.447Z",
+  "source_message_id": null
+}

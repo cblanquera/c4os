@@ -11,7 +11,10 @@ Use this when feasibility could change MVP scope, architecture, runtime strategy
 5. Put runnable POC code, harnesses, fixtures, and evidence in `proofs/<proof-name>/`.
 6. Do not create branches or prototype code unless the user explicitly asks for implementation.
 7. Record whether the result should be promoted, replaced, discarded, or continued.
-8. Promote accepted POC learning into `.agents/specs/mvp/` before it becomes MVP implementation work.
+8. Promote accepted reusable POC learning into the relevant `.agents/context/`
+   file before it becomes implementation work.
+9. If a POC decision affects multiple specs, copy the relevant decision into
+   each affected spec's `decisions.md` and cite the proof record.
 
 ## Stop
 

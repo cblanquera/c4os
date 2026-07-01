@@ -1,0 +1,108 @@
+{
+  "qid": "004",
+  "title": "C4OS Grill Question 004 - Plugin Instance Scope",
+  "submitted": "2026-06-30T16:51:01.536Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-004-plugin-instance-scope-schema.json",
+  "answer_key": {
+    "What is the default state scope for tool-view plugins?": "Per chat session",
+    "Can the same plugin have multiple instances in one chat session?": "One instance per plugin per chat session"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 004 - Plugin Instance Scope",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "plugin_instance_scope",
+        "label": "What is the default state scope for tool-view plugins?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: per chat session, with plugin-specific persistence. This matches Browser/Terminal per-session behavior while allowing Settings/config to stay global.",
+        "options": [
+          "Per chat session",
+          "Per workspace",
+          "Per app install/global",
+          "Plugin decides its own scope",
+          "Other"
+        ]
+      },
+      {
+        "id": "multiple_instances",
+        "label": "Can the same plugin have multiple instances in one chat session?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: one instance per plugin per chat session for v1. Multiple different plugins can support the same tool, but one plugin should not multiply itself until there is a concrete workflow.",
+        "options": [
+          "One instance per plugin per chat session",
+          "Multiple instances per plugin per chat session",
+          "Plugin decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "plugin_instance_scope_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify exceptions for Browser, Terminal, Chat Debug, FS, IDE, or Settings."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "plugin_instance_scope",
+      "label": "What is the default state scope for tool-view plugins?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Per chat session",
+        "Per workspace",
+        "Per app install/global",
+        "Plugin decides its own scope",
+        "Other"
+      ],
+      "help": "Recommended: per chat session, with plugin-specific persistence. This matches Browser/Terminal per-session behavior while allowing Settings/config to stay global.",
+      "answer": "Per chat session"
+    },
+    {
+      "id": "multiple_instances",
+      "label": "Can the same plugin have multiple instances in one chat session?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "One instance per plugin per chat session",
+        "Multiple instances per plugin per chat session",
+        "Plugin decides",
+        "Other"
+      ],
+      "help": "Recommended: one instance per plugin per chat session for v1. Multiple different plugins can support the same tool, but one plugin should not multiply itself until there is a concrete workflow.",
+      "answer": "One instance per plugin per chat session"
+    },
+    {
+      "id": "plugin_instance_scope_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify exceptions for Browser, Terminal, Chat Debug, FS, IDE, or Settings.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 004 - Plugin Instance Scope\nSubmitted: 2026-06-30T16:51:01.536Z\n\nWhat is the default state scope for tool-view plugins?\nPer chat session\n\nCan the same plugin have multiple instances in one chat session?\nOne instance per plugin per chat session\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 004 - Plugin Instance Scope\nSubmitted: 2026-06-30T16:51:01.536Z\n\nWhat is the default state scope for tool-view plugins?\nPer chat session\n\nCan the same plugin have multiple instances in one chat session?\nOne instance per plugin per chat session\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 924,
+  "source_timestamp": "2026-06-30T16:51:06.163Z",
+  "source_message_id": null
+}

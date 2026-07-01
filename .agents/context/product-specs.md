@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-21
+Updated: 2026-07-02
 Source Note: Normalized from previous feature, experience, and MVP context documents. Detailed inventories are preserved under `.agents/references/context/product-specs/`.
 
 ## Purpose
@@ -70,6 +70,28 @@ The MVP must let a technical local-project user:
 - Terminal: user terminal plus backend-owned agent command terminal under trusted-root validation and approval policy.
 - Settings and extensions: Providers, Models, Runtimes, Configuration, Plugins, Skills, MCP Servers, provenance, scopes, enabled state, and audit log.
 - Local memory: app-owned scoped memory separate from raw provider state and runtime-local session storage.
+
+## Final Implementation Product Surfaces
+
+- Persistent shell: chat prompt, active chat thread, user-global `Chats`
+  history, and Settings remain available without plugins.
+- App plugins: File System, File Editor, Terminal, Chat Debug, Browser, and
+  Skills-related surfaces extend the shell when enabled.
+- FS plugin: workspaces, project list, per-project chats, project search,
+  project add/clone, project reorder, project options, missing-project relink,
+  and workspace-file load/save.
+- IDE plugin: file explorer/editor, save/revert, create/rename/delete with
+  confirmation, external-change conflict handling, VS Code-like file icons, and
+  file references added to chat tags.
+- Terminal plugin: one user PTY per chat session; runtime terminal tool
+  activity remains in the C4OS tool gateway, thread context, and Chat Debug.
+- Chat Debug plugin: disabled by default; shows CLI commands/results, tool use,
+  tool events, approvals, and redacted parameters for the active chat session.
+- Browser plugin: navigation, actions, screenshots, and many Codex-style
+  annotations attach to the prompt; document-family plugins own document
+  previews while Browser may host rendered output.
+- Prompt interactions: approvals, branch selection, attachments, and `$`, `@`,
+  `/` tagging are prompt-level behaviors.
 
 ## Product Experience
 

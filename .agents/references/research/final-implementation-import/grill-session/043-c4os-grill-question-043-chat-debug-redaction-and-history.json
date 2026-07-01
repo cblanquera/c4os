@@ -1,0 +1,200 @@
+{
+  "qid": "043",
+  "title": "C4OS Grill Question 043 - Chat Debug Redaction And History",
+  "submitted": "2026-07-01T05:32:13.197Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-043-chat-debug-redaction-history-schema.json",
+  "answer_key": {
+    "Should Chat Debug ever be enabled by default?": "Disabled by default everywhere",
+    "Which Chat Debug values must always be redacted?": "Secrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params",
+    "Should Chat Debug show historical runs?": "Current and historical runs for the active chat session",
+    "Should users be able to export Chat Debug logs?": "No export",
+    "Where should approval decisions appear?": "Both thread context and Chat Debug"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 043 - Chat Debug Redaction And History",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "chat_debug_default_enablement",
+        "label": "Should Chat Debug ever be enabled by default?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: disabled by default everywhere. Developers can enable it, but it should not surprise normal users.",
+        "options": [
+          "Disabled by default everywhere",
+          "Enabled by default only in development builds",
+          "Enabled by default for local projects",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_redaction",
+        "label": "Which Chat Debug values must always be redacted?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: redact secrets, tokens, raw credential values, provider keys, auth headers, cookies, and configured sensitive parameters before display or export.",
+        "options": [
+          "Secrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params",
+          "Only provider keys and raw credentials",
+          "Only values marked secret by the plugin/tool",
+          "No automatic redaction",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_history_scope",
+        "label": "Should Chat Debug show historical runs?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: show current and historical runs for the active chat session because debug value comes from reviewing previous tool events.",
+        "options": [
+          "Current and historical runs for the active chat session",
+          "Current live run only",
+          "Historical runs only after explicit load",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_export",
+        "label": "Should users be able to export Chat Debug logs?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: allow explicit redacted export only, never raw unredacted export.",
+        "options": [
+          "Yes, explicit redacted export only",
+          "Yes, raw and redacted export",
+          "No export",
+          "Plugin setting decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_approval_visibility",
+        "label": "Where should approval decisions appear?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: approval decisions appear in both the normal thread context and Chat Debug, with Chat Debug showing structured parameters after redaction.",
+        "options": [
+          "Both thread context and Chat Debug",
+          "Chat Debug only",
+          "Thread context only",
+          "Approval dialog/audit log only",
+          "Other"
+        ]
+      },
+      {
+        "id": "chat_debug_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify export format, retention, whether redacted values can be revealed by user action, or sensitive parameter naming rules."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "chat_debug_default_enablement",
+      "label": "Should Chat Debug ever be enabled by default?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Disabled by default everywhere",
+        "Enabled by default only in development builds",
+        "Enabled by default for local projects",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: disabled by default everywhere. Developers can enable it, but it should not surprise normal users.",
+      "answer": "Disabled by default everywhere"
+    },
+    {
+      "id": "chat_debug_redaction",
+      "label": "Which Chat Debug values must always be redacted?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Secrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params",
+        "Only provider keys and raw credentials",
+        "Only values marked secret by the plugin/tool",
+        "No automatic redaction",
+        "Other"
+      ],
+      "help": "Recommended: redact secrets, tokens, raw credential values, provider keys, auth headers, cookies, and configured sensitive parameters before display or export.",
+      "answer": "Secrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params"
+    },
+    {
+      "id": "chat_debug_history_scope",
+      "label": "Should Chat Debug show historical runs?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Current and historical runs for the active chat session",
+        "Current live run only",
+        "Historical runs only after explicit load",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: show current and historical runs for the active chat session because debug value comes from reviewing previous tool events.",
+      "answer": "Current and historical runs for the active chat session"
+    },
+    {
+      "id": "chat_debug_export",
+      "label": "Should users be able to export Chat Debug logs?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes, explicit redacted export only",
+        "Yes, raw and redacted export",
+        "No export",
+        "Plugin setting decides",
+        "Other"
+      ],
+      "help": "Recommended: allow explicit redacted export only, never raw unredacted export.",
+      "answer": "No export"
+    },
+    {
+      "id": "chat_debug_approval_visibility",
+      "label": "Where should approval decisions appear?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Both thread context and Chat Debug",
+        "Chat Debug only",
+        "Thread context only",
+        "Approval dialog/audit log only",
+        "Other"
+      ],
+      "help": "Recommended: approval decisions appear in both the normal thread context and Chat Debug, with Chat Debug showing structured parameters after redaction.",
+      "answer": "Both thread context and Chat Debug"
+    },
+    {
+      "id": "chat_debug_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify export format, retention, whether redacted values can be revealed by user action, or sensitive parameter naming rules.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 043 - Chat Debug Redaction And History\nSubmitted: 2026-07-01T05:32:13.197Z\n\nShould Chat Debug ever be enabled by default?\nDisabled by default everywhere\n\nWhich Chat Debug values must always be redacted?\nSecrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params\n\nShould Chat Debug show historical runs?\nCurrent and historical runs for the active chat session\n\nShould users be able to export Chat Debug logs?\nNo export\n\nWhere should approval decisions appear?\nBoth thread context and Chat Debug\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 043 - Chat Debug Redaction And History\nSubmitted: 2026-07-01T05:32:13.197Z\n\nShould Chat Debug ever be enabled by default?\nDisabled by default everywhere\n\nWhich Chat Debug values must always be redacted?\nSecrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params\n\nShould Chat Debug show historical runs?\nCurrent and historical runs for the active chat session\n\nShould users be able to export Chat Debug logs?\nNo export\n\nWhere should approval decisions appear?\nBoth thread context and Chat Debug\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2309,
+  "source_timestamp": "2026-07-01T05:32:16.633Z",
+  "source_message_id": null
+}

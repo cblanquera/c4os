@@ -1,0 +1,176 @@
+{
+  "qid": "050",
+  "title": "C4OS Grill Question 050 - Plugin Migration Failure Handling",
+  "submitted": "2026-07-01T09:57:42.094Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-050-plugin-migration-failure-handling-schema.json",
+  "answer_key": {
+    "Which plugin migration failures should C4OS automatically recover from?": "Auto-recover cache, reinstallable bundle, and stale-index failures only",
+    "Which plugin migration failures should cause visible disablement instead of recovery?": "Unsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle",
+    "How should C4OS handle corrupt plugin-owned user config during migration?": "Reset corrupt plugin config automatically and keep plugin enabled",
+    "Where should migration failures be surfaced to the user?": "Settings > Plugins with disabled reason and repair actions"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 050 - Plugin Migration Failure Handling",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "recoverable_plugin_migration_failures",
+        "label": "Which plugin migration failures should C4OS automatically recover from?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: auto-recover only mechanical/local-state issues such as cache rebuilds, missing installed copies that can be reinstalled from a known source, and stale indexes; visibly disable security, incompatibility, dependency, or native binding failures.",
+        "options": [
+          "Auto-recover cache, reinstallable bundle, and stale-index failures only",
+          "Auto-recover any failure where C4OS can infer a fix",
+          "Never auto-recover; visibly disable on all migration failures",
+          "Ask the user before every migration recovery attempt",
+          "Other"
+        ]
+      },
+      {
+        "id": "visible_disablement_failures",
+        "label": "Which plugin migration failures should cause visible disablement instead of recovery?",
+        "type": "checkbox",
+        "required": true,
+        "help": "Select all failure classes that should leave the plugin visible in Settings with a disabled state and reason.",
+        "options": [
+          "Unsupported agents/c4os.yaml schemaVersion",
+          "Missing or disabled dependency",
+          "Security policy violation",
+          "Unavailable required preinstalled native module",
+          "Invalid or unreadable plugin manifest",
+          "Corrupt plugin-owned user config",
+          "Missing marketplace source or non-reinstallable plugin bundle",
+          "Other"
+        ]
+      },
+      {
+        "id": "corrupt_user_config_handling",
+        "label": "How should C4OS handle corrupt plugin-owned user config during migration?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: keep a backup of the corrupt config, disable only the affected plugin, and show repair/reset actions in Settings.",
+        "options": [
+          "Back up corrupt config, disable affected plugin, and show repair/reset actions",
+          "Reset corrupt plugin config automatically and keep plugin enabled",
+          "Block app startup until user fixes the config",
+          "Ignore corrupt plugin config and use plugin defaults silently",
+          "Other"
+        ]
+      },
+      {
+        "id": "migration_failure_ui",
+        "label": "Where should migration failures be surfaced to the user?",
+        "type": "checkbox",
+        "required": true,
+        "help": "Recommended: Settings > Plugins for durable state, plus a startup notification only when user action is needed.",
+        "options": [
+          "Settings > Plugins with disabled reason and repair actions",
+          "Startup notification only when user action is needed",
+          "Chat thread system notice",
+          "Log/debug surface only",
+          "Other"
+        ]
+      },
+      {
+        "id": "notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Add any correction to the recommended policy or any migration failure case that is missing."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "recoverable_plugin_migration_failures",
+      "label": "Which plugin migration failures should C4OS automatically recover from?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Auto-recover cache, reinstallable bundle, and stale-index failures only",
+        "Auto-recover any failure where C4OS can infer a fix",
+        "Never auto-recover; visibly disable on all migration failures",
+        "Ask the user before every migration recovery attempt",
+        "Other"
+      ],
+      "help": "Recommended: auto-recover only mechanical/local-state issues such as cache rebuilds, missing installed copies that can be reinstalled from a known source, and stale indexes; visibly disable security, incompatibility, dependency, or native binding failures.",
+      "answer": "Auto-recover cache, reinstallable bundle, and stale-index failures only"
+    },
+    {
+      "id": "visible_disablement_failures",
+      "label": "Which plugin migration failures should cause visible disablement instead of recovery?",
+      "type": "checkbox",
+      "required": true,
+      "options": [
+        "Unsupported agents/c4os.yaml schemaVersion",
+        "Missing or disabled dependency",
+        "Security policy violation",
+        "Unavailable required preinstalled native module",
+        "Invalid or unreadable plugin manifest",
+        "Corrupt plugin-owned user config",
+        "Missing marketplace source or non-reinstallable plugin bundle",
+        "Other"
+      ],
+      "help": "Select all failure classes that should leave the plugin visible in Settings with a disabled state and reason.",
+      "answer": "Unsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle"
+    },
+    {
+      "id": "corrupt_user_config_handling",
+      "label": "How should C4OS handle corrupt plugin-owned user config during migration?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Back up corrupt config, disable affected plugin, and show repair/reset actions",
+        "Reset corrupt plugin config automatically and keep plugin enabled",
+        "Block app startup until user fixes the config",
+        "Ignore corrupt plugin config and use plugin defaults silently",
+        "Other"
+      ],
+      "help": "Recommended: keep a backup of the corrupt config, disable only the affected plugin, and show repair/reset actions in Settings.",
+      "answer": "Reset corrupt plugin config automatically and keep plugin enabled"
+    },
+    {
+      "id": "migration_failure_ui",
+      "label": "Where should migration failures be surfaced to the user?",
+      "type": "checkbox",
+      "required": true,
+      "options": [
+        "Settings > Plugins with disabled reason and repair actions",
+        "Startup notification only when user action is needed",
+        "Chat thread system notice",
+        "Log/debug surface only",
+        "Other"
+      ],
+      "help": "Recommended: Settings > Plugins for durable state, plus a startup notification only when user action is needed.",
+      "answer": "Settings > Plugins with disabled reason and repair actions"
+    },
+    {
+      "id": "notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Add any correction to the recommended policy or any migration failure case that is missing.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 050 - Plugin Migration Failure Handling\nSubmitted: 2026-07-01T09:57:42.094Z\n\nWhich plugin migration failures should C4OS automatically recover from?\nAuto-recover cache, reinstallable bundle, and stale-index failures only\n\nWhich plugin migration failures should cause visible disablement instead of recovery?\nUnsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle\n\nHow should C4OS handle corrupt plugin-owned user config during migration?\nReset corrupt plugin config automatically and keep plugin enabled\n\nWhere should migration failures be surfaced to the user?\nSettings > Plugins with disabled reason and repair actions\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 050 - Plugin Migration Failure Handling\nSubmitted: 2026-07-01T09:57:42.094Z\n\nWhich plugin migration failures should C4OS automatically recover from?\nAuto-recover cache, reinstallable bundle, and stale-index failures only\n\nWhich plugin migration failures should cause visible disablement instead of recovery?\nUnsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle\n\nHow should C4OS handle corrupt plugin-owned user config during migration?\nReset corrupt plugin config automatically and keep plugin enabled\n\nWhere should migration failures be surfaced to the user?\nSettings > Plugins with disabled reason and repair actions\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2704,
+  "source_timestamp": "2026-07-01T09:57:49.825Z",
+  "source_message_id": null
+}

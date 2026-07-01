@@ -1,0 +1,41 @@
+{
+  "title": "C4OS Grill Question 026 - Disabled Plugin Prompt Tags",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "disabled_plugin_tag_behavior",
+      "label": "What happens when a prompt tag references a disabled plugin or plugin resource?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: show the disabled result but block insertion, with a Settings link to enable the plugin. This keeps discovery useful without silently enabling plugins.",
+      "options": [
+        "Show disabled result but block insertion with link to enable plugin",
+        "Hide disabled plugin resources completely",
+        "Allow insertion, then fail at send time",
+        "Offer to enable the plugin inline from the tag menu",
+        "Other"
+      ]
+    },
+    {
+      "id": "missing_dependency_tag_behavior",
+      "label": "What happens when the plugin is enabled but dependency-blocked?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: show dependency-blocked state and block insertion until dependencies are fixed.",
+      "options": [
+        "Show dependency-blocked state and block insertion",
+        "Hide dependency-blocked resources",
+        "Allow insertion, then fail at send time",
+        "Other"
+      ]
+    },
+    {
+      "id": "disabled_plugin_tags_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify whether disabled skills, missing files, missing projects, or unavailable runtime commands should behave the same way."
+    }
+  ]
+}

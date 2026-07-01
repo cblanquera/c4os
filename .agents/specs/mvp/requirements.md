@@ -80,7 +80,7 @@ APIs.
 
 ### REQ-010: Browser Surface
 
-Source: `docs/adr/0001-browser-and-agent-authority.md`, `.agents/specs/research/decisions.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/decisions.md`
 
 Browser is a user-owned desktop surface with project-scoped profile, local file
 browsing, public web browsing, request-scoped agent browsing, logged-in use when
@@ -123,7 +123,7 @@ state.
 
 ### REQ-015: Extension Install, Enablement, And Invocation
 
-Source: `docs/adr/0002-extension-enablements-and-prompt-tags.md`, `.agents/specs/research/requirements.md`
+Source: `.agents/references/research/grill-session.md`, `.agents/specs/research/requirements.md`
 
 The MVP supports plugin, skill, and MCP install/connect records with provenance,
 scopes, workspace/project scope, shared data, runtime/tool access, enabled

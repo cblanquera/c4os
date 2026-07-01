@@ -1,0 +1,84 @@
+{
+  "title": "C4OS Grill Question 043 - Chat Debug Redaction And History",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "chat_debug_default_enablement",
+      "label": "Should Chat Debug ever be enabled by default?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: disabled by default everywhere. Developers can enable it, but it should not surprise normal users.",
+      "options": [
+        "Disabled by default everywhere",
+        "Enabled by default only in development builds",
+        "Enabled by default for local projects",
+        "Plugin setting decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_redaction",
+      "label": "Which Chat Debug values must always be redacted?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: redact secrets, tokens, raw credential values, provider keys, auth headers, cookies, and configured sensitive parameters before display or export.",
+      "options": [
+        "Secrets, tokens, raw credentials, provider keys, auth headers, cookies, and sensitive params",
+        "Only provider keys and raw credentials",
+        "Only values marked secret by the plugin/tool",
+        "No automatic redaction",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_history_scope",
+      "label": "Should Chat Debug show historical runs?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: show current and historical runs for the active chat session because debug value comes from reviewing previous tool events.",
+      "options": [
+        "Current and historical runs for the active chat session",
+        "Current live run only",
+        "Historical runs only after explicit load",
+        "Plugin setting decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_export",
+      "label": "Should users be able to export Chat Debug logs?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: allow explicit redacted export only, never raw unredacted export.",
+      "options": [
+        "Yes, explicit redacted export only",
+        "Yes, raw and redacted export",
+        "No export",
+        "Plugin setting decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_approval_visibility",
+      "label": "Where should approval decisions appear?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: approval decisions appear in both the normal thread context and Chat Debug, with Chat Debug showing structured parameters after redaction.",
+      "options": [
+        "Both thread context and Chat Debug",
+        "Chat Debug only",
+        "Thread context only",
+        "Approval dialog/audit log only",
+        "Other"
+      ]
+    },
+    {
+      "id": "chat_debug_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify export format, retention, whether redacted values can be revealed by user action, or sensitive parameter naming rules."
+    }
+  ]
+}

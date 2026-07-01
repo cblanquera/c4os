@@ -23,12 +23,12 @@
       "type": "radio",
       "required": true,
       "options": [
-        ".agents/specs/research/ for freeze and checkpoint docs; docs/adr/ for ADRs",
-        ".agents/specs/freeze/ for freeze docs; docs/adr/ for ADRs",
+        ".agents/specs/research/ for freeze and checkpoint docs; spec decisions.md for ADR-style decisions",
+        ".agents/specs/freeze/ for freeze docs; spec decisions.md for ADR-style decisions",
         "plans/ for human docs; .agents/ only for traceability",
         "Decide automatically from existing repo conventions"
       ],
-      "help": "Recommended: keep freeze/checkpoint docs in .agents/specs/research/ for now and ADRs in docs/adr/ per grill-with-docs convention."
+      "help": "Recommended: keep freeze/checkpoint docs in .agents/specs/research/ for now and keep ADR-style decisions in affected spec decisions.md records."
     },
     {
       "id": "closeout_notes",

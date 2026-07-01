@@ -1,0 +1,56 @@
+{
+  "title": "C4OS Grill Question 034 - Terminal Session Scope",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "terminal_cwd_no_project",
+      "label": "What cwd should a terminal use when no project is assigned?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: user home directory. It gives unassigned chats a usable terminal without inventing a project boundary.",
+      "options": [
+        "User home directory",
+        "App config directory",
+        "Disable terminal until a project is active",
+        "Last active project folder",
+        "Other"
+      ]
+    },
+    {
+      "id": "terminal_instances_per_chat",
+      "label": "How many user terminals should one chat session have in v1?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: exactly one user terminal per chat session, matching the plugin instance rule.",
+      "options": [
+        "Exactly one user terminal per chat session",
+        "Multiple user terminals per chat session",
+        "One terminal per project, shared across chats",
+        "Plugin config decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "terminal_persistence_after_chat_remove",
+      "label": "What happens to the terminal when its chat is removed?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: terminate the terminal and delete its C4OS-owned terminal state because Remove Chat permanently removes chat-owned history.",
+      "options": [
+        "Terminate terminal and delete chat-owned terminal state",
+        "Keep terminal running until app exit",
+        "Move terminal history to an audit/archive log",
+        "Prompt the user whether to keep it",
+        "Other"
+      ]
+    },
+    {
+      "id": "terminal_session_scope_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify shell selection, environment config, user terminal versus runtime tool terminal, PTY persistence, or read-only transcript behavior."
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-06-21
+Updated: 2026-07-02
 Source Note: Normalized from the previous context documents. Detailed source slices are preserved under `.agents/references/context/`.
 
 ## Purpose
@@ -54,6 +54,7 @@ Expanded breakdowns live in `.agents/references/context/`. Source paths, provena
 | Exact vocabulary definitions | `.agents/references/context/product/terms.md` | Canonical term meanings and scope distinctions. |
 | High-level feature goal inputs | `.agents/references/context/product/feature-goals.md` | Goal list preserved from prior context. |
 | Source and artifact provenance | `.agents/references/context/source-provenance.md` | Source paths stay out of context docs. |
+| Final-implementation replay sources | `.agents/references/research/final-implementation-source-inventory.md` | Archive provenance, grill answer counts, and research-source classification. |
 
 ## Summary
 
@@ -64,6 +65,20 @@ C4OS is a folder-first local AI workspace for technical project work. It gives u
 C4OS exists between cloud-first chat tools and developer-first agent runtimes. Cloud chat lacks safe ownership of local project context, files, approvals, credentials, and workspace state. Raw CLIs and runtimes expose too much implementation detail and fragment persistence, safety, artifacts, and multi-project workflows.
 
 C4OS should feel like a durable desktop workspace for local projects, not a prompt box or marketing dashboard.
+
+## Final Implementation Direction
+
+The MVP implementation is accepted through TASK-017. The next planning stream
+rebuilds C4OS around a persistent chat shell plus app plugins. The shell owns
+unassigned user-global chats, chat prompt, active thread, Settings, runtime
+policy, and app-owned persistence. Workspaces, projects, file editing,
+Terminal, Chat Debug, Browser, and Skills are planned as bounded plugin or
+settings surfaces with their own proposed specs.
+
+Input for this stream comes from `.agents/references/research/final-implementation-import`; that archive is import
+provenance only. Accepted reusable truth must live in `.agents/context/`, long
+support in `.agents/references/`, and spec decisions in the affected spec
+packages.
 
 ## Target Users
 

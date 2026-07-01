@@ -1,7 +1,7 @@
 # Research Status
 
 Status: frozen-for-mvp-specification
-Updated: 2026-06-20
+Updated: 2026-07-02
 
 ## Classification
 
@@ -22,4 +22,7 @@ The imported plans, POCs, r04 wireframes, and grill answers are frozen as resear
 - Concurrent sessions/runs across trusted project folders are MVP, with one main run per chat session.
 - Extension install/connect for plugins, skills, and MCP servers is MVP, with explicit per-extension enablement before runtime impact.
 - r04 wireframe behavior is MVP behavioral handoff; final visual design and product copy remain separate unless explicitly documented.
-- Research freeze artifacts now exist in `research-freeze.md`, `implementation-checkpoint-plan.md`, and `docs/adr/`.
+- Research freeze artifacts now exist in `research-freeze.md` and
+  `implementation-checkpoint-plan.md`. Earlier ADR-style decisions have been
+  embedded in the relevant `.agents/specs/**/decisions.md` records; root
+  `docs/adr` is not the active agent decision surface.

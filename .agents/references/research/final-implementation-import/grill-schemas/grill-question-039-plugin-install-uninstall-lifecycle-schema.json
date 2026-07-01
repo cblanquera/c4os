@@ -1,0 +1,97 @@
+{
+  "title": "C4OS Grill Question 039 - Plugin Marketplace And Lifecycle",
+  "source_skill": "grill-with-docs",
+  "source_workflow": "combined-spec-grill",
+  "questions": [
+    {
+      "id": "marketplace_sources",
+      "label": "Which Codex marketplace sources should C4OS support?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: mirror Codex's marketplace model: bundled/default, repo, personal, local marketplace root, GitHub shorthand, Git URL, ref, and sparse paths.",
+      "options": [
+        "Bundled/default, repo, personal, local root, GitHub, Git URL, ref, and sparse paths",
+        "Bundled/default, repo, and personal marketplaces only",
+        "Bundled/default and local marketplace roots only",
+        "Any filesystem path only; no marketplace catalog model",
+        "Other"
+      ]
+    },
+    {
+      "id": "bundled_plugins_as_marketplace",
+      "label": "Should built-in C4OS plugins be modeled as a bundled marketplace source?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: model built-ins as a bundled/default marketplace source so install, uninstall, reinstall, and source display follow the same catalog lifecycle.",
+      "options": [
+        "Yes; built-ins are a bundled/default marketplace source",
+        "No; built-ins are separate app-bundle plugin roots",
+        "Yes, but hide the marketplace source from normal UI",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_cache_owner",
+      "label": "Where should installed plugin bundles live?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: C4OS-owned user config/cache path that mirrors Codex cache semantics without writing into ~/.codex as C4OS state.",
+      "options": [
+        "C4OS-owned cache path mirroring Codex cache semantics",
+        "Use the Codex ~/.codex/plugins/cache path directly",
+        "Load directly from marketplace source paths without cache copy",
+        "Plugin source decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_uninstall_reinstall",
+      "label": "After uninstall, how should reinstall work?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: uninstall removes the installed cache copy and enabled state; reinstall resolves again from the marketplace source.",
+      "options": [
+        "Remove installed cache copy; reinstall from marketplace source",
+        "Keep installed cache copy hidden; reinstall restores it",
+        "Delete source files too when local",
+        "Uninstall only disables plugins",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_live_activation",
+      "label": "When should plugin lifecycle changes require restart?",
+      "type": "radio",
+      "required": true,
+      "help": "Codex docs mention restart after local marketplace changes and config disablement. C4OS can still decide whether shell-only changes can apply live.",
+      "options": [
+        "Live for UI/settings; restart required for native backend registration changes",
+        "Follow Codex-style restart for install, uninstall, enable, and disable",
+        "All plugin lifecycle changes require restart",
+        "Plugin manifest decides whether restart is required",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_uninstall_data",
+      "label": "What happens to plugin-owned user data when a plugin is uninstalled?",
+      "type": "radio",
+      "required": true,
+      "help": "Recommended: keep plugin-owned data by default and offer a separate remove-data action so uninstall is reversible and does not destroy chats or plugin records accidentally.",
+      "options": [
+        "Keep plugin-owned data; separate remove-data action",
+        "Prompt during uninstall whether to delete data",
+        "Always delete plugin-owned data",
+        "Plugin manifest decides",
+        "Other"
+      ]
+    },
+    {
+      "id": "plugin_lifecycle_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "help": "Clarify marketplace source trust, installed cache semantics, source refresh, update checks, reinstall UX, restart prompts, or data deletion semantics."
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "qid": "048",
+  "title": "C4OS Grill Question 048 - Skills Customization And Invalid States",
+  "submitted": "2026-07-01T05:56:08.495Z",
+  "status": "answered",
+  "source": "current-chat-context-intake-response-blocks",
+  "source_schema": ".agents/references/research/grill-question-048-skills-customization-invalid-states-schema.json",
+  "answer_key": {
+    "What happens when the bundled skill creator skill is customized?": "Bundled read-only; customization creates user-global copy",
+    "Which invalid-skill states should Settings distinguish?": "Missing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable",
+    "When later promoted, should project-local skills require the FS plugin?": "Yes; project-local skills require FS plugin",
+    "How should invalid skills behave in `$` tagging?": "Hide from $ suggestions; show in Settings with reason and repair actions"
+  },
+  "notes_or_corrections": "No answer provided.",
+  "schema": {
+    "title": "C4OS Grill Question 048 - Skills Customization And Invalid States",
+    "source_skill": "grill-with-docs",
+    "source_workflow": "combined-spec-grill",
+    "questions": [
+      {
+        "id": "skill_creator_customization",
+        "label": "What happens when the bundled skill creator skill is customized?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: bundled skill stays read-only; customization creates a user-global copy so app updates do not overwrite user changes.",
+        "options": [
+          "Bundled read-only; customization creates user-global copy",
+          "Edit bundled skill in place",
+          "Copy into user config on first run even if unchanged",
+          "Do not allow customization",
+          "Other"
+        ]
+      },
+      {
+        "id": "invalid_skill_states",
+        "label": "Which invalid-skill states should Settings distinguish?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: distinguish missing SKILL.md, invalid frontmatter, missing name, missing description, duplicate name, unreadable files, and dependency/source unavailable.",
+        "options": [
+          "Missing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable",
+          "Only valid versus invalid",
+          "Only missing file and parse error",
+          "Plugin/source decides",
+          "Other"
+        ]
+      },
+      {
+        "id": "project_local_skill_dependency",
+        "label": "When later promoted, should project-local skills require the FS plugin?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: yes. Project-local skills depend on FS because FS owns project roots, trust, and workspace/project context.",
+        "options": [
+          "Yes; project-local skills require FS plugin",
+          "No; skills discovery should read project paths without FS",
+          "Only require FS for enabling, not discovery",
+          "Defer project-local skills entirely",
+          "Other"
+        ]
+      },
+      {
+        "id": "invalid_skill_tag_behavior",
+        "label": "How should invalid skills behave in `$` tagging?",
+        "type": "radio",
+        "required": true,
+        "help": "Recommended: hide invalid skills from `$` suggestions but show them in Settings with reason and repair actions.",
+        "options": [
+          "Hide from $ suggestions; show in Settings with reason and repair actions",
+          "Show disabled in $ suggestions",
+          "Show only parseable invalid skills",
+          "Hide invalid skills everywhere",
+          "Other"
+        ]
+      },
+      {
+        "id": "skills_invalid_notes",
+        "label": "Notes or corrections",
+        "type": "textarea",
+        "required": false,
+        "help": "Clarify repair actions, duplicate-name resolution, whether plugin-provided invalid skills disable parent plugin, or how user copies relate to bundled updates."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "skill_creator_customization",
+      "label": "What happens when the bundled skill creator skill is customized?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Bundled read-only; customization creates user-global copy",
+        "Edit bundled skill in place",
+        "Copy into user config on first run even if unchanged",
+        "Do not allow customization",
+        "Other"
+      ],
+      "help": "Recommended: bundled skill stays read-only; customization creates a user-global copy so app updates do not overwrite user changes.",
+      "answer": "Bundled read-only; customization creates user-global copy"
+    },
+    {
+      "id": "invalid_skill_states",
+      "label": "Which invalid-skill states should Settings distinguish?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Missing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable",
+        "Only valid versus invalid",
+        "Only missing file and parse error",
+        "Plugin/source decides",
+        "Other"
+      ],
+      "help": "Recommended: distinguish missing SKILL.md, invalid frontmatter, missing name, missing description, duplicate name, unreadable files, and dependency/source unavailable.",
+      "answer": "Missing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable"
+    },
+    {
+      "id": "project_local_skill_dependency",
+      "label": "When later promoted, should project-local skills require the FS plugin?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Yes; project-local skills require FS plugin",
+        "No; skills discovery should read project paths without FS",
+        "Only require FS for enabling, not discovery",
+        "Defer project-local skills entirely",
+        "Other"
+      ],
+      "help": "Recommended: yes. Project-local skills depend on FS because FS owns project roots, trust, and workspace/project context.",
+      "answer": "Yes; project-local skills require FS plugin"
+    },
+    {
+      "id": "invalid_skill_tag_behavior",
+      "label": "How should invalid skills behave in `$` tagging?",
+      "type": "radio",
+      "required": true,
+      "options": [
+        "Hide from $ suggestions; show in Settings with reason and repair actions",
+        "Show disabled in $ suggestions",
+        "Show only parseable invalid skills",
+        "Hide invalid skills everywhere",
+        "Other"
+      ],
+      "help": "Recommended: hide invalid skills from `$` suggestions but show them in Settings with reason and repair actions.",
+      "answer": "Hide from $ suggestions; show in Settings with reason and repair actions"
+    },
+    {
+      "id": "skills_invalid_notes",
+      "label": "Notes or corrections",
+      "type": "textarea",
+      "required": false,
+      "options": [],
+      "help": "Clarify repair actions, duplicate-name resolution, whether plugin-provided invalid skills disable parent plugin, or how user copies relate to bundled updates.",
+      "answer": "No answer provided."
+    }
+  ],
+  "extraction": {
+    "source_thread_id": "019f16b7-dd45-7fc0-bc74-fc464f58c8ac",
+    "method": "local-session-jsonl-response-item",
+    "raw_intake_response_scope": "Exact substring from Intake response through end of user message; browser wrapper omitted from raw_intake_response and preserved in raw_user_message.",
+    "fidelity": "verbatim raw intake response from local Codex session JSONL",
+    "regenerated_at": "2026-07-01",
+    "source_session_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl"
+  },
+  "raw_intake_response": "Intake response: C4OS Grill Question 048 - Skills Customization And Invalid States\nSubmitted: 2026-07-01T05:56:08.495Z\n\nWhat happens when the bundled skill creator skill is customized?\nBundled read-only; customization creates user-global copy\n\nWhich invalid-skill states should Settings distinguish?\nMissing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable\n\nWhen later promoted, should project-local skills require the FS plugin?\nYes; project-local skills require FS plugin\n\nHow should invalid skills behave in `$` tagging?\nHide from $ suggestions; show in Settings with reason and repair actions\n\nNotes or corrections\nNo answer provided.",
+  "raw_user_message": "\n# In app browser:\n- The user has the in-app browser open with 1 tab.\n- Current URL: file:///private/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/chrisai-intake-form/intake-form.html\n\n## My request for Codex:\nIntake response: C4OS Grill Question 048 - Skills Customization And Invalid States\nSubmitted: 2026-07-01T05:56:08.495Z\n\nWhat happens when the bundled skill creator skill is customized?\nBundled read-only; customization creates user-global copy\n\nWhich invalid-skill states should Settings distinguish?\nMissing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable\n\nWhen later promoted, should project-local skills require the FS plugin?\nYes; project-local skills require FS plugin\n\nHow should invalid skills behave in `$` tagging?\nHide from $ suggestions; show in Settings with reason and repair actions\n\nNotes or corrections\nNo answer provided.\n",
+  "source_jsonl": "/Users/cblanquera/.codex/sessions/2026/06/30/rollout-2026-06-30T12-09-36-019f16b7-dd45-7fc0-bc74-fc464f58c8ac.jsonl",
+  "source_jsonl_line": 2553,
+  "source_timestamp": "2026-07-01T05:56:12.825Z",
+  "source_message_id": null
+}
