@@ -6,7 +6,7 @@ Status: proposed
 
 Source: `.agents/references/research/final-implementation-import/grill-session/002-c4os-grill-question-002-plugin-backend-authority.json`
 
-  - How should C4OS app plugins access backend authority in v1?: See Notes.
+  - How should C4OS app plugins access backend authority?: See Notes.
   - Notes: Tauri backend is formed similar to how MCP tools work. The available tools on tauri should be based on tauri and tauri native plugins only. At the same time tauri tools should be robust enough to process almost any practical use case. By default, unless part of the app shell, most tools should remain dormant, yet available for an app plugin to utilize.  If this is unclear, ask more questions about this.
 
 ### DEC-002: 002A: C4OS Grill Question 002A - Tauri Tool Authority Boundary
@@ -35,7 +35,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/020-c4os-grill-question-020-app-tool-approval-defaults.json`
 
   - How should C4OS define default approval policy?: Per Tauri tool/app tool with default policy and max authority
-  - Which first-pass approval categories should exist?: allow, ask, deny, remember
+  - Which approval categories should exist?: allow, ask, deny, remember
 
 ### DEC-006: 021: C4OS Grill Question 021 - Core Tool Approval Defaults
 
@@ -77,9 +77,9 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/025-c4os-grill-question-025-prompt-tag-routing.json`
 
-  - What should `@` tags target in v1?: Plugin resources and files, based on enabled plugins
-  - What should `/` commands route to in v1?: Agent CLI/runtime commands through the runtime/tool gateway
-  - What should `$` tags target in v1?: Skills only
+  - What should `@` tags target?: Plugin resources and files, based on enabled plugins
+  - What should `/` commands route to?: Agent CLI/runtime commands through the runtime/tool gateway
+  - What should `$` tags target?: Skills only
 
 ### DEC-012: 040: C4OS Grill Question 040 - Plugin Backend Registration Boundary
 
@@ -96,7 +96,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS treat config.toml?: Both user-editable and UI-editable
   - What scope should per-tool policy defaults use?: User-global defaults with session-level narrowing
-  - Which settings belong in config.toml first?: Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy
+  - Which settings belong in config.toml?: Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy
   - When Settings UI and config.toml disagree, which wins?: config.toml is source; Settings writes to it; parse errors keep last valid config
 
 ### DEC-014: 045: C4OS Grill Question 045 - Model Attachment Compatibility
@@ -105,8 +105,8 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS handle model/provider attachment differences?: Store C4OS attachment records; adapters translate or degrade per model
   - What should happen when a selected model cannot consume an attachment directly?: Warn visibly and use best safe adapter fallback
-  - Which provider/model path should the first attachment proof target?: Current OpenAI-compatible provider path first
-  - Which attachment types need first proof coverage?: Files, Browser screenshots, and Browser annotation attachments
+  - Which provider/model path should the attachment proof target?: Current OpenAI-compatible provider path
+  - Which attachment types need accepted proof coverage?: Files, Browser screenshots, and Browser annotation attachments
 
 ### DEC-015: 047: C4OS Grill Question 047 - Terminal Plugin Tool Boundary
 
@@ -122,6 +122,6 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/049-c4os-grill-question-049-app-tool-taxonomy-and-pi-proof.json`
 
   - Which app-tool taxonomy should be frozen before plugin details?: Let each plugin define its own taxonomy independently
-  - Which app-tool categories must be represented first?: Only plugin-contributed tools
+  - Which app-tool categories must be represented?: Only plugin-contributed tools
   - Which Pi capabilities are proof-critical?: Prompt execution, streaming, tool-call interception, approval denial, and resume
   - Where should `/` prompt commands route?: Runtime/tool gateway command handling with C4OS and plugin command definitions

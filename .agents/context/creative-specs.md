@@ -59,23 +59,24 @@ Use this as the interface and creative gate. It summarizes C4OS experience direc
 
 ## Summary
 
-C4OS should feel neutral, utilitarian, dense enough for repeated technical work, and closer to a local desktop workspace than a landing page, dashboard, or decorative chat surface. The MVP interface contract is a three-panel desktop shell with project/session navigation on the left, session workbench in the center, and Browser, Files, and Terminal tools on the right.
+C4OS should feel neutral, utilitarian, dense enough for repeated technical
+work, and closer to a local desktop workspace than a landing page, dashboard,
+or decorative chat surface. The current interface contract is a plugin-first
+desktop shell: persistent chat in the center, one header, Settings as a shell
+route, and optional plugin panels activated by configured plugin icons.
 
-## Overall Layout
+The earlier three-panel MVP shell with fixed Browser/Files/Terminal right tabs
+is historical MVP scope. It is preserved in `.agents/specs/mvp/decisions.md`
+and detailed references, but it is not the active shared creative contract for
+the final implementation planning stream.
 
-- Left panel: global navigation, project list, project-level chat sessions, settings entry.
-- Center panel: empty-state prompt or active session thread.
-- Right panel: workspace tools with Browser, Files, and Terminal tabs.
-- Left and right panels are resizable and collapsible; center content flexes between them.
-- Top center bar includes left-panel collapse, current project/session title, and right-panel collapse.
+## Shell Layout
 
-## Final Implementation Shell Layout
-
-The final implementation shell removes the start screen, right-panel tabs, and
-right-panel collapse icon. The persistent shell has one header, a center chat
-pane, Settings, and no right panel by default. Plugin icons render in fixed
-header slots on the side configured by plugin settings; primary click toggles
-the plugin panel, and icon order is controlled by header reorder.
+The current shell removes the start screen, right-panel tabs, and right-panel
+collapse icon. The persistent shell has one header, a center chat pane,
+Settings, and no right panel by default. Plugin icons render in fixed header
+slots on the side configured by plugin settings; primary click toggles the
+plugin panel, and icon order is controlled by header reorder.
 
 Only one plugin panel can be visible per side. Same-side plugin icons replace
 the visible panel. Left and right plugin panels can be visible together, with a
@@ -99,11 +100,16 @@ the file editor can save. Edit menu items are Undo, Redo, Select All, Cut,
 Copy, and Paste; they are enabled according to focus in editable contexts such
 as the chat prompt, Browser address bar, file editor, and settings input
 fields. These commands should not be duplicated as new in-app toolbar controls
-unless a later accepted UI change explicitly revises the contract.
+unless a separate accepted UI change explicitly revises the contract.
 
-## Left Panel
+## FS Plugin Panel
 
-The left panel contains project search, add-project action, project rows, nested chat session rows, and Settings. Project selection and active chat selection are distinct states. Chat session rows do not use chevrons, and active chat highlighting should align with the project row edge.
+Project search, add-project action, project rows, nested chat session rows,
+and workspace/project navigation belong to the FS plugin surface, not the
+persistent shell. Project selection and active chat selection remain distinct
+states when the FS plugin is enabled. Chat session rows do not use chevrons,
+and active chat highlighting should align with the project row edge unless a
+separate accepted UI decision changes that inherited behavior.
 
 ## Composer And Model Selector
 
@@ -115,11 +121,13 @@ Clicking the model chip opens the model popover directly to the active provider 
 
 Messages use messenger-style layout. User messages align right. Agent messages align left and are not full width. Agent messages can collapse/expand and support content-level Show more/Show less. Tool calls, run activity, and approval waits are structured event surfaces, not plain message text.
 
-## Right Panel
+## Plugin Panels
 
-The right-panel tab order is Browser, Files, Terminal. The active tab owns the full right-panel body. Do not add extra gear, collapse, secondary tab, or panel-management strips inside that tab bar.
-
-Browser has one preview surface and an address bar, with no Browser tab strip in MVP. Files has explorer and open file/code view states. Terminal has main terminal output plus a resizable bottom AI command preview/results panel.
+Browser, IDE, Terminal, Chat Debug, and separately accepted plugin surfaces are plugin
+panels, not fixed right-panel tabs. Browser owns navigation and capture
+surfaces when enabled. IDE owns explorer/editor surfaces when enabled and when
+its FS dependency is satisfied. Terminal owns the user PTY panel only. Chat
+Debug owns developer-oriented tool and CLI event inspection.
 
 ## Settings
 
@@ -127,7 +135,7 @@ Settings navigation order is Providers, Models, Runtimes, Configuration, Plugins
 
 ## Visual And Accessibility Rules
 
-- Keep MVP interface neutral and utilitarian.
+- Keep the interface neutral and utilitarian.
 - Use lucide icons where available.
 - Do not introduce dark theme or brand styling unless design phase explicitly approves it.
 - Use familiar icon buttons and accessible labels for icon-only controls.

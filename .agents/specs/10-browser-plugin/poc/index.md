@@ -2,7 +2,7 @@
 
 Status: proposed
 
-Proof implementation artifacts, if approved later, must live under the listed `proofs/<proof-name>/` paths. Do not create proof code during planning replay.
+Proof implementation artifacts, if approved during proof execution, must live under the listed `proofs/<proof-name>/` paths. Do not create proof code during planning replay.
 
 | Proof Path | Proof Question |
 | --- | --- |

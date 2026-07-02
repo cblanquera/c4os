@@ -4,16 +4,28 @@ Status: proposed
 
 ## Requirement Coverage
 
-| Requirement | Acceptance | QIDs | Source |
+| Requirement | Acceptance | QIDs | Source Note |
 | --- | --- | --- | --- |
-| REQ-001 | AC-001 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-002 | AC-002 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-003 | AC-003 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-004 | AC-004 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-005 | AC-001 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-006 | AC-002 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
-| REQ-007 | AC-003 | 003, 003A, 004, 010 | Context plus local decisions/evidence |
+| REQ-001 | AC-001 | 011, 014 | No fixed right-panel tab model; Settings center route behavior |
+| REQ-002 | AC-004 | 015, 015A, 016, 044 | Header icon ordering, settings entry, schema keys, SVG constraints |
+| REQ-003 | AC-001 | 015A | Primary click toggles panel; config in Settings > Plugins |
+| REQ-004 | AC-002 | 011 | One visible panel per side and same-side replacement |
+| REQ-005 | AC-002 | 012 | Per-chat visible panel persistence |
+| REQ-006 | AC-003 | 013 | 640px center-pane minimum and collision rule |
+| REQ-007 | AC-002 | 014 | Settings center route closes and restores panels |
 
-## Cross-Spec Source Rule
+## Source Rule
 
-This spec may cite `.agents/context/` and `.agents/references/`. It must not rely on a sibling spec for project-wide truth.
+This spec derives project-wide truth from `.agents/context/` and detailed evidence from `.agents/references/`. It must not depend on sibling specs for project-wide truth.
+
+## Reference Routing
+
+- `.agents/context/work-orders.md`
+  Purpose: Shared accepted sequencing, guardrails, and pending-spec routing.
+  Load when: checking whether this spec is proposed, frozen, or ready for execution conversion.
+  Skip when: only reading local requirement coverage.
+
+- `.agents/references/research/final-implementation-import/grill-session/`
+  Purpose: Exact grill Q&A JSON source records.
+  Load when: verifying a QID, answer wording, note, or superseded question.
+  Skip when: local decisions and context already answer the planning question.

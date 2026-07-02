@@ -7,7 +7,7 @@ Source Note: Normalized from accepted decisions, constraints, MVP guardrails, an
 
 ## Purpose
 
-Work Orders is the expandable prework surface for accepted work packages, sequencing, validation needs, deferred work, and implementation guardrails. It is not active execution state. Proposed work becomes active only when the relevant spec is frozen and converted into `.agents/development/mvp/` items for historical MVP work or `.agents/development/<spec-id>/` items for future frozen specs.
+Work Orders is the expandable prework surface for accepted work packages, sequencing, validation needs, deferred work, and implementation guardrails. It is not active execution state. Proposed work becomes active only when the relevant spec is frozen and converted into `.agents/development/mvp/` items for historical MVP work or `.agents/development/<spec-id>/` items for new frozen specs.
 
 ## Load When
 
@@ -28,7 +28,7 @@ Work Orders is the expandable prework surface for accepted work packages, sequen
 
 ## Does Not Own
 
-- Active execution state, detailed acceptance criteria, product thesis, technical proof detail, or UI handoff detail. MVP execution belongs in `.agents/development/mvp/`; future frozen-spec execution belongs in `.agents/development/<spec-id>/`.
+- Active execution state, detailed acceptance criteria, product thesis, technical proof detail, or UI handoff detail. MVP execution belongs in `.agents/development/mvp/`; new frozen-spec execution belongs in `.agents/development/<spec-id>/`.
 
 ## Reference Routing
 
@@ -76,30 +76,28 @@ Use these statuses for work-order records:
 ## Accepted Decisions
 
 - C4OS is a greenfield restart that uses prior planning records as product intent and evidence.
-- The app is folder-first; prompt entry is disabled until a trusted project folder exists.
-- C4OS owns product identity for workspaces, projects, sessions, agent runs, approvals, artifacts, providers, files, Browser, Terminal, settings, and extensions.
-- Runtime-specific OpenCode or Pi concepts stay behind an adapter unless exposed for advanced compatibility inspection.
-- OpenCode is the first runtime backend; Pi remains a later adapter target.
-- Provider support starts with OpenAI-compatible profiles and BYOK storage.
-- The interface uses a three-panel desktop shell with left navigation, central session content, and right-side Browser, Files, and Terminal tabs.
-- The MVP interface remains neutral and utilitarian unless a later design phase approves brand styling.
-- All documented/r04 features are MVP scope unless explicitly moved out later. Checkpoint phases are implementation milestones, not MVP scope boundaries.
-- Browser, Terminal, plugin, skill, MCP install/connect flows, and concurrent sessions/runs are MVP scope.
-- Browser downloads are excluded from MVP.
-- Prompt extension tags are `$skill`, `@plugin`, and `^mcp`; MCP invocation is explicit only.
+- Historical MVP execution state lives under `.agents/development/mvp/`; each new frozen spec uses `.agents/development/<spec-id>/`.
+- C4OS owns product identity for workspaces, projects, sessions, agent runs, approvals, artifacts, providers, files, Browser, Terminal, settings, plugins, skills, and MCP connections.
+- The current planning stream uses a plugin-first shell: persistent chat center, one header, Settings center route, and no default right panel.
+- Built-in C4OS app plugins ship with the default app install, are disabled by default, and are modeled as bundled/default marketplace entries.
+- C4OS app plugins are separate from Tauri plugins. Runtime and plugin tool calls flow through the C4OS-owned tool gateway.
+- Workspace/project registry state and chats live in user-level app state. Workspace files are explicit load/save groupings of project folder references, not chat owners.
+- Prompt tags are `$` for skills, `@` for plugin resources/files, and `/` for runtime/tool-gateway commands.
+- Plugin settings live in user-level config and may reserve shell keys such as `enabled`, `panel`, and `iconOrder`.
+- Proposed specs are not implementation contracts until freeze converts them into scoped execution state.
 
 ## Current Work Packages
 
 | ID | Status | Work Order | Depends On |
 | --- | --- | --- | --- |
 | WO-001 | accepted | Preserve five canonical prework documents in `.agents/context/` and detailed breakdowns in `.agents/references/context/`. | This document set |
-| WO-002 | proposed | Repair or create `.agents/specs/mvp/` before active distributable MVP implementation. | Product Specs, Technical Specs, Creative Specs |
-| WO-003 | proposed | Validate remaining Browser isolation, Terminal ownership, and credentialed OpenCode permission-request behavior before relying on those claims for freeze. | Technical Specs |
-| WO-004 | deferred | Add Pi as a first implementation adapter. | Runtime adapter validation |
-| WO-005 | deferred | Add Browser downloads, remote shells, SSH, containers, terminal multiplexing, or agent auto-run. | Future feature scope |
-| WO-006 | accepted | Define the runtime tool gateway contract before broad approval hardening: runtime requests tools through generic events, C4OS owns authority/execution, and per-session tool config maps tool identities to enabled state, access, and approval policy. | Technical Specs, TASK-016 |
-| WO-007 | proposed | Define extension discovery/loading before extension enablement or invocation: skills are `SKILL.md` folders, plugins are manifest bundles, MCP servers are explicit connections, and discovery records metadata without runtime impact. | Technical Specs, TASK-012, post-TASK-014 extension work |
-| WO-008 | deferred | Make runtime/provider tool execution emit structured C4OS tool lifecycle events so Agent terminal output reflects real `terminal.run` calls instead of assistant prose or markdown. C4OS should execute those calls through the tool gateway and stream/persist outputs as tool/action/audit records. | Runtime Tool Gateway, TASK-017 |
+| WO-002 | done | Preserve completed MVP contract and historical execution state under `.agents/specs/mvp/` and `.agents/development/mvp/`. | MVP accepted baseline |
+| WO-003 | proposed | Reconcile the 11 pending final-implementation specs against context, grill Q&A, proof needs, acceptance gaps, and upcoming grill questions before freeze. | Context, grill imports, pending specs |
+| WO-004 | proposed | Run required proofs before deciding runtime, plugin, tool, FS, prompt, Browser, and settings implementation scope. | Pending spec POC records |
+| WO-005 | deferred | Add Browser downloads, remote shells, SSH, containers, terminal multiplexing, or agent auto-run. | Separate accepted scope |
+| WO-006 | accepted | Use the runtime tool gateway contract: runtime requests tools through generic events, C4OS owns authority/execution, and tool config maps tool identities to enabled state, access, and approval policy. | Technical Specs |
+| WO-007 | proposed | Define Codex-compatible plugin discovery/loading before plugin enablement or invocation: skills are `SKILL.md` folders, plugins are manifest bundles, MCP servers are explicit connections, and discovery records metadata before runtime impact. | Technical Specs, Plugin System spec |
+| WO-008 | proposed | Define structured runtime/provider tool lifecycle events so terminal tool output reflects gateway events instead of assistant prose or markdown. | Runtime Tool Policy spec, Chat Debug spec |
 
 ## Final Implementation Planning Stream
 
@@ -129,7 +127,7 @@ Planning replay must reconcile every accepted grill QID from
 - Production implementation belongs in `backend/`, `frontend/`, and `tests/server/`.
 - Do not create or use `src-tauri/`.
 - Use `proofs/<proof-name>/` for POCs, spikes, throwaway harnesses, and proof evidence.
-- Proposed MVP tasks are not active work until the MVP spec is frozen and converted into progress items.
+- Proposed spec tasks are not active work until the relevant spec is frozen and converted into scoped development items.
 - Every mock-backed phase must state exactly what is mocked.
 - Do not claim product completion until acceptance passes with real behavior or explicitly accepted remaining mocks.
 
@@ -143,6 +141,6 @@ Planning replay must reconcile every accepted grill QID from
   frontend prompt-text command parsing must not be restored.
 - Runtime/provider command output reflection still needs structured tool events:
   assistant prose or markdown that includes command output is not an Agent
-  terminal source of truth. A future item must emit `terminal.run` lifecycle
-  events, route execution through C4OS, and update the Agent terminal from
-  gateway output.
+  terminal source of truth. A separate accepted runtime item must emit
+  `terminal.run` lifecycle events, route execution through C4OS, and update
+  thread context plus Chat Debug from gateway output.

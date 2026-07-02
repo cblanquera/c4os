@@ -6,9 +6,9 @@ Status: proposed
 
 Source: `.agents/references/research/final-implementation-import/grill-session/025-c4os-grill-question-025-prompt-tag-routing.json`
 
-  - What should `@` tags target in v1?: Plugin resources and files, based on enabled plugins
-  - What should `/` commands route to in v1?: Agent CLI/runtime commands through the runtime/tool gateway
-  - What should `$` tags target in v1?: Skills only
+  - What should `@` tags target?: Plugin resources and files, based on enabled plugins
+  - What should `/` commands route to?: Agent CLI/runtime commands through the runtime/tool gateway
+  - What should `$` tags target?: Skills only
 
 ### DEC-002: 026: C4OS Grill Question 026 - Disabled Plugin Prompt Tags
 
@@ -22,7 +22,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/037-c4os-grill-question-037-skills-settings-scope.json`
 
   - Which skill creator implementation should be pre-populated?: Bundled Codex-compatible skill creator skill
-  - Which skill sources should Settings show in the first pass?: Bundled and user-global skills first
+  - Which skill sources should Settings show in accepted scope?: Bundled and user-global skills
   - Can plugin-provided skills be enabled separately from their parent plugin?: No; plugin-provided skills follow parent plugin enablement
   - What metadata is required before a skill appears in `$` tagging?: Name and enabled status only
 
@@ -32,5 +32,5 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - What happens when the bundled skill creator skill is customized?: Bundled read-only; customization creates user-global copy
   - Which invalid-skill states should Settings distinguish?: Missing SKILL.md, invalid frontmatter, missing name/description, duplicate name, unreadable, and source unavailable
-  - When later promoted, should project-local skills require the FS plugin?: Yes; project-local skills require FS plugin
+  - When separately promoted, should project-local skills require the FS plugin?: Yes; project-local skills require FS plugin
   - How should invalid skills behave in `$` tagging?: Hide from $ suggestions; show in Settings with reason and repair actions

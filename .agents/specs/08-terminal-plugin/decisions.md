@@ -14,7 +14,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/034-c4os-grill-question-034-terminal-session-scope.json`
 
   - What cwd should a terminal use when no project is assigned?: User home directory
-  - How many user terminals should one chat session have in v1?: Exactly one user terminal per chat session
+  - How many user terminals should one chat session have?: Exactly one user terminal per chat session
   - What happens to the terminal when its chat is removed?: Terminate terminal and delete chat-owned terminal state
 
 ### DEC-003: 047: C4OS Grill Question 047 - Terminal Plugin Tool Boundary

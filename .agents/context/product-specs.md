@@ -78,7 +78,7 @@ The MVP must let a technical local-project user:
 - Providers and models: OpenAI-compatible BYOK provider profiles, built-in profile types, secure key status, connection testing, model discovery, manual model entry, model enablement, search, and per-session selection.
 - Approvals and audit: allow, ask, deny, pending queue, clear action descriptions, affected resources, remembered scoped rules, and audit records.
 - Files: trusted-root explorer, open file/code view, editing, saving, reverting, creating, renaming, guarded delete, external change handling, and active-file search.
-- Artifacts: first-class records for Markdown, text, code, diffs, generated HTML, images, PDFs, downloadable files, command logs, research, and analysis outputs.
+- Artifacts: accepted-class records for Markdown, text, code, diffs, generated HTML, images, PDFs, downloadable files, command logs, research, and analysis outputs.
 - Browser: user-owned desktop surface for local preview and web URLs with request-scoped agent browsing and action records.
 - Terminal: user terminal plus backend-owned agent command terminal under trusted-root validation and approval policy.
 - Settings and extensions: Providers, Models, Runtimes, Configuration, Plugins, Skills, MCP Servers, provenance, scopes, enabled state, and audit log.
@@ -108,16 +108,20 @@ The MVP must let a technical local-project user:
 
 ## Product Experience
 
-The first launch is folder-first. Prompt submission is disabled until a project folder exists and is trusted. The first usable screen after trusting a folder is the active workspace, not a dashboard. The shell uses a Codex-like desktop layout with left project/session navigation, center session content, and right workspace tools.
+The current shell can run without plugins as chat prompt, active thread,
+user-global Chats history, and Settings. Project/workspace behavior appears
+when the FS plugin is enabled; file editing, Browser, Terminal, Chat Debug, and
+skills surfaces appear through their own enabled plugins. The accepted usable
+screen is the active chat workspace, not a dashboard or start screen.
 
 Agent prework should be visible without turning the transcript into noisy logs. Progress can be grouped and collapsed after final response. Response rendering should feel polished and suitable for repeated technical work.
 
-## MVP Exclusions
+## Historical MVP Exclusions And Deferred Scope
 
 - Browser downloads.
 - Final brand styling or permanent product copy beyond accepted behavioral handoff.
 - Provider-native integrations beyond OpenAI-compatible provider profiles.
-- Pi as the first runtime adapter.
+- Pi as an accepted runtime adapter before the required proof passes.
 - Treating proof code, mock server behavior, or wireframe simulation as production-complete behavior.
 - Browser tab strip, secondary right-panel tabs, gear tabs, or panel-management strips inside the Browser/Files/Terminal tab bar.
-- Arbitrary renderer shell spawn, remote shells, SSH, containers, terminal multiplexing, and agent auto-run without deliberate future scope.
+- Arbitrary renderer shell spawn, remote shells, SSH, containers, terminal multiplexing, and agent auto-run without separate accepted scope.

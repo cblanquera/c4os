@@ -13,7 +13,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/033-c4os-grill-question-033-file-icons-scope.json`
 
-  - Which file icons should the IDE plugin support first?: Full VS Code-like file icon theme
+  - Which file icons should the IDE plugin support?: Full VS Code-like file icon theme
   - Should hidden files remain visible in the IDE File Explorer?: Hidden files visible except `.git`
 
 ### DEC-003: 046: C4OS Grill Question 046 - IDE File Operation Boundary

@@ -6,14 +6,14 @@ Status: proposed
 
 Source: `.agents/references/research/final-implementation-import/grill-session/001-c4os-grill-question-001-plugin-packaging-boundary.json`
 
-  - For C4OS v1, how should built-in plugins be packaged?: Bundled plugin roots inside the main repo
+  - For C4OS final implementation, how should built-in plugins be packaged?: Bundled plugin roots inside the main repo
   - Notes: Builtin plugins should be part of the default app install, but not enabled by default. App plugins are a different concept from Tauri plugins.
 
 ### DEC-002: 002: C4OS Grill Question 002 - Plugin Backend Authority
 
 Source: `.agents/references/research/final-implementation-import/grill-session/002-c4os-grill-question-002-plugin-backend-authority.json`
 
-  - How should C4OS app plugins access backend authority in v1?: See Notes.
+  - How should C4OS app plugins access backend authority?: See Notes.
   - Notes: Tauri backend is formed similar to how MCP tools work. The available tools on tauri should be based on tauri and tauri native plugins only. At the same time tauri tools should be robust enough to process almost any practical use case. By default, unless part of the app shell, most tools should remain dormant, yet available for an app plugin to utilize.  If this is unclear, ask more questions about this.
 
 ### DEC-003: 002A: C4OS Grill Question 002A - Tauri Tool Authority Boundary
@@ -55,19 +55,19 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/017-c4os-grill-question-017-c4os-plugin-manifest.json`
 
-  - What should `agents/c4os.yaml` be responsible for in v1?: App-shell contribution metadata only
-  - Which fields should `agents/c4os.yaml` include first?: Other
+  - What should `agents/c4os.yaml` be responsible for?: App-shell contribution metadata only
+  - Which fields should `agents/c4os.yaml` include?: Other
   - Notes: Follow standards on Codex's plugin.json spec. For `agents/c4os.yaml` convert my last json example that describes the form builder config for plugin settings to yaml format as well as id, name, icon. ("panel" should be included in form builder config if it applies)
 
 ### DEC-009: 038: C4OS Grill Question 038 - Codex Plugin Compatibility Boundary
 
 Source: `.agents/references/research/final-implementation-import/grill-session/038-c4os-grill-question-038-codex-plugin-compatibility-boundary.json`
 
-  - What minimum Codex plugin subset should C4OS support in v1?: Full Codex plugin compatibility
+  - What minimum Codex plugin subset should C4OS support?: Full Codex plugin compatibility
   - Should bundled built-in plugins be uninstallable?: Uninstallable like user-installed plugins
-  - What icon format should plugin metadata support first?: Bundled SVG asset path first
+  - What icon format should plugin metadata support?: Bundled SVG asset path
   - How should C4OS handle agents/c4os.yaml version incompatibility?: Require schemaVersion; disable incompatible plugins with visible reason
-  - Notes: There is no more soft MVP, MVP, Post MVP, v1. There is only the final implementation. Please stop referencing v1 as if there will be a v2...
+  - Notes: User correction requires final-implementation framing and rejects version-phase language.
 
 ### DEC-010: 039: C4OS Grill Question 039 - Plugin Marketplace And Lifecycle
 

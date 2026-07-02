@@ -13,14 +13,14 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/027-c4os-grill-question-027-attachments-first-pass.json`
 
-  - Which attachment types must work in the first pass?: Files, Browser screenshots, and Browser annotations first
+  - Which attachment types must work in accepted scope?: Files, Browser screenshots, and Browser annotations
   - How should C4OS handle providers that do not support direct attachments?: Store C4OS attachment records; runtime adapter translates per provider/model
 
 ### DEC-003: 036: C4OS Grill Question 036 - Browser Document Preview
 
 Source: `.agents/references/research/final-implementation-import/grill-session/036-c4os-grill-question-036-browser-document-preview.json`
 
-  - Which document preview formats should Browser support first?: Other
+  - Which document preview formats should Browser support?: Other
   - How should document preview be handled?: Other
   - Notes: Looking at Codex, they have a plugin per doc type (pdf naturally supported by browser). Please confirm before asking me this again.
 
@@ -28,9 +28,9 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/036a-c4os-grill-question-036a-document-preview-plugin-boundary.json`
 
-  - Who should own document preview support in C4OS v1?: Document-family plugins own previews; Browser can host rendered output
-  - Which document-family plugins should be planned first?: Documents and Spreadsheets first
-  - How should PDF be treated in the first pass?: Browser-native PDF preview first; advanced PDF plugin later
+  - Who should own document preview support in C4OS final implementation?: Document-family plugins own previews; Browser can host rendered output
+  - Which document-family plugins should be planned?: Documents and Spreadsheets
+  - How should PDF be treated in accepted scope?: Browser-native PDF preview; advanced PDF plugin only under separate accepted scope
 
 ### DEC-005: 042: C4OS Grill Question 042 - Browser Capture, Annotation, And State (no-submitted-intake-response-found)
 

@@ -93,3 +93,18 @@ Source: `.agents/AGENTS.md`, `.agents/specs/research/research-freeze.md`
 
 Production implementation belongs in `backend/`, `frontend/`, and
 `tests/server/`; `src-tauri/` is not used.
+
+### DEC-013: Historical MVP Three-Panel Interface
+
+Source: `.agents/context/creative-specs.md` before 2026-07-02 final-implementation cleanup, `.agents/references/context/creative-specs/interface.md`, `.agents/references/context/ui-handoff/index.md`
+
+The accepted MVP interface used a three-panel desktop shell with project and
+session navigation on the left, session workbench in the center, and
+Browser/Files/Terminal tools on the right. Left and right panels were
+resizable/collapsible, and the right-side tab model used Browser, Files, and
+Terminal tabs.
+
+This is historical MVP scope only. It remains useful when auditing the accepted
+MVP baseline or inherited r04 handoff behavior, but the current
+final-implementation planning stream uses the plugin-first shell defined in
+`.agents/context/creative-specs.md`.

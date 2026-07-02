@@ -7,15 +7,15 @@ Status: proposed
 Source: `.agents/references/research/final-implementation-import/grill-session/020-c4os-grill-question-020-app-tool-approval-defaults.json`
 
   - How should C4OS define default approval policy?: Per Tauri tool/app tool with default policy and max authority
-  - Which first-pass approval categories should exist?: allow, ask, deny, remember
+  - Which approval categories should exist?: allow, ask, deny, remember
 
 ### DEC-002: 025: C4OS Grill Question 025 - Prompt Tag Routing
 
 Source: `.agents/references/research/final-implementation-import/grill-session/025-c4os-grill-question-025-prompt-tag-routing.json`
 
-  - What should `@` tags target in v1?: Plugin resources and files, based on enabled plugins
-  - What should `/` commands route to in v1?: Agent CLI/runtime commands through the runtime/tool gateway
-  - What should `$` tags target in v1?: Skills only
+  - What should `@` tags target?: Plugin resources and files, based on enabled plugins
+  - What should `/` commands route to?: Agent CLI/runtime commands through the runtime/tool gateway
+  - What should `$` tags target?: Skills only
 
 ### DEC-003: 026: C4OS Grill Question 026 - Disabled Plugin Prompt Tags
 
@@ -28,7 +28,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/027-c4os-grill-question-027-attachments-first-pass.json`
 
-  - Which attachment types must work in the first pass?: Files, Browser screenshots, and Browser annotations first
+  - Which attachment types must work in accepted scope?: Files, Browser screenshots, and Browser annotations
   - How should C4OS handle providers that do not support direct attachments?: Store C4OS attachment records; runtime adapter translates per provider/model
 
 ### DEC-005: 028: C4OS Grill Question 028 - Branch Selection
@@ -36,7 +36,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/028-c4os-grill-question-028-branch-selection.json`
 
   - When should the chat prompt branch button appear?: Only when the active project folder is a Git repository
-  - What should Choose/Create Branch do?: Create/select project branch for future work; existing chat thread branch remains read-only
+  - What should Choose/Create Branch do?: Create/select project branch for separate accepted work; existing chat thread branch remains read-only
 
 ### DEC-006: 032: C4OS Grill Question 032 - File Explorer Add To Chat
 
@@ -71,14 +71,14 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS handle model/provider attachment differences?: Store C4OS attachment records; adapters translate or degrade per model
   - What should happen when a selected model cannot consume an attachment directly?: Warn visibly and use best safe adapter fallback
-  - Which provider/model path should the first attachment proof target?: Current OpenAI-compatible provider path first
-  - Which attachment types need first proof coverage?: Files, Browser screenshots, and Browser annotation attachments
+  - Which provider/model path should the attachment proof target?: Current OpenAI-compatible provider path
+  - Which attachment types need accepted proof coverage?: Files, Browser screenshots, and Browser annotation attachments
 
 ### DEC-010: 049: C4OS Grill Question 049 - App Tool Taxonomy And Pi Proof
 
 Source: `.agents/references/research/final-implementation-import/grill-session/049-c4os-grill-question-049-app-tool-taxonomy-and-pi-proof.json`
 
   - Which app-tool taxonomy should be frozen before plugin details?: Let each plugin define its own taxonomy independently
-  - Which app-tool categories must be represented first?: Only plugin-contributed tools
+  - Which app-tool categories must be represented?: Only plugin-contributed tools
   - Which Pi capabilities are proof-critical?: Prompt execution, streaming, tool-call interception, approval denial, and resume
   - Where should `/` prompt commands route?: Runtime/tool gateway command handling with C4OS and plugin command definitions

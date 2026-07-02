@@ -47,7 +47,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should user-level chat sessions be associated with a loaded workspace file?: Each project folder path owns its chats regardless of workspace file
   - If two workspace files contain the same project folders, should they share chats?: Yes, same project folders share chats across workspace files
-  - Notes: A case study is I have a workspace for just my open source projects and another workspace for my work related projects. But some of my work related projects use some of my open source projects. In the case where I need to fix my open source project first in order to make my work project work they would live in the same workspace rather than me toggling between 2 workspaces. At the same time when I open my open source workspace I would like to see the latest changes.
+  - Notes: A case study is I have a workspace for just my open source projects and another workspace for my work related projects. But some of my work related projects use some of my open source projects. In the case where I need to fix my open source project accepted in order to make my work project work they would live in the same workspace rather than me toggling between 2 workspaces. At the same time when I open my open source workspace I would like to see the latest changes.
 
 ### DEC-007: 010: C4OS Grill Question 010 - Unassigned Chat Scope
 
@@ -76,7 +76,7 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/028-c4os-grill-question-028-branch-selection.json`
 
   - When should the chat prompt branch button appear?: Only when the active project folder is a Git repository
-  - What should Choose/Create Branch do?: Create/select project branch for future work; existing chat thread branch remains read-only
+  - What should Choose/Create Branch do?: Create/select project branch for separate accepted work; existing chat thread branch remains read-only
 
 ### DEC-011: 029: C4OS Grill Question 029 - Remove Project Semantics
 
@@ -96,5 +96,5 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/031-c4os-grill-question-031-project-search.json`
 
-  - What should Search Projects search in v1?: Chat threads only
+  - What should Search Projects search?: Chat threads only
   - How should search results appear?: Center-screen takeover with X close button

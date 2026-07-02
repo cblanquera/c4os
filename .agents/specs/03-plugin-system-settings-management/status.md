@@ -16,3 +16,13 @@ Created: 2026-07-02
 - Do not implement product code during planning.
 - Decisions live in this spec when they affect this spec.
 - Shared reusable truth is promoted to `.agents/context/`; long rationale stays in `.agents/references/`.
+
+## Freeze Gaps
+
+- Acceptance criteria are planning acceptance only. Before freeze, convert them into executable acceptance with concrete verification method, evidence target, and pass/fail boundary.
+- Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
+- Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
+
+## Open Questions For Upcoming Grill
+
+- Full Codex plugin compatibility is accepted as the target, but freeze still needs the exact compatibility matrix: plugin.json fields, skill/app/MCP mapping, marketplace trust/auth, cache layout, uninstall/reinstall edge cases, native-module limitations, and schemaVersion handling.

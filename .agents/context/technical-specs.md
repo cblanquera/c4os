@@ -92,13 +92,26 @@ Minimum product-owned entities include:
 
 ## Workspace And Persistence
 
-Workspace files use a `.c4os` descriptor model. A descriptor can reference folders, display names, workspace settings, enabled extension references, default provider/model preferences, and non-secret IDs. It must not contain raw secrets, full transcripts, artifact archives, or private operational state by default.
+C4OS stores project/workspace registry state and chats in user-level app state,
+not in hidden project-root `.c4os` folders. User-global config uses the
+platform-standard per-user app config directory. Project identity is the
+canonical project folder path; when a project path is missing, the UI keeps the
+project visible as missing, makes its chats read-only, and allows relocation.
+Relocation migrates chats to the new canonical path.
 
-Full state migration belongs in explicit future export/import flows.
+Workspace files remain explicit load/save artifacts such as
+`workspace.c4os.json`. They contain the workspace name and project folder
+references only. Workspace files are groupings of project folders, not chat
+owners. The same project folder appearing in multiple workspace files shares
+the same user-level project chats.
+
+Workspace files, config files, and user-level registries must not contain raw
+secrets. Full export/import remains outside current accepted scope unless a
+separate spec explicitly promotes it.
 
 ## Runtime Boundary
 
-OpenCode is the first implementation target behind a thin C4OS-owned runtime adapter. Pi remains a later adapter target. C4OS owns user-facing session identity, workspace persistence, artifact identity, approval policy, provider settings, local memory, runtime lifecycle supervision, runtime recovery, and error reporting.
+OpenCode is the accepted implementation target behind a thin C4OS-owned runtime adapter. Pi requires a proof before runtime adapter scope is accepted. C4OS owns user-facing session identity, workspace persistence, artifact identity, approval policy, provider settings, local memory, runtime lifecycle supervision, runtime recovery, and error reporting.
 
 OpenCode proof findings are preserved in `.agents/references/context/technical-specs/runtime-adapter.md`. Credentialed model-backed prompt execution and live permission-request capture still need validation because the proof avoided provider credentials and token spend.
 
@@ -151,6 +164,30 @@ outside-project writes ask unless explicitly requested. Terminal commands ask by
 default with remembered safe-command rules; trusted-project git/worktree actions
 are allowed; network mutation and credential use ask.
 
+## Cross-Spec Interface Contracts
+
+These contracts are shared context, not owned by any one pending spec:
+
+- Plugin manifests: `.codex-plugin/plugin.json` owns Codex package metadata;
+  `agents/c4os.yaml` owns C4OS app-shell metadata, settings schema,
+  dependencies, tool declarations, and tool-view declarations.
+- Tool gateway: runtime and plugin tool calls flow through the C4OS-owned
+  gateway. One backend invocation emits one tool event that fans out to enabled
+  compatible plugin views, including hidden enabled views.
+- Plugin settings: Settings renders plugin-declared fields and persists values
+  in user-level config. Shell-reserved fields include `enabled`, `panel`, and
+  `iconOrder`.
+- Prompt attachments: Browser, IDE, and other plugins contribute C4OS
+  attachment/reference records. The prompt/model layer owns adapter translation,
+  warning, and safe degradation for provider-specific capabilities.
+- FS identity: plugins consume canonical project paths, workspace files, and
+  user-level registries from the FS/workspace model. No plugin should create
+  hidden project-root C4OS identity folders.
+- Terminal/debug split: Terminal owns user PTY panel state. Runtime terminal
+  tools remain gateway-owned and surface in thread context plus Chat Debug.
+- Document preview: document-family plugins own document renderers; Browser may
+  host rendered output when a compatible plugin provides it.
+
 ## Security And Trust
 
 - Project-local operations require explicit trusted-root containment.
@@ -175,7 +212,7 @@ The implementation must not ignore the failed direct Tauri `WebviewWindow` proof
 Terminal sessions are backend-owned; renderer code must not spawn arbitrary shells directly. Terminal implementation requires trusted-root cwd validation, deterministic command allowlist, approval policy, sanitized environment, backend-owned lifecycle, bounded renderer event transport, backpressure handling, audit persistence, and cross-platform PTY/ConPTY confirmation.
 
 The TASK-011A/TASK-011B explicit prompt command bridge is transitional polish.
-It must not become the long-term command-planning mechanism. Future command
+It must not become the long-term command-planning mechanism. Runtime command
 selection should come from runtime tool-call requests and flow through the
 C4OS tool gateway.
 

@@ -6,7 +6,7 @@ Status: proposed
 
 Source: `.agents/references/research/final-implementation-import/grill-session/001-c4os-grill-question-001-plugin-packaging-boundary.json`
 
-  - For C4OS v1, how should built-in plugins be packaged?: Bundled plugin roots inside the main repo
+  - For C4OS final implementation, how should built-in plugins be packaged?: Bundled plugin roots inside the main repo
   - Notes: Builtin plugins should be part of the default app install, but not enabled by default. App plugins are a different concept from Tauri plugins.
 
 ### DEC-002: 005: C4OS Grill Question 005 - Plugin Configuration Scope
@@ -36,16 +36,16 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/016-c4os-grill-question-016-plugin-settings-schema.json`
 
-  - What field types should plugin settings support in v1?: string, text, boolean, number, and enum arrays
+  - What field types should plugin settings support?: string, text, boolean, number, and enum arrays
   - Which plugin settings keys should the app shell reserve?: Reserve `panel`, `enabled`, and `iconOrder`
-  - Notes: What field types should plugin settings support in v1? - string = input type text - text = textarea  - boolean = switch  - number = input type number - enum arrays = select  Which plugin settings keys should the app shell reserve? You can make it up as we go along.
+  - Notes: What field types should plugin settings support? - string = input type text - text = textarea  - boolean = switch  - number = input type number - enum arrays = select  Which plugin settings keys should the app shell reserve? You can make it up as we go along.
 
 ### DEC-006: 017: C4OS Grill Question 017 - C4OS Plugin Manifest
 
 Source: `.agents/references/research/final-implementation-import/grill-session/017-c4os-grill-question-017-c4os-plugin-manifest.json`
 
-  - What should `agents/c4os.yaml` be responsible for in v1?: App-shell contribution metadata only
-  - Which fields should `agents/c4os.yaml` include first?: Other
+  - What should `agents/c4os.yaml` be responsible for?: App-shell contribution metadata only
+  - Which fields should `agents/c4os.yaml` include?: Other
   - Notes: Follow standards on Codex's plugin.json spec. For `agents/c4os.yaml` convert my last json example that describes the form builder config for plugin settings to yaml format as well as id, name, icon. ("panel" should be included in form builder config if it applies)
 
 ### DEC-007: 018: C4OS Grill Question 018 - Plugin Dependencies
@@ -66,11 +66,11 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
 Source: `.agents/references/research/final-implementation-import/grill-session/038-c4os-grill-question-038-codex-plugin-compatibility-boundary.json`
 
-  - What minimum Codex plugin subset should C4OS support in v1?: Full Codex plugin compatibility
+  - What minimum Codex plugin subset should C4OS support?: Full Codex plugin compatibility
   - Should bundled built-in plugins be uninstallable?: Uninstallable like user-installed plugins
-  - What icon format should plugin metadata support first?: Bundled SVG asset path first
+  - What icon format should plugin metadata support?: Bundled SVG asset path
   - How should C4OS handle agents/c4os.yaml version incompatibility?: Require schemaVersion; disable incompatible plugins with visible reason
-  - Notes: There is no more soft MVP, MVP, Post MVP, v1. There is only the final implementation. Please stop referencing v1 as if there will be a v2...
+  - Notes: User correction requires final-implementation framing and rejects version-phase language.
 
 ### DEC-010: 039: C4OS Grill Question 039 - Plugin Marketplace And Lifecycle
 
