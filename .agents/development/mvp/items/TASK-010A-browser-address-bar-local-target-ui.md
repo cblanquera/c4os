@@ -7,11 +7,11 @@ Updated: 2026-06-23
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-010A`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-010-browser-slice.md`
+  `.agents/development/mvp/items/TASK-010-browser-slice.md`
 - Requirements: `.agents/specs/mvp/requirements.md` `REQ-010`, `REQ-013`,
   `REQ-016`
 - Acceptance: `.agents/specs/mvp/acceptance.md` `AC-010`
-- Progress manifest: `.agents/development/progress/manifest.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

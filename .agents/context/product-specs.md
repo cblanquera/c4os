@@ -32,12 +32,25 @@ Use this as the product-behavior gate. It summarizes what the product must do, w
 
 ## Reference Routing
 
-| Need | Load | Why |
-| --- | --- | --- |
-| First-run, main workspace, session flow, prework, composer behavior | `.agents/references/context/product-specs/product-experience.md` | Use for experiential behavior before UI detail. |
-| Workspace, approvals, providers, files, artifacts, Browser, Terminal, settings, extensions, memory | `.agents/references/context/product-specs/feature-surfaces.md` | Use for surface-level product capabilities. |
-| Complete MVP feature inventory, exclusions, guardrails | `.agents/references/context/product-specs/mvp-feature-list.md` | Use before MVP implementation or detailed acceptance work. |
-| Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where product facts came from. |
+- `.agents/references/context/product-specs/product-experience.md`
+  Purpose: Detailed first-run, workspace, session flow, prework, and composer behavior.
+  Load when: checking experiential behavior before UI detail.
+  Skip when: only compact product behavior is needed.
+
+- `.agents/references/context/product-specs/feature-surfaces.md`
+  Purpose: Detailed workspace, approvals, providers, files, artifacts, Browser, Terminal, settings, extensions, and memory surfaces.
+  Load when: checking surface-level product capabilities.
+  Skip when: the spec-local requirement already names the accepted behavior.
+
+- `.agents/references/context/product-specs/mvp-feature-list.md`
+  Purpose: Complete MVP feature inventory, exclusions, and guardrails.
+  Load when: checking MVP scope or detailed acceptance history.
+  Skip when: working only on final-implementation planning that does not reopen MVP scope.
+
+- `.agents/references/context/source-provenance.md`
+  Purpose: Source and artifact provenance for product facts.
+  Load when: tracing where product behavior came from.
+  Skip when: current context already supplies the accepted fact.
 
 ## Summary
 

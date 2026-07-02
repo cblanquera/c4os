@@ -11,8 +11,8 @@ Updated: 2026-06-30
   `.agents/references/context/technical-specs/runtime-adapter.md`
 - Work order: `.agents/context/work-orders.md` `WO-008`
 - Accepted predecessors:
-  - `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
-  - `.agents/development/progress/items/TASK-016-security-approval-policies.md`
+  - `.agents/development/mvp/items/WO-006-runtime-tool-gateway-refactor.md`
+  - `.agents/development/mvp/items/TASK-016-security-approval-policies.md`
 
 ## Goal
 

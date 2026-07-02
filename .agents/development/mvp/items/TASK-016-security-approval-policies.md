@@ -7,9 +7,9 @@ Updated: 2026-06-30
 
 - Frozen task basis: `.agents/specs/mvp/tasks.md` `TASK-016`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
+  `.agents/development/mvp/items/TASK-015-pause-at-feature-complete.md`
 - Gateway predecessor:
-  `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
+  `.agents/development/mvp/items/WO-006-runtime-tool-gateway-refactor.md`
 - Technical context: `.agents/context/technical-specs.md`
 - Runtime gateway reference:
   `.agents/references/context/technical-specs/runtime-adapter.md`

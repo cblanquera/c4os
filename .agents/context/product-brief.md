@@ -48,13 +48,30 @@ Expanded breakdowns live in `.agents/references/context/`. Source paths, provena
 
 ## Reference Routing
 
-| Need | Load | Why |
-| --- | --- | --- |
-| More complete product thesis, users, goals, workflow, principles | `.agents/references/context/product/product.md` | Expanded product context from the retired detailed document. |
-| Exact vocabulary definitions | `.agents/references/context/product/terms.md` | Canonical term meanings and scope distinctions. |
-| High-level feature goal inputs | `.agents/references/context/product/feature-goals.md` | Goal list preserved from prior context. |
-| Source and artifact provenance | `.agents/references/context/source-provenance.md` | Source paths stay out of context docs. |
-| Final-implementation replay sources | `.agents/references/research/final-implementation-source-inventory.md` | Archive provenance, grill answer counts, and research-source classification. |
+- `.agents/references/context/product/product.md`
+  Purpose: Expanded product thesis, users, goals, workflow, and principles from retired detailed context.
+  Load when: checking product framing beyond the compact brief.
+  Skip when: product-brief.md already answers the question.
+
+- `.agents/references/context/product/terms.md`
+  Purpose: Canonical vocabulary definitions and scope distinctions.
+  Load when: checking exact term meanings or naming boundaries.
+  Skip when: the term is already defined in the current context section.
+
+- `.agents/references/context/product/feature-goals.md`
+  Purpose: High-level feature-goal inputs preserved from prior context.
+  Load when: routing or auditing feature-goal origin.
+  Skip when: working on implementation mechanics that do not affect goals.
+
+- `.agents/references/context/source-provenance.md`
+  Purpose: Source and artifact provenance kept out of compact context.
+  Load when: tracing where product facts came from.
+  Skip when: current context already supplies the accepted fact.
+
+- `.agents/references/research/final-implementation-source-inventory.md`
+  Purpose: Final-implementation archive provenance, grill answer counts, and research-source classification.
+  Load when: auditing replay inputs, grill coverage, or research evidence routing.
+  Skip when: working from accepted context/spec records only.
 
 ## Summary
 

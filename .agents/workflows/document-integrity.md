@@ -5,6 +5,7 @@ Use this when context, specs, wireframes, progress, releases, or derived views m
 ## Check
 
 - Links and source references are valid enough for local routing.
+- Linked context, reference, evidence, import, proof, wireframe, progress, and source files are not bare links; they include `Purpose:` and `Load when:` routing metadata, with `Skip when:` when useful.
 - Context contains only shared reusable product truth and starts routing from `.agents/context/product-brief.md`.
 - Context reference routing lets agents load only the context or reference needed for the task.
 - Context files link only to `.agents/context/` or `.agents/references/`; provenance for source paths, root artifacts, specs, progress, URLs, and local files belongs in `.agents/references/`.
@@ -18,6 +19,7 @@ Use this when context, specs, wireframes, progress, releases, or derived views m
 - Research freeze is named `.agents/specs/research/research-freeze.md`.
 - MVP implementation has a frozen `.agents/specs/mvp/status.md`.
 - Progress files exist only for active execution after a frozen spec.
+- MVP execution state lives in `.agents/development/mvp/`; future frozen-spec execution state lives in `.agents/development/<spec-id>/`.
 - Progress items link to frozen spec tasks, requirements, and acceptance.
 - Distributable MVP implementation paths are `backend/`, `frontend/`, and `tests/server/`.
 - `src-tauri/` is not created or referenced as an implementation target.
@@ -38,6 +40,13 @@ Use this when context, specs, wireframes, progress, releases, or derived views m
 - Do not retire original planning sources without a source-retirement pass.
 - Do not move decisions into a non-implementable spec or root `docs/adr`
   archive. Use relevant spec `decisions.md`, context, and references.
+- Treat bare links as integrity defects. Repair them with repeated blocks that
+  include `Purpose:` and `Load when:` rather than adding unexplained source
+  lists.
+- Treat stale `.agents/development/progress/` references as integrity defects
+  unless they appear inside an explicit migration note. Use `.agents/development/mvp/`
+  for historical MVP execution and `.agents/development/<spec-id>/` for future
+  spec execution.
 
 ## Stop
 

@@ -5,7 +5,7 @@ Updated: 2026-06-30
 
 ## Source
 
-- Follow-up to: `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
+- Follow-up to: `.agents/development/mvp/items/TASK-013-concurrency-restart-resume.md`
 - Frozen task basis: `.agents/specs/mvp/tasks.md` `TASK-013`, `TASK-014`
 - MVP requirements: `REQ-001`, `REQ-002`, `REQ-003`, `REQ-005`, `REQ-006`,
   `REQ-013`, `REQ-016`
@@ -45,7 +45,7 @@ continues with local memory and audit records.
 - `backend/`
 - `frontend/`
 - `tests/server/`
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 - `.agents/workflows/manual-qa.md`
 
 ## Verification Plan

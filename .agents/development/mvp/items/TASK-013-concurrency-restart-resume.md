@@ -7,7 +7,7 @@ Updated: 2026-06-27
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-013`
 - Predecessor:
-  `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
+  `.agents/development/mvp/items/TASK-012-settings-ia-extension-records.md`
 - MVP requirements: `REQ-005`, `REQ-006`, `REQ-010`, `REQ-011`, `REQ-015`,
   `REQ-016`
 - MVP acceptance: `AC-005`, `AC-006`, `AC-010`, `AC-011`, `AC-019`

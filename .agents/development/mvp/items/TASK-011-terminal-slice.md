@@ -7,8 +7,8 @@ Updated: 2026-06-24
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-011`
 - Planned predecessor:
-  `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
+  `.agents/development/mvp/items/TASK-010C-artifact-preview-type-rendering.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

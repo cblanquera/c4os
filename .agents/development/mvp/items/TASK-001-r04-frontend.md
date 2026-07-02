@@ -45,7 +45,7 @@ Additional frontend foundation gates: AC-022, AC-023, AC-024, AC-025
   TASK-001 verification locally.
 - Minimal `package.json` script updates when needed to expose TASK-001 frontend
   dev, test, or acceptance commands.
-- `.agents/development/progress/items/TASK-001-r04-frontend.md`
+- `.agents/development/mvp/items/TASK-001-r04-frontend.md`
 
 No backend activation is expected in this item. Do not edit `backend/` or
 `tests/server/`. If implementation uncovers a backend or mock-server concern,

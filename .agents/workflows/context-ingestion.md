@@ -37,7 +37,7 @@ Choose one owner for each accepted fact:
 2. Convert reusable product facts into compact Markdown in the single best owner document.
 3. Keep context files under 500 lines.
 4. Put long source summaries under the matching `.agents/references/context/<topic>/` folder.
-5. Update the owner document's `Reference Routing` table only when a new reference should be discoverable by future agents.
+5. Update the owner document's `Reference Routing` section only when a new reference should be discoverable by future agents.
 6. Keep `.agents/context/` links limited to `.agents/context/` and `.agents/references/`; put source paths, external URLs, spec paths, progress paths, root artifact paths, and other provenance in `.agents/references/`.
 7. If the source adds goals, constraints, decisions, risks, or acceptance criteria, reconcile those into the relevant spec records.
 8. Store spec decisions in the relevant spec's `decisions.md`. If the same
@@ -49,6 +49,19 @@ Choose one owner for each accepted fact:
 10. Specs may cite context and references, but must not depend on sibling specs
     for project-wide truth.
 11. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
+
+## Reference Routing
+
+Do not add bare context, reference, evidence, source, spec, proof, or progress links. Each linked support file must use this block shape unless there is a documented reason to use an equivalent complete table:
+
+```md
+- `.agents/references/context/<topic>/<file>.md`
+  Purpose: What this source preserves or proves.
+  Load when: The task needs this exact source detail, rationale, evidence, or decision context.
+  Skip when: Current context already answers the task or the task is unrelated.
+```
+
+`Purpose:` and `Load when:` are required. `Skip when:` is optional but preferred.
 
 ## Stop
 

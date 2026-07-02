@@ -16,6 +16,8 @@ Use this when accepted MVP or bounded feature records should become an implement
 - Specs are understandable from `.agents/context/`, `.agents/references/`, and
   their own files, without sibling specs as the source of project-wide truth.
 - Imported archive material is provenance only, not live project truth.
+- References in the target spec use routed blocks with `Purpose:` and
+  `Load when:`; bare source lists are blockers to freeze.
 - The target spec states implementation paths and verification expectations.
 
 For the distributable desktop MVP, implementation paths must be `backend/`,
@@ -33,6 +35,19 @@ For the distributable desktop MVP, implementation paths must be `backend/`,
    marked `frozen-for-implementation`.
 7. Convert accepted tasks into implementation-ready proposed work.
 8. Create progress items only if active execution is requested.
+
+## Reference Routing Gate
+
+Before freezing, inspect `index.md`, `evidence.md`, `traceability.md`, `decisions.md`, `tasks.md`, and `poc/index.md` for bare links. Each linked context, reference, evidence file, proof, wireframe, source import, grill answer, or progress record must explain:
+
+```md
+- `.agents/references/<area>/<file>.md`
+  Purpose: Why this file matters to the frozen contract.
+  Load when: What future implementation, review, proof, or verification task needs it.
+  Skip when: The frozen spec and context already answer the task.
+```
+
+Do not freeze a spec that relies on a sibling spec for shared truth. Promote or copy the truth into `.agents/context/`, `.agents/references/`, and the affected spec records first.
 
 ## Stop
 

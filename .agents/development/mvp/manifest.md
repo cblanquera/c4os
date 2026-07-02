@@ -9,31 +9,31 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
 
 ## Last Verified Item
 
-- `.agents/development/progress/items/TASK-001-r04-frontend.md`
-- `.agents/development/progress/items/TASK-002-mock-server-connection.md`
-- `.agents/development/progress/items/TASK-003-backend-mock-parity.md`
-- `.agents/development/progress/items/TASK-004-first-user-flow.md`
-- `.agents/development/progress/items/TASK-005-openrouter-chat-session.md`
-- `.agents/development/progress/items/TASK-005A-scoped-frontend-state.md`
-- `.agents/development/progress/items/TASK-006-provider-model-management.md`
-- `.agents/development/progress/items/TASK-007-runtime-adapter-persistent-sessions.md`
-- `.agents/development/progress/items/TASK-008-files-slice.md`
-- `.agents/development/progress/items/TASK-009-artifact-safe-html-preview.md`
-- `.agents/development/progress/items/TASK-010-browser-slice.md`
-- `.agents/development/progress/items/TASK-010A-browser-address-bar-local-target-ui.md`
-- `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
-- `.agents/development/progress/items/TASK-010C-artifact-preview-type-rendering.md`
-- `.agents/development/progress/items/TASK-011-terminal-slice.md`
-- `.agents/development/progress/items/TASK-011A-agent-command-terminal-bridge.md`
-- `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
-- `.agents/development/progress/items/TASK-012-settings-ia-extension-records.md`
-- `.agents/development/progress/items/TASK-013-concurrency-restart-resume.md`
-- `.agents/development/progress/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
-- `.agents/development/progress/items/TASK-014-local-memory-action-audit-records.md`
-- `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
-- `.agents/development/progress/items/WO-006-runtime-tool-gateway-refactor.md`
-- `.agents/development/progress/items/TASK-016-security-approval-policies.md`
-- `.agents/development/progress/items/TASK-017-integration-release-readiness.md`
+- `.agents/development/mvp/items/TASK-001-r04-frontend.md`
+- `.agents/development/mvp/items/TASK-002-mock-server-connection.md`
+- `.agents/development/mvp/items/TASK-003-backend-mock-parity.md`
+- `.agents/development/mvp/items/TASK-004-first-user-flow.md`
+- `.agents/development/mvp/items/TASK-005-openrouter-chat-session.md`
+- `.agents/development/mvp/items/TASK-005A-scoped-frontend-state.md`
+- `.agents/development/mvp/items/TASK-006-provider-model-management.md`
+- `.agents/development/mvp/items/TASK-007-runtime-adapter-persistent-sessions.md`
+- `.agents/development/mvp/items/TASK-008-files-slice.md`
+- `.agents/development/mvp/items/TASK-009-artifact-safe-html-preview.md`
+- `.agents/development/mvp/items/TASK-010-browser-slice.md`
+- `.agents/development/mvp/items/TASK-010A-browser-address-bar-local-target-ui.md`
+- `.agents/development/mvp/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
+- `.agents/development/mvp/items/TASK-010C-artifact-preview-type-rendering.md`
+- `.agents/development/mvp/items/TASK-011-terminal-slice.md`
+- `.agents/development/mvp/items/TASK-011A-agent-command-terminal-bridge.md`
+- `.agents/development/mvp/items/TASK-011B-chat-session-transition-polish.md`
+- `.agents/development/mvp/items/TASK-012-settings-ia-extension-records.md`
+- `.agents/development/mvp/items/TASK-013-concurrency-restart-resume.md`
+- `.agents/development/mvp/items/TASK-013A-desktop-qa-bootstrap-workspace-provider-persistence.md`
+- `.agents/development/mvp/items/TASK-014-local-memory-action-audit-records.md`
+- `.agents/development/mvp/items/TASK-015-pause-at-feature-complete.md`
+- `.agents/development/mvp/items/WO-006-runtime-tool-gateway-refactor.md`
+- `.agents/development/mvp/items/TASK-016-security-approval-policies.md`
+- `.agents/development/mvp/items/TASK-017-integration-release-readiness.md`
 
 ## Active Item
 
@@ -51,7 +51,7 @@ MVP implementation queue from frozen spec `.agents/specs/mvp/status.md`.
   TASK-002 or later.
 - Do not create or use `src-tauri/`.
 - Proposed task records remain in `.agents/specs/mvp/tasks.md`; active work
-  lives in `.agents/development/progress/items/`.
+  lives in `.agents/development/mvp/items/`.
 - Mock-backed phases must state exactly what is mocked before acceptance.
 - TASK-001 is a parity-preserving production frontend task. Preserve r04 route
   structures, working interactions, and settings screen shapes, then apply a

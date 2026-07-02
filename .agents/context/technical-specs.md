@@ -32,14 +32,35 @@ Use this as the technical gate. It summarizes product-owned system concepts, run
 
 ## Reference Routing
 
-| Need | Load | Why |
-| --- | --- | --- |
-| Entity model, workspace descriptors, sessions, runs, secrets | `.agents/references/context/technical-specs/product-model.md` | Use for data model and ownership questions. |
-| OpenCode/Pi proof findings, adapter boundary, runtime implications | `.agents/references/context/technical-specs/runtime-adapter.md` | Use for runtime selection or adapter work. |
-| Trust, credential, Browser, Terminal, extension, and validation constraints | `.agents/references/context/technical-specs/constraints.md` | Use for safety-sensitive implementation or review. |
-| Skill, plugin, and MCP discovery/loading contract | `.agents/references/context/technical-specs/extension-loading.md` | Use before implementing extension install, discovery, loading, enablement, or invocation. |
-| Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where technical facts came from. |
-| Final-implementation replay sources | `.agents/references/research/final-implementation-source-inventory.md` | Use when tracing imported goals, grill answers, and research evidence. |
+- `.agents/references/context/technical-specs/product-model.md`
+  Purpose: Detailed entity model, workspace descriptors, sessions, runs, and secrets ownership.
+  Load when: checking data model and ownership questions.
+  Skip when: the compact technical context already answers the boundary.
+
+- `.agents/references/context/technical-specs/runtime-adapter.md`
+  Purpose: OpenCode/Pi proof findings, adapter boundary, and runtime implications.
+  Load when: checking runtime selection or adapter work.
+  Skip when: the task does not affect runtime adapter behavior.
+
+- `.agents/references/context/technical-specs/constraints.md`
+  Purpose: Trust, credential, Browser, Terminal, extension, and validation constraints.
+  Load when: reviewing safety-sensitive implementation, proof, or approval behavior.
+  Skip when: the task is unrelated to trust or execution boundaries.
+
+- `.agents/references/context/technical-specs/extension-loading.md`
+  Purpose: Skill, plugin, and MCP discovery/loading contract.
+  Load when: implementing or reviewing extension install, discovery, loading, enablement, or invocation.
+  Skip when: the task is unrelated to extension behavior.
+
+- `.agents/references/context/source-provenance.md`
+  Purpose: Source and artifact provenance for technical facts.
+  Load when: tracing where technical context came from.
+  Skip when: current context already supplies the accepted fact.
+
+- `.agents/references/research/final-implementation-source-inventory.md`
+  Purpose: Final-implementation replay source inventory and research evidence routing.
+  Load when: auditing imported goals, grill answers, and research evidence.
+  Skip when: working from accepted context/spec records only.
 
 ## Summary
 

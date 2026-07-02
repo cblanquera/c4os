@@ -32,13 +32,30 @@ Use this as the interface and creative gate. It summarizes C4OS experience direc
 
 ## Reference Routing
 
-| Need | Load | Why |
-| --- | --- | --- |
-| Current three-panel shell, composer, model selector, session thread, right panel, settings | `.agents/references/context/creative-specs/interface.md` | Use for current interface contract details. |
-| Historical r04 handoff summary and current-vs-historical caution | `.agents/references/context/creative-specs/ui-handoff.md` | Use before relying on inherited wireframe decisions. |
-| Full r04 UI chunks for implementation or detailed spec conversion | `.agents/references/context/ui-handoff/index.md` | Use only when detailed handoff behavior is required. |
-| First-run, workspace, session flow, prework, composer behavior | `.agents/references/context/product-specs/product-experience.md` | Use when UX flow matters more than screen layout. |
-| Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where UI facts came from. |
+- `.agents/references/context/creative-specs/interface.md`
+  Purpose: Current shell, composer, model selector, session thread, panel, and settings interface details.
+  Load when: checking current interface contract details.
+  Skip when: the compact creative context already answers the layout rule.
+
+- `.agents/references/context/creative-specs/ui-handoff.md`
+  Purpose: Historical r04 handoff summary and current-vs-historical caution.
+  Load when: checking inherited wireframe decisions or historical UI caution.
+  Skip when: working on final shell rules that supersede r04 details.
+
+- `.agents/references/context/ui-handoff/index.md`
+  Purpose: Full r04 UI chunks for implementation or detailed spec conversion.
+  Load when: detailed handoff behavior is required.
+  Skip when: the task only needs accepted compact UI guidance.
+
+- `.agents/references/context/product-specs/product-experience.md`
+  Purpose: Product-experience flow detail for first-run, workspace, session, prework, and composer behavior.
+  Load when: UX flow matters more than screen layout.
+  Skip when: the task is visual-only or already covered by creative context.
+
+- `.agents/references/context/source-provenance.md`
+  Purpose: Source and artifact provenance for UI facts.
+  Load when: tracing where UI facts came from.
+  Skip when: current context already supplies the accepted fact.
 
 ## Summary
 

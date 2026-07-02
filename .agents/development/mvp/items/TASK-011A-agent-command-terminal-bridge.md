@@ -5,8 +5,8 @@ Updated: 2026-06-25
 
 ## Source
 
-- Follow-up from `.agents/development/progress/items/TASK-011-terminal-slice.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
+- Follow-up from `.agents/development/mvp/items/TASK-011-terminal-slice.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 - MVP acceptance: `.agents/specs/mvp/acceptance.md` terminal acceptance
 
 ## Goal

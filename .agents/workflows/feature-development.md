@@ -8,7 +8,8 @@ Use this after MVP scope is accepted for bounded feature streams, hardening, pol
 - `.agents/context/product-specs.md`
 - `.agents/context/work-orders.md`
 - The relevant spec folder or MVP records
-- `.agents/development/progress/manifest.md`, if active progress exists
+- `.agents/development/mvp/manifest.md`, if MVP progress is involved
+- `.agents/development/<spec-id>/manifest.md`, if active progress exists for the target spec
 
 ## Process
 
@@ -24,7 +25,22 @@ Use this after MVP scope is accepted for bounded feature streams, hardening, pol
    into the relevant `.agents/context/` file.
 6. Keep long research, provenance, and rationale in `.agents/references/`.
 7. Convert accepted tasks into progress items only when implementation starts.
+   Use `.agents/development/<spec-id>/` for future frozen specs, not the MVP
+   execution folder.
 8. Verify changed surfaces before marking progress done or verified.
+
+## Reference Routing
+
+Feature specs must not contain bare source lists. Every linked context, reference, evidence file, grill answer, proof result, or imported source must include:
+
+```md
+- `.agents/references/<area>/<file>.md`
+  Purpose: What this file contributes to the feature decision or evidence chain.
+  Load when: The task needs that source, rationale, decision, proof, or accepted-answer detail.
+  Skip when: The current spec record and `.agents/context/` already answer the task.
+```
+
+`Purpose:` and `Load when:` are required. `Skip when:` is optional but preferred.
 
 ## Stop
 

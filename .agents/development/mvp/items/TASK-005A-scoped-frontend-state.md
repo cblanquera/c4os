@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-005A`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-005-openrouter-chat-session.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
+  `.agents/development/mvp/items/TASK-005-openrouter-chat-session.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

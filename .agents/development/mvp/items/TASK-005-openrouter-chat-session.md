@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-005`
 - Frozen spec: `.agents/specs/mvp/status.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
-- Accepted baseline: `.agents/development/progress/items/TASK-004-first-user-flow.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
+- Accepted baseline: `.agents/development/mvp/items/TASK-004-first-user-flow.md`
 
 ## Goal
 
@@ -31,7 +31,7 @@ AC-003, AC-004, AC-005, AC-013, AC-015, AC-016
 - `backend/`
 - `frontend/`
 - `tests/server/`
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Required Scope
 

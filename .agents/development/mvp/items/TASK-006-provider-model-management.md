@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-006`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-005A-scoped-frontend-state.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
+  `.agents/development/mvp/items/TASK-005A-scoped-frontend-state.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

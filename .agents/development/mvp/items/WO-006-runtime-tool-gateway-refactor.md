@@ -11,7 +11,7 @@ Updated: 2026-06-30
   `.agents/references/context/technical-specs/runtime-adapter.md`
   `Future Runtime Tool Gateway`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-015-pause-at-feature-complete.md`
+  `.agents/development/mvp/items/TASK-015-pause-at-feature-complete.md`
 - Deferred successor: `.agents/specs/mvp/tasks.md` `TASK-016`
 
 ## Goal
@@ -64,7 +64,7 @@ audit records belong to C4OS.
 - `frontend/` only where connector/runtime event handling must change.
 - `tests/server/`
 - Existing frontend tests when user-visible behavior must be protected.
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Verification Plan
 

@@ -45,5 +45,5 @@ implementation, freeze specs, or create progress items.
 - The new specs are proposed planning records only.
 - `.agents/references/research/final-implementation-import` remains import provenance only.
 - No proof code was created under `proofs/`.
-- No `.agents/development/progress/items/` record was created for this planning replay.
+- No `.agents/development/mvp/items/` record was created for this planning replay.
 - A later freeze pass must still review each proposed spec before any implementation work begins.

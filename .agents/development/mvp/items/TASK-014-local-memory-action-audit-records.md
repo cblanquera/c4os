@@ -45,7 +45,7 @@ restart/resume behavior.
 - `backend/`
 - `frontend/` only if an accepted state path already exists
 - `tests/server/`
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Verification Plan
 

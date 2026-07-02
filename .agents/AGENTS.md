@@ -30,14 +30,15 @@ Read the workflow that matches the task:
 - `plans/product-brief.md` and `plans/product-interface.md` are the imported human planning sources for this restart.
 - `plans/pegs/*.png` are the visual peg sources for the UI direction.
 - `.agents/context/` contains five shared prework documents. Start with `.agents/context/product-brief.md` for the document map, then load only the context document or reference needed for the task: product brief, product specs, technical specs, creative specs, or work orders.
-- `.agents/references/` is the non-entry detail, evidence, provenance, and historical-support layer. Do not load references by default; load them only through a context document's `Reference Routing` table or a workflow-specific need.
+- `.agents/references/` is the non-entry detail, evidence, provenance, and historical-support layer. Do not load references by default; load them only through routed references with `Purpose:` and `Load when:` metadata or a workflow-specific need.
 - `.agents/specs/research/` contains the current imported research, MVP-scope analysis, wireframe acceptance, and POC validation records. It is discovery input only.
 - `.agents/specs/research/research-freeze.md` closes the research round and recommends the next planning path. It is not an implementation contract.
 - `.agents/specs/mvp/` is the required contract for the distributable desktop MVP. Create or repair it before active MVP implementation.
 - `proofs/` contains repo-level POC implementation artifacts. Put runnable proof code, harnesses, fixtures, and proof-specific evidence files there instead of burying implementation code inside `.agents/`.
 - `wireframes/` contains wireframe routing notes and links back to the visual pegs.
 - `creatives/` contains creative direction, asset, and guideline artifacts only when creative work is created or approved.
-- `.agents/development/progress/` should exist only after implementation or active execution tracking begins.
+- `.agents/development/mvp/` contains historical MVP execution state.
+- `.agents/development/<spec-id>/` contains future active execution state for the matching frozen spec. Do not use one global progress folder for unrelated specs.
 
 ## QA And Acceptance Boundary
 
@@ -72,7 +73,22 @@ Use `.agents/references/` for material that supports context or specs but should
 - `.agents/references/context/work-orders/` for decision history and work-order support.
 - `.agents/references/research/` for research support, grill-session material, schemas, validation evidence, and long-form research notes.
 
-When contributing context, choose one major context document as the owner, add only compact accepted reusable truth there, route long detail to the matching references folder, and update that context document's `Reference Routing` table when the new reference should be discoverable. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
+When contributing context, choose one major context document as the owner, add only compact accepted reusable truth there, route long detail to the matching references folder, and update that context document's `Reference Routing` section when the new reference should be discoverable. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
+
+## Reference Routing
+
+Do not emit bare links to `.agents/context/`, `.agents/references/`, specs, progress files, proof artifacts, wireframes, imported sources, or evidence. Every linked support file must carry enough routing metadata for a future agent to decide whether to load it without opening the file first.
+
+Use this repeated block shape by default:
+
+```md
+- `.agents/references/research/example.md`
+  Purpose: What this file proves, preserves, or owns.
+  Load when: The task needs this evidence, source detail, rationale, or decision context.
+  Skip when: The task is unrelated or the owner context already answers the question.
+```
+
+`Purpose:` and `Load when:` are required. `Skip when:` is optional but preferred. Tables are allowed only when the same routing metadata stays readable and complete. Root `docs/adr` and non-implementable decision specs are not valid decision-record destinations for this repository.
 
 ## Implementation Locations
 
@@ -95,7 +111,7 @@ Use this sequence for MVP work:
 3. Accepted reusable findings are promoted or reconciled into the relevant major `.agents/context/` document.
 4. The MVP workflow creates or repairs `.agents/specs/mvp/`.
 5. MVP freeze marks `.agents/specs/mvp/status.md` as `frozen-for-implementation`.
-6. Progress converts accepted MVP tasks into `.agents/development/progress/` items.
+6. Progress converts accepted MVP tasks into `.agents/development/mvp/` items.
 7. Implementation changes are made in `backend/`, `frontend/`, and `tests/server/`.
 
 If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementation, route MVP/distribution work to `workflows/mvp.md` before creating progress items or editing product code.
@@ -106,6 +122,7 @@ If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementat
 - Keep records short, source-linked, and explicit about status and confidence.
 - Proposed `TASK` records are not active work until converted into progress items.
 - MVP `TASK` records are not active work until they live in `.agents/specs/mvp/` and the MVP spec is frozen for implementation.
+- Future spec execution must use scoped task IDs under `.agents/development/<spec-id>/`; do not reuse one global task-number sequence across unrelated specs.
 - Do not invent completed implementation, verification, runtime behavior, or user decisions.
 - Raw feedback must be validated, rejected, classified, or reconciled before becoming implementation work unless evidence is already explicit.
 - Treat imported plan content as product intent unless a later review, validation result, or user decision changes it.

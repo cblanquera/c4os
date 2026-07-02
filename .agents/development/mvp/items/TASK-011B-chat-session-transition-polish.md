@@ -59,7 +59,7 @@ user turn, and renders a clear run/working/streaming or setup-required state.
 - `backend/` and `tests/server/` only if the setup-required state needs a
   backend-owned field that is already part of the existing session/runtime
   contract.
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Verification
 

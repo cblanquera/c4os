@@ -7,7 +7,7 @@ Updated: 2026-06-26
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-012`
 - Predecessor:
-  `.agents/development/progress/items/TASK-011B-chat-session-transition-polish.md`
+  `.agents/development/mvp/items/TASK-011B-chat-session-transition-polish.md`
 - MVP requirements: `REQ-013`, `REQ-015`, `REQ-016`
 - MVP acceptance: `AC-018`, `AC-019`
 

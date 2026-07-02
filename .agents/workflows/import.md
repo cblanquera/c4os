@@ -34,6 +34,19 @@ Use this when existing planning material should become compact `.agents` records
    create or repair `.agents/specs/mvp/`.
 12. Do not create active progress from imported research records.
 
+## Reference Routing
+
+Imported sources must remain auditable without becoming live project truth. Do not emit bare source or evidence links. Route each linked import, transcript, grill answer, schema, research note, or provenance file with:
+
+```md
+- `.agents/references/research/<source>.md`
+  Purpose: What imported source detail this file preserves.
+  Load when: The task needs the original import evidence, accepted answer, conflict detail, or source freshness check.
+  Skip when: The promoted `.agents/context/` or spec record already answers the task.
+```
+
+`Purpose:` and `Load when:` are required. `Skip when:` is optional but preferred. Tables are acceptable only when they preserve the same fields clearly.
+
 ## Stop
 
 Stop when durable facts are compact records, useful source value is linked, and the recommended next step is review, validation, MVP specification, POC, source retirement, or no follow-up.

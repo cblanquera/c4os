@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-003`
 - Frozen spec: `.agents/specs/mvp/status.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
-- Accepted baseline: `.agents/development/progress/items/TASK-002-mock-server-connection.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
+- Accepted baseline: `.agents/development/mvp/items/TASK-002-mock-server-connection.md`
 
 ## Goal
 
@@ -31,7 +31,7 @@ AC-022, AC-023, AC-024, AC-025
 
 - `backend/`
 - `tests/server/`
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Verification
 

@@ -4,7 +4,7 @@ Status: frozen-for-implementation
 Updated: 2026-06-22
 
 These tasks are accepted implementation tasks for the frozen MVP contract. They
-are not active work until converted into `.agents/development/progress/` items.
+are not active work until converted into `.agents/development/mvp/` items.
 
 ## Sequencing Rules
 

@@ -8,7 +8,7 @@ Updated: 2026-06-22
 This file maps the MVP contract across requirements, acceptance criteria,
 accepted task records, evidence, and the normalized context owners. Spec task
 records remain planning records; active work lives in
-`.agents/development/progress/`.
+`.agents/development/mvp/`.
 
 ## Requirement Traceability
 

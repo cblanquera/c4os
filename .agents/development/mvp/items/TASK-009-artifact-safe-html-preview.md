@@ -12,10 +12,10 @@ Updated: 2026-06-23
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-009`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-008-files-slice.md`
+  `.agents/development/mvp/items/TASK-008-files-slice.md`
 - Requirements: `.agents/specs/mvp/requirements.md` `REQ-009`
 - Acceptance: `.agents/specs/mvp/acceptance.md` `AC-009`
-- Progress manifest: `.agents/development/progress/manifest.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

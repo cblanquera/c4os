@@ -7,7 +7,7 @@ Source Note: Normalized from accepted decisions, constraints, MVP guardrails, an
 
 ## Purpose
 
-Work Orders is the expandable prework surface for accepted work packages, sequencing, validation needs, deferred work, and implementation guardrails. It is not active execution state. Proposed work becomes active only when the relevant spec is frozen and converted into `.agents/development/progress/` items.
+Work Orders is the expandable prework surface for accepted work packages, sequencing, validation needs, deferred work, and implementation guardrails. It is not active execution state. Proposed work becomes active only when the relevant spec is frozen and converted into `.agents/development/mvp/` items for historical MVP work or `.agents/development/<spec-id>/` items for future frozen specs.
 
 ## Load When
 
@@ -28,18 +28,39 @@ Work Orders is the expandable prework surface for accepted work packages, sequen
 
 ## Does Not Own
 
-- Active execution state, detailed acceptance criteria, product thesis, technical proof detail, or UI handoff detail. Active execution belongs in `.agents/development/progress/` after a frozen spec exists.
+- Active execution state, detailed acceptance criteria, product thesis, technical proof detail, or UI handoff detail. MVP execution belongs in `.agents/development/mvp/`; future frozen-spec execution belongs in `.agents/development/<spec-id>/`.
 
 ## Reference Routing
 
-| Need | Load | Why |
-| --- | --- | --- |
-| Full accepted restart decisions | `.agents/references/context/work-orders/decisions.md` | Use when checking decision history. |
-| Safety or validation blockers behind a work order | `.agents/references/context/technical-specs/constraints.md` | Use when work depends on trust, Browser, Terminal, credentials, or extensions. |
-| MVP scope and guardrails behind a work order | `.agents/references/context/product-specs/mvp-feature-list.md` | Use before turning MVP work into tasks or progress. |
-| Pre-normalization context routing | `.agents/references/context/index-legacy.md` | Use only when auditing the normalization or checking old routing. |
-| Source and artifact provenance | `.agents/references/context/source-provenance.md` | Use only when tracing where work-order facts came from. |
-| Final-implementation source inventory | `.agents/references/research/final-implementation-source-inventory.md` | Use for archive provenance, grill answer counts, and research evidence routing. |
+- `.agents/references/context/work-orders/decisions.md`
+  Purpose: Detailed accepted restart decision history.
+  Load when: checking decision history or why a guardrail exists.
+  Skip when: the compact work-order decision list already answers the task.
+
+- `.agents/references/context/technical-specs/constraints.md`
+  Purpose: Safety or validation blockers behind work orders.
+  Load when: work depends on trust, Browser, Terminal, credentials, extensions, or approval boundaries.
+  Skip when: the work order is sequencing-only.
+
+- `.agents/references/context/product-specs/mvp-feature-list.md`
+  Purpose: MVP scope and guardrails behind work orders.
+  Load when: turning MVP work into tasks or auditing MVP scope.
+  Skip when: the task is final-implementation planning that does not reopen MVP.
+
+- `.agents/references/context/index-legacy.md`
+  Purpose: Pre-normalization context routing.
+  Load when: auditing normalization or old routing.
+  Skip when: using current context as source of truth.
+
+- `.agents/references/context/source-provenance.md`
+  Purpose: Source and artifact provenance for work-order facts.
+  Load when: tracing where work-order facts came from.
+  Skip when: current work-order context already supplies the accepted fact.
+
+- `.agents/references/research/final-implementation-source-inventory.md`
+  Purpose: Final-implementation source inventory, archive provenance, grill answer counts, and research evidence routing.
+  Load when: checking archive provenance, grill answer counts, and research evidence routing.
+  Skip when: working from accepted spec/context records only.
 
 ## Status Values
 

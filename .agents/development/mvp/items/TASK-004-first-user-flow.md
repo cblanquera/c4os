@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-004`
 - Frozen spec: `.agents/specs/mvp/status.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
-- Accepted baseline: `.agents/development/progress/items/TASK-003-backend-mock-parity.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
+- Accepted baseline: `.agents/development/mvp/items/TASK-003-backend-mock-parity.md`
 
 ## Goal
 
@@ -37,7 +37,7 @@ AC-016, AC-017
 - `tests/frontend-task-004.test.js`
 - `tests/server/task-004-first-user-flow.test.js`
 - `tests/server/README.md`
-- `.agents/development/progress/`
+- `.agents/development/mvp/`
 
 ## Implementation Notes
 

@@ -7,8 +7,8 @@ Updated: 2026-06-23
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-007`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-006-provider-model-management.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
+  `.agents/development/mvp/items/TASK-006-provider-model-management.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

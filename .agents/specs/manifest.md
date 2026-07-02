@@ -24,8 +24,8 @@ Updated: 2026-07-02
 ## Notes
 
 - MVP implementation is accepted through
-  `.agents/development/progress/items/TASK-017-integration-release-readiness.md`.
-- `.agents/development/progress/manifest.md` is the authority for completed MVP
+  `.agents/development/mvp/items/TASK-017-integration-release-readiness.md`.
+- `.agents/development/mvp/manifest.md` is the authority for completed MVP
   progress state; its active item is `None`.
 - Final-implementation planning is a new proposed stream imported from
   `.agents/references/research/final-implementation-import`. It is not active implementation and no final

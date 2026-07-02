@@ -7,8 +7,8 @@ Updated: 2026-06-22
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-002`
 - Frozen spec: `.agents/specs/mvp/status.md`
-- Progress manifest: `.agents/development/progress/manifest.md`
-- Baseline: `.agents/development/progress/items/TASK-001-r04-frontend.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
+- Baseline: `.agents/development/mvp/items/TASK-001-r04-frontend.md`
 
 ## Goal
 

@@ -13,7 +13,8 @@ progress workflows.
 - `.agents/specs/manifest.md`
 - `.agents/specs/research/research-freeze.md`, when the goal depends on research output
 - `.agents/specs/mvp/status.md`, when the goal mentions MVP, viability, distribution, dogfood, desktop, or release
-- `.agents/development/progress/manifest.md`, if it exists
+- `.agents/development/mvp/manifest.md`, if MVP execution state is involved
+- `.agents/development/<spec-id>/manifest.md`, if future spec execution state is involved
 - `.agents/workflows/batch-reconciliation.md`, when the goal is validated feedback, QA mismatch, or polish batching
 - The workflow for the current phase
 
@@ -37,7 +38,7 @@ For this repository, implementation paths for distributable MVP work are
 2. Check the routed context, work orders when relevant, specs manifest, and current progress before selecting work.
 3. Determine the current phase: research, MVP specification, creative review, freeze, progress, implementation, QA, batch reconciliation, or closeout.
 4. Route to the smallest useful specialist workflow.
-5. Create progress state only after an accepted/frozen spec exists and active execution is requested.
+5. Create progress state only after an accepted/frozen spec exists and active execution is requested. Use `.agents/development/mvp/` for MVP history and `.agents/development/<spec-id>/` for future frozen specs.
 6. Before closeout, run document-integrity checks against changed context, specs, progress, and derived views.
 7. Report the recommended next step.
 

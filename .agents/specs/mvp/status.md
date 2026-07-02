@@ -17,7 +17,7 @@ frozen research records, accepted context documents, r04 wireframe handoff, and
 approved task sequencing.
 
 Implementation was executed through the frozen MVP progress queue and accepted
-through `.agents/development/progress/items/TASK-017-integration-release-readiness.md`.
+through `.agents/development/mvp/items/TASK-017-integration-release-readiness.md`.
 Implementation remains bounded by `backend/`, `frontend/`, and `tests/server/`;
 do not create or use `src-tauri/`.
 

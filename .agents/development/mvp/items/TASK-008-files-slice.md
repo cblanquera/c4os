@@ -7,10 +7,10 @@ Updated: 2026-06-23
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-008`
 - Accepted predecessor:
-  `.agents/development/progress/items/TASK-007-runtime-adapter-persistent-sessions.md`
+  `.agents/development/mvp/items/TASK-007-runtime-adapter-persistent-sessions.md`
 - Requirements: `.agents/specs/mvp/requirements.md` `REQ-008`, `REQ-013`
 - Acceptance: `.agents/specs/mvp/acceptance.md` `AC-008`, `AC-017`
-- Progress manifest: `.agents/development/progress/manifest.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 

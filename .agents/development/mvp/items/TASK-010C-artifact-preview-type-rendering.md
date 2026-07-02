@@ -7,11 +7,11 @@ Updated: 2026-06-24
 
 - Task: `.agents/specs/mvp/tasks.md` `TASK-010C`
 - Planned predecessor:
-  `.agents/development/progress/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
+  `.agents/development/mvp/items/TASK-010B-native-browser-webview-or-external-open-fallback.md`
 - Requirements: `.agents/specs/mvp/requirements.md` `REQ-009`, `REQ-010`,
   `REQ-013`, `REQ-016`
 - Acceptance: `.agents/specs/mvp/acceptance.md` `AC-009`, `AC-010`
-- Progress manifest: `.agents/development/progress/manifest.md`
+- Progress manifest: `.agents/development/mvp/manifest.md`
 
 ## Goal
 
