@@ -231,3 +231,23 @@ Source: `proofs/runtime-tool-discovery-without-plugin-view/`,
     degradation and redacted logs.
   - These are POC decisions only. They do not freeze this spec or create
     implementation progress items.
+
+### DEC-019: 2026-07-02 Approved Batch 2 Wireframes - Tool Policy Settings
+
+Source: `wireframes/r05-final-implementation/review-round-06.md`,
+`wireframes/r05-final-implementation/qa/notes.md`, and approved user review on
+2026-07-02.
+
+  - Settings > Configuration shows one policy item per registered server tool,
+    each with a user-readable explanation plus default and maximum authority.
+  - Policy rows use icon-only edit and revoke actions for durable/global
+    remembered rule management. Session-only rules are not shown in this
+    global Settings surface because they differ per session.
+  - Plugin detail may link to tool policy, but tool policy management remains
+    under Settings > Configuration and below rendered plugin settings when
+    summarized on plugin detail.
+  - Config parse errors are represented as a Settings state that keeps the
+    last valid config active and blocks saving until the source is repaired or
+    restored.
+  - This decision records approved wireframe behavior only. It does not freeze
+    this spec or create implementation progress items.

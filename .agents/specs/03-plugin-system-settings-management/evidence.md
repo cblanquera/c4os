@@ -172,3 +172,9 @@ Status: proposed
 | EVD-POC-002 | `proofs/codex-marketplace-install-cache/` | `node --test proofs/codex-marketplace-install-cache/proof.test.mjs` passed on 2026-07-02. Supports install cache, uninstall, and reinstall semantics. |
 | EVD-POC-003 | `proofs/plugin-svg-sanitization/` | `node --test proofs/plugin-svg-sanitization/proof.test.mjs` passed on 2026-07-02. Supports sanitized static SVG with fallback. |
 | EVD-POC-004 | `proofs/plugin-lifecycle-pending-restart-and-service-scope/` | `node --test proofs/plugin-lifecycle-pending-restart-and-service-scope/proof.test.mjs` passed on 2026-07-02. Supports live UI settings, pending-restart backend tools, dependency states, and shared service lifecycle. |
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#settings-plugin-marketplace`, `#settings-plugin-detail`, `#settings-plugin-states`, `#settings-plugin-uninstall`, `#repair-state`, `#coverage`; `wireframes/r05-final-implementation/review-round-07.md`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-02 as Batch 2 Settings wireframe evidence for plugin settings and configuration behavior. The approved UI shows the Plugins page with the Built by C4OS source dropdown, the five pending-spec C4OS plugins, add-marketplace dialog, plugin connect modal, Advanced settings route to rendered plugin config, dependency-blocked/incompatible/pending-restart/repair/icon-fallback states, uninstall data prompt, sensitive-setting redaction, and panel/icon-order configuration examples. |

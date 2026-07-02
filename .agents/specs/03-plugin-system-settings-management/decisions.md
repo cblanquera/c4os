@@ -241,3 +241,26 @@ Source: `proofs/plugin-settings-renderer/`,
     and narrow shared heavy-service lifecycle as feasible.
   - These are POC decisions only. They do not freeze this spec or create
     implementation progress items.
+
+### DEC-017: 2026-07-02 Approved Batch 2 Wireframes - Plugin Settings
+
+Source: `wireframes/r05-final-implementation/review-round-07.md`,
+`wireframes/r05-final-implementation/qa/notes.md`, and approved user review on
+2026-07-02.
+
+  - Settings > Plugins keeps the r04-style Plugins page identity and source
+    filter behavior. The Built by C4OS source menu shows the current source,
+    a separator, and `+ Add Marketplace`.
+  - The Built by C4OS marketplace source lists the pending-spec C4OS plugins:
+    File system, File editor, Terminal, Chat Debug, and Browser.
+  - Advanced settings routes to the plugin detail settings renderer, not to a
+    separate marketplace-only surface. The detail view shows schema-rendered
+    fields, including input, number, switch, select, sensitive redaction,
+    default-only values, panel placement, and icon order.
+  - Repair states and tool policy appear below the rendered form on plugin
+    detail. Search and source controls do not appear on plugin detail.
+  - The approved Settings states preserve visible dependency-blocked,
+    incompatible, pending-restart, repairable config, icon fallback, and
+    uninstall data-retention prompts.
+  - This decision records approved wireframe behavior only. It does not freeze
+    this spec or create implementation progress items.

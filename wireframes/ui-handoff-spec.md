@@ -6,10 +6,11 @@ Primary artifact for final-implementation shell behavior: `wireframes/r05-final-
 Legacy MVP baseline artifact: `wireframes/r04-single-page-app/index.html`
 
 This document explains the approved C4OS wireframe behavior as an
-implementation handoff. It now has two layers: r04 remains the accepted MVP
-baseline for the original app shell and detailed screen set, while approved
-r05 Batch 1 supersedes r04 only for final-implementation shell-foundation
-behavior in specs 01 and 02.
+implementation handoff. It now has three layers: r04 remains the accepted MVP
+baseline for the original app shell and detailed screen set, approved r05 Batch
+1 supersedes r04 only for final-implementation shell-foundation behavior in
+specs 01 and 02, and approved r05 Batch 2 supersedes r04 only for the focused
+Settings behavior in specs 03, 04, and 11.
 
 ## 1. How To Use This Document
 
@@ -88,10 +89,14 @@ The handoff is derived from:
 - `.agents/specs/research/acceptance.md`
 - `.agents/specs/01-shell-plugin-architecture-refactor/`
 - `.agents/specs/02-core-app-shell-ux/`
+- `.agents/specs/03-plugin-system-settings-management/`
+- `.agents/specs/04-runtime-tool-policy/`
+- `.agents/specs/11-skills-settings/`
 
 The r05 prototype is the approved final-implementation shell-foundation review
-target for specs 01 and 02. The r04 prototype remains the legacy MVP handoff
-baseline for routes and surfaces not superseded by r05 Batch 1.
+target for specs 01 and 02 and the approved focused Settings review target for
+specs 03, 04, and 11. The r04 prototype remains the legacy MVP handoff
+baseline for routes and surfaces not superseded by an approved r05 batch.
 
 ## 3A. r05 Final-Implementation Shell Addendum
 
@@ -152,6 +157,64 @@ r04 route carry-forward:
   r04 right tabs and deferred as plugin content.
 - Provider/model popovers and settings subsections remain deferred unless a
   later batch approves them.
+
+## 3B. r05 Batch 2 Settings Addendum
+
+Revision: `wireframes/r05-final-implementation/`
+
+Approval status: approved Batch 2 Settings and Configuration behavior.
+
+This revision supersedes r04 only for the focused Settings routes needed by
+specs 03, 04, and 11. It does not recreate or approve all r04 Settings routes.
+
+Normative r05 Batch 2 Settings behavior:
+
+- Settings > Plugins keeps the r04-style Plugins page identity and functional
+  marketplace controls.
+- The Built by C4OS source menu shows the current source label, a separator,
+  and `+ Add Marketplace`.
+- Built by C4OS plugin examples for this batch are File system, File editor,
+  Terminal, Chat Debug, and Browser.
+- Plugin add opens a connect modal. The connect modal includes Advanced
+  settings, which routes to plugin detail.
+- Plugin detail is the advanced-settings surface for rendered plugin
+  configuration. It must not show the generic plugin-list search or Add source
+  controls.
+- Plugin detail shows a schema-rendered form with examples for input, number,
+  switch, select, sensitive/redacted input, default-only value, panel placement,
+  and icon order. Default-only values demonstrate plugin-provided values that
+  are visible but not user-editable.
+- Repair states and tool policy summaries sit below the rendered plugin form.
+- Dependency-blocked, incompatible, pending-restart, repairable config, icon
+  fallback, and uninstall data-retention prompt states are represented as
+  reviewable Settings states.
+- Settings > Configuration shows per-server-tool policy rows with explanations,
+  default/max policy, and icon-only edit/revoke actions. Session-only remembered
+  rules are not shown in global Settings.
+- Config parse-error state keeps the last valid config active and blocks saving
+  until the config source is repaired or restored.
+- Settings > Skills keeps the r04-style functional list. Skill rows open a
+  detail modal instead of rendering a static inline detail panel.
+- Skill detail remains metadata-first. Bundled skill customization creates a
+  user-global copy. Invalid skills remain visible in Settings with repair
+  actions while staying hidden from `$` suggestions.
+
+r05 Batch 2 review routes:
+
+| Route | Durable handoff meaning |
+| --- | --- |
+| `#settings-plugins` | Plugin list with C4OS plugin status, source, panel, icon-order, fallback, and state links. |
+| `#settings-plugin-marketplace` | Plugins page with Built by C4OS source menu, add-marketplace dialog, C4OS plugin catalog, connect modal, and Advanced settings route. |
+| `#settings-plugin-detail` | Advanced plugin settings renderer with schema fields, sensitive redaction, default-only value, repair states, and tool policy summary. |
+| `#settings-plugin-states` | Dependency-blocked, incompatible, pending-restart, repairable, and icon-fallback plugin states. |
+| `#settings-plugin-uninstall` | Plugin-owned data keep/delete prompt before uninstall. |
+| `#settings-configuration` | Per-server-tool policy items and global edit/revoke controls. |
+| `#settings-config-error` | Config parse-error and last-valid fallback behavior. |
+| `#settings-skills` | Functional Skills list with modal detail behavior. |
+| `#settings-skill-detail` | Metadata-first skill detail route. |
+| `#settings-skill-customize` | Bundled read-only skill to user-global editable copy flow. |
+| `#settings-skill-invalid` | Invalid skill states and `$` suggestion filtering behavior. |
+| `#coverage` | Specs 03, 04, and 11 Batch 2 coverage matrix. |
 
 ## 4. Product Frame
 

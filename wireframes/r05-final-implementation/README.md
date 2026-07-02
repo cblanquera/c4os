@@ -1,8 +1,11 @@
 # C4OS r05 Final Implementation Shell Foundation Wireframe
 
-Draft stage: wireframe review, Batch 1.
+Draft stage: wireframe review, Batch 2.
 
-This revision is a new major wireframe revision because the final implementation shell model changes the r04 layout contract. It keeps r04 as reference history only and does not copy the full r04 route set.
+This revision is the continuing r05 final-implementation wireframe because Batch
+1 was approved and not rejected. It keeps the approved r05 shell model, uses r04
+only as a still-relevant Settings structure reference, and adds only the
+Settings and Configuration routes needed to review specs 03, 04, and 11.
 
 ## Scope
 
@@ -17,6 +20,14 @@ This revision is a new major wireframe revision because the final implementation
 - Resize/collision behavior preserving a 640px center pane.
 - Hidden plugin unread/activity indicators.
 - Invalid shell layout repair state.
+- Settings > Plugins list, detail/settings renderer, marketplace source/install
+  flow, dependency/incompatibility/pending-restart/repair states, uninstall
+  data prompt, sensitive setting redaction, icon fallback, and panel/icon-order
+  configuration.
+- Settings > Configuration per-server-tool policy rows, remembered approval
+  rule review/edit/revoke controls, and config parse-error/last-valid fallback.
+- Settings > Skills list, metadata-first detail, bundled customization copy,
+  and invalid skill states hidden from `$` suggestions.
 
 ## Review Routes
 
@@ -30,7 +41,18 @@ This revision is a new major wireframe revision because the final implementation
 | `./index.html#debug` | Chat Debug command, tool call, result, and approval history. |
 | `./index.html#repair-state` | Invalid shell layout repair/disable state. |
 | `./index.html#settings` | Settings center route and panel restore contract. |
-| `./index.html#coverage` | r05 route/state coverage matrix for specs 01 and 02. |
+| `./index.html#settings-plugins` | Settings > Plugins list with status, source, panel, icon order, fallback icon, and flow links. |
+| `./index.html#settings-plugin-detail` | Plugin detail/settings renderer with input, number, switch, select, default-only, and redacted sensitive values. |
+| `./index.html#settings-plugin-marketplace` | Plugins page with clickable marketplace/add source/install review flow. |
+| `./index.html#settings-plugin-states` | Dependency-blocked, incompatible, pending-restart, repairable, and icon-fallback states. |
+| `./index.html#settings-plugin-uninstall` | Uninstall prompt with plugin-owned data choice. |
+| `./index.html#settings-configuration` | Per-server-tool policy rows with edit/revoke icon actions. |
+| `./index.html#settings-config-error` | config.toml parse-error and last-valid fallback state. |
+| `./index.html#settings-skills` | Clickable Skills list with source/status/suggestion boundaries. |
+| `./index.html#settings-skill-detail` | Metadata-first skill detail. |
+| `./index.html#settings-skill-customize` | Bundled read-only skill customization copy flow. |
+| `./index.html#settings-skill-invalid` | Invalid skill states and `$` suggestion filtering. |
+| `./index.html#coverage` | Batch 2 route/state coverage matrix for specs 03, 04, and 11. |
 
 ## r04 Route Carry-Forward Decision
 
@@ -48,13 +70,17 @@ This revision is a new major wireframe revision because the final implementation
 | `#settings-add-provider` | Deferred | Provider form details are outside Batch 1 shell foundation. |
 | `#settings-models` | Deferred | Model settings are outside Batch 1 shell foundation. |
 | `#settings-runtimes` | Deferred | Runtime settings are outside Batch 1 shell foundation. |
-| `#settings-configuration` | Deferred | Configuration details are outside Batch 1 shell foundation. |
-| `#settings-plugins` | Partially carried forward through `#settings` and `#repair-state` | Batch 1 only needs plugin configuration placement and repair entry. |
-| `#settings-skills` | Deferred | Skills settings are outside Batch 1 shell foundation. |
+| `#settings-configuration` | Focused Batch 2 route added | Covers spec 04 server-tool policy, remembered approvals, and config fallback only. |
+| `#settings-plugins` | Focused Batch 2 route added | Covers spec 03 plugin settings/configuration states without recreating all r04 catalog behavior. |
+| `#settings-skills` | Focused Batch 2 route added | Covers spec 11 skills list/detail/customize/invalid behavior only. |
 | `#settings-mcp` | Deferred | MCP settings are outside Batch 1 shell foundation. |
 
 ## Simulation Boundary
 
-This is static HTML/CSS/JS for wireframe review only. Plugin state, tool fanout, panel restore, resize collision, Settings restore, Chat Debug history, and repair state are simulated to make the shell behavior reviewable before implementation.
+This is static HTML/CSS/JS for wireframe review only. Plugin state, tool fanout,
+panel restore, resize collision, Settings restore, Chat Debug history, plugin
+marketplace install, policy editing, config fallback, skill customization, and
+repair states are simulated to make the behavior reviewable before
+implementation.
 
 Safe to delete: yes. This is a review artifact, not product code.

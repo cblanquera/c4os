@@ -190,3 +190,9 @@ Status: proposed
 | EVD-POC-003 | `proofs/approval-remember-policy/` | `node --test proofs/approval-remember-policy/proof.test.mjs` passed on 2026-07-02. Supports remembered approval key shape, duration behavior, and per-tool Settings controls. |
 | EVD-POC-004 | `proofs/pi-runtime-app-layer-proof/` | `node --test proofs/pi-runtime-app-layer-proof/proof.test.mjs` passed on 2026-07-02. Supports Pi app-layer streaming, tool interception, denial, and resume contract. |
 | EVD-POC-005 | `proofs/model-attachment-adapter/` | `node --test proofs/model-attachment-adapter/proof.test.mjs` passed on 2026-07-02. Supports OpenAI-compatible attachment translation, degradation, and redacted logging. |
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#settings-configuration`, `#settings-config-error`, `#settings-plugin-detail`, `#coverage`; `wireframes/r05-final-implementation/review-round-06.md`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-02 as Batch 2 Settings wireframe evidence for runtime tool policy. The approved UI shows per-server-tool policy rows with explanations, default and maximum authority pills, icon-only edit/revoke actions, no session-only rule list in global Settings, plugin detail routing to tool policy below the rendered settings form, and config parse-error/last-valid fallback. |

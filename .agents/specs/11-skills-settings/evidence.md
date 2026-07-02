@@ -81,3 +81,9 @@ Status: proposed
   suggestion filtering.
   Load when: verifying the Skills Settings invalid-state proof.
   Skip when: the spec-local POC result and decision are enough.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#settings-skills`, `#settings-skill-detail`, `#settings-skill-customize`, `#settings-skill-invalid`, `#coverage`; `wireframes/r05-final-implementation/review-round-06.md`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-02 as Batch 2 Settings wireframe evidence for Skills Settings. The approved UI keeps the r04-style functional skills list, uses clickable skill rows that open a detail modal, preserves metadata-first detail behavior, shows bundled read-only customization to a user-global copy, and exposes invalid skill states with repair actions while keeping invalid skills out of `$` suggestions. |

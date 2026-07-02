@@ -75,3 +75,22 @@ Source: `proofs/skills-settings-invalid-states/`
     `proofs/prompt-tag-resolution/`, the plugin-provided-skill parent
     enablement boundary, and the FS authority requirement for separately
     promoted project-local skills.
+
+### DEC-007: 2026-07-02 Approved Batch 2 Wireframes - Skills Settings
+
+Source: `wireframes/r05-final-implementation/review-round-06.md`,
+`wireframes/r05-final-implementation/qa/notes.md`, and approved user review on
+2026-07-02.
+
+  - Settings > Skills keeps the r04-style functional list behavior: rows are
+    clickable controls and open a detail modal rather than rendering a static
+    inline detail panel on the list route.
+  - The skill detail state remains metadata-first and shows name,
+    description, source/status-style controls, and detail copy without loading
+    full instructions into runtime context by default.
+  - Bundled skill customization creates a user-global copy and leaves the
+    bundled source read-only.
+  - Invalid skill states remain visible in Settings with repair actions while
+    staying hidden from `$` suggestions and runtime context.
+  - This decision records approved wireframe behavior only. It does not freeze
+    this spec or create implementation progress items.
