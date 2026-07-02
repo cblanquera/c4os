@@ -11,3 +11,5 @@ Status: proposed
 | REQ-005 | Persist visible plugin panels per chat session and restore them on session switch. |
 | REQ-006 | Enforce 640px center-pane minimum and collision behavior. |
 | REQ-007 | Open Settings as a center route that closes panels and restores per-chat panels when leaving. |
+| REQ-008 | Define shell layout as a documented event-driven state machine for icon click, panel replacement, Settings route, resize collision, session switch, and hidden plugin event delivery. |
+| REQ-009 | Keep visible shell language and repair/empty states worker-friendly and not coding-only. |

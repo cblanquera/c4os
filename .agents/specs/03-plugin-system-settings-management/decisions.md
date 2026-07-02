@@ -173,6 +173,9 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 Source: `.agents/references/research/final-implementation-import/grill-session/050-c4os-grill-question-050-plugin-migration-failure-handling.json`
 
   - Which plugin migration failures should C4OS automatically recover from?: Auto-recover cache, reinstallable bundle, and stale-index failures only
+  - Other migration or schema failures disable the affected plugin with a
+    visible repair reason and do not run plugin code until the user repairs,
+    reinstalls, resets plugin-owned data, or disables the plugin.
   - Which plugin migration failures should cause visible disablement instead of recovery?: Unsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle
   - How should C4OS handle corrupt plugin-owned user config during migration?: Reset corrupt plugin config automatically and keep plugin enabled
   - Where should migration failures be surfaced to the user?: Settings > Plugins with disabled reason and repair actions
@@ -193,3 +196,48 @@ Source: 2026-07-02 grill intake, "Plugin Sensitive Settings Storage".
   - Redaction boundary: Settings, thread context, Chat Debug, logs, and
     inspectable tool state never display or persist raw sensitive setting
     values.
+
+### DEC-015: Backend App Architect Resolution - Plugin Standards And Lifecycle
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Standards precedence: When plugin, skill, marketplace, or manifest behavior
+    is uncertain, C4OS checks OpenAI/Codex conventions first,
+    Claude/Anthropic conventions second, and broader open standards such as MCP
+    third. Any local C4OS deviation must be explicit in `agents/c4os.yaml`.
+  - Manifest split: Codex-compatible metadata remains in `plugin.json` or the
+    current Codex-standard equivalent. C4OS app-shell metadata lives in
+    `agents/c4os.yaml`. C4OS must not require standards-owned metadata to be
+    duplicated into C4OS-only files.
+  - Marketplace safety: Marketplace installation is metadata-first. C4OS reads
+    package identity, versions, manifests, settings schema, dependencies, and
+    declared capabilities before loading instructions, launching services, or
+    granting runtime access.
+  - Memory/RAM lifecycle: Plugin views are lightweight per-chat state
+    instances. Heavy services are lazy, shared at app/user/workspace/project
+    scope, observable, and shut down on idle, disable, uninstall, close, or app
+    exit.
+  - Windows compatibility: Plugin cache, config, icon paths, service launch,
+    trash/recycle hooks, and secret storage must use platform adapters. Specs
+    may name macOS/Linux paths only as examples, not as portable contracts.
+  - Maintainability: Generated plugin loader/settings code must isolate
+    parsing, validation, persistence, lifecycle, service supervision, and UI
+    rendering into separate modules with documented state transitions and
+    repair reasons.
+
+### DEC-016: 2026-07-02 POC Batch - Plugin Settings And Lifecycle
+
+Source: `proofs/plugin-settings-renderer/`,
+`proofs/codex-marketplace-install-cache/`,
+`proofs/plugin-svg-sanitization/`, and
+`proofs/plugin-lifecycle-pending-restart-and-service-scope/`.
+
+  - Promote schema-rendered plugin settings, redacted sensitive storage, simple
+    `visibleWhen`, unknown-key warnings, and reserved-key validation as feasible.
+  - Promote metadata-first marketplace cache install, uninstall cache removal,
+    and reinstall from source as feasible.
+  - Promote static sanitized SVG with fallback icon as feasible.
+  - Promote pending-restart backend registration, visible dependency states,
+    and narrow shared heavy-service lifecycle as feasible.
+  - These are POC decisions only. They do not freeze this spec or create
+    implementation progress items.

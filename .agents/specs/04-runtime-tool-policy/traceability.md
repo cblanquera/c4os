@@ -30,3 +30,13 @@ This spec derives project-wide truth from `.agents/context/` and detailed eviden
   Purpose: Exact grill Q&A JSON source records.
   Load when: verifying a QID, answer wording, note, or superseded question.
   Skip when: local decisions and context already answer the planning question.
+
+## POC Coverage
+
+| Proof | Requirements | Evidence |
+| --- | --- | --- |
+| `proofs/runtime-tool-discovery-without-plugin-view/` | REQ-001, REQ-002, REQ-007, REQ-009, REQ-010 | EVD-POC-001 |
+| `proofs/user-directed-file-access-policy/` | REQ-003, REQ-010 | EVD-POC-002 |
+| `proofs/approval-remember-policy/` | REQ-003, REQ-008 | EVD-POC-003 |
+| `proofs/pi-runtime-app-layer-proof/` | REQ-005, REQ-006 | EVD-POC-004 |
+| `proofs/model-attachment-adapter/` | REQ-009, REQ-010 | EVD-POC-005 |

@@ -163,3 +163,12 @@ Status: proposed
   Purpose: Exact accepted grill answer for 050: C4OS Grill Question 050 - Plugin Migration Failure Handling.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 050.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## POC Execution Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-POC-001 | `proofs/plugin-settings-renderer/` | `node --test proofs/plugin-settings-renderer/proof.test.mjs` passed on 2026-07-02. Supports settings rendering, persistence, redaction, warnings, and reserved-key validation. |
+| EVD-POC-002 | `proofs/codex-marketplace-install-cache/` | `node --test proofs/codex-marketplace-install-cache/proof.test.mjs` passed on 2026-07-02. Supports install cache, uninstall, and reinstall semantics. |
+| EVD-POC-003 | `proofs/plugin-svg-sanitization/` | `node --test proofs/plugin-svg-sanitization/proof.test.mjs` passed on 2026-07-02. Supports sanitized static SVG with fallback. |
+| EVD-POC-004 | `proofs/plugin-lifecycle-pending-restart-and-service-scope/` | `node --test proofs/plugin-lifecycle-pending-restart-and-service-scope/proof.test.mjs` passed on 2026-07-02. Supports live UI settings, pending-restart backend tools, dependency states, and shared service lifecycle. |

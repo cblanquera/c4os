@@ -10,3 +10,6 @@ Status: proposed
 | REQ-004 | Support branch choose/create popover only when git exists; chat thread branch remains read-only. |
 | REQ-005 | Store C4OS attachment records and let model adapters translate or degrade safely. |
 | REQ-006 | Support file references, Browser screenshots, and many Browser annotation attachments. |
+| REQ-007 | Route authoritative prompt tag resolution and `/` command execution through backend/gateway services rather than frontend-only parsing. |
+| REQ-008 | Include source, target metadata, memory/size limits, provider compatibility, redaction policy, and degradation status in attachment/reference records. |
+| REQ-009 | Use worker-friendly prompt labels and approval text that explain impact without assuming coding-only workflows. |

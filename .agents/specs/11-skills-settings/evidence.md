@@ -72,3 +72,12 @@ Status: proposed
   Purpose: Exact accepted grill answer for 048: C4OS Grill Question 048 - Skills Customization And Invalid States.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 048.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## POC Evidence
+
+- `proofs/skills-settings-invalid-states/`
+  Purpose: Runnable proof for metadata-first skill discovery, source
+  precedence, customization copy, invalid-state repair visibility, and `$`
+  suggestion filtering.
+  Load when: verifying the Skills Settings invalid-state proof.
+  Skip when: the spec-local POC result and decision are enough.

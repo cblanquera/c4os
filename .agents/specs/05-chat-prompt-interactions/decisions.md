@@ -92,3 +92,48 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Which app-tool categories must be represented?: Only plugin-contributed tools
   - Which Pi capabilities are proof-critical?: Prompt execution, streaming, tool-call interception, approval denial, and resume
   - Where should `/` prompt commands route?: Runtime/tool gateway command handling with C4OS and plugin command definitions
+
+### DEC-011: Backend App Architect Resolution - Prompt Interactions
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Parsing boundary: `$`, `@`, and `/` are UI affordances backed by C4OS
+    resolver records. The frontend may tokenize for display, but authoritative
+    resolution, permission checks, disabled-resource filtering, and command
+    execution route through backend/gateway services.
+  - Worker-friendly language: Prompt UI labels should say Skills, Files,
+    Resources, Commands, Approvals, Attachments, and Branch only when the
+    concept is actually relevant. Coding-specific labels must not leak into
+    non-code workflows.
+  - Attachment model: Files, Browser screenshots, Browser annotations, and
+    plugin-provided references become C4OS attachment/reference records with
+    source plugin, target metadata, size/memory limits, provider compatibility
+    status, and redaction policy.
+  - Approval UI: Approval prompts show tool title, action, target, risk,
+    plugin/source, remembered duration, and plain-language impact. They emit
+    typed approval decision events for thread context, Chat Debug, audit, and
+    runtime resume.
+  - Maintainability: Prompt interaction implementation separates tokenizer,
+    resolver, attachment store, approval event contract, provider adapter
+    degradation, and view components.
+
+### DEC-012: 2026-07-02 POC Batch - Prompt Interaction Flow
+
+Source: `proofs/approval-ui-flow/`, `proofs/prompt-tag-resolution/`, and
+`proofs/attachment-compatibility/`.
+
+  - Promote typed approval decision events for allow, deny, and remember flows.
+    Remembered-rule summaries include tool, action/risk category, target
+    scope, plugin id when relevant, and session-only or user-global duration.
+  - Promote backend-authoritative `$`, `@`, and `/` resolution, with frontend
+    tokenization limited to display and disabled or dependency-blocked
+    resources hidden from executable resolution.
+  - Promote C4OS attachment records for files, Browser screenshots, and Browser
+    annotations with source, target metadata, limits, provider compatibility,
+    fallback, and redaction fields.
+  - The attachment proof depends on the already passed
+    `proofs/model-attachment-adapter/` provider-adapter direction and covers
+    prompt-level record collection and handoff rather than re-proving provider
+    internals.
+  - These are POC decisions only. They do not freeze this spec or create
+    implementation progress items.

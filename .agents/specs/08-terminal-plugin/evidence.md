@@ -2,6 +2,13 @@
 
 Status: proposed
 
+## POC Evidence Routing
+
+- `proofs/terminal-user-pty-lifecycle/`
+  Purpose: Executable proof for one user PTY per chat, cwd selection, chat-delete cleanup, and separation from runtime terminal tools.
+  Load when: verifying Terminal plugin lifecycle, cwd defaults, or runtime/tool separation.
+  Skip when: the spec-local POC result already answers the question.
+
 ## Primary Source Routing
 
 - `.agents/references/research/final-implementation-import/adhoc-goals.md`

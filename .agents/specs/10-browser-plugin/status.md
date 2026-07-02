@@ -34,3 +34,10 @@ Created: 2026-07-02
   model, multi-annotation support, and clear-after-send behavior.
 - No additional Browser-specific grill question is currently needed from the
   Q036/Q042 overlap set.
+
+## Architect Resolution
+
+- Browser gaps are resolved toward plugin-owned Browser views, C4OS-owned
+  Browser state and attachments, typed events, Codex-style annotations,
+  document-family plugin preview ownership, platform/security provisions, and
+  general worker evidence-capture workflows.

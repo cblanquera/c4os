@@ -81,6 +81,16 @@ Use these statuses for work-order records:
 - The current planning stream uses a plugin-first shell: persistent chat center, one header, Settings center route, and no default right panel.
 - Built-in C4OS app plugins ship with the default app install, are disabled by default, and are modeled as bundled/default marketplace entries.
 - C4OS app plugins are separate from Tauri plugins. Runtime and plugin tool calls flow through the C4OS-owned tool gateway.
+- When a final-implementation spec is uncertain, resolve toward popular AI
+  ecosystem conventions in this order: OpenAI/Codex, Claude/Anthropic, then
+  broader open standards such as MCP. Local C4OS deviations must be explicit.
+- Tauri tools should follow MCP-shaped structure without turning C4OS into a
+  generic MCP server: stable tool IDs, typed input/output contracts, capability
+  metadata, approval policy, structured results, and lifecycle events.
+- The backend app architecture target is a thin shell plus rich plugins,
+  event-driven communication, C4OS-owned authority, memory-aware service
+  lifecycles, Windows-ready platform abstractions, maintainable generated code,
+  and worker-friendly UX beyond coding-only workflows.
 - Workspace/project registry state and chats live in user-level app state. Workspace files are explicit load/save groupings of project folder references, not chat owners.
 - Prompt tags are `$` for skills, `@` for plugin resources/files, and `/` for runtime/tool-gateway commands.
 - Plugin settings live in user-level config and may reserve shell keys such as `enabled`, `panel`, and `iconOrder`.

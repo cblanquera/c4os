@@ -153,3 +153,18 @@ Status: proposed
   Purpose: Exact accepted grill answer for 031: C4OS Grill Question 031 - Project Search.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 031.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## POC Evidence Routing
+
+- `proofs/fs-workspace-file-and-relink/`
+  Purpose: Executable proof for workspace file load/save, user-level chat ownership, missing read-only state, and explicit relink migration.
+  Load when: verifying workspace descriptor boundaries, project identity relocation, or missing project behavior.
+  Skip when: the spec-local POC result already answers the question.
+- `proofs/project-chat-sharing-across-workspaces/`
+  Purpose: Executable proof that the same canonical project folder shares chats across multiple workspace files.
+  Load when: checking workspace/chat ownership separation or cross-workspace chat hydration.
+  Skip when: the spec-local POC result already answers the question.
+- `proofs/project-and-chat-removal-semantics/`
+  Purpose: Executable proof separating Remove Chat deletion from Remove Project membership removal.
+  Load when: checking project removal, chat deletion, or preserved project-history semantics.
+  Skip when: the spec-local POC result already answers the question.

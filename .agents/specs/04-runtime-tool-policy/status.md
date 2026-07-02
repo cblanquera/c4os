@@ -27,3 +27,10 @@ Created: 2026-07-02
   plugin id for plugin tools, duration is user-selected as session-only or
   user-global, and Settings > Configuration owns review/edit/revoke as
   per-server-tool policy items with tool explanations.
+
+## Architect Resolution
+
+- Runtime/tool open questions are resolved toward a C4OS-owned,
+  MCP-shaped internal tool gateway with structured descriptors, typed request
+  and result envelopes, lifecycle events, approval policy, traceability,
+  cancellation, output caps, redaction metadata, and standards-first alignment.

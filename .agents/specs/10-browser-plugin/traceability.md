@@ -13,6 +13,9 @@ Status: proposed
 | REQ-005 | AC-002 | 036, 036A | Document-family preview boundary and corrected Browser role |
 | REQ-006 | AC-003 | 010, 024 | Browser activation does not create chat item |
 | REQ-007 | AC-004 | 002B, 024, 2026-07-02 grill refinements | Browser-oriented runtime tool state can exist before a visible Browser view and hydrate later |
+| REQ-002, REQ-003, REQ-004 | AC-001, AC-005 | POC `proofs/browser-annotation-attachment-model/` | Many annotation evidence bundle proof |
+| REQ-005 | AC-002 | POC `proofs/browser-document-preview-boundary/` | Browser hosting and document-family ownership proof |
+| REQ-007 | AC-004, AC-005 | POC `proofs/browser-state-hydration-without-visible-view/` | App-owned Browser state hydration proof |
 
 ## Source Rule
 

@@ -13,3 +13,7 @@ Status: proposed
 | AC-007 | `agents/c4os.yaml` keeps dependencies in a separate top-level manifest section from user-facing `settings`; required missing dependencies block enablement, while optional missing dependencies keep the plugin enabled and visibly hide or degrade only dependent contributions. |
 | AC-008 | Shell-reserved settings keys `panel`, `enabled`, and `iconOrder` are accepted only with compatible field types and allowed values; invalid reserved-key declarations disable or repair the affected shell contribution with a visible reason. |
 | AC-009 | Sensitive plugin settings persist in secure secret storage/keychain, config files contain only references or redacted placeholders, plugin views show redacted display values, and raw secret use is only available through C4OS-governed tool/service calls. |
+| AC-010 | The spec includes a standards-alignment table for plugin manifests, skills, marketplace sources, MCP connections, and C4OS-only metadata, including the accepted local deviation for each. |
+| AC-011 | Passive discovery produces metadata and visible status only; service start, hook execution, instruction loading, tool exposure, and runtime access require explicit enablement. |
+| AC-012 | Platform-specific cache/config/secret/service/path behaviors identify macOS, Linux, and Windows handling or an explicit deferred validation note. |
+| AC-013 | The implementation plan separates loader, parser, validator, lifecycle supervisor, settings renderer, and persistence responsibilities. |

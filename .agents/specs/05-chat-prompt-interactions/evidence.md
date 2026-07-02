@@ -34,6 +34,36 @@ Status: proposed
   Load when: checking shell layout, UI behavior, visual direction, accessibility, or interaction constraints.
   Skip when: the task is unrelated to this source boundary.
 
+- `proofs/approval-ui-flow/`
+  Purpose: Runnable proof for typed approval decisions, remember duration
+    summaries, thread/Chat Debug summary display, and Settings > Configuration
+    review/edit/revoke routing.
+  Load when: checking approval UI POC evidence, event shape, remembered-rule
+    summaries, or Settings policy routing before freeze.
+  Skip when: local decisions and POC results already answer the question.
+
+- `proofs/prompt-tag-resolution/`
+  Purpose: Runnable proof for `$` Skills, `@` enabled resources/files, `/`
+    runtime/tool-gateway command routing, and disabled-resource hiding.
+  Load when: checking prompt resolver POC evidence or frontend/backend parsing
+    boundaries before freeze.
+  Skip when: local decisions and POC results already answer the question.
+
+- `proofs/attachment-compatibility/`
+  Purpose: Runnable proof for prompt-level C4OS attachment records, Browser
+    screenshot and annotation handoff, OpenAI-compatible adaptation, visible
+    degradation, redacted logs, and clearing active annotations after send.
+  Load when: checking prompt attachment POC evidence or compatibility handoff
+    before freeze.
+  Skip when: local decisions and POC results already answer the question.
+
+- `proofs/model-attachment-adapter/`
+  Purpose: Prior runtime/tool-policy proof for provider adapter translation and
+    degradation on the OpenAI-compatible provider path.
+  Load when: checking the provider-adapter decision that
+    `proofs/attachment-compatibility/` depends on.
+  Skip when: only prompt-level attachment collection is in scope.
+
 - `.agents/references/research/final-implementation-import/grill-session/020-c4os-grill-question-020-app-tool-approval-defaults.json`
   Purpose: Exact accepted grill answer JSON for this spec decision set.
   Load when: verifying the exact accepted user answer, notes, or answer key for this grill question.

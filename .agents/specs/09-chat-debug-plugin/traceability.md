@@ -11,6 +11,7 @@ Status: proposed
 | REQ-003 | AC-001 | 043 | Current and historical runs for active chat |
 | REQ-004 | AC-001 | 043, 2026-07-02 grill refinement | Hard redaction floor including plugin settings marked sensitive |
 | REQ-005 | AC-002 | 043 | No export |
+| REQ-002 through REQ-008 | AC-001 through AC-005 | POC `proofs/chat-debug-redaction-history/` | Redacted typed history proof with approval visibility and no export |
 
 ## Source Rule
 

@@ -96,3 +96,33 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What SVG content should C4OS allow for plugin icons?: Static sanitized SVG only; no scripts, external refs, event handlers, foreignObject, animation, or embedded data
   - How should plugin icons render in the shell?: Fixed-size icon slots with fallback icon on failure
   - Should plugin SVG icons be themeable by C4OS?: Preserve author colors; allow declared monochrome mask mode
+
+### DEC-012: Backend App Architect Resolution - Shell UX
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Shell principle: The app shell stays intentionally thin. It owns chat/session
+    identity, Settings routing, plugin mounting, approval surfaces, and shared
+    layout state; plugins own enhanced work surfaces.
+  - Event model: Plugin panel visibility, unread/activity indicators, tool
+    result hydration, and Settings restore behavior are driven by typed C4OS
+    shell/plugin events, not direct cross-plugin UI calls.
+  - Worker-friendly UX: Header icons, panel toggles, empty states, repair
+    states, and Settings language must be understandable to operations,
+    support, admin, research, and normal knowledge workers, not only coders.
+  - Maintainability: Shell layout behavior must be implemented as a small
+    state machine with documented transitions for icon click, same-side
+    replacement, opposite-side collision, Settings enter/leave, session switch,
+    and hidden plugin event delivery.
+
+### DEC-013: 2026-07-02 POC Batch - Shell Panel State Machine
+
+Source: `proofs/shell-panel-resize-and-restore/`.
+
+  - Promote a shell-owned state machine for plugin panel toggles, same-side
+    replacement, per-chat visible panel restoration, Settings close/restore,
+    and resize collision handling.
+  - Resize behavior must preserve the 640px center-pane minimum by closing the
+    opposite-side panel when needed before clamping panel expansion.
+  - This is a POC decision only. It does not freeze this spec or create
+    implementation progress items.

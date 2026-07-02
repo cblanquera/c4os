@@ -22,3 +22,10 @@ Created: 2026-07-02
 - Acceptance criteria are planning acceptance only. Before freeze, convert them into executable acceptance with concrete verification method, evidence target, and pass/fail boundary.
 - Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
 - Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
+
+## Architect Resolution
+
+- Skills Settings gaps are resolved toward standards-first,
+  metadata-first skill discovery, explicit source precedence, no runtime impact
+  from invalid or disabled skills, supply-chain-aware filtering, and
+  worker-friendly skill language.

@@ -34,6 +34,14 @@ Status: proposed
   Load when: checking accepted sequencing, guardrails, status, validation needs, or whether work may become active.
   Skip when: the task is unrelated to this source boundary.
 
+- `proofs/shell-panel-resize-and-restore/`
+  Purpose: Runnable proof for panel toggle, same-side replacement,
+    per-session restore, Settings route close/restore, and resize collision
+    preserving a 640px center pane.
+  Load when: checking shell-panel POC evidence, proof commands, or state-machine
+    behavior before freeze.
+  Skip when: local decisions and POC results already answer the question.
+
 - `.agents/references/research/final-implementation-import/grill-session/003-c4os-grill-question-003-tool-view-selection.json`
   Purpose: Exact accepted grill answer JSON for this spec decision set.
   Load when: verifying the exact accepted user answer, notes, or answer key for this grill question.

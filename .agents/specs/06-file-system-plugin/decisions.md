@@ -98,3 +98,42 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - What should Search Projects search?: Chat threads only
   - How should search results appear?: Center-screen takeover with X close button
+
+### DEC-014: Backend App Architect Resolution - Filesystem And Workspace
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Platform storage: User-level app state and config use the OS-standard
+    per-user app data/config directory through a platform adapter. Windows uses
+    the equivalent known-folder/AppData locations through the adapter rather
+    than hard-coded Unix-style paths.
+  - Project identity: Canonical path remains the accepted project identity for
+    this scope. To reduce relocation risk, records also store display name,
+    last known path, optional filesystem metadata when available, and relink
+    history. Relocation is explicit user action and migrates chat ownership to
+    the new canonical path.
+  - Worker-friendly workspaces: Workspace UI should support generic project,
+    client, operations, research, and knowledge-work folders. Git features are
+    conditional enhancements, not required for using C4OS.
+  - Event model: Workspace load/save, project add/remove/relink, missing-state
+    detection, clone completion, search open/close, and Browser non-chat
+    activation emit typed C4OS events for shell/plugin hydration.
+  - Windows compatibility: Path normalization, case sensitivity, drive roots,
+    UNC paths, symlinks/junctions, file watching, reveal-in-file-manager, copy
+    path, and trash/recycle behavior must be adapter-owned.
+  - Maintainability: Registry storage, workspace-file IO, project identity,
+    file watching, platform operations, and UI search behavior are separate
+    modules with documented failure and repair states.
+
+### DEC-015: POC Result - Workspace Files, Chat Sharing, Relink, And Removal
+
+Source: `proofs/fs-workspace-file-and-relink/`, `proofs/project-chat-sharing-across-workspaces/`, `proofs/project-and-chat-removal-semantics/`
+
+  - Workspace files contain workspace name and project folder references only;
+    user-level app state owns project records and chats.
+  - Canonical project folder identity is the chat lookup key, so the same
+    project folder shares chats across multiple workspace files.
+  - Missing project records become muted/read-only with last-known path until
+    explicit relocation migrates chat ownership to the new canonical path.
+  - Remove Chat deletes selected C4OS-owned history; Remove Project removes
+    only current workspace membership and preserves project history.

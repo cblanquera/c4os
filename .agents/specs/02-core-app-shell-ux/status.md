@@ -21,4 +21,12 @@ Created: 2026-07-02
 
 - Acceptance criteria are planning acceptance only. Before freeze, convert them into executable acceptance with concrete verification method, evidence target, and pass/fail boundary.
 - Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
-- Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
+- Wireframes are still pending where named by this spec. The shell panel POC has
+  passed, but do not treat this spec as implementation-ready until remaining
+  records are created, reviewed, and accepted or explicitly deferred.
+
+## Architect Resolution
+
+- Shell UX open questions are resolved toward a thin event-driven shell with
+  plugin-owned enhanced work surfaces, worker-friendly language, and a
+  documented layout state machine.

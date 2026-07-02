@@ -182,3 +182,52 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Which app-tool categories must be represented?: Only plugin-contributed tools
   - Which Pi capabilities are proof-critical?: Prompt execution, streaming, tool-call interception, approval denial, and resume
   - Where should `/` prompt commands route?: Runtime/tool gateway command handling with C4OS and plugin command definitions
+
+### DEC-017: Backend App Architect Resolution - MCP-Shaped Tool Gateway
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Tool shape: C4OS Tauri tools use an MCP-shaped internal contract with
+    stable tool ID, title, description, input schema, output schema, behavior
+    annotations, default approval policy, maximum authority, capability
+    requirements, and structured result envelope.
+  - Host boundary: C4OS is the host/gateway. Runtimes and plugins may discover,
+    request, or contribute tools, but C4OS owns execution, approval, audit,
+    persistence, trusted-root enforcement, result state, and event fanout.
+  - Event lifecycle: Every tool call emits typed lifecycle events:
+    `tool_call_requested`, `tool_call_policy_evaluated`,
+    `tool_call_approved` or `tool_call_rejected`, `tool_call_started`,
+    `tool_output_delta`, `tool_call_completed` or `tool_call_failed`, and
+    optional `tool_call_cancelled`.
+  - Result state: Tool output is persisted as a C4OS result record with
+    structured content first, text fallback for model compatibility, resource
+    links or attachments where needed, redaction metadata, and provider-adapter
+    translation state.
+  - Operational controls: Tool calls have request IDs, trace IDs, caller
+    identity, target scope, timeout, cancellation, retry policy where safe,
+    memory/output caps, and structured error codes.
+  - Standards resolution: When gateway semantics are uncertain, prefer
+    OpenAI/Codex tool and hosted/local MCP patterns first, then
+    Claude/Anthropic agent conventions, then the MCP specification. C4OS local
+    deviations must remain documented.
+
+### DEC-018: 2026-07-02 POC Batch - Runtime Tool Policy
+
+Source: `proofs/runtime-tool-discovery-without-plugin-view/`,
+`proofs/user-directed-file-access-policy/`,
+`proofs/approval-remember-policy/`,
+`proofs/pi-runtime-app-layer-proof/`, and
+`proofs/model-attachment-adapter/`.
+
+  - Promote runtime discovery/invocation of registered tools without plugin
+    views, with C4OS-owned inspectable state for later view hydration.
+  - Promote explicit user-directed file policy handling and narrow remembered
+    approval rules keyed by tool, risk/action, normalized target scope, and
+    plugin id when applicable.
+  - Promote the Pi app-layer contract for streaming, tool-call interception,
+    approval denial, and resume as feasible pending integration against the
+    real runtime package.
+  - Promote the OpenAI-compatible attachment adapter direction with visible
+    degradation and redacted logs.
+  - These are POC decisions only. They do not freeze this spec or create
+    implementation progress items.

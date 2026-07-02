@@ -47,3 +47,47 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What screenshot scope should annotations attach by default?: Viewport evidence around the selected target
   - What happens to active annotations after send?: Persist on sent prompt attachments; clear active Browser annotations
   - Notes: It's possible to have many annotations.
+
+### DEC-007: Backend App Architect Resolution - Browser
+
+Source: 2026-07-02 user architect profile in active chat.
+
+  - Browser role: Browser is an app plugin/view for web and preview
+    interaction, not a special shell-owned panel. Browser-oriented tools may
+    execute through the C4OS gateway without a visible Browser view and leave
+    app-owned per-chat Browser state for later compatible views.
+  - Event model: Navigation, action request, action result, screenshot,
+    annotation create/update/delete, attach-to-prompt, clear-after-send, and
+    document-preview handoff emit typed C4OS Browser events.
+  - Attachment model: Screenshots and annotations are C4OS attachment records
+    with URL, title, frame, selector/path, viewport, marker/comment, screenshot
+    metadata, source plugin, memory/size limits, redaction status, and provider
+    compatibility.
+  - Standards: Browser annotations follow the accepted Codex-style annotation
+    pattern when uncertain. Document-family previews follow plugin ownership;
+    Browser may host rendered output but does not own document parsing.
+  - Platform/security: Browser implementation must account for macOS, Linux,
+    and Windows webview differences, profile isolation, local-file access,
+    downloads being out of scope unless separately accepted, and no privileged
+    bridge exposure to untrusted pages.
+  - Worker-friendly UX: Browser flows support research, admin, support, and
+    operations evidence capture, not only developer preview workflows.
+
+### DEC-008: POC Result - Browser Annotation, Preview, And Hydration
+
+Source: `proofs/browser-annotation-attachment-model/`,
+`proofs/browser-document-preview-boundary/`,
+`proofs/browser-state-hydration-without-visible-view/`
+
+  - Result: Passed with `node --test
+    proofs/browser-annotation-attachment-model/proof.test.mjs
+    proofs/browser-document-preview-boundary/proof.test.mjs
+    proofs/browser-state-hydration-without-visible-view/proof.test.mjs`.
+  - Decision: Browser attachments should use C4OS-owned screenshot and
+    annotation records; document-family plugins own non-PDF parsing while
+    Browser hosts rendered output; Browser-oriented runtime tools may execute
+    without a visible view and hydrate later compatible views from app-owned
+    per-chat state.
+  - Reconciliation: This keeps Q036 superseded by Q036A, preserves prior
+    runtime tool discovery and attachment compatibility results, and avoids
+    UI-text scraping by relying on typed Browser events.

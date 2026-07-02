@@ -66,6 +66,45 @@ Use this as the technical gate. It summarizes product-owned system concepts, run
 
 C4OS owns the product model and safety boundary even when it delegates execution to OpenCode, Pi, MCP servers, shells, Browser engines, or other runtime components. Runtime concepts should stay behind app-owned adapters unless exposed for advanced compatibility inspection.
 
+## Backend App Architect Profile
+
+Final implementation specs should resolve uncertain backend/product questions
+using this profile:
+
+- Prefer popular AI ecosystem conventions before inventing local shapes. Check
+  OpenAI/Codex conventions first, then Claude/Anthropic conventions, then
+  broader open standards such as MCP when the local record is uncertain.
+- Model Tauri tools like MCP tools structurally: stable IDs, human-readable
+  titles/descriptions, JSON-schema-like input and output contracts, capability
+  metadata, approval policy, structured results, and lifecycle events.
+- Keep C4OS as the host/gateway. Runtime providers and plugins may request or
+  contribute tools, but C4OS owns execution, approval, persistence, trusted-root
+  enforcement, audit records, and app-owned per-chat result state.
+- Use event-driven communication between backend tools, the shell, and app
+  plugins. UI surfaces hydrate from typed C4OS state and events; they must not
+  become the authority for security, persistence, tool execution, or prompt
+  parsing.
+- Keep the shell thin: chat/session identity, settings, navigation, approval,
+  attachment, and plugin mounting are shell primitives. Rich work surfaces
+  belong to plugins.
+- Design for workers as well as coders. Product language, empty states, repair
+  flows, settings, and plugin surfaces should support operations, support,
+  research, admin, and normal knowledge work, not only Git/code workflows.
+- Treat C4OS as a reusable generic AI app harness. Chat sessions, provider
+  adapters, tools, attachments, approvals, plugin views, debug/audit, and
+  runtime adapters should be reusable for future domain-specific AI apps.
+- Keep memory and RAM cost explicit. Heavy services start lazily, are shared at
+  the narrowest safe app/user/workspace/project scope, expose health/activity
+  state, and shut down on idle, disable/uninstall, close, or app exit.
+- Preserve Windows compatibility even before Windows QA exists. Filesystem
+  paths, trash/recycle, config directories, PTY/ConPTY, file watchers, shell
+  environment, browser/webview behavior, and secret storage must sit behind
+  platform adapters with documented fallback behavior.
+- Generate maintainable code: small modules, explicit state machines for
+  lifecycles, narrow service responsibilities, typed contracts, clear naming,
+  JSDoc or Rust doc comments for non-obvious behavior, and readable error
+  paths instead of clever ad hoc logic.
+
 ## Product Model
 
 Minimum product-owned entities include:

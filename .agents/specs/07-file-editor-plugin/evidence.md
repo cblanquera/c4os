@@ -2,6 +2,13 @@
 
 Status: proposed
 
+## POC Evidence Routing
+
+- `proofs/ide-file-operation-boundary/`
+  Purpose: Executable proof for editor save/create/rename/delete-to-trash, external-change conflicts, backend file-service authority, and prompt tag insertion.
+  Load when: verifying File Editor authority boundaries, conflict behavior, guarded delete, or Add to chat semantics.
+  Skip when: the spec-local POC result already answers the question.
+
 ## Primary Source Routing
 
 - `.agents/references/research/final-implementation-import/adhoc-goals.md`

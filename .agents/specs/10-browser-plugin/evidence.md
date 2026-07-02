@@ -95,3 +95,23 @@ Status: proposed
   Purpose: Exact accepted grill answer for 042A: C4OS Grill Question 042A - Browser Annotation Attachment Model.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 042A.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## POC Evidence
+
+- `proofs/browser-annotation-attachment-model/`
+  Purpose: Runnable proof for many Browser annotations attached to one prompt
+  evidence bundle with screenshot and target metadata.
+  Load when: verifying the Browser annotation attachment model proof.
+  Skip when: the spec-local POC result and decision are enough.
+
+- `proofs/browser-document-preview-boundary/`
+  Purpose: Runnable proof for document-family parsing ownership and Browser
+  rendered-output hosting.
+  Load when: verifying the document preview boundary proof.
+  Skip when: the spec-local POC result and decision are enough.
+
+- `proofs/browser-state-hydration-without-visible-view/`
+  Purpose: Runnable proof for Browser tool execution without visible view and
+  later app-owned state hydration into compatible Browser views.
+  Load when: verifying the Browser hydration proof.
+  Skip when: the spec-local POC result and decision are enough.

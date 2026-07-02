@@ -12,3 +12,7 @@ Status: proposed
 | REQ-006 | Constrain plugin SVG icons to installed bundle relative paths and sanitized static SVG. |
 | REQ-007 | Treat per-chat plugin instances as lightweight view/state instances, not backend service/process instances; heavy plugin services use the narrowest safe shared lifecycle scope and lazy startup. |
 | REQ-008 | Store plugin settings marked `sensitive` in C4OS-managed secure secret storage/keychain with only references or redacted placeholders in config files, and expose raw secret use only through governed C4OS calls. |
+| REQ-009 | Resolve uncertain plugin/marketplace behavior against OpenAI/Codex standards first, Claude/Anthropic standards second, and broader open standards such as MCP third, with explicit C4OS deviations. |
+| REQ-010 | Keep plugin discovery metadata-first and inert until explicit user enablement; do not execute plugin code, load full instructions, or start services during passive discovery. |
+| REQ-011 | Route plugin cache, config, secret, path, process/service, and icon handling through platform adapters with Windows-compatible fallback behavior. |
+| REQ-012 | Separate loader, manifest validation, settings persistence, lifecycle supervision, and UI rendering into maintainable modules with documented repair states. |

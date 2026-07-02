@@ -8,3 +8,4 @@ These are planning tasks only. They are not active progress items.
 | --- | --- | --- |
 | TASK-001 | Define shell layout state model and resize invariants. | proposed |
 | TASK-002 | Define Settings route panel restore behavior. | proposed |
+| TASK-003 | Add event-driven shell/plugin transition table and worker-friendly UX wording pass before freeze. | proposed |

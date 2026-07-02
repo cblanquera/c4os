@@ -22,3 +22,9 @@ Created: 2026-07-02
 - Acceptance criteria are planning acceptance only. Before freeze, convert them into executable acceptance with concrete verification method, evidence target, and pass/fail boundary.
 - Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
 - Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
+
+## Architect Resolution
+
+- Chat Debug gaps are resolved toward typed observability events, redaction
+  before persistence/display, bounded per-chat history, no export, and
+  support-friendly diagnostic language.

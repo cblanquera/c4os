@@ -14,6 +14,7 @@ Status: proposed
 | REQ-006 | AC-002 | 048 | Invalid skill state taxonomy |
 | REQ-007 | AC-002 | 048 | Project-local skills require FS if promoted |
 | REQ-008 | AC-002 | 048 | Invalid skills hidden from suggestions with repair actions |
+| REQ-001 through REQ-012 | AC-001 through AC-006 | POC `proofs/skills-settings-invalid-states/` | Metadata-first source, customization, invalid-state, and suggestion-filtering proof |
 
 ## Source Rule
 

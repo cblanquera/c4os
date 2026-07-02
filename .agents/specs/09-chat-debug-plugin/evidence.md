@@ -58,3 +58,12 @@ Status: proposed
   Purpose: Exact accepted grill answer for 047: C4OS Grill Question 047 - Terminal Plugin Tool Boundary.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 047.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## POC Evidence
+
+- `proofs/chat-debug-redaction-history/`
+  Purpose: Runnable proof for typed Chat Debug history, approval visibility,
+  redaction-before-persistence, bounded retention, and no export.
+  Load when: verifying the Chat Debug POC result, proof harness, or evidence
+  README.
+  Skip when: the spec-local POC result and decision are enough.

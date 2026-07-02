@@ -30,3 +30,12 @@ This spec derives project-wide truth from `.agents/context/` and detailed eviden
   Purpose: Exact grill Q&A JSON source records.
   Load when: verifying a QID, answer wording, note, or superseded question.
   Skip when: local decisions and context already answer the planning question.
+
+## POC Coverage
+
+| Proof | Requirements | Evidence |
+| --- | --- | --- |
+| `proofs/plugin-settings-renderer/` | REQ-002, REQ-003, REQ-008 | EVD-POC-001 |
+| `proofs/codex-marketplace-install-cache/` | REQ-005, REQ-011 | EVD-POC-002 |
+| `proofs/plugin-svg-sanitization/` | REQ-006 | EVD-POC-003 |
+| `proofs/plugin-lifecycle-pending-restart-and-service-scope/` | REQ-004, REQ-007, REQ-010, REQ-012 | EVD-POC-004 |

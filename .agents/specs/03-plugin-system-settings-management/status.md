@@ -36,3 +36,11 @@ Created: 2026-07-02
   follow-up: secure secret storage/keychain owns raw values, config stores only
   references or redacted placeholders, and plugins use secrets through
   C4OS-governed calls rather than raw reads by default.
+
+## Architect Resolution
+
+- Plugin system open questions are resolved toward standards-first,
+  metadata-first, inert-by-default discovery; C4OS-specific app-shell metadata
+  in `agents/c4os.yaml`; Codex-compatible metadata in the Codex-standard
+  manifest; memory-aware service lifecycles; Windows-ready platform adapters;
+  and explicit module boundaries for maintainable implementation.

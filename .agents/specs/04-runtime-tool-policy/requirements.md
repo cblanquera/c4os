@@ -12,3 +12,6 @@ Status: proposed
 | REQ-006 | Plan Pi proof for prompt execution, streaming, tool-call interception, approval denial, and resume. |
 | REQ-007 | Keep C4OS as the owner of tool execution and app-level/per-chat tool result state while plugin views hydrate from C4OS-owned state and heavy plugin services use shared lifecycle scopes. |
 | REQ-008 | Surface server-tool policy in Settings > Configuration as one policy item per registered server tool, including a user-readable explanation and review/edit/revoke controls for user-global remembered rules. |
+| REQ-009 | Define the MCP-shaped C4OS tool descriptor, request envelope, lifecycle events, structured result envelope, and structured error taxonomy. |
+| REQ-010 | Include request IDs, trace IDs, caller identity, target scope, approval decision, timeout, cancellation, memory/output caps, and redaction metadata in tool-call records. |
+| REQ-011 | Resolve uncertain tool semantics against OpenAI/Codex tool/MCP patterns first, Claude/Anthropic conventions second, and MCP/open standards third, with explicit local deviations. |

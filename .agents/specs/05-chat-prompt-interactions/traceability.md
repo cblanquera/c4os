@@ -6,12 +6,12 @@ Status: proposed
 
 | Requirement | Acceptance | QIDs | Source Note |
 | --- | --- | --- | --- |
-| REQ-001 | AC-001, AC-004, AC-005 | 020, 021, 021A, 022, 023, 024, 2026-07-02 grill refinement | Approval categories, remembered-rule summaries, duration choices, per-tool policy display, and Settings > Configuration review/revoke routing |
-| REQ-002 | AC-002 | 025, 026, 049 | Prompt tag targets and gateway command routing |
-| REQ-003 | AC-002 | 018, 019, 026 | Dependency-blocked plugin resources and tag suggestion behavior |
+| REQ-001 | AC-001, AC-004, AC-005 | 020, 021, 021A, 022, 023, 024, 2026-07-02 grill refinement, proofs/approval-ui-flow | Approval categories, remembered-rule summaries, duration choices, per-tool policy display, and Settings > Configuration review/revoke routing |
+| REQ-002 | AC-002, AC-006 | 025, 026, 049, proofs/prompt-tag-resolution | Prompt tag targets, backend-authoritative resolver events, and gateway command routing |
+| REQ-003 | AC-002, AC-006 | 018, 019, 026, proofs/prompt-tag-resolution | Dependency-blocked plugin resources and tag suggestion behavior |
 | REQ-004 | AC-002 | 028 | Git branch control visibility and read-only thread branch |
-| REQ-005 | AC-003 | 027, 045 | C4OS attachment records and model adapter fallback |
-| REQ-006 | AC-003 | 027, 032, 042A, 045 | File references, screenshots, and many annotation attachments |
+| REQ-005 | AC-003, AC-007 | 027, 045, proofs/attachment-compatibility, proofs/model-attachment-adapter | C4OS attachment records and model adapter fallback |
+| REQ-006 | AC-003, AC-007 | 027, 032, 042A, 045, proofs/attachment-compatibility | File references, screenshots, and many annotation attachments |
 
 ## Source Rule
 
