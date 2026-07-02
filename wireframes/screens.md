@@ -1,10 +1,12 @@
 # Wireframe Screens
 
 Status: active
-Updated: 2026-06-20
+Updated: 2026-07-02
 Source:
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
+- `.agents/specs/01-shell-plugin-architecture-refactor/`
+- `.agents/specs/02-core-app-shell-ux/`
 
 ## Screen Pegs
 
@@ -26,9 +28,25 @@ Source:
 
 ## Imported UI Rules
 
-- Use a three-panel desktop shell.
-- Left and right panels are resizable.
-- Right tool tab order is Browser, Files, Terminal.
+- r04 remains the accepted MVP baseline for the original three-panel desktop
+  shell and route set.
+- r05 final-implementation Batch 1 supersedes the r04 shell model for specs 01
+  and 02 only: use one global header, left/right plugin icon groups, no default
+  right panel, and icon-owned plugin panel toggle/close behavior.
+- Left and right plugin panels are resizable when visible.
+- The final shell allows one visible plugin panel per side. Same-side plugin
+  icon clicks replace the visible panel; left and right panels can coexist.
+- Plugin panel visibility persists per chat session and is restored on chat
+  switch.
+- Settings opens as a center route, closes plugin panels while active, and
+  restores the chat's prior panels when leaving Settings.
+- Resize behavior preserves a 640px center-pane minimum by closing the
+  opposite-side panel before clamping expansion.
+- Hidden compatible plugins may update per-chat state and unread/activity
+  indicators, but must not open panels, steal focus, prompt the user, or
+  trigger duplicate backend calls.
+- Invalid shell layout declarations must surface repair/disable states instead
+  of corrupting shell layout.
 - The prompt composer is disabled until a trusted project exists.
 - The empty-state prompt asks `What should we build in c4os2?` until final product copy is decided.
 - User messages align right and agent messages align left.
@@ -50,3 +68,5 @@ The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
 | r01-functional-wireframes | `r01-functional-wireframes/index.html` | ready-for-review | HTML/CSS/JS grayscale draft covering the peg-backed shell, session, right-panel, popover, and settings screens. |
 | r02-functional-interface-draft | `r02-functional-interface-draft/index.html` | ready-for-review | HTML/CSS/JS desktop interface draft with scalable CSS tokens, peg-backed screen coverage, distinct app-start state, and review-only simulated interactions. |
 | r03-functional-frontend-architecture | `r03-functional-frontend-architecture/index.html` | ready-for-review | Fresh HTML/CSS/JS desktop interface draft with route-level screen declarations, component-style DOM helpers, layered CSS, trust-spine state treatment, and review-only simulated interactions. |
+| r04-single-page-app | `r04-single-page-app/index.html` | accepted MVP baseline | HTML/CSS/JS single-page app baseline for original MVP shell, settings, right-tool tabs, and implementation handoff. |
+| r05-final-implementation | `r05-final-implementation/index.html` | approved Batch 1 | Final-implementation shell-foundation revision for specs 01 and 02. Supersedes only the approved shell behavior named above; later plugin-specific routes remain pending. |

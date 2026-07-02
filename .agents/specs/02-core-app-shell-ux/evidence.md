@@ -143,3 +143,11 @@ Status: proposed
   Purpose: Exact accepted grill answer for 044: C4OS Grill Question 044 - Plugin SVG Icon Constraints.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 044.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/` | Approved r05 Batch 1 shell-foundation wireframes. Covers single global header, left/right plugin icons, no default right panel, plugin panel toggle/close via icon, one visible panel per side, same-side replacement, per-chat panel restore, Settings center route, resize/collision behavior, hidden plugin unread/activity indicators, and invalid shell layout repair state. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#coverage` | Approved route/state coverage matrix maps r05 shell-foundation states to specs 01 and 02. |
+| EVD-WF-003 | `wireframes/r05-final-implementation/README.md` | Records r04 route carry-forward decisions for this final-implementation shell revision, including superseded, deferred, and intentionally not copied routes. |

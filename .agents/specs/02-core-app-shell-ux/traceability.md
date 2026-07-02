@@ -29,3 +29,16 @@ This spec derives project-wide truth from `.agents/context/` and detailed eviden
   Purpose: Exact grill Q&A JSON source records.
   Load when: verifying a QID, answer wording, note, or superseded question.
   Skip when: local decisions and context already answer the planning question.
+
+## Wireframe Coverage
+
+| Wireframe State | Requirements | Acceptance | Evidence |
+| --- | --- | --- | --- |
+| `wireframes/r05-final-implementation/index.html#shell-foundation` | REQ-001, REQ-002 | AC-001, AC-004 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#same-side-replacement` | REQ-003, REQ-004 | AC-002 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#per-chat-restore` | REQ-005 | AC-002 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#settings` | REQ-007 | AC-002, AC-007 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#resize-collision` | REQ-006 | AC-003 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#hidden-activity` | REQ-008 | AC-005, AC-006, AC-008 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#repair-state` | REQ-009 | AC-007, AC-009 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#coverage` | REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009 | AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009 | EVD-WF-002 |

@@ -37,3 +37,16 @@ This spec derives project-wide truth from `.agents/context/` and detailed eviden
 | `proofs/tool-event-fanout/` | REQ-005, REQ-007 | EVD-POC-001 |
 | `proofs/bundled-plugin-lifecycle/` | REQ-002, REQ-003 | EVD-POC-002 |
 | `proofs/plugin-migration-failure-handling/` | REQ-008 | EVD-POC-003 |
+
+## Wireframe Coverage
+
+| Wireframe State | Requirements | Acceptance | Evidence |
+| --- | --- | --- | --- |
+| `wireframes/r05-final-implementation/index.html#shell-foundation` | REQ-001, REQ-006 | AC-001 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#same-side-replacement` | REQ-005 | AC-005 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#per-chat-restore` | REQ-007 | AC-007 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#settings` | REQ-006 | AC-001 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#resize-collision` | REQ-010 | AC-010 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#hidden-activity` | REQ-005 | AC-005, AC-006 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#repair-state` | REQ-008 | AC-004 | EVD-WF-001 |
+| `wireframes/r05-final-implementation/index.html#coverage` | REQ-001, REQ-005, REQ-006, REQ-007, REQ-008, REQ-010 | AC-001, AC-004, AC-005, AC-006, AC-007, AC-010 | EVD-WF-002 |

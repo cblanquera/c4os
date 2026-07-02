@@ -1,17 +1,19 @@
 # C4OS UI Handoff Specification
 
 Status: draft handoff
-Updated: 2026-06-20
-Primary artifact: `wireframes/r04-single-page-app/index.html`
+Updated: 2026-07-02
+Primary artifact for final-implementation shell behavior: `wireframes/r05-final-implementation/index.html`
+Legacy MVP baseline artifact: `wireframes/r04-single-page-app/index.html`
 
-This document explains the r04 C4OS wireframes as an implementation handoff.
-It is written for an agent or engineer who has not opened the r04 folder. The
-goal is to remove guesswork about layout, state, interactions, simulated
-behavior, and implementation boundaries.
+This document explains the approved C4OS wireframe behavior as an
+implementation handoff. It now has two layers: r04 remains the accepted MVP
+baseline for the original app shell and detailed screen set, while approved
+r05 Batch 1 supersedes r04 only for final-implementation shell-foundation
+behavior in specs 01 and 02.
 
 ## 1. How To Use This Document
 
-Use this document when translating the r04 wireframes into product
+Use this document when translating approved wireframes into product
 implementation, acceptance criteria, frontend tasks, or detailed UI specs.
 
 Read it in this order:
@@ -23,10 +25,11 @@ Read it in this order:
 5. Check interaction, simulation, and open-question sections before turning
    wireframe behavior into implementation work.
 
-This document is authoritative for what the wireframes currently express. It is
-not a production architecture plan and does not claim backend persistence,
-provider calls, file writes, terminal execution, plugin installation, skill
-execution, or MCP connectivity has already been implemented.
+This document is authoritative for what the approved wireframes currently
+express. It is not a production architecture plan and does not claim backend
+persistence, provider calls, file writes, terminal execution, plugin
+installation, skill execution, or MCP connectivity has already been
+implemented.
 
 ## 2. Normative Versus Illustrative Content
 
@@ -76,15 +79,79 @@ Wireframe versus final frontend guard:
 
 The handoff is derived from:
 
+- `wireframes/r05-final-implementation/`
 - `wireframes/r04-single-page-app/`
 - `wireframes/screens.md`
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
 - `.agents/specs/research/requirements.md`
 - `.agents/specs/research/acceptance.md`
+- `.agents/specs/01-shell-plugin-architecture-refactor/`
+- `.agents/specs/02-core-app-shell-ux/`
 
-The r04 prototype is the latest review target. Earlier revisions remain useful
-as design history, but r04 is the current handoff baseline.
+The r05 prototype is the approved final-implementation shell-foundation review
+target for specs 01 and 02. The r04 prototype remains the legacy MVP handoff
+baseline for routes and surfaces not superseded by r05 Batch 1.
+
+## 3A. r05 Final-Implementation Shell Addendum
+
+Revision: `wireframes/r05-final-implementation/`
+
+Approval status: approved Batch 1 shell foundation.
+
+The r05 shell-foundation revision supersedes the r04 global shell model for
+specs 01 and 02. It does not recreate every r04 route and must not be treated
+as approval for later plugin-specific behavior.
+
+Normative r05 shell behavior:
+
+- One global header owns shell navigation and plugin icon placement.
+- Plugin icons can be configured to the left or right header group.
+- There is no default right panel.
+- Primary plugin icon click toggles the plugin panel; clicking the active
+  plugin icon closes the relative panel.
+- Side panels do not have their own headers or close buttons. Header plugin
+  icons are the toggle and close surface.
+- One plugin panel per side may be visible. A left panel and right panel may be
+  visible together.
+- Clicking another plugin icon on the same side replaces the visible panel on
+  that side.
+- Visible plugin panels persist per chat session and restore when switching
+  back to that chat.
+- Settings opens as a center route, closes plugin panels while active, and
+  restores the chat's prior panels when leaving Settings.
+- Left and right panel resize must preserve a 640px center-pane minimum. If
+  expansion would violate the minimum, the opposite-side panel closes before
+  expansion clamps.
+- Hidden compatible plugins may update per-chat state and unread/activity
+  indicators after fanned-out tool events, but must not open panels, steal
+  focus, prompt the user, or trigger duplicate backend calls.
+- Invalid plugin layout declarations must produce visible repair or disabled
+  states before the shell applies the layout.
+
+r05 review routes:
+
+| Route | Durable handoff meaning |
+| --- | --- |
+| `#shell-foundation` | Default shell with no default right panel. |
+| `#same-side-replacement` | Plugin icon toggle, same-side replacement, and one visible panel per side. |
+| `#per-chat-restore` | Per-chat panel restoration. |
+| `#resize-collision` | 640px center minimum and collision handling. |
+| `#hidden-activity` | Hidden compatible plugin activity indicator behavior. |
+| `#debug` | Chat Debug command, tool call, result, and approval history direction. |
+| `#repair-state` | Invalid shell layout repair/disable state. |
+| `#settings` | Settings center route and panel restore contract. |
+| `#coverage` | Specs 01 and 02 wireframe coverage matrix. |
+
+r04 route carry-forward:
+
+- `#app-start` is intentionally not copied into r05 Batch 1.
+- `#new-session` is superseded by `#shell-foundation` for final shell review.
+- `#chat-session` is carried forward as center chat continuity only.
+- `#file-explorer`, `#file-editor`, and `#terminal` are superseded as fixed
+  r04 right tabs and deferred as plugin content.
+- Provider/model popovers and settings subsections remain deferred unless a
+  later batch approves them.
 
 ## 4. Product Frame
 
@@ -103,6 +170,9 @@ before a user prompts the agent, the application asks the user to scope work to
 a trusted local project folder.
 
 ## 5. r04 Artifact Contract
+
+This section records the legacy MVP artifact contract. For
+final-implementation shell behavior in specs 01 and 02, use section 3A first.
 
 The r04 artifact is a single page app prototype:
 
@@ -139,7 +209,11 @@ Unknown or stale routes fall back to App Start.
 
 ## 6. Global Layout Model
 
-C4OS uses a desktop shell with three functional regions:
+This section describes the legacy r04 MVP shell model. For
+final-implementation shell behavior in specs 01 and 02, section 3A supersedes
+the fixed right-tool-tab model.
+
+The r04 shell uses three functional regions:
 
 1. Left navigation panel.
 2. Center workbench.

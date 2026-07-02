@@ -152,3 +152,11 @@ Status: proposed
 | EVD-POC-001 | `proofs/tool-event-fanout/` | `node --test proofs/tool-event-fanout/proof.test.mjs` passed on 2026-07-02. Supports one backend execution with visible and hidden compatible view fanout. |
 | EVD-POC-002 | `proofs/bundled-plugin-lifecycle/` | `node --test proofs/bundled-plugin-lifecycle/proof.test.mjs` passed on 2026-07-02. Supports bundled/default plugin install-disabled, uninstall, data-delete prompt, and reinstall flow. |
 | EVD-POC-003 | `proofs/plugin-migration-failure-handling/` | `node --test proofs/plugin-migration-failure-handling/proof.test.mjs` passed on 2026-07-02. Supports migration recovery, reset, blocked, and disabled-with-reason routing. |
+
+## Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/` | Approved r05 Batch 1 shell-foundation wireframes. Covers persistent shell boundaries, left/right plugin icon placement, panel toggle/replacement, per-chat panel restore, Settings center route, resize/collision behavior, hidden plugin activity indicators, and invalid shell layout repair state. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#coverage` | Approved route/state coverage matrix maps r05 shell-foundation states to specs 01 and 02. |
+| EVD-WF-003 | `wireframes/r05-final-implementation/README.md` | Records r04 carry-forward decisions, including superseded, deferred, and intentionally not copied routes for the final-implementation shell revision. |
