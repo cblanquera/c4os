@@ -23,7 +23,14 @@ Created: 2026-07-02
 - Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
 - Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
 
-## Open Questions For Upcoming Grill
+## Resolved Prior Grill Overlaps
 
-- Q036 is superseded by Q036A for document preview ownership. The upcoming grill must confirm whether any Browser-owned preview behavior remains beyond hosting compatible document-family plugin output.
-- Q042 has no accepted intake answer and is superseded by Q042A. The upcoming grill must verify that Q042A fully covers screenshot scope, annotation persistence, and multi-annotation evidence.
+- Q036 is superseded by Q036A for document preview ownership. Q036A confirms
+  document-family plugins own previews, Browser hosts compatible rendered
+  output, Browser-native PDF preview is accepted, and advanced PDF support is a
+  separate scope.
+- Q042 has no submitted intake answer and is superseded by Q042A. Q042A covers
+  screenshot scope, annotation persistence, target metadata, marker/comment
+  model, multi-annotation support, and clear-after-send behavior.
+- No additional Browser-specific grill question is currently needed from the
+  Q036/Q042 overlap set.

@@ -6,7 +6,7 @@ Status: proposed
 
 | Requirement | Acceptance | QIDs | Source Note |
 | --- | --- | --- | --- |
-| REQ-001 | AC-001 | 020, 021, 021A, 022, 023, 024 | Approval categories and per-tool policy display requirements |
+| REQ-001 | AC-001, AC-004, AC-005 | 020, 021, 021A, 022, 023, 024, 2026-07-02 grill refinement | Approval categories, remembered-rule summaries, duration choices, per-tool policy display, and Settings > Configuration review/revoke routing |
 | REQ-002 | AC-002 | 025, 026, 049 | Prompt tag targets and gateway command routing |
 | REQ-003 | AC-002 | 018, 019, 026 | Dependency-blocked plugin resources and tag suggestion behavior |
 | REQ-004 | AC-002 | 028 | Git branch control visibility and read-only thread branch |

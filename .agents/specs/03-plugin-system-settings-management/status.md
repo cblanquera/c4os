@@ -23,6 +23,16 @@ Created: 2026-07-02
 - Proposed tasks are not implementation decomposition. Before execution, convert accepted scope into scoped work orders under `.agents/development/<spec-id>/` with non-conflicting task IDs.
 - Wireframes and proofs are still pending where named by this spec. Do not treat this spec as implementation-ready until those records are created, reviewed, and accepted or explicitly deferred.
 
-## Open Questions For Upcoming Grill
+## Prior Grill Overlaps And Remaining Question
 
-- Full Codex plugin compatibility is accepted as the target, but freeze still needs the exact compatibility matrix: plugin.json fields, skill/app/MCP mapping, marketplace trust/auth, cache layout, uninstall/reinstall edge cases, native-module limitations, and schemaVersion handling.
+- Codex plugin compatibility is accepted as the target and the core matrix is
+  now covered by prior grill answers plus follow-up refinements: `plugin.json`
+  remains the Codex compatibility surface; `agents/c4os.yaml` owns C4OS
+  app-shell metadata; marketplace/cache/uninstall/reinstall behavior is
+  sourced from Q039; native backend limits are sourced from Q040; schemaVersion
+  incompatibility is sourced from Q038/Q050; typed dependencies and settings
+  field metadata are recorded from the 2026-07-02 grill follow-up.
+- Plugin settings marked `sensitive` are now resolved by the 2026-07-02 grill
+  follow-up: secure secret storage/keychain owns raw values, config stores only
+  references or redacted placeholders, and plugins use secrets through
+  C4OS-governed calls rather than raw reads by default.

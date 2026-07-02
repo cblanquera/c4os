@@ -6,12 +6,14 @@ Status: proposed
 
 | Requirement | Acceptance | QIDs | Source Note |
 | --- | --- | --- | --- |
-| REQ-001 | AC-001 | 017, 038, 040 | Codex plugin compatibility, c4os.yaml, and tool contributions |
+| REQ-001 | AC-001, AC-006 | 017, 038, 040, 2026-07-02 grill refinement | Codex plugin compatibility, plugin.json versus agents/c4os.yaml parser boundary, and C4OS app-shell metadata |
 | REQ-002 | AC-002 | 005, 006, 015A, 016, 041 | User-global config, settings schema, and config.toml ownership |
-| REQ-003 | AC-002 | 016, 017 | Field schema and shell-reserved keys |
-| REQ-004 | AC-001 | 018, 019 | Dependency enablement and cascading disable behavior |
-| REQ-005 | AC-003, AC-004 | 039 | Marketplace sources, cache, uninstall, reinstall, restart gates |
+| REQ-003 | AC-002, AC-008 | 016, 017, 2026-07-02 grill refinement | Field schema, field metadata, sensitive/visibleWhen behavior, unknown-key warnings, and shell-reserved key validation |
+| REQ-004 | AC-001, AC-007 | 018, 019, 2026-07-02 grill refinements | Typed dependency model, separate dependencies manifest section, required/optional behavior, manual plugin enablement, visible dependency-blocked states, and cascading disable behavior |
+| REQ-005 | AC-003, AC-004 | 039, 2026-07-02 grill refinement | Marketplace sources, cache, uninstall, reinstall, pending-restart backend registration, and disabled/uninstalled tool availability |
 | REQ-006 | AC-002 | 044 | SVG icon source, sanitization, rendering, and theme rules |
+| REQ-007 | AC-005 | 004, 040, 2026-07-02 grill refinement | Per-chat plugin instances are lightweight view/state instances; heavy services are lazily started and shared at narrowest safe scope |
+| REQ-008 | AC-009 | 041, 043, 2026-07-02 grill refinement | Sensitive plugin settings use secure secret storage/keychain, config references/redacted placeholders, governed secret use, and hard redaction |
 
 ## Source Rule
 

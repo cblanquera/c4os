@@ -39,6 +39,18 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What field types should plugin settings support?: string, text, boolean, number, and enum arrays
   - Which plugin settings keys should the app shell reserve?: Reserve `panel`, `enabled`, and `iconOrder`
   - Notes: What field types should plugin settings support? - string = input type text - text = textarea  - boolean = switch  - number = input type number - enum arrays = select  Which plugin settings keys should the app shell reserve? You can make it up as we go along.
+  - Settings field metadata: Each plugin settings field may include `label`,
+    `description` or help text, `required`, `placeholder`, `min`/`max` for
+    numbers, option labels for enum arrays, `sensitive` for secret-like
+    display/storage, and `visibleWhen` for simple dependency on another
+    setting. Unknown keys are ignored with validation warnings.
+  - Reserved-key validation: `panel`, `enabled`, and `iconOrder` are
+    shell-interpreted user settings. Plugins may declare them only with
+    compatible field types and allowed values. Invalid reserved-key
+    declarations disable or repair the affected shell contribution with a
+    visible reason.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Settings Field
+    Metadata".
 
 ### DEC-006: 017: C4OS Grill Question 017 - C4OS Plugin Manifest
 
@@ -47,6 +59,19 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What should `agents/c4os.yaml` be responsible for?: App-shell contribution metadata only
   - Which fields should `agents/c4os.yaml` include?: Other
   - Notes: Follow standards on Codex's plugin.json spec. For `agents/c4os.yaml` convert my last json example that describes the form builder config for plugin settings to yaml format as well as id, name, icon. ("panel" should be included in form builder config if it applies)
+  - Metadata boundary: Preserve Codex `plugin.json` as the compatibility
+    surface for Codex-defined plugin identity/capabilities such as skills,
+    apps/MCP, version, and marketplace metadata. Put only C4OS app-shell
+    contributions in `agents/c4os.yaml`: `schemaVersion`, C4OS plugin id/name,
+    icon asset path, panel/view contributions, settings schema including
+    reserved shell keys, tool contributions/consumers, dependencies, service
+    lifecycle declarations, and compatibility constraints.
+  - Manifest section boundary: Dependencies are a separate top-level
+    `agents/c4os.yaml` manifest section, not `settings` fields. The `settings`
+    section remains a user-facing form schema from Q015A/Q016.
+  - Refinement source: 2026-07-02 grill intake, "Codex Plugin Metadata
+    Boundary"; 2026-07-02 grill intake, "Dependency Schema Separate From
+    Settings".
 
 ### DEC-007: 018: C4OS Grill Question 018 - Plugin Dependencies
 
@@ -54,6 +79,19 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - Where should C4OS app plugin dependencies be declared?: `agents/c4os.yaml`
   - What should happen when enabling a plugin with a disabled dependency?: Block enablement until the user manually enables dependencies
+  - Dependency types: `agents/c4os.yaml` supports typed dependencies for app
+    plugins, C4OS/preinstalled native modules, heavy services, and required
+    C4OS capabilities/tool identities. Plugin-to-plugin dependencies require
+    manual enablement. Missing native, capability, or service dependencies
+    produce disabled-with-reason or pending-restart states rather than
+    automatic install or hidden fallback.
+  - Dependency record shape: Each dependency record has `type`, `id`, optional
+    boolean defaulting to `false`, version/range when applicable, reason label,
+    and repair hint. Required missing dependencies block enablement. Optional
+    missing dependencies keep the plugin enabled but hide or degrade only the
+    dependent contribution with a visible reason.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Dependency Types";
+    2026-07-02 grill intake, "Dependency Schema Separate From Settings".
 
 ### DEC-008: 019: C4OS Grill Question 019 - Disabling Plugin Dependencies
 
@@ -71,6 +109,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What icon format should plugin metadata support?: Bundled SVG asset path
   - How should C4OS handle agents/c4os.yaml version incompatibility?: Require schemaVersion; disable incompatible plugins with visible reason
   - Notes: User correction requires final-implementation framing and rejects version-phase language.
+  - Parser boundary: C4OS reads Codex `plugin.json` for Codex compatibility and
+    reads `agents/c4os.yaml` for C4OS app-shell contributions. C4OS must not
+    require Codex metadata to be duplicated into `agents/c4os.yaml`, and C4OS
+    app-shell behavior must not depend on non-standard `plugin.json` extension
+    fields.
+  - Refinement source: 2026-07-02 grill intake, "Codex Plugin Metadata
+    Boundary".
 
 ### DEC-010: 039: C4OS Grill Question 039 - Plugin Marketplace And Lifecycle
 
@@ -82,6 +127,21 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - After uninstall, how should reinstall work?: Remove installed cache copy; reinstall from marketplace source
   - When should plugin lifecycle changes require restart?: Live for UI/settings; restart required for native backend registration changes
   - What happens to plugin-owned user data when a plugin is uninstalled?: Prompt during uninstall whether to delete data
+  - Pending-restart backend registration: UI/settings changes apply
+    immediately. Backend/native registration changes become
+    pending-restart. Newly contributed backend tools remain unavailable until
+    restart. Disabled or uninstalled plugin tools are unavailable for new calls
+    immediately. Settings and affected command/tag/tool surfaces show the
+    restart-required reason.
+  - Heavy service lifecycle: Per-chat plugin instances are lightweight
+    view/state instances, not one backend service/process per chat. Heavy
+    plugin services are shared at the narrowest safe scope: app, user,
+    workspace, or project. They start lazily on first real use, are reused
+    across chats where safe, expose health/activity state, and shut down on
+    idle timeout, plugin disable/uninstall, project close, workspace close, or
+    app exit.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Lifecycle
+    Restart-Gated Backend Registration".
 
 ### DEC-011: 040: C4OS Grill Question 040 - Plugin Backend Registration Boundary
 
@@ -91,6 +151,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Where should plugin tool contributions be declared?: agents/c4os.yaml declares tools; plugin c4os/ code implements bindings
   - How should native backend registration work for marketplace plugins?: Marketplace plugins bind to preinstalled C4OS/Tauri native modules only
   - Who owns approval policy for plugin-contributed tools?: C4OS owns default and maximum approval policy; plugins can request narrower defaults
+  - Architecture rule: C4OS owns tool execution through the gateway and owns
+    app-level/per-chat tool result state. Plugin views hydrate from C4OS-owned
+    state, multiple compatible plugin views can hydrate the same shared source
+    state, and each plugin view may keep its own view-local UI state. Heavy
+    plugin services must not be spawned per chat by default.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Lifecycle
+    Restart-Gated Backend Registration".
 
 ### DEC-012: 044: C4OS Grill Question 044 - Plugin SVG Icon Constraints
 
@@ -109,3 +176,20 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Which plugin migration failures should cause visible disablement instead of recovery?: Unsupported agents/c4os.yaml schemaVersion, Missing or disabled dependency, Security policy violation, Unavailable required preinstalled native module, Invalid or unreadable plugin manifest, Corrupt plugin-owned user config, Missing marketplace source or non-reinstallable plugin bundle
   - How should C4OS handle corrupt plugin-owned user config during migration?: Reset corrupt plugin config automatically and keep plugin enabled
   - Where should migration failures be surfaced to the user?: Settings > Plugins with disabled reason and repair actions
+
+### DEC-014: 2026-07-02: Plugin Sensitive Settings Storage
+
+Source: 2026-07-02 grill intake, "Plugin Sensitive Settings Storage".
+
+  - Where should plugin settings marked sensitive be stored?: Use the
+    recommended secure secret storage/keychain rule
+  - Accepted rule: Plugin settings marked `sensitive` are stored in
+    C4OS-managed secure secret storage/keychain keyed by plugin id and setting
+    key. `config.toml` and user config store only references or redacted
+    placeholders.
+  - Access boundary: Plugin views receive redacted display values. Plugins do
+    not receive raw sensitive values by default; they request secret use
+    through C4OS-governed tool or service calls.
+  - Redaction boundary: Settings, thread context, Chat Debug, logs, and
+    inspectable tool state never display or persist raw sensitive setting
+    values.

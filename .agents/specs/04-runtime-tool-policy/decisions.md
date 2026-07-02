@@ -22,6 +22,24 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - Without app plugins enabled, what can the runtime do with Tauri tools?: Discover and invoke any registered backend tool if tool-level approval policy allows it
   - Notes: Dont take the term "dormant" literally. What I really mean is it's generally available for runtime to discover and try to use if it wants. For example opening a website or local file without a browser/preview plugin to open the view is kind of pointless at first thought, nor do I want to ultimately assume is pointless.  At the same time, if a user doesnt like the default browser plugin, they are free to create another one themselves.
+  - View-oriented tool behavior without plugin views: If approval policy allows
+    it, the runtime may execute view-oriented tools fully even when no
+    compatible app-plugin view is enabled or visible. C4OS must store the
+    resulting inspectable state so a compatible view can display it later.
+  - View-oriented tool state ownership: Inspectable state from a view-oriented
+    tool run before a compatible plugin view exists lives as app-owned
+    per-chat tool result state keyed by tool identity plus resource/session
+    target. Compatible plugin views hydrate from that state when opened or
+    enabled. The state is deleted with the chat unless it is attached to a sent
+    prompt or saved by a plugin-specific action.
+  - Shared hydration rule: Multiple compatible enabled plugin instances in the
+    chat may hydrate the same app-owned source state. Each plugin may keep its
+    own view-local UI state, but cannot claim, mutate, or delete the shared
+    source state unless it calls an explicit C4OS action governed by policy.
+  - Refinement source: 2026-07-02 grill intake, "Tool Invocation Without
+    Plugin Views"; 2026-07-02 grill intake, "View-Oriented Tool State
+    Ownership"; 2026-07-02 grill intake, "Shared Hydration Of View Tool
+    State".
 
 ### DEC-004: 003A: C4OS Grill Question 003A - Tool Event Fanout
 
@@ -36,6 +54,21 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS define default approval policy?: Per Tauri tool/app tool with default policy and max authority
   - Which approval categories should exist?: allow, ask, deny, remember
+  - Remembered approval rule shape: A remembered approval decision is keyed by
+    tool id, action/risk category, and normalized target scope when applicable.
+    Plugin-contributed tools include plugin id in the key. This prevents a
+    remembered safe decision from silently widening to unrelated tools or
+    targets.
+  - Remembered approval duration: When remembering a decision, the user can
+    choose session-only or user-global. Session-only expires with the active
+    chat/session. User-global persists in config policy but must still obey
+    each tool's maximum authority and cannot widen a stricter session policy.
+  - Review/revoke surface: Settings > Configuration lists policy items per
+    registered server tool with an explanation of what each server tool does.
+    Users review, edit, and revoke remembered/user-global policy there instead
+    of through one single default approval policy item.
+  - Refinement source: 2026-07-02 grill intake, "Approval Remember Rule
+    Semantics".
 
 ### DEC-006: 021: C4OS Grill Question 021 - Core Tool Approval Defaults
 
@@ -89,6 +122,23 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Where should plugin tool contributions be declared?: agents/c4os.yaml declares tools; plugin c4os/ code implements bindings
   - How should native backend registration work for marketplace plugins?: Marketplace plugins bind to preinstalled C4OS/Tauri native modules only
   - Who owns approval policy for plugin-contributed tools?: C4OS owns default and maximum approval policy; plugins can request narrower defaults
+  - Architecture rule: C4OS owns tool execution through the gateway and owns
+    app-level/per-chat tool result state. Plugin views hydrate from C4OS-owned
+    state, multiple compatible plugin views can hydrate the same shared source
+    state, and each plugin view may keep its own view-local UI state. Heavy
+    plugin services must not be spawned per chat by default.
+  - Dependency boundary: `agents/c4os.yaml` can require C4OS capabilities/tool
+    identities, C4OS/preinstalled native modules, and heavy services. Missing
+    native, capability, or service dependencies produce visible blocked or
+    pending-restart states rather than automatic install or hidden fallback.
+    Dependency declarations live in a separate top-level manifest section from
+    user-facing `settings` fields. Optional missing dependencies keep the
+    plugin enabled but hide or degrade only the dependent contribution with a
+    visible reason.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Lifecycle
+    Restart-Gated Backend Registration"; 2026-07-02 grill intake, "Plugin
+    Dependency Types"; 2026-07-02 grill intake, "Dependency Schema Separate
+    From Settings".
 
 ### DEC-013: 041: C4OS Grill Question 041 - Config TOML And Tool Policy
 
@@ -98,6 +148,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - What scope should per-tool policy defaults use?: User-global defaults with session-level narrowing
   - Which settings belong in config.toml?: Runtime, provider/model defaults, marketplaces, plugin enablement, and app-tool policy
   - When Settings UI and config.toml disagree, which wins?: config.toml is source; Settings writes to it; parse errors keep last valid config
+  - Sensitive plugin setting boundary: Plugin settings marked `sensitive` are
+    stored in C4OS-managed secure secret storage/keychain. Config files store
+    only references or redacted placeholders, and plugins request secret use
+    through C4OS-governed tool/service calls rather than receiving raw secret
+    reads by default.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Sensitive Settings
+    Storage".
 
 ### DEC-014: 045: C4OS Grill Question 045 - Model Attachment Compatibility
 

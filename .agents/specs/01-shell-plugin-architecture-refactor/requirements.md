@@ -10,3 +10,4 @@ Status: proposed
 | REQ-004 | Route plugin backend capability through the C4OS tool gateway and preinstalled native modules. |
 | REQ-005 | Fan out one C4OS tool event to all enabled compatible plugin views without duplicate backend invocation. |
 | REQ-006 | Define plugin migration failure handling and visible repair states. |
+| REQ-007 | Keep per-chat plugin instances as lightweight view/state instances and keep heavy plugin services shared at the narrowest safe lifecycle scope instead of spawning one backend service/process per chat. |

@@ -10,8 +10,9 @@ Status: proposed
 | REQ-002 | AC-002 | 001, 038 | C4OS app plugin packaging and Codex compatibility boundary |
 | REQ-003 | AC-002 | 038, 039 | Marketplace source, cache, uninstall, and reinstall decisions |
 | REQ-004 | AC-003 | 002, 002A, 002B, 040 | Runtime discovery and app-owned backend gateway boundary |
-| REQ-005 | AC-003 | 003, 003A, 004 | Tool event fanout and per-chat plugin instance scope |
+| REQ-005 | AC-003, AC-005, AC-006 | 003, 003A, 004, 2026-07-02 grill refinements | Tool event fanout, per-chat plugin instance scope, hidden plugin state updates, and inspectable view-oriented tool state |
 | REQ-006 | AC-004 | 050 | Plugin migration failure handling |
+| REQ-007 | AC-007 | 004, 040, 2026-07-02 grill refinement | Per-chat plugin instances are lightweight view/state instances; heavy services are shared and lifecycle-managed outside per-chat view instances |
 
 ## Source Rule
 

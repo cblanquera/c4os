@@ -10,7 +10,7 @@ Status: proposed
 | REQ-002 | AC-004 | 015, 015A, 016, 044 | Header icon ordering, settings entry, schema keys, SVG constraints |
 | REQ-003 | AC-001 | 015A | Primary click toggles panel; config in Settings > Plugins |
 | REQ-004 | AC-002 | 011 | One visible panel per side and same-side replacement |
-| REQ-005 | AC-002 | 012 | Per-chat visible panel persistence |
+| REQ-005 | AC-002, AC-005, AC-006 | 012, 003A, 2026-07-02 grill refinements | Per-chat visible panel persistence, hidden-compatible state update behavior, and shared hydration of app-owned tool result state |
 | REQ-006 | AC-003 | 013 | 640px center-pane minimum and collision rule |
 | REQ-007 | AC-002 | 014 | Settings center route closes and restores panels |
 

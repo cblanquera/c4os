@@ -11,6 +11,9 @@ Use this when accepted MVP or bounded feature records should become an implement
 - Important decisions and risks are recorded.
 - Decisions are recorded in the affected spec's `decisions.md`; multi-spec
   decisions are copied into each affected spec and cite the same source.
+- ADRs, when needed, live under the affected spec's `adrs/` folder. Shared
+  ADRs are copied into each affected spec's `adrs/` folder and cite the same
+  source or grill QID rather than becoming a global decision source.
 - POC, wireframe, creative, review, QA, feedback, and validation outcomes are reconciled or explicitly deferred.
 - Reusable product understanding has been promoted or reconciled into the relevant major `.agents/context/` document.
 - Specs are understandable from `.agents/context/`, `.agents/references/`, and

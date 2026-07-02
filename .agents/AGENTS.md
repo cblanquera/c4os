@@ -127,6 +127,11 @@ If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementat
 - Raw feedback must be validated, rejected, classified, or reconciled before becoming implementation work unless evidence is already explicit.
 - Treat imported plan content as product intent unless a later review, validation result, or user decision changes it.
 - Promote only final accepted reusable findings into the relevant major `.agents/context/` document and route long detail through `.agents/references/`.
+- Create ADRs lazily under `.agents/specs/<spec-id>/adrs/NNNN-short-title.md`
+  when a spec needs a hard-to-reverse architectural decision record. Keep the
+  concise accepted decision in that spec's `decisions.md`. If the same ADR
+  affects multiple specs, copy the ADR into each affected spec's `adrs/`
+  folder and cite the same source or grill QID in each copy.
 - Keep `.agents/specs/<spec-id>/poc/` focused on proof questions, expected proof, results, links, and promotion decisions. Link to `proofs/<proof-name>/` for the implementation artifact.
 
 ## Boundaries

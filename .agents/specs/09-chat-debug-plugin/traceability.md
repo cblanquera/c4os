@@ -9,7 +9,7 @@ Status: proposed
 | REQ-001 | AC-001 | 035, 043 | Disabled-by-default developer plugin |
 | REQ-002 | AC-002 | 035, 043, 047 | CLI commands/results, tool use/events, approvals |
 | REQ-003 | AC-001 | 043 | Current and historical runs for active chat |
-| REQ-004 | AC-001 | 043 | Hard redaction floor |
+| REQ-004 | AC-001 | 043, 2026-07-02 grill refinement | Hard redaction floor including plugin settings marked sensitive |
 | REQ-005 | AC-002 | 043 | No export |
 
 ## Source Rule

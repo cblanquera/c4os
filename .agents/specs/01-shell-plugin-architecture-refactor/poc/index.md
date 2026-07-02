@@ -6,6 +6,6 @@ Proof implementation artifacts, if approved during proof execution, must live un
 
 | Proof Path | Proof Question |
 | --- | --- |
-| proofs/tool-event-fanout/ | Prove one tool event reaches all enabled compatible visible and hidden plugin views without duplicate backend calls. |
+| proofs/tool-event-fanout/ | Prove one tool event reaches all enabled compatible visible and hidden plugin views without duplicate backend calls, and that hidden compatible plugin instances only update per-chat state/unread indicators without opening panels, stealing focus, or prompting the user. |
 | proofs/bundled-plugin-lifecycle/ | Prove bundled plugins install disabled by default, uninstall, reinstall from bundled/default marketplace, and surface data-delete prompts. |
 | proofs/plugin-migration-failure-handling/ | Prove migration failures route to auto-recovery, reset, or visible disabled repair states. |

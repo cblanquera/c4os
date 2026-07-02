@@ -19,6 +19,11 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - Should Chat Debug show historical runs?: Current and historical runs for the active chat session
   - Should users be able to export Chat Debug logs?: No export
   - Where should approval decisions appear?: Both thread context and Chat Debug
+  - Sensitive plugin setting boundary: Plugin settings marked `sensitive` are
+    treated as secret-like values. Chat Debug must never display or persist raw
+    sensitive plugin setting values.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Sensitive Settings
+    Storage".
 
 ### DEC-003: 047: C4OS Grill Question 047 - Terminal Plugin Tool Boundary
 

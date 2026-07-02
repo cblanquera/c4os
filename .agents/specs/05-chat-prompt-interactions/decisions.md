@@ -8,6 +8,16 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS define default approval policy?: Per Tauri tool/app tool with default policy and max authority
   - Which approval categories should exist?: allow, ask, deny, remember
+  - Remembered approval UI: When a user chooses `remember`, the approval UI
+    offers session-only or user-global duration. The UI summary names the tool,
+    action/risk category, target scope when applicable, and plugin id for
+    plugin-contributed tools.
+  - Review/revoke routing: The approval UI and Chat Debug/thread context can
+    show the applied remembered-rule summary, but Settings > Configuration is
+    the review/edit/revoke surface. Settings > Configuration lists one policy
+    item per registered server tool and explains what each server tool does.
+  - Refinement source: 2026-07-02 grill intake, "Approval Remember Rule
+    Semantics".
 
 ### DEC-002: 025: C4OS Grill Question 025 - Prompt Tag Routing
 

@@ -6,6 +6,6 @@ Proof implementation artifacts, if approved during proof execution, must live un
 
 | Proof Path | Proof Question |
 | --- | --- |
-| proofs/approval-ui-flow/ | Prove approval popover/dialog decisions end to end and visibility in thread/Chat Debug. |
+| proofs/approval-ui-flow/ | Prove approval popover/dialog decisions end to end, including remember duration choices, applied remembered-rule summaries in thread/Chat Debug, and review/edit/revoke routing to Settings > Configuration per registered server tool. |
 | proofs/prompt-tag-resolution/ | Prove $, @, / routing and disabled resource behavior. |
 | proofs/attachment-compatibility/ | Prove files, screenshots, and annotations through OpenAI-compatible adapter fallback. |

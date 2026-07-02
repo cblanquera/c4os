@@ -29,6 +29,24 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - Without app plugins enabled, what can the runtime do with Tauri tools?: Discover and invoke any registered backend tool if tool-level approval policy allows it
   - Notes: Dont take the term "dormant" literally. What I really mean is it's generally available for runtime to discover and try to use if it wants. For example opening a website or local file without a browser/preview plugin to open the view is kind of pointless at first thought, nor do I want to ultimately assume is pointless.  At the same time, if a user doesnt like the default browser plugin, they are free to create another one themselves.
+  - View-oriented tool behavior without plugin views: If approval policy allows
+    it, the runtime may execute view-oriented tools fully even when no
+    compatible app-plugin view is enabled or visible. C4OS must store the
+    resulting inspectable state so a compatible view can display it later.
+  - View-oriented tool state ownership: Inspectable state from a view-oriented
+    tool run before a compatible plugin view exists lives as app-owned
+    per-chat tool result state keyed by tool identity plus resource/session
+    target. Compatible plugin views hydrate from that state when opened or
+    enabled. The state is deleted with the chat unless it is attached to a sent
+    prompt or saved by a plugin-specific action.
+  - Shared hydration rule: Multiple compatible enabled plugin instances in the
+    chat may hydrate the same app-owned source state. Each plugin may keep its
+    own view-local UI state, but cannot claim, mutate, or delete the shared
+    source state unless it calls an explicit C4OS action governed by policy.
+  - Refinement source: 2026-07-02 grill intake, "Tool Invocation Without
+    Plugin Views"; 2026-07-02 grill intake, "View-Oriented Tool State
+    Ownership"; 2026-07-02 grill intake, "Shared Hydration Of View Tool
+    State".
 
 ### DEC-005: 003: C4OS Grill Question 003 - Tool View Selection
 
@@ -43,6 +61,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - When multiple active plugin panels support a tool call, what should happen?: One tool call event fans out to all active compatible plugin views
   - What about enabled but hidden compatible plugins?: Enabled hidden plugins receive events too
+  - Hidden plugin event semantics: The backend tool runs once and C4OS records
+    one event. Visible compatible plugin views may render or act immediately.
+    Hidden enabled compatible plugin instances may update per-chat state and
+    unread/activity indicators, but must not open panels, steal focus, prompt
+    the user, or trigger another backend call.
+  - Refinement source: 2026-07-02 grill intake, "Hidden Plugin Tool Event
+    Semantics".
 
 ### DEC-007: 004: C4OS Grill Question 004 - Plugin Instance Scope
 
@@ -50,6 +75,12 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - What is the default state scope for tool-view plugins?: Per chat session
   - Can the same plugin have multiple instances in one chat session?: One instance per plugin per chat session
+  - Instance clarification: Per-chat plugin instances are lightweight
+    view/state instances, not backend service/process instances. Heavy plugin
+    services must not be spawned per chat by default; they are shared at the
+    narrowest safe scope and reused across chats where safe.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Lifecycle
+    Restart-Gated Backend Registration".
 
 ### DEC-008: 017: C4OS Grill Question 017 - C4OS Plugin Manifest
 
@@ -57,6 +88,22 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - What should `agents/c4os.yaml` be responsible for?: App-shell contribution metadata only
   - Which fields should `agents/c4os.yaml` include?: Other
+  - Metadata boundary: Preserve Codex `plugin.json` as the compatibility
+    surface for Codex-defined plugin identity/capabilities such as skills,
+    apps/MCP, version, and marketplace metadata. Put only C4OS app-shell
+    contributions in `agents/c4os.yaml`: `schemaVersion`, C4OS plugin id/name,
+    icon asset path, panel/view contributions, settings schema including
+    reserved shell keys, tool contributions/consumers, dependencies, service
+    lifecycle declarations, and compatibility constraints.
+  - Dependency types: `agents/c4os.yaml` supports typed dependencies for app
+    plugins, C4OS/preinstalled native modules, heavy services, and required
+    C4OS capabilities/tool identities.
+  - Manifest section boundary: Dependencies are a separate top-level
+    `agents/c4os.yaml` manifest section, not `settings` fields. The `settings`
+    section remains a user-facing form schema from Q015A/Q016.
+  - Refinement source: 2026-07-02 grill intake, "Codex Plugin Metadata
+    Boundary"; 2026-07-02 grill intake, "Plugin Dependency Types";
+    2026-07-02 grill intake, "Dependency Schema Separate From Settings".
   - Notes: Follow standards on Codex's plugin.json spec. For `agents/c4os.yaml` convert my last json example that describes the form builder config for plugin settings to yaml format as well as id, name, icon. ("panel" should be included in form builder config if it applies)
 
 ### DEC-009: 038: C4OS Grill Question 038 - Codex Plugin Compatibility Boundary

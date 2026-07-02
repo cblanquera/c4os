@@ -15,6 +15,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - When multiple active plugin panels support a tool call, what should happen?: One tool call event fans out to all active compatible plugin views
   - What about enabled but hidden compatible plugins?: Enabled hidden plugins receive events too
+  - Hidden plugin event semantics: The backend tool runs once and C4OS records
+    one event. Visible compatible plugin views may render or act immediately.
+    Hidden enabled compatible plugin instances may update per-chat state and
+    unread/activity indicators, but must not open panels, steal focus, prompt
+    the user, or trigger another backend call.
+  - Refinement source: 2026-07-02 grill intake, "Hidden Plugin Tool Event
+    Semantics".
 
 ### DEC-003: 004: C4OS Grill Question 004 - Plugin Instance Scope
 
@@ -73,6 +80,13 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
   - How should users open a plugin's configuration form?: Primary click toggles panel; configuration is only in Settings > Plugins
   - Where should users change a plugin's left/right placement?: Other
   - Notes: For example a plugin config could look like:  ``` {   settings: {     username: {        field: 'string'     },     prompt: {        default: false     },     panel: {        field: ['left', 'right'],        default: 'left'     }   } } ```  Where as:  ``` {   field?: 'string' | 'text' | 'boolean' | string[];   default?: string|boolean|number; } ```  Then the app shell picks up certain keys like "panel" to determine location on app view.
+  - Reserved-key validation: `panel`, `enabled`, and `iconOrder` are
+    shell-interpreted user settings. Plugins may declare them only with
+    compatible field types and allowed values. Invalid reserved-key
+    declarations disable or repair the affected shell contribution with a
+    visible reason.
+  - Refinement source: 2026-07-02 grill intake, "Plugin Settings Field
+    Metadata".
 
 ### DEC-011: 044: C4OS Grill Question 044 - Plugin SVG Icon Constraints
 

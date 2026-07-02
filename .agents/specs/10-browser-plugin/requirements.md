@@ -10,3 +10,4 @@ Status: proposed
 | REQ-004 | Persist sent prompt annotation attachments and clear active Browser annotations after send. |
 | REQ-005 | Document-family plugins own .docx/.xlsx previews; Browser can host rendered output. Browser-native PDF preview comes accepted; advanced PDF plugin is separate. |
 | REQ-006 | Browser activation must not create a chat item. |
+| REQ-007 | Browser-oriented runtime tool activity can execute without a visible Browser plugin view and must leave app-owned per-chat inspectable Browser state for later compatible views. |
