@@ -70,3 +70,10 @@ Status: proposed
   Purpose: Exact accepted grill answer for 046: C4OS Grill Question 046 - IDE File Operation Boundary.
   Load when: verifying answer text, notes, conflicts, or decision provenance for 046.
   Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#prompt-suggestions`; `wireframes/r05-final-implementation/index.html#attachment-states`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-03 as Batch 3 File Editor overlap evidence. The approved UI shows `@` typeahead matching plugins first and files/folders second, inline resolved file references that serialize to runtime references, and file attachment chips that preserve attachment/reference boundaries. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#blocked-suggestion-repair`; `wireframes/r05-final-implementation/index.html#coverage` | Approved on 2026-07-03 as Batch 3 dependency-blocked suggestion evidence. The approved UI keeps dependency-blocked resources out of executable prompt state unless a visible repair path is shown. |

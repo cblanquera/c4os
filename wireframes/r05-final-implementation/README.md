@@ -1,11 +1,13 @@
 # C4OS r05 Final Implementation Shell Foundation Wireframe
 
-Draft stage: wireframe review, Batch 2.
+Draft stage: wireframe review, Batch 3.
 
 This revision is the continuing r05 final-implementation wireframe because Batch
-1 was approved and not rejected. It keeps the approved r05 shell model, uses r04
-only as a still-relevant Settings structure reference, and adds only the
-Settings and Configuration routes needed to review specs 03, 04, and 11.
+1 was approved and not rejected. It keeps the approved r05 shell model and
+Settings structure, uses r04/current frontend chat-session states as the
+functional reference, and adds only the prompt, approval, suggestion, branch,
+and attachment states needed for pending spec 05 review plus direct overlap
+checks.
 
 ## Scope
 
@@ -28,6 +30,21 @@ Settings and Configuration routes needed to review specs 03, 04, and 11.
   rule review/edit/revoke controls, and config parse-error/last-valid fallback.
 - Settings > Skills list, metadata-first detail, bundled customization copy,
   and invalid skill states hidden from `$` suggestions.
+- Prompt suggestions for `$` skills, `@` files/plugin resources, and `/`
+  runtime commands with backend-authoritative resolution boundary.
+- Trigger-based prompt reference behavior with active query, typeahead menu,
+  resolved inline reference, unresolved token, and serialized prompt states;
+  resolved references render as inline blue text rather than chips.
+- Approval dialog/popover states for Deny, Deny and wait, Allow once, Allow
+  and remember, session-only versus user-global duration, remembered-rule
+  summary, and Settings > Configuration routing.
+- Disabled/dependency-blocked suggestion repair path.
+- Branch choose/create popover shown only for Git-backed projects.
+- File attachment chips, Browser screenshot attachments, Browser annotation
+  bundle attachments, unsupported attachment warning, and safe fallback
+  messaging.
+- Batch 3 prompt routes use the chat-session shape: Chats panel, thread list,
+  work log, agent response, permission prompt, and composer dock.
 
 ## Review Routes
 
@@ -52,7 +69,14 @@ Settings and Configuration routes needed to review specs 03, 04, and 11.
 | `./index.html#settings-skill-detail` | Metadata-first skill detail. |
 | `./index.html#settings-skill-customize` | Bundled read-only skill customization copy flow. |
 | `./index.html#settings-skill-invalid` | Invalid skill states and `$` suggestion filtering. |
-| `./index.html#coverage` | Batch 2 route/state coverage matrix for specs 03, 04, and 11. |
+| `./index.html#prompt-suggestions` | Interactive `$`, `@`, and `/` trigger typeahead above the fixed composer, with inline blue resolved references. |
+| `./index.html#approval-dialog` | Approval request with Deny, Deny and wait, Allow once, Allow and remember, Advanced metadata, and duration choices. |
+| `./index.html#remembered-rule-summary` | Applied remembered-rule summary plus Settings > Configuration route. |
+| `./index.html#blocked-suggestion-repair` | Disabled/dependency-blocked suggestion repair path. |
+| `./index.html#branch-popover` | Branch choose/create popover and read-only current chat branch. |
+| `./index.html#attachment-states` | File, Browser screenshot, and Browser annotation attachment records. |
+| `./index.html#safe-fallback` | Unsupported attachment warning and safe provider fallback. |
+| `./index.html#coverage` | Batch 2 and Batch 3 route/state coverage matrix for specs 03, 04, 05, 07, 10, and 11. |
 
 ## r04 Route Carry-Forward Decision
 
@@ -79,8 +103,9 @@ Settings and Configuration routes needed to review specs 03, 04, and 11.
 
 This is static HTML/CSS/JS for wireframe review only. Plugin state, tool fanout,
 panel restore, resize collision, Settings restore, Chat Debug history, plugin
-marketplace install, policy editing, config fallback, skill customization, and
-repair states are simulated to make the behavior reviewable before
-implementation.
+marketplace install, policy editing, config fallback, skill customization,
+prompt resolution, approval decisions, remembered policy application, branch
+creation, attachment records, provider fallback, and repair states are
+simulated to make the behavior reviewable before implementation.
 
 Safe to delete: yes. This is a review artifact, not product code.

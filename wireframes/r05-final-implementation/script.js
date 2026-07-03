@@ -7,6 +7,7 @@ const icons = {
   bug: "m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3 3 0 0 1 6 0v1M12 20c-3.3 0-6-2.7-6-6v-3a6 6 0 0 1 12 0v3c0 3.3-2.7 6-6 6ZM4 13H2m20 0h-2M6.2 18 4.8 19.4m14.4 0L17.8 18M6.2 8 4.8 6.6m14.4 0L17.8 8",
   check: "m5 12 4 4L19 6",
   chevronDown: "m6 9 6 6 6-6",
+  chevronRight: "m9 18 6-6-6-6",
   circleAlert: "M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
@@ -21,6 +22,7 @@ const icons = {
   pencil: "M21 6 7 20H3v-4L17 2a3 3 0 0 1 4 4Z",
   plug: "M9 2v6m6-6v6m3 0v5a6 6 0 0 1-12 0V8Zm-6 14v-5",
   plus: "M12 5v14M5 12h14",
+  quote: "M3 21c3 0 7-2 7-8V5H3v8h4c0 3-2 5-4 5Zm11 0c3 0 7-2 7-8V5h-7v8h4c0 3-2 5-4 5Z",
   rotate: "M21 12a9 9 0 1 1-3-6.7M21 3v6h-6",
   search: "m21 21-4-4m2-6a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
   send: "M3 4 21 12 3 20l3-8Zm3 8h15",
@@ -58,7 +60,14 @@ const routeStates = {
   "settings-skill-detail": { title: "Settings", subtitle: "Skill detail", settings: "skill-detail" },
   "settings-skill-customize": { title: "Settings", subtitle: "Customize skill", settings: "skill-customize" },
   "settings-skill-invalid": { title: "Settings", subtitle: "Invalid skill", settings: "skill-invalid" },
-  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03, 04, and 11", coverage: true }
+  "prompt-suggestions": { title: "Draft release notes", subtitle: "Prompt suggestions", left: "chats", prompt: "suggestions" },
+  "approval-dialog": { title: "Run migration check", subtitle: "Approval request", left: "chats", right: "debug", prompt: "approval" },
+  "remembered-rule-summary": { title: "Run migration check", subtitle: "Remembered approval", left: "chats", right: "debug", prompt: "remembered" },
+  "blocked-suggestion-repair": { title: "Prepare customer brief", subtitle: "Blocked suggestion", left: "chats", prompt: "blocked" },
+  "branch-popover": { title: "Ship focused fix", subtitle: "Branch selection", left: "chats", prompt: "branch" },
+  "attachment-states": { title: "Review evidence bundle", subtitle: "Prompt attachments", left: "chats", right: "browser", prompt: "attachments" },
+  "safe-fallback": { title: "Review evidence bundle", subtitle: "Attachment fallback", left: "chats", right: "browser", prompt: "fallback" },
+  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03, 04, 05, 07, 10, and 11", coverage: true }
 };
 
 const chats = [
@@ -251,6 +260,7 @@ function fileRow(name, icon, active = false) {
 }
 
 function chatWorkbench(state) {
+  if (state.prompt) return promptWorkbench(state.prompt);
   if (state.collision) return collisionWorkbench();
   return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
     h("section", { class: "chat-surface" }, [
@@ -273,6 +283,366 @@ function chatWorkbench(state) {
       ]),
       composer()
     ])
+  ]);
+}
+
+function promptWorkbench(mode) {
+  const disclosureId = `prompt-${mode}-agent-extra`;
+  return h("main", { class: "workbench prompt-workbench", id: "main", tabindex: "-1" }, [
+    h("section", { class: `thread-view prompt-${mode}` }, [
+      h("div", { class: "thread-list", "aria-label": "Session messages" }, [
+        h("article", { class: "message user thread-item" }, [
+          h("p", {}, messageText(mode)),
+          mode === "attachments" || mode === "fallback" ? h("div", { class: "message-attachments" }, attachmentChips(mode === "fallback")) : null
+        ]),
+        promptRunSummary(mode),
+        h("article", { class: "message agent thread-item has-actions" }, [
+          h("div", { class: "markdown-body" }, [
+            h("p", { text: agentReply(mode) })
+          ]),
+          h("div", { class: "message-extra", id: disclosureId }, agentExtra(mode)),
+          h("button", {
+            class: "text-button",
+            type: "button",
+            "data-toggle": "message",
+            "data-collapsed-label": "Show More",
+            "data-expanded-label": "Show Less",
+            "aria-controls": disclosureId,
+            "aria-expanded": "false",
+            text: "Show More"
+          })
+        ])
+      ]),
+      h("div", { class: "composer-dock" }, [
+        mode === "approval" ? approvalRequest(false) : null,
+        mode === "remembered" ? approvalRequest(true) : null,
+        mode === "blocked" ? blockedRepairPanel() : null,
+        mode === "fallback" ? fallbackWarning() : null,
+        promptComposer(mode)
+      ])
+    ])
+  ]);
+}
+
+function promptText(mode) {
+  if (mode === "suggestions") {
+    return [
+      "use ",
+      token("$", "grill", { active: true }),
+      " to ask me questions"
+    ];
+  }
+  if (mode === "branch") {
+    return ["Create a small branch for the prompt interaction wireframes before changing the review artifact."];
+  }
+  if (mode === "attachments" || mode === "fallback") {
+    return ["Use the attached file, Browser screenshot, and annotations to explain what changed."];
+  }
+  if (mode === "blocked") {
+    return ["Use ", token("@", "hubspot/company-record"), " and ", token("$", "customer-research"), " to prepare a brief."];
+  }
+  return ["Run the terminal migration check and continue only if it passes."];
+}
+
+function messageText(mode) {
+  if (mode === "suggestions") {
+    return ["use ", token("$", "grill-me-with-docs", { resolved: true }), " to ask me questions"];
+  }
+  return promptText(mode);
+}
+
+function token(kind, value, options = {}) {
+  const type = kind === "$" ? "skill" : kind === "@" ? "resource" : "command";
+  return h("span", {
+    class: `prompt-token token-${type}${options.resolved ? " is-resolved" : ""}${options.active ? " is-active-query" : ""}`,
+    text: `${kind}${value}`
+  });
+}
+
+function agentReply(mode) {
+  const replies = {
+    suggestions: "Choose a skill from the menu or keep typing in the composer.",
+    approval: "I need approval before running the terminal command for this turn.",
+    remembered: "A remembered terminal rule applies to this trusted project command, so the run can continue with the recorded policy summary.",
+    blocked: "That resource is not available to execute from the prompt because its plugin dependency is blocked.",
+    branch: "This project is a Git repository, so this prompt can be sent on a selected or newly created branch.",
+    attachments: "I will send the file, screenshot, and Browser annotation records as structured C4OS attachments.",
+    fallback: "The selected model cannot consume the Browser image records directly, so C4OS will keep the records and send the safe fallback payload."
+  };
+  return replies[mode] || replies.suggestions;
+}
+
+function promptWorkLog(mode) {
+  return h("section", { class: "work-log thread-item is-expanded" }, [
+    h("button", { class: "work-log-toggle", type: "button", "aria-expanded": "true" }, [
+      h("span", { text: mode === "approval" ? "Waiting for approval" : "Worked for 2s" }),
+      svgIcon("chevronDown")
+    ]),
+    h("div", { class: "work-log-body markdown-body" }, [
+      h("ul", {}, workLogItems(mode).map((item) => h("li", {}, item)))
+    ])
+  ]);
+}
+
+function promptRunSummary(mode) {
+  const detailsId = `prompt-${mode}-run-details`;
+  return h("article", { class: "activity-card prompt-run-summary thread-item" }, [
+    h("button", {
+      class: "activity-summary-toggle",
+      type: "button",
+      "data-toggle": "activity",
+      "data-collapsed-label": "Worked for 5sec",
+      "data-expanded-label": "Worked for 5sec",
+      "aria-controls": detailsId,
+      "aria-expanded": "false"
+    }, [
+      h("span", { "data-toggle-label": "true", text: "Worked for 5sec" }),
+      svgIcon("chevronRight")
+    ]),
+    h("div", { class: "message-extra", id: detailsId }, [
+      h("ul", {}, workLogItems(mode).map((item) => h("li", {}, item)))
+    ])
+  ]);
+}
+
+function workLogItems(mode) {
+  if (mode === "suggestions") {
+    return [
+      ["Prompt resolver is ready for ", token("$", "skills", { resolved: true }), ", ", token("@", "resources", { resolved: true }), ", and ", token("/", "commands", { resolved: true }), "."],
+      ["The current active query is editable in the composer."]
+    ];
+  }
+  if (mode === "approval" || mode === "remembered") {
+    return [
+      ["Prepared ", h("code", { text: "terminal.run" }), " through the C4OS tool gateway."],
+      ["Recorded approval event for thread context, Chat Debug, audit, and runtime resume."]
+    ];
+  }
+  if (mode === "blocked") {
+    return [
+      ["Filtered dependency-blocked ", token("@", "hubspot/company-record"), " from executable suggestions."],
+      ["Kept repair visible without allowing frontend-only execution."]
+    ];
+  }
+  if (mode === "branch") {
+    return [
+      ["Detected Git project state and exposed branch choose/create control."],
+      ["Kept current chat branch read-only for this thread."]
+    ];
+  }
+  return [
+    ["Collected file, Browser screenshot, and Browser annotation records."],
+    ["Marked provider compatibility, redaction, source plugin, and fallback metadata."]
+  ];
+}
+
+function promptComposer(mode) {
+  const suggestions = mode === "suggestions";
+  const branch = mode === "branch";
+  const attachments = mode === "attachments" || mode === "fallback";
+  return h("section", { class: "composer prompt-composer", "aria-label": "Prompt composer" }, [
+    attachments ? h("div", { class: "attachment-preview", "data-attachments": "", "aria-label": "Attached files" }, attachmentChips(mode === "fallback")) : null,
+    h("div", { class: "prompt-text tagged prompt-box", role: "textbox", "aria-label": "Prompt", "aria-multiline": "true", contenteditable: "true", spellcheck: "true", "data-placeholder": "Ask for follow-up changes", "data-typeahead-prompt": suggestions ? "true" : null }, promptText(mode)),
+    suggestions ? inlineSuggestions("$", "grill") : null,
+    branch ? branchPopover() : null,
+    h("div", { class: "composer-row" }, [
+      h("button", { class: "icon-button", type: "button", "aria-label": "Attach file" }, [svgIcon("paperclip")]),
+      h("a", { class: "chip", href: "#approval-dialog" }, [svgIcon("shield"), h("span", { text: "Ask for approval" })]),
+      h("span", { class: "spacer" }),
+      h("button", { class: "icon-button", type: "button", "aria-label": "Use microphone" }, [svgIcon("mic")]),
+      h("button", { class: "icon-button is-active", type: "button", "aria-label": "Send prompt" }, [svgIcon("send")])
+    ]),
+    h("div", { class: "context-strip" }, [
+      h("a", { class: "chip readonly-chip", href: "#branch-popover", "aria-label": "Branch locked for this chat" }, [svgIcon("gitBranch"), h("span", { text: branch ? "feature/prompt-approvals" : "main" })]),
+      h("span", { class: "spacer" }),
+      h("span", { class: "readonly-chip" }, [svgIcon("bot"), h("span", { text: "openai-compatible/default" })])
+    ])
+  ]);
+}
+
+function inlineSuggestions(trigger = "$", query = "") {
+  return h("div", { class: "suggestion-popover typeahead-menu", role: "listbox", "aria-label": "Prompt reference typeahead menu", "data-typeahead-menu": "true" }, [
+    suggestionGroup(typeaheadTitle(trigger), typeaheadRows(trigger, query))
+  ]);
+}
+
+function suggestionGroup(title, rows) {
+  return h("section", { class: "suggestion-group" }, [
+    h("h3", { text: title }),
+    ...rows.map(([label, meta, selected]) => h("button", { class: `suggestion-row${selected ? " is-selected" : ""}`, type: "button", role: "option", "aria-selected": selected ? "true" : "false", "data-typeahead-option": label, "data-typeahead-meta": meta }, [
+      h("strong", { text: label }),
+      h("span", { text: meta })
+    ]))
+  ]);
+}
+
+const typeaheadCatalog = {
+  "$": [
+    ["grill-me-with-docs", "/User/cblanquera/.c4os/skills/grill-me-with-docs", "selected"],
+    ["grill-with-docs", "/User/cblanquera/.c4os/skills/grill-with-docs"],
+    ["spec-grill-me-with-docs", "/User/cblanquera/.c4os/skills/spec-grill-me-with-docs"],
+    ["chrisai-designing", "/User/cblanquera/.c4os/skills/chrisai-designing"]
+  ],
+  "@": [
+    ["browser:screenshot-14", "Browser screenshot record", "selected"],
+    ["browser:annotation-bundle-14", "Browser annotation bundle"],
+    ["docs:release-plan", "Plugin resource"],
+    ["wireframes/ui-handoff-spec.md", "File"]
+  ],
+  "/": [
+    ["summarize-run", "C4OS command", "selected"],
+    ["attach-browser-evidence", "C4OS command"],
+    ["new-chat", "C4OS command"],
+    ["wireframes/review-round-11.md", "Accepted file match"]
+  ]
+};
+
+function typeaheadTitle(trigger) {
+  if (trigger === "$") return "$ Skills";
+  if (trigger === "@") return "@ Resources";
+  return "/ Commands";
+}
+
+function typeaheadRows(trigger, query) {
+  const normalized = String(query || "").toLowerCase();
+  const rows = typeaheadCatalog[trigger] || [];
+  const filtered = normalized ? rows.filter(([label]) => label.toLowerCase().includes(normalized)) : rows;
+  return filtered.length ? filtered : [["No matches", "Keep typing or delete the trigger", "selected"]];
+}
+
+function approvalRequest(remembered) {
+  const advancedId = remembered ? "remembered-approval-advanced" : "approval-request-advanced";
+  return h("section", { class: "permission-prompt approval-card", role: "dialog", "aria-label": "Approval request" }, [
+    h("p", { class: "approval-title", text: remembered ? "Remembered approval applied for terminal.run" : "Approve terminal.run for this chat?" }),
+    h("code", { text: "npm run test -- --runInBand" }),
+    h("section", { class: "approval-advanced" }, [
+      h("button", { class: "approval-advanced-toggle", type: "button", "data-toggle": "approval-advanced", "aria-expanded": "false", "aria-controls": advancedId }, [
+        h("span", { text: "Advanced" }),
+        svgIcon("chevronRight")
+      ]),
+      h("div", { class: "approval-advanced-body", id: advancedId, hidden: "true" }, [
+        h("div", { class: "approval-impact" }, [
+          approvalLine("Tool", "terminal.run"),
+          approvalLine("Action/risk", "execute command - terminal"),
+          approvalLine("Target scope", "trusted project"),
+          approvalLine("Decision event", remembered ? "approval_policy remembered.applied" : "approval_requested pending")
+        ]),
+        remembered ? rememberedSummary() : rememberChoices()
+      ])
+    ]),
+    h("div", { class: "permission-options approval-actions" }, [
+      h("button", { class: "button secondary", type: "button", text: "Deny" }),
+      h("button", { class: "button secondary", type: "button", text: "Deny and wait" }),
+      h("button", { class: "button secondary", type: "button", text: "Allow once" }),
+      h("button", { class: "button primary", type: "button" }, [svgIcon("check"), h("span", { text: remembered ? "Continue" : "Allow and remember" })])
+    ])
+  ]);
+}
+
+function approvalLine(label, value) {
+  return h("div", { class: "approval-line" }, [h("strong", { text: label }), h("span", { text: value })]);
+}
+
+function rememberChoices() {
+  return h("div", { class: "remember-box" }, [
+    h("strong", { text: "Remember this decision" }),
+    h("label", { class: "check-row" }, [h("input", { type: "radio", name: "remember", checked: "true" }), h("span", { text: "Session only - expires with this chat session" })]),
+    h("label", { class: "check-row" }, [h("input", { type: "radio", name: "remember" }), h("span", { text: "User global - save to Settings > Configuration" })])
+  ]);
+}
+
+function rememberedSummary() {
+  return h("div", { class: "remember-box" }, [
+    h("strong", { text: "Applied remembered rule" }),
+    approvalLine("Rule key", "terminal.run + terminal risk + trusted project scope"),
+    approvalLine("Duration", "Session only for this chat; user-global rules are edited in Settings > Configuration."),
+    h("a", { class: "button secondary", href: "#settings-configuration" }, [svgIcon("settings"), h("span", { text: "Open Settings > Configuration" })])
+  ]);
+}
+
+function blockedRepairPanel() {
+  return h("section", { class: "permission-prompt blocked-panel" }, [
+    h("div", {}, [
+      h("strong", {}, [svgIcon("circleAlert"), h("span", { text: "Resource hidden from executable suggestions" })]),
+      h("p", { text: "The HubSpot resource belongs to an enabled plugin with a missing service dependency. It is not selectable in the prompt resolver." })
+    ]),
+    h("a", { class: "button secondary", href: "#settings-plugin-states" }, [h("span", { text: "Repair dependency" })])
+  ]);
+}
+
+function branchPopover() {
+  return h("div", { class: "composer-popover branch-popover" }, [
+    h("strong", { text: "Choose branch" }),
+    branchOption("main", "Current chat branch - read-only", true),
+    branchOption("feature/prompt-approvals", "Use for accepted separate work"),
+    h("div", { class: "fake-input", text: "feature/new-safe-scope" }),
+    h("button", { class: "button primary", type: "button" }, [svgIcon("plus"), h("span", { text: "Create branch" })])
+  ]);
+}
+
+function branchOption(name, detail, disabled = false) {
+  return h("button", { class: `popover-row branch-option${disabled ? " is-disabled" : ""}`, type: "button", disabled }, [
+    h("strong", { text: name }),
+    h("span", { text: detail })
+  ]);
+}
+
+function promptInlineState(mode) {
+  if (mode === "attachments" || mode === "fallback") {
+    return h("div", { class: "attachment-grid" }, attachmentCards(mode === "fallback"));
+  }
+  if (mode === "blocked") {
+    return h("p", {}, [h("a", { href: "#settings-plugin-states", text: "Open plugin repair state" })]);
+  }
+  if (mode === "remembered") {
+    return h("p", {}, [h("a", { href: "#settings-configuration", text: "Review remembered rules in Settings > Configuration" })]);
+  }
+  return null;
+}
+
+function agentExtra(mode) {
+  const inlineState = promptInlineState(mode);
+  if (inlineState) return [inlineState];
+  if (mode === "suggestions") {
+    return [
+      h("p", { text: "The composer keeps typed trigger text editable while the menu follows the active token." })
+    ];
+  }
+  return [
+    h("p", { text: "Decision and state details remain available in the thread without crowding the default message view." })
+  ];
+}
+
+function attachmentCards(fallback) {
+  return [
+    attachmentCard("File", "@wireframes/ui-handoff-spec.md", "source: file editor - redaction: none - cap: 64 KB", false),
+    attachmentCard("Browser screenshot", "screenshot-14.png", "source: Browser - viewport: 1440x900 - URL captured", fallback),
+    attachmentCard("Annotation bundle", "3 target comments", "markers, comments, selectors, frame, viewport, screenshot evidence", fallback)
+  ];
+}
+
+function attachmentCard(title, name, detail, warning) {
+  return h("article", { class: `attachment-card${warning ? " has-warning" : ""}` }, [
+    h("span", { class: "attachment-icon" }, [svgIcon(warning ? "circleAlert" : "paperclip")]),
+    h("strong", { text: title }),
+    h("p", { text: name }),
+    h("span", { text: warning ? `${detail} - adapter fallback required` : detail })
+  ]);
+}
+
+function attachmentChips(fallback) {
+  return [
+    h("span", { class: "attachment-chip" }, [svgIcon("file"), h("span", { text: "ui-handoff-spec.md" }), h("small", { text: "file" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove file attachment", text: "x" })]),
+    h("span", { class: `attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon(fallback ? "circleAlert" : "globe"), h("span", { text: "Browser screenshot" }), h("small", { text: fallback ? "fallback" : "image" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove screenshot attachment", text: "x" })]),
+    h("span", { class: `attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon("quote"), h("span", { text: "3 annotations" }), h("small", { text: "bundle" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove annotation bundle", text: "x" })])
+  ];
+}
+
+function fallbackWarning() {
+  return h("section", { class: "permission-prompt fallback-warning", role: "status" }, [
+    h("p", { text: "Unsupported attachment warning" }),
+    h("code", { text: "Selected model cannot consume Browser image attachments directly." }),
+    h("p", { text: "C4OS keeps the screenshot and annotation records, then sends a safe text-plus-metadata fallback to the adapter." })
   ]);
 }
 
@@ -749,7 +1119,21 @@ function coverageWorkbench() {
   return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
     h("section", { class: "coverage-main" }, [
       h("h1", { text: "Wireframe coverage" }),
-      h("p", { text: "Batch 2 adds focused Settings and Configuration routes for specs 03, 04, and 11 without recreating the full r04 Settings route set." }),
+      h("p", { text: "Batch 3 adds focused prompt, approval, suggestion, branch, and attachment states for spec 05 and direct overlaps in specs 04, 07, 10, and 11. Batch 2 Settings coverage remains listed below for continuity." }),
+      h("h2", { text: "Batch 3 prompt interaction coverage" }),
+      h("table", { class: "matrix" }, [
+        h("thead", {}, [h("tr", {}, ["r05 state", "Spec 05", "Spec 04", "Spec 07", "Spec 10", "Spec 11", "Review intent"].map((text) => h("th", { text })))]),
+        h("tbody", {}, [
+          matrixRow("#prompt-suggestions", "REQ-002, REQ-003, REQ-007, AC-002, AC-006", "REQ-005, AC-002", "REQ-004, AC-002", "-", "REQ-004, REQ-010, AC-001, AC-005", "Pending trigger typeahead behavior with inline resolved references and backend serialization boundary"),
+          matrixRow("#approval-dialog", "REQ-001, REQ-009, AC-001, AC-004, AC-008", "REQ-003, REQ-008, AC-006, AC-007", "-", "-", "-", "Approval dialog with Deny, Deny and wait, Allow once, Allow and remember, duration, and typed decision event shape"),
+          matrixRow("#remembered-rule-summary", "REQ-001, AC-004, AC-005", "REQ-003, REQ-008, AC-006, AC-007", "-", "-", "-", "Applied rule summary plus Settings > Configuration route for user-global review/edit/revoke"),
+          matrixRow("#blocked-suggestion-repair", "REQ-003, REQ-007, AC-006", "REQ-008", "REQ-001, AC-001", "-", "REQ-008, AC-002, AC-005", "Dependency-blocked suggestion hidden from execution with repair path"),
+          matrixRow("#branch-popover", "REQ-004, AC-002", "-", "-", "-", "-", "Choose/create branch control shown only for Git-backed project; current chat branch read-only"),
+          matrixRow("#attachment-states", "REQ-005, REQ-006, REQ-008, AC-003, AC-007", "REQ-010, AC-003, AC-010", "REQ-004, REQ-009, AC-002, AC-006", "REQ-002, REQ-003, REQ-004, REQ-009, AC-001, AC-005", "-", "File chips, Browser screenshot chip, and Browser annotation bundle records"),
+          matrixRow("#safe-fallback", "REQ-005, REQ-008, AC-003, AC-007", "REQ-010, AC-003, AC-010", "-", "REQ-009, AC-005", "-", "Unsupported attachment warning and safe provider adapter fallback")
+        ])
+      ]),
+      h("h2", { text: "Batch 2 Settings coverage" }),
       h("table", { class: "matrix" }, [
         h("thead", {}, [h("tr", {}, ["r05 state", "Spec 03", "Spec 04", "Spec 11", "Review intent"].map((text) => h("th", { text })))]),
         h("tbody", {}, [
@@ -931,6 +1315,222 @@ function render() {
   bindPluginConnectDialog();
   bindMarketplaceControls();
   bindSkillDetails();
+  bindShowMore();
+  bindApprovalAdvanced();
+  bindPromptTypeahead();
+}
+
+function bindShowMore() {
+  document.querySelectorAll("[data-toggle='message'], [data-toggle='activity']").forEach((control) => {
+    control.addEventListener("click", () => {
+      const card = control.closest(".message, .activity-card");
+      const expanded = card.classList.toggle("is-expanded");
+      const label = control.querySelector("[data-toggle-label]");
+      control.setAttribute("aria-expanded", String(expanded));
+      control.classList.toggle("is-expanded", expanded);
+      if (label) label.textContent = expanded ? control.dataset.expandedLabel : control.dataset.collapsedLabel;
+      else control.textContent = expanded ? control.dataset.expandedLabel : control.dataset.collapsedLabel;
+    });
+  });
+}
+
+function bindApprovalAdvanced() {
+  document.querySelectorAll("[data-toggle='approval-advanced']").forEach((control) => {
+    control.addEventListener("click", () => {
+      const target = document.getElementById(control.getAttribute("aria-controls"));
+      const expanded = control.getAttribute("aria-expanded") === "true";
+      control.setAttribute("aria-expanded", String(!expanded));
+      control.classList.toggle("is-expanded", !expanded);
+      if (target) target.hidden = expanded;
+    });
+  });
+}
+
+function bindPromptTypeahead() {
+  document.querySelectorAll("[data-typeahead-prompt]").forEach((prompt) => {
+    const composerNode = prompt.closest(".prompt-composer");
+    const menu = composerNode?.querySelector("[data-typeahead-menu]");
+    if (!composerNode || !menu) return;
+    let activeIndex = 0;
+    let activeKey = "";
+    let lastActive = null;
+
+    const renderMenu = () => {
+      const active = activeReferenceAtCaret(prompt);
+      if (!active) {
+        menu.hidden = true;
+        lastActive = null;
+        return;
+      }
+      const nextKey = `${active.trigger}:${active.query}`;
+      if (nextKey !== activeKey) {
+        activeIndex = 0;
+        activeKey = nextKey;
+      }
+      lastActive = active;
+      menu.hidden = false;
+      menu.replaceChildren(suggestionGroup(typeaheadTitle(active.trigger), typeaheadRows(active.trigger, active.query)));
+      updateTypeaheadSelection(menu, activeIndex);
+    };
+
+    const chooseOption = (event) => {
+      const option = event.target.closest("[data-typeahead-option]");
+      if (!option || option.dataset.typeaheadOption === "No matches") return;
+      const active = activeReferenceAtCaret(prompt) || lastActive;
+      if (!active) return;
+      resolvePromptReference(prompt, active, option.dataset.typeaheadOption);
+      menu.hidden = true;
+      lastActive = null;
+    };
+
+    menu.addEventListener("pointerdown", chooseOption);
+    menu.addEventListener("click", chooseOption);
+
+    prompt.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+      if (menu.hidden) renderMenu();
+      if (menu.hidden) return;
+      const options = typeaheadOptions(menu).filter((option) => option.dataset.typeaheadOption !== "No matches");
+      if (!options.length) return;
+      event.preventDefault();
+      if (event.key === "ArrowDown") {
+        activeIndex = (activeIndex + 1) % options.length;
+        updateTypeaheadSelection(menu, activeIndex);
+      } else if (event.key === "ArrowUp") {
+        activeIndex = (activeIndex - 1 + options.length) % options.length;
+        updateTypeaheadSelection(menu, activeIndex);
+      } else {
+        resolvePromptReference(prompt, lastActive || activeReferenceAtCaret(prompt), options[activeIndex].dataset.typeaheadOption);
+        menu.hidden = true;
+        lastActive = null;
+      }
+    });
+    prompt.addEventListener("input", () => {
+      normalizePromptMarkup(prompt);
+      renderMenu();
+    });
+    prompt.addEventListener("keyup", renderMenu);
+    prompt.addEventListener("click", renderMenu);
+    prompt.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (!composerNode.contains(document.activeElement)) menu.hidden = true;
+      }, 0);
+    });
+    renderMenu();
+  });
+}
+
+function normalizePromptMarkup(prompt) {
+  const caret = caretOffset(prompt);
+  if (caret == null) return;
+  renderResolvedPrompt(prompt, prompt.textContent || "", caret);
+}
+
+function typeaheadOptions(menu) {
+  return Array.from(menu.querySelectorAll("[data-typeahead-option]"));
+}
+
+function updateTypeaheadSelection(menu, activeIndex) {
+  const options = typeaheadOptions(menu);
+  options.forEach((option, index) => {
+    const selected = index === activeIndex;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-selected", String(selected));
+  });
+}
+
+function activeReferenceAtCaret(prompt) {
+  const selection = window.getSelection();
+  const focusElement = selection?.focusNode?.nodeType === Node.TEXT_NODE
+    ? selection.focusNode.parentElement
+    : selection?.focusNode;
+  if (focusElement?.closest?.(".prompt-token.is-resolved")) return null;
+  const text = prompt.textContent || "";
+  const caret = caretOffset(prompt);
+  if (caret == null) return null;
+  return activeReference(text, caret);
+}
+
+function caretOffset(root) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !root.contains(selection.focusNode)) return null;
+  const range = selection.getRangeAt(0).cloneRange();
+  range.selectNodeContents(root);
+  range.setEnd(selection.focusNode, selection.focusOffset);
+  return range.toString().length;
+}
+
+function activeReference(text, caret = text.length) {
+  if (!text || caret == null) return null;
+  const beforeCaret = text.slice(0, caret);
+  if (!beforeCaret || /\s$/.test(beforeCaret)) return null;
+  const segmentMatch = beforeCaret.match(/\S+$/);
+  if (!segmentMatch) return null;
+  const segment = segmentMatch[0];
+  const segmentStart = caret - segment.length;
+  const triggerPositions = ["$", "@", "/"].map((trigger) => ({ trigger, index: segment.lastIndexOf(trigger) }))
+    .filter((item) => item.index >= 0)
+    .sort((a, b) => b.index - a.index);
+  if (!triggerPositions.length) return null;
+  const { trigger, index } = triggerPositions[0];
+  return {
+    trigger,
+    query: segment.slice(index + 1),
+    start: segmentStart + index,
+    end: caret
+  };
+}
+
+function resolvePromptReference(prompt, active, label) {
+  if (!active) return;
+  const text = prompt.textContent || "";
+  const replacement = `${active.trigger}${label}`;
+  const nextText = `${text.slice(0, active.start)}${replacement}${text.slice(active.end)}`;
+  renderResolvedPrompt(prompt, nextText, active.start + replacement.length);
+}
+
+function renderResolvedPrompt(prompt, text, caret) {
+  const fragment = document.createDocumentFragment();
+  const references = resolvedReferenceSet();
+  for (const part of text.match(/\s+|\S+/g) || []) {
+    if (references.has(part)) {
+      fragment.append(token(part[0], part.slice(1), { resolved: true }));
+    } else {
+      fragment.append(document.createTextNode(part));
+    }
+  }
+  prompt.replaceChildren(fragment);
+  setCaretOffset(prompt, caret);
+}
+
+function resolvedReferenceSet() {
+  return new Set(Object.entries(typeaheadCatalog).flatMap(([trigger, rows]) =>
+    rows.filter(([label]) => label !== "No matches").map(([label]) => `${trigger}${label}`)
+  ));
+}
+
+function setCaretOffset(root, offset) {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  let remaining = offset;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (remaining <= node.nodeValue.length) {
+      range.setStart(node, remaining);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    remaining -= node.nodeValue.length;
+    node = walker.nextNode();
+  }
+  range.selectNodeContents(root);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 document.addEventListener("click", (event) => {

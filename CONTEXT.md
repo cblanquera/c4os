@@ -48,6 +48,42 @@ _Avoid_: Runtime job, OpenCode run
 A user decision that allows, denies, or remembers a sensitive action requested by an agent.
 _Avoid_: OpenCode permission when speaking to users
 
+**Prompt Trigger**:
+A typed prefix character in the prompt composer that starts scoped reference
+lookup. `$` starts Skills lookup, `@` starts resource lookup, and `/` starts
+C4OS command lookup.
+_Avoid_: Magic character, parser shortcut
+
+**Active Query**:
+The editable text range after a prompt trigger and before the next boundary.
+Boundaries include whitespace, deletion of the trigger, cursor movement outside
+the token, or composer blur.
+_Avoid_: Full prompt parse, completed reference
+
+**Typeahead Menu**:
+The filtered picker shown while a prompt trigger has an active query. The menu
+is scoped by trigger: `$` shows Skills, `@` shows plugin resources before files
+and folders, and `/` shows built-in C4OS commands before accepted file or
+resource matches.
+_Avoid_: Global search, settings picker
+
+**Resolved Inline Reference**:
+A prompt token whose visible text exactly maps to a known skill, resource,
+file, folder, or command. Resolved references render distinctly in the composer
+and serialize to canonical runtime text before execution.
+_Avoid_: Plain text tag, frontend-only match
+
+**Unresolved Token**:
+Typed trigger text that has not been selected or exact-matched to a known
+reference. Unresolved tokens remain plain prompt text unless a later product
+rule blocks sending them.
+_Avoid_: Broken link, hidden attachment
+
+**Serialized Prompt**:
+The canonical text sent to the runtime after visible resolved inline references
+are expanded to stable reference forms, such as Markdown-style links.
+_Avoid_: Display prompt, raw textbox HTML
+
 **Artifact**:
 A generated file or previewable output associated with a session.
 _Avoid_: Output blob, runtime file

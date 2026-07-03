@@ -134,6 +134,181 @@ Date: 2026-07-02
   File editor field examples, `Repair states`, and `Tool policy`.
 - Temporary server remains running for review at `http://127.0.0.1:4187/`.
 
+## Batch 3 Verification
+
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- Static route inventory confirmed the 7 new Batch 3 prompt routes are present:
+  `#prompt-suggestions`, `#approval-dialog`, `#remembered-rule-summary`,
+  `#blocked-suggestion-repair`, `#branch-popover`, `#attachment-states`, and
+  `#safe-fallback`.
+- Static scan found no `undefined`, `[object Object]`, legacy session-rule
+  labels, or stale global remembered-rule placeholder copy in the active JS/CSS.
+- Local static server returned `200 OK` for `/`, `/script.js`, and
+  `/styles.css` at `http://127.0.0.1:4188/`.
+- Browser rendering was attempted with Playwright. The bundled Playwright
+  browser is not installed, and system Chrome aborted under the current runtime,
+  so no browser screenshot pass was recorded for Batch 3 in this run.
+- Temporary server remains running for review at `http://127.0.0.1:4188/`.
+
+## Round 9 Feedback Verification
+
+- Reworked Batch 3 routes after user feedback that Round 08 felt instructional
+  and annotation-like rather than functional.
+- Static scan confirms the active prompt routes now use `thread-view`,
+  `thread-list`, `work-log`, `composer-dock`, `permission-prompt`, and
+  composer attachment/popover elements patterned after the current frontend and
+  r04 chat-session mockups.
+- `node --check wireframes/r05-final-implementation/script.js` passed after
+  the functional chat-session rework.
+- `git diff --check -- wireframes/r05-final-implementation` passed after the
+  rework.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or durable handoff docs
+  were updated in this feedback round.
+
+## Round 10 Prompt Reference Verification
+
+- Added prompt-reference vocabulary to `CONTEXT.md`: Prompt Trigger, Active
+  Query, Typeahead Menu, Resolved Inline Reference, Unresolved Token, and
+  Serialized Prompt.
+- Updated `#prompt-suggestions` to show trigger-scoped typeahead behavior:
+  `$` Skills, `@` plugin resources before files/folders, and `/` C4OS built-in
+  commands before accepted file/resource matches.
+- Updated resolved inline reference styling so exact-match or selected tokens
+  render blue in the composer.
+- Added serialized prompt text to show the runtime-facing canonical reference
+  expansion for visible prompt tokens.
+- `node --check wireframes/r05-final-implementation/script.js` passed after
+  the prompt-reference terminology update.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md` passed
+  after the update.
+
+## Round 11 Prompt Typeahead Correction
+
+- Removed chip/bubble styling from typed prompt triggers. Resolved references
+  now render as inline blue text only.
+- Updated `#prompt-suggestions` so the composer shows a pending `$grill` skill
+  query and the typeahead menu contains only matching skills.
+- Removed the visible `Typeahead menu` title, explanatory boundary text,
+  cross-trigger examples, and serialized prompt annotation from the popup.
+- Repositioned the typeahead popup above the fixed composer.
+- Kept serialized prompt behavior as a coverage/spec boundary rather than
+  visible instructional copy in the prompt wireframe.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md`
+  passed.
+- Static scan confirmed the active JS/CSS no longer contains `Typeahead menu`,
+  trigger-boundary helper text, `typeahead-head`, `typeahead-examples`, or
+  `serialized-prompt`.
+- Browser verification on
+  `http://127.0.0.1:4188/index.html#prompt-suggestions` confirmed the
+  composer text is `use $grill to ask me questions`, the popup contains only
+  `$ Skills`, the popup is above the composer, the pending token background is
+  transparent with `0px` radius, and the resolved sent-message token is blue.
+- Follow-up browser verification confirmed `#prompt-suggestions` no longer
+  renders a work-log annotation for the live draft state.
+
+## Round 12 Prompt Interaction Repair
+
+- Restored the r04-style `Worked for 5sec >` activity row in the prompt
+  session route.
+- Added r04-style Show More / Show Less disclosure behavior for the agent
+  message.
+- Added wireframe-local composer behavior so typing `$`, `@`, or `/` into the
+  prompt activates the matching typeahead menu.
+- `$` filters skills, `@` shows resource matches, and `/` shows runtime
+  command matches. Trailing space or plain text hides the menu.
+- Moved the typeahead popup to a fixed top-layer position above the bottom
+  composer so rows receive pointer events instead of the thread grid.
+- Browser verification on
+  `http://127.0.0.1:4188/index.html#prompt-suggestions` confirmed `$`, `@`,
+  and `/` all open their matching menus; plain trailing text hides the menu;
+  selecting `grill-me-with-docs` resolves to inline blue text with transparent
+  background and `0px` radius; `Worked for 5sec >` expands; and Show More /
+  Show Less toggles correctly.
+
+## Round 13 Caret-Scoped Typeahead Repair
+
+- Replaced full-prompt typeahead activation with caret-scoped activation.
+  Clicking in the prompt now checks the current selection offset and only opens
+  typeahead when the caret is inside a pending `$`, `@`, or `/` token.
+- Replaced text-arrow `Worked for 5sec >` / `Worked for 5sec v` labels with a
+  real chevron icon that rotates when expanded.
+- Kept typeahead hidden when the caret is outside a trigger token or after a
+  whitespace boundary.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md`
+  passed.
+- Browser verification could not be completed for this round because Browser
+  use rejected reloading the localhost review URL under the current URL
+  policy. No alternate browser-control workaround was used.
+
+## Round 14 Typeahead Placement Correction
+
+- Moved the fixed typeahead popover higher above the bottom composer so it no
+  longer covers the editable prompt text while typing.
+
+## Round 15 Multi-Reference And Keyboard Typeahead Repair
+
+- Changed suggestion resolution so the prompt is re-rendered from recognized
+  references after each selection. Previously, selecting a new typeahead row
+  flattened earlier blue references back to black text.
+- Added ArrowDown, ArrowUp, and Enter handling while the typeahead menu is open.
+- Added active-row state updates through `is-selected` and `aria-selected`.
+- Prevented already-resolved blue references from reopening typeahead when the
+  caret is inside them.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md`
+  passed.
+- The local server remained active on port `4188`. The already-open browser tab
+  was reachable, but it must be refreshed to load the updated script.
+
+## Round 16 Prompt Markup Normalization Repair
+
+- Added prompt markup normalization on every input event so typed text cannot
+  remain trapped inside the most recent blue resolved-reference span.
+- Backspace/input edits now re-run active-trigger detection immediately after
+  normalizing known references.
+- Known `$`, `@`, and `/` references stay blue only when the visible token
+  exactly matches a recognized reference.
+- Attempted to use Browser for live verification as requested, but Browser use
+  rejected access to the current localhost review URL under the URL policy. No
+  alternate browser-control workaround was used.
+
+## Round 17 Approval Dialog Readability Repair
+
+- Restyled the approval dialog as a light card with explicit dark text instead
+  of inheriting the dark `permission-prompt` foreground color.
+- Kept the command preview as a high-contrast dark code block.
+- Changed approval impact details to an even two-column grid with a fixed label
+  column and flexible value column.
+- Restyled remembered-choice rows so radio labels are readable on the light
+  approval surface.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md`
+  passed.
+
+## Round 18 Approval Advanced Accordion And Responsive Repair
+
+- Moved approval impact rows and remembered-choice controls into a collapsed
+  `Advanced` accordion.
+- Added the `Advanced` accordion toggle with chevron rotation.
+- Changed the approval card to stretch to the available composer dock width
+  instead of leaving a blank right-side column at wider responsive sizes.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation CONTEXT.md`
+  passed.
+
+## Round 19 Approval Action Wording
+
+- Removed the `Ask each time` approval action.
+- Added `Deny and wait` to represent denying the requested action while keeping
+  the session paused for further prompt instructions.
+
 ## Manual Review Targets
 
 - `./index.html#shell-foundation`
@@ -155,4 +330,11 @@ Date: 2026-07-02
 - `./index.html#settings-skill-detail`
 - `./index.html#settings-skill-customize`
 - `./index.html#settings-skill-invalid`
+- `./index.html#prompt-suggestions`
+- `./index.html#approval-dialog`
+- `./index.html#remembered-rule-summary`
+- `./index.html#blocked-suggestion-repair`
+- `./index.html#branch-popover`
+- `./index.html#attachment-states`
+- `./index.html#safe-fallback`
 - `./index.html#coverage`

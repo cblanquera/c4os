@@ -115,3 +115,10 @@ Status: proposed
   later app-owned state hydration into compatible Browser views.
   Load when: verifying the Browser hydration proof.
   Skip when: the spec-local POC result and decision are enough.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#attachment-states`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-03 as Batch 3 Browser attachment evidence. The approved UI shows Browser screenshot attachments and Browser annotation bundle attachments as prompt-level records with visible source, count, URL/target metadata, and attachment-chip behavior. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#safe-fallback`; `wireframes/r05-final-implementation/index.html#coverage` | Approved on 2026-07-03 as Batch 3 Browser fallback evidence. The approved UI shows unsupported attachment warnings and safe fallback messaging for provider or adapter limitations. |

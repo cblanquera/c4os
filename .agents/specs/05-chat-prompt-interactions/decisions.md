@@ -8,6 +8,10 @@ Source: `.agents/references/research/final-implementation-import/grill-session/0
 
   - How should C4OS define default approval policy?: Per Tauri tool/app tool with default policy and max authority
   - Which approval categories should exist?: allow, ask, deny, remember
+  - Batch 3 approved UI mapping: `ask` remains the default policy state that
+    causes an approval request. The approval dialog actions are Deny, Deny and
+    wait, Allow once, and Allow and remember; there is no separate Ask each time
+    button in the approved dialog.
   - Remembered approval UI: When a user chooses `remember`, the approval UI
     offers session-only or user-global duration. The UI summary names the tool,
     action/risk category, target scope when applicable, and plugin id for

@@ -7,15 +7,23 @@ Status: proposed
 | Requirement | Acceptance | QIDs | Source Note |
 | --- | --- | --- | --- |
 | REQ-001 | AC-003 | 024 | Browser navigation/actions allowed by default |
-| REQ-002 | AC-001 | 024, 027, 042A, 045 | Screenshots and annotations attach as prompt evidence |
-| REQ-003 | AC-001 | 042A | Many Codex-style annotation attachments |
-| REQ-004 | AC-001 | 042A | Persist sent attachments and clear active annotations |
+| REQ-002 | AC-001 | 024, 027, 042A, 045, EVD-WF-001 | Screenshots and annotations attach as prompt evidence |
+| REQ-003 | AC-001 | 042A, EVD-WF-001 | Many Codex-style annotation attachments |
+| REQ-004 | AC-001 | 042A, EVD-WF-001 | Persist sent attachments and clear active annotations |
 | REQ-005 | AC-002 | 036, 036A | Document-family preview boundary and corrected Browser role |
 | REQ-006 | AC-003 | 010, 024 | Browser activation does not create chat item |
 | REQ-007 | AC-004 | 002B, 024, 2026-07-02 grill refinements | Browser-oriented runtime tool state can exist before a visible Browser view and hydrate later |
 | REQ-002, REQ-003, REQ-004 | AC-001, AC-005 | POC `proofs/browser-annotation-attachment-model/` | Many annotation evidence bundle proof |
 | REQ-005 | AC-002 | POC `proofs/browser-document-preview-boundary/` | Browser hosting and document-family ownership proof |
 | REQ-007 | AC-004, AC-005 | POC `proofs/browser-state-hydration-without-visible-view/` | App-owned Browser state hydration proof |
+
+## Approved Wireframe Route Coverage
+
+| Route | Requirements | Acceptance |
+| --- | --- | --- |
+| `wireframes/r05-final-implementation/index.html#attachment-states` | REQ-002, REQ-003, REQ-004, REQ-008, REQ-009 | AC-001, AC-005 |
+| `wireframes/r05-final-implementation/index.html#safe-fallback` | REQ-008, REQ-009 | AC-005 |
+| `wireframes/r05-final-implementation/index.html#coverage` | REQ-002, REQ-003, REQ-004, REQ-008, REQ-009 | AC-001, AC-005 |
 
 ## Source Rule
 
