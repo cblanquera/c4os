@@ -1,16 +1,15 @@
 # C4OS UI Handoff Specification
 
 Status: draft handoff
-Updated: 2026-07-02
+Updated: 2026-07-04
 Primary artifact for final-implementation shell behavior: `wireframes/r05-final-implementation/index.html`
 Legacy MVP baseline artifact: `wireframes/r04-single-page-app/index.html`
 
 This document explains the approved C4OS wireframe behavior as an
-implementation handoff. It now has three layers: r04 remains the accepted MVP
-baseline for the original app shell and detailed screen set, approved r05 Batch
-1 supersedes r04 only for final-implementation shell-foundation behavior in
-specs 01 and 02, and approved r05 Batch 2 supersedes r04 only for the focused
-Settings behavior in specs 03, 04, and 11.
+implementation handoff. r04 remains the accepted MVP baseline for the original
+app shell and detailed screen set, while approved r05 batches supersede r04
+only for their focused final-implementation surfaces: Batch 1 shell foundation,
+Batch 2 Settings, and Batch 4 workspace/files behavior.
 
 ## 1. How To Use This Document
 
@@ -91,12 +90,16 @@ The handoff is derived from:
 - `.agents/specs/02-core-app-shell-ux/`
 - `.agents/specs/03-plugin-system-settings-management/`
 - `.agents/specs/04-runtime-tool-policy/`
+- `.agents/specs/06-file-system-plugin/`
+- `.agents/specs/07-file-editor-plugin/`
 - `.agents/specs/11-skills-settings/`
 
 The r05 prototype is the approved final-implementation shell-foundation review
 target for specs 01 and 02 and the approved focused Settings review target for
-specs 03, 04, and 11. The r04 prototype remains the legacy MVP handoff
-baseline for routes and surfaces not superseded by an approved r05 batch.
+specs 03, 04, and 11. It is also the approved focused Workspace and Files
+review target for specs 06 and 07. The r04 prototype remains the legacy MVP
+handoff baseline for routes and surfaces not superseded by an approved r05
+batch.
 
 ## 3A. r05 Final-Implementation Shell Addendum
 
@@ -216,6 +219,84 @@ r05 Batch 2 review routes:
 | `#settings-skill-invalid` | Invalid skill states and `$` suggestion filtering behavior. |
 | `#coverage` | Specs 03, 04, and 11 Batch 2 coverage matrix. |
 
+## 3C. r05 Batch 4 Workspace And Files Addendum
+
+Revision: `wireframes/r05-final-implementation/`
+
+Approval status: approved Batch 4 Workspace and Files behavior.
+
+This revision supersedes r04 only for the focused workspace, project, file
+explorer, and file editor states needed by specs 06 and 07. It does not
+approve unrelated product routes, final copy, final styling, or production file
+operation implementation.
+
+Normative r05 Batch 4 Workspace behavior:
+
+- Workspace start, loaded workspace, missing project, project/chat search, and
+  non-Git workspace states belong inside the File System plugin panel.
+- The center pane remains the normal chat prompt surface. Workspace management
+  must not replace the center pane with an instructional manager page.
+- `#workspace-start` uses FS-panel actions for opening a folder, cloning a
+  repository, opening a workspace file, and reviewing recent folder-backed
+  workspaces.
+- `#workspace-loaded` uses the r04-style project list density: project search,
+  Projects heading, project rows, active project state, and nested chat rows.
+- Project rows expose an overflow action menu plus a separate pencil action for
+  starting a new chat in that project.
+- Missing project rows are muted and struck through. Their chat rows remain
+  visible but read-only until relocation is completed.
+- Missing project overflow menus show `Relocate`, `Copy path`, `Rename`, and
+  `Remove`. They do not show `Reveal`.
+- Found project overflow menus show `Reveal`, `Copy path`, `Rename`, and
+  `Remove`. They do not show `Relocate`.
+- Project/chat search is a center-screen takeover route with a close action.
+- Non-Git workspaces are first-class and hide irrelevant repository-only
+  controls such as branch and clone actions.
+- Review annotations and explanatory notes must not render inside product shell
+  routes. Keep that material in review notes or handoff documents.
+
+Normative r05 Batch 4 File Editor behavior:
+
+- File System and File Editor are separate plugins with separate header icons.
+- File Editor requires File System, but its explorer/editor surfaces belong to
+  the File Editor plugin panel.
+- File Editor can mount on either the left or right side through panel
+  placement configuration.
+- File explorer rows keep r04-style density and click-to-editor navigation.
+  `.git` remains hidden while other hidden files such as `.env.example` can be
+  visible.
+- The base file editor state is breadcrumbs plus code view. Save/revert toolbar
+  controls appear in dirty or conflict states, not in the normal saved editor
+  state.
+- File context menus include Open, Add to chat, Copy path, Reveal in file
+  manager, Rename, and Move to Trash actions.
+- Add to chat inserts an inline `@` file reference, not hidden full file
+  contents.
+- Create, rename, and delete-to-trash confirmation states must route through
+  backend file services and platform adapters.
+- External file changes require explicit user choice before overwrite.
+- Empty states and labels must work for notes, documents, config, text, and
+  operations files, not only code repositories.
+
+r05 Batch 4 review routes:
+
+| Route | Durable handoff meaning |
+| --- | --- |
+| `#workspace-start` | FS-panel workspace start actions and recent workspace rows. |
+| `#workspace-loaded` | Normal loaded workspace project/chat navigation with center new-chat prompt. |
+| `#workspace-missing-project` | Missing project muted/read-only state and state-specific project action menu. |
+| `#workspace-search` | Center-screen project/chat search takeover and close action. |
+| `#workspace-non-git` | First-class non-Git workspace state with Git-only controls hidden. |
+| `#files-left-panel` | File Editor explorer mounted on the left side. |
+| `#files-right-panel` | File Editor explorer mounted on the right side. |
+| `#file-editor` | File click opens File Editor breadcrumbs and saved code view. |
+| `#file-context-menu` | File context menu and Add to chat inline reference behavior. |
+| `#file-operations` | Create, rename, and guarded delete-to-trash confirmation. |
+| `#file-editor-dirty` | Dirty buffer state with Save and Revert controls. |
+| `#file-external-conflict` | External-change conflict requiring user choice before overwrite. |
+| `#file-empty-states` | Non-code empty state and fallback file picks. |
+| `#coverage` | Specs 06 and 07 Batch 4 coverage matrix. |
+
 ## 4. Product Frame
 
 C4OS is a local-first desktop command center for agentic project work. The UI
@@ -236,6 +317,8 @@ a trusted local project folder.
 
 This section records the legacy MVP artifact contract. For
 final-implementation shell behavior in specs 01 and 02, use section 3A first.
+For approved workspace, project, file explorer, and file editor behavior in
+specs 06 and 07, use section 3C first.
 
 The r04 artifact is a single page app prototype:
 

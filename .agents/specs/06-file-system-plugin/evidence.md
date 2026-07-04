@@ -168,3 +168,12 @@ Status: proposed
   Purpose: Executable proof separating Remove Chat deletion from Remove Project membership removal.
   Load when: checking project removal, chat deletion, or preserved project-history semantics.
   Skip when: the spec-local POC result already answers the question.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#workspace-start`; `wireframes/r05-final-implementation/index.html#workspace-loaded`; `wireframes/r05-final-implementation/index.html#workspace-missing-project`; `wireframes/r05-final-implementation/index.html#workspace-search`; `wireframes/r05-final-implementation/index.html#workspace-non-git`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-04 as Batch 4 FS workspace evidence. The approved UI keeps workspace start/load/save and project navigation inside the FS left panel, keeps the center pane on the normal new-chat prompt, shows loaded workspace project/chat rows at r04 density, and avoids visible instructional annotations in the product shell. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#workspace-missing-project`; `wireframes/r05-final-implementation/review-round-34.md`; `wireframes/r05-final-implementation/review-round-35.md` | Approved on 2026-07-04 as Batch 4 missing-project behavior. Missing projects are muted with strike-through display, keep read-only chat rows visible, and expose `Relocate`, `Copy path`, `Rename`, and `Remove` in the project action menu. Found projects expose `Reveal`, `Copy path`, `Rename`, and `Remove` instead. |
+| EVD-WF-003 | `wireframes/r05-final-implementation/index.html#workspace-search`; `wireframes/r05-final-implementation/index.html#workspace-non-git`; `wireframes/r05-final-implementation/index.html#coverage` | Approved on 2026-07-04 as Batch 4 search and non-Git workspace evidence. Project/chat search takes over the center route with close navigation, while non-Git workspaces remain first-class and hide repository-only controls. |
+| EVD-WF-004 | `wireframes/r05-final-implementation/index.html#file-operations`; `wireframes/r05-final-implementation/index.html#coverage` | Approved on 2026-07-04 as Batch 4 platform-operation overlap evidence. File create, rename, and guarded delete-to-trash behavior is represented as policy-gated UI backed by platform adapter semantics, including OS Trash/Recycle Bin wording. |

@@ -217,6 +217,104 @@ Date: 2026-07-02
 - Restored the r04-style `Worked for 5sec >` activity row in the prompt
   session route.
 - Added r04-style Show More / Show Less disclosure behavior for the agent
+
+## Batch 4 Verification
+
+- Added focused workspace-and-files routes for specs 06 and 07 only; no
+  `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated before approval.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- Static route scan confirmed the new Batch 4 routes are present, including
+  `#workspace-start` and `#file-external-conflict`.
+- Temporary server on `http://127.0.0.1:4189/` returned `200 OK` for `/`,
+  `/script.js`, and `/styles.css`.
+- The in-app Browser tool was not active in this session, so no browser
+  screenshot pass was recorded for Batch 4.
+
+## Round 21 Functional Wireframe Correction
+
+- Reworked Batch 4 routes after user feedback that the original round felt too
+  instructional/annotated and not functional enough.
+- Workspace routes now render an app-like workspace manager table, toolbar,
+  missing-project action menu, and non-Git composer state
+  instead of explanatory cards.
+- File/editor routes now keep the editor as the primary surface and show the
+  file context menu, create row, trash confirmation, save/revert controls,
+  external-change conflict, and non-code empty picks in-place.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
+
+## Round 22 Workspace Start Ownership Correction
+
+- Reworked `#workspace-start` after user feedback that Workspace belongs under
+  the FS plugin and should not take over the center workbench.
+- The FS left panel now contains the r04-style start actions and recent
+  folder-backed workspace rows.
+- The center pane now stays on the original app-shell new-chat prompt state.
+- Related missing-project controls remain inside the FS panel pattern.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
+
+## Round 23 Workspace Add Project Removal
+
+- Removed `#workspace-add-project` after user feedback that it was no longer
+  relevant.
+- Removed the FS panel title row that showed `File system` and the plus icon.
+- Removed active review links and coverage references for the deleted route.
+- Static scan confirmed no active `workspace-add-project` route, navigation
+  link, or coverage row remains in the r05 HTML/CSS/JS/README surfaces.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative `href`, `src`, or `url(...)` references in
+  `wireframes/r05-final-implementation/`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
+
+## Round 25 Loaded Workspace Transition
+
+- Added `#workspace-loaded` after user feedback that the transition from
+  `#workspace-start` to `#workspace-missing-project` needed a normal loaded
+  workspace state.
+- Updated the `c4os` recent workspace row to open `#workspace-loaded`.
+- Kept the loaded workspace state inside the FS left panel, with the center
+  pane still showing the app-shell new-chat prompt.
+- Updated the coverage matrix and README route list with `#workspace-loaded`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
+
+## Round 26 r04 Loaded Workspace Panel Match
+
+- Updated `#workspace-loaded` after user feedback and screenshot reference
+  showed the loaded state did not match r04.
+- Replaced workspace-management controls with r04-style project navigation:
+  large search field, Projects heading with plus action, folder rows with
+  edit/trash icons, active `c4os2` row, and indented chat sessions.
+- Updated the center prompt copy to `What should we build in c4os2?`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
+
+## Round 27 r04 Density Correction
+
+- Corrected `#workspace-loaded` after user feedback that the r04 screenshot was
+  a density reference, not a target to scale up.
+- Removed oversized custom route typography and spacing.
+- Restored r04-scale values for the loaded FS panel: 44px search field, 38px
+  project rows, 36px session rows, 14px text, normal icon size, and the r04
+  left-panel width clamp.
+- Updated the search placeholder to `Search projects`.
+- No `.agents` specs, `wireframes/ui-handoff-spec.md`, or product code were
+  updated in this correction round.
   message.
 - Added wireframe-local composer behavior so typing `$`, `@`, or `/` into the
   prompt activates the matching typeahead menu.
@@ -309,6 +407,151 @@ Date: 2026-07-02
 - Added `Deny and wait` to represent denying the requested action while keeping
   the session paused for further prompt instructions.
 
+## Round 28 Batch 4 Self-QA Correction
+
+- Treated the workspace/files feedback as a batch-level self-QA failure rather
+  than another acceptance handoff.
+- Kept `#workspace-start` in the already-reviewed FS-left-panel shape.
+- Tightened `#workspace-loaded`, `#workspace-missing-project`, and
+  `#workspace-non-git` so the sidebar state changes match a r04-style project
+  list instead of an invented center workspace manager.
+- Removed rendered file-explorer explanation labels and the icon-theme note card
+  from the active UI. File states now show product rows only.
+- Hid `.git` from the active explorer state while leaving `.env.example` visible.
+- Changed Batch 4 file route titles away from the invented `Draft handoff`
+  wording.
+- Removed dead workspace-manager/table/savebar functions from the script.
+- Removed dead workspace-manager/table/savebar/card CSS from the stylesheet.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Targeted source scan found no active `Markdown icon`, `hidden file visible`,
+  `hidden by rule`, `Icon theme`, `Draft handoff`,
+  `workspaceManagerToolbar`, `workspaceProjectItem`, `workspaceSaveBar`, or
+  rendered `.git` file row in `script.js` or `styles.css`.
+- Browser verification was attempted but blocked by the in-app Browser URL
+  policy for this `file://` review page, so no browser screenshot claim is
+  attached to this round.
+
+## Round 29 File System And File Editor Split
+
+- Left-aligned `.prompt-text` so the chat prompt no longer inherits centered
+  empty-workspace alignment.
+- Changed the loaded workspace search control into a clickable route target for
+  `#workspace-search`.
+- Added a separate File Editor plugin icon and moved file explorer/editor states
+  out of the File System plugin panel.
+- Added `#file-editor` as the normal code-view route reached by clicking file
+  rows in the explorer.
+- Reworked File Editor explorer rows to match r04 structure and density more
+  closely: folder rows, indented file rows, 30px row height, and active outline.
+- Kept `.git` hidden while preserving `.env.example` as the hidden-file visible
+  row.
+- Kept the center new-chat prompt visible while File Editor is open, matching
+  the r04 panel behavior.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Targeted source assertions passed for separate File Editor plugin ownership,
+  `#file-editor`, clickable file links, `#workspace-search`, FS-only workspace
+  panel ownership, left-aligned prompt text, and r04-style explorer row names.
+
+## Round 30 r04 File Editor Match
+
+- Compared r05 `#file-editor` against r04 source.
+- r04's normal file editor is breadcrumbs plus code pane only; r05 had added
+  save/revert toolbar chrome to the base editor state.
+- Removed the toolbar from base `#file-editor`.
+- Kept save/revert toolbar behavior only for `#file-editor-dirty` and
+  `#file-external-conflict`.
+- Aligned File Editor panel layout and code-pane styling with r04: 36px
+  breadcrumbs, 13px monospace code, sticky line numbers, `max-content` code
+  rows, and `white-space: pre`.
+
+## Round 31 File Editor Padding
+
+- Reduced visual inset in `#file-editor` after feedback that the editor had too
+  much left and top padding.
+- Changed File Editor breadcrumb rows from 36px to 32px.
+- Reduced code pane top padding from 14px to 8px.
+- Reduced the line-number gutter from 48px to 34px.
+- Reduced line-number and code-left padding so code starts closer to the panel
+  edge while preserving the r04 breadcrumb/code-pane structure.
+
+## Round 32 Project Row Actions Menu
+
+- Changed project row actions from pencil/trash to `...` plus pencil.
+- Preserved pencil as the new-chat action.
+- Added per-project `...` menu toggles.
+- Kept the missing-project menu open by default in
+  `#workspace-missing-project`.
+- Simplified menu order by state:
+  - Missing project: Relocate, Copy path, Rename, Remove.
+  - Found project: Reveal, Copy path, Rename, Remove.
+- Kept the current light r05 theme and current type scale.
+
+## Round 33 Project Menu Rendering Repair
+
+- Fixed project action menus rendering as full nested boxes under every project.
+- Moved menu markup inside the project row so session rows remain in normal
+  sidebar flow.
+- Added explicit `[hidden]` display suppression for project menus.
+- Positioned the open menu as a compact absolute popover under the row actions.
+- Removed outlined button treatment from project menu items.
+- Preserved chat/session rows under active/missing projects.
+- Corrected menu order:
+  - Missing project: Relocate, Copy path, Rename, Remove.
+  - Found project: Reveal, Copy path, Rename, Remove.
+- Rendered `#workspace-missing-project` with Playwright and confirmed exactly
+  one visible project menu, five hidden menus, two visible session rows, and
+  menu items in the expected order.
+
+## Round 34 Project Menu Acceptance Fix
+
+- Added the missing `Copy path` icon.
+- Removed `Reveal` from the missing-project menu.
+- Kept `Reveal` only for found-project menus.
+- Tightened project menu popover padding from the inherited `12px` panel
+  padding to `4px`.
+- Left-aligned menu button text and verified icon/text grid alignment.
+- Rendered `#workspace-missing-project` with Chromium and confirmed:
+  - Missing project menu: Relocate, Copy path, Rename, Remove.
+  - Found project menu: Reveal, Copy path, Rename, Remove.
+  - Every menu row has one icon.
+  - Menu row text aligns left.
+  - Menu padding is `4px`.
+  - `Homepage refresh` and `Launch copy` remain present.
+
+## Round 35 Annotation Removal
+
+- Removed the visible center-panel annotation from
+  `#workspace-missing-project`.
+- Removed the unused `read-only-banner` styling.
+- Kept the missing-project sidebar row, open project actions menu, and read-only
+  chat rows intact.
+- Source scan found no remaining `read-only-banner` class or
+  `moved-marketing-site chats are visible` string in active JS/CSS.
+- Rendered `#workspace-missing-project` with Chromium and confirmed the center
+  prompt has only the heading and composer, with no read-only banner.
+- Rendered check confirmed the missing-project menu still shows Relocate, Copy
+  path, Rename, Remove.
+
+## Batch 4 Approval Sync
+
+- User approved Batch 4 on 2026-07-04.
+- Synced approved workspace/files evidence into specs 06 and 07.
+- Promoted durable workspace/files UI behavior into the compact creative
+  context and `wireframes/ui-handoff-spec.md`.
+- Updated `wireframes/screens.md` and this artifact README to mark Batch 4 as
+  approved.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- .agents wireframes` passed.
+- Static link scan found no root-relative links in the synced surfaces.
+- Rendered Chromium checks confirmed:
+  - `#workspace-missing-project` has no visible annotation banner.
+  - Missing-project menu items are Relocate, Copy path, Rename, Remove.
+  - `#file-editor` renders breadcrumbs and code view without the dirty toolbar.
+  - `#coverage` contains the Batch 4 matrix with no stale
+    `reveal/copy/remove actions` missing-project wording.
+
 ## Manual Review Targets
 
 - `./index.html#shell-foundation`
@@ -337,4 +580,17 @@ Date: 2026-07-02
 - `./index.html#branch-popover`
 - `./index.html#attachment-states`
 - `./index.html#safe-fallback`
+- `./index.html#workspace-start`
+- `./index.html#workspace-loaded`
+- `./index.html#workspace-missing-project`
+- `./index.html#workspace-search`
+- `./index.html#workspace-non-git`
+- `./index.html#files-left-panel`
+- `./index.html#files-right-panel`
+- `./index.html#file-editor`
+- `./index.html#file-context-menu`
+- `./index.html#file-operations`
+- `./index.html#file-editor-dirty`
+- `./index.html#file-external-conflict`
+- `./index.html#file-empty-states`
 - `./index.html#coverage`

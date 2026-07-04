@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-07-02
+Updated: 2026-07-04
 Source Note: Normalized from interface, product-experience, and UI handoff context. Detailed UI handoff material is preserved under `.agents/references/context/creative-specs/` and `.agents/references/context/ui-handoff/`.
 
 ## Purpose
@@ -111,6 +111,15 @@ states when the FS plugin is enabled. Chat session rows do not use chevrons,
 and active chat highlighting should align with the project row edge unless a
 separate accepted UI decision changes that inherited behavior.
 
+Workspace start, loaded workspace, missing project, project search, and non-Git
+workspace states stay inside the FS plugin panel. The center pane remains the
+normal chat prompt surface, not a workspace manager page. Missing projects use
+muted strike-through project rows and read-only chat rows until relocation.
+Project row actions use an overflow menu plus a separate new-chat pencil. The
+missing-project menu shows Relocate, Copy path, Rename, and Remove; found
+project menus show Reveal, Copy path, Rename, and Remove. Explanatory review
+annotations must not appear inside the product shell.
+
 ## Composer And Model Selector
 
 The composer exposes attachment, approval policy, branch, provider, and model context before submission. Empty state asks `What should we build in c4os2?` in the inherited r04 handoff, but sample names and copy should not be hardcoded into production behavior.
@@ -123,10 +132,15 @@ Messages use messenger-style layout. User messages align right. Agent messages a
 
 ## Plugin Panels
 
-Browser, IDE, Terminal, Chat Debug, and separately accepted plugin surfaces are plugin
-panels, not fixed right-panel tabs. Browser owns navigation and capture
-surfaces when enabled. IDE owns explorer/editor surfaces when enabled and when
-its FS dependency is satisfied. Terminal owns the user PTY panel only. Chat
+Browser, File Editor, Terminal, Chat Debug, and separately accepted plugin
+surfaces are plugin panels, not fixed right-panel tabs. Browser owns navigation
+and capture surfaces when enabled. File Editor owns explorer/editor surfaces
+when enabled and when its FS dependency is satisfied. File Editor may mount on
+the left or right side, uses a dense r04-style file explorer with click-to-file
+editor navigation, and keeps the base editor state to breadcrumbs plus code
+view. Dirty save/revert, external-change conflict, file context menus,
+delete-to-trash confirmation, hidden-file behavior, and non-code empty states
+belong to the File Editor surface. Terminal owns the user PTY panel only. Chat
 Debug owns developer-oriented tool and CLI event inspection.
 
 ## Settings

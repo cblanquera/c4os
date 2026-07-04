@@ -1,13 +1,12 @@
 # C4OS r05 Final Implementation Shell Foundation Wireframe
 
-Draft stage: wireframe review, Batch 3.
+Approval stage: approved wireframe review, Batch 4.
 
 This revision is the continuing r05 final-implementation wireframe because Batch
-1 was approved and not rejected. It keeps the approved r05 shell model and
-Settings structure, uses r04/current frontend chat-session states as the
-functional reference, and adds only the prompt, approval, suggestion, branch,
-and attachment states needed for pending spec 05 review plus direct overlap
-checks.
+1 was approved and not rejected. It keeps the approved r05 shell model,
+Settings structure, and prompt conventions, uses r04 project/file routes only
+where still relevant, and adds only the workspace, project, file explorer, and
+editor states needed for pending specs 06 and 07 review.
 
 ## Scope
 
@@ -45,6 +44,14 @@ checks.
   messaging.
 - Batch 3 prompt routes use the chat-session shape: Chats panel, thread list,
   work log, agent response, permission prompt, and composer dock.
+- Workspace create/load/save, folder/repository opening controls, sidebar
+  project reorder/collapse/rename/remove/reveal/copy
+  path affordances, missing project muted strike-through with relocate and
+  read-only behavior, center search takeover, and non-Git workspace state.
+- File Explorer/File Editor plugin panel placement on either side, file context
+  menu, Add to chat reference insertion, create/rename/delete-to-trash
+  confirmation, save/revert dirty state, external-change conflict, icon theme
+  behavior, hidden-file behavior, and non-code empty states.
 
 ## Review Routes
 
@@ -76,7 +83,20 @@ checks.
 | `./index.html#branch-popover` | Branch choose/create popover and read-only current chat branch. |
 | `./index.html#attachment-states` | File, Browser screenshot, and Browser annotation attachment records. |
 | `./index.html#safe-fallback` | Unsupported attachment warning and safe provider fallback. |
-| `./index.html#coverage` | Batch 2 and Batch 3 route/state coverage matrix for specs 03, 04, 05, 07, 10, and 11. |
+| `./index.html#workspace-start` | Create, load, and save workspace file behavior without project-root metadata. |
+| `./index.html#workspace-loaded` | Normal loaded workspace state with FS project list and center new-chat prompt. |
+| `./index.html#workspace-missing-project` | Missing project muted strike-through, last-known path, read-only sessions, and Relocate/Copy path/Rename/Remove actions. |
+| `./index.html#workspace-search` | Center-screen project/chat search takeover with close action. |
+| `./index.html#workspace-non-git` | Non-Git workspace state with repository-only controls hidden. |
+| `./index.html#files-left-panel` | File Editor plugin explorer mounted on the left side. |
+| `./index.html#files-right-panel` | File Editor plugin explorer mounted on the right side. |
+| `./index.html#file-editor` | File Editor plugin code view reached by clicking an explorer file. |
+| `./index.html#file-context-menu` | File context menu with Add to chat, Copy Path, reveal, rename, and delete actions. |
+| `./index.html#file-operations` | Create, rename, and guarded delete-to-trash confirmation behavior. |
+| `./index.html#file-editor-dirty` | Editor dirty state with save/revert controls. |
+| `./index.html#file-external-conflict` | External-change conflict requiring user choice before overwrite. |
+| `./index.html#file-empty-states` | Non-code file and empty editor state. |
+| `./index.html#coverage` | Batch 2, Batch 3, and Batch 4 route/state coverage matrix for specs 03, 04, 05, 06, 07, 10, and 11. |
 
 ## r04 Route Carry-Forward Decision
 
@@ -87,8 +107,8 @@ checks.
 | `#chat-session` | Carried forward as center chat concept only | Batch 1 needs chat continuity but not the full r04 message thread. |
 | `#providers-popover` | Deferred | Prompt/model picker behavior belongs to later prompt interaction review. |
 | `#models-popover` | Deferred | Prompt/model picker behavior belongs to later prompt interaction review. |
-| `#file-explorer` | Superseded as fixed right tab; deferred as plugin content | Files becomes a plugin panel contribution, not a permanent r04 right tab. |
-| `#file-editor` | Superseded as fixed right tab; deferred as plugin content | File editing belongs to the File Editor plugin review. |
+| `#file-explorer` | Carried forward as File Editor plugin explorer states | The r04 explorer density and click-to-editor behavior remain relevant, but the surface is now the File Editor plugin. |
+| `#file-editor` | Carried forward as File Editor plugin code view | The r04 code-view/breadcrumb pattern remains relevant inside the File Editor plugin panel. |
 | `#terminal` | Superseded as fixed right tab; deferred as plugin content | Terminal becomes a plugin panel contribution. |
 | `#settings-providers` | Deferred | Provider settings are outside Batch 1 shell foundation. |
 | `#settings-add-provider` | Deferred | Provider form details are outside Batch 1 shell foundation. |
@@ -105,7 +125,9 @@ This is static HTML/CSS/JS for wireframe review only. Plugin state, tool fanout,
 panel restore, resize collision, Settings restore, Chat Debug history, plugin
 marketplace install, policy editing, config fallback, skill customization,
 prompt resolution, approval decisions, remembered policy application, branch
-creation, attachment records, provider fallback, and repair states are
-simulated to make the behavior reviewable before implementation.
+creation, attachment records, provider fallback, workspace load/save, folder
+selection, clone registration, project relocation, file operations, editor
+conflict resolution, and repair states are simulated to make the behavior
+reviewable before implementation.
 
 Safe to delete: yes. This is a review artifact, not product code.

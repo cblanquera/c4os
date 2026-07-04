@@ -9,6 +9,7 @@ const icons = {
   chevronDown: "m6 9 6 6 6-6",
   chevronRight: "m9 18 6-6-6-6",
   circleAlert: "M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
+  copy: "M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Zm-4 8H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
   globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-20a15 15 0 0 1 0 20m0-20a15 15 0 0 0 0 20M2 12h20",
@@ -16,6 +17,7 @@ const icons = {
   key: "M7 14a5 5 0 1 1 3.5-8.5A5 5 0 0 1 7 14Zm7-4 7-7m-3 3 3 3m-6 0 3 3",
   messages: "M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z",
   mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm7 8v2a7 7 0 0 1-14 0v-2m7 9v3",
+  moreHorizontal: "M12 12h.01M19 12h.01M5 12h.01",
   panelLeft: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm6-2v18",
   panelRight: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm12-2v18",
   paperclip: "m21 11-9 9a6 6 0 0 1-8-8l9-9a4 4 0 0 1 6 6l-9 9a2 2 0 0 1-3-3l8-8",
@@ -29,12 +31,14 @@ const icons = {
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-6v3m0 14v3M4.9 4.9 7 7m10 10 2.1 2.1M2 12h3m14 0h3M4.9 19.1 7 17m10-10 2.1-2.1",
   shield: "M12 3c3 2 5 3 8 3v6c0 5-3 8-8 10-5-2-8-5-8-10V6c3 0 5-1 8-3Z",
   terminal: "m4 17 6-5-6-5m8 10h8",
+  trash: "M3 6h18m-2 0-.8 14.2A2 2 0 0 1 16.2 22H7.8a2 2 0 0 1-2-1.8L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-6 5v6m4-6v6",
   x: "M18 6 6 18M6 6l12 12"
 };
 
 const plugins = {
   chats: { id: "chats", label: "Chats", icon: "messages", side: "left" },
-  files: { id: "files", label: "Files", icon: "folder", side: "left" },
+  files: { id: "files", label: "File System", icon: "folder", side: "left" },
+  editor: { id: "editor", label: "File Editor", icon: "file", side: "right" },
   browser: { id: "browser", label: "Browser", icon: "globe", side: "right" },
   terminal: { id: "terminal", label: "Terminal", icon: "terminal", side: "right" },
   debug: { id: "debug", label: "Debug", icon: "bug", side: "right" }
@@ -67,7 +71,20 @@ const routeStates = {
   "branch-popover": { title: "Ship focused fix", subtitle: "Branch selection", left: "chats", prompt: "branch" },
   "attachment-states": { title: "Review evidence bundle", subtitle: "Prompt attachments", left: "chats", right: "browser", prompt: "attachments" },
   "safe-fallback": { title: "Review evidence bundle", subtitle: "Attachment fallback", left: "chats", right: "browser", prompt: "fallback" },
-  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03, 04, 05, 07, 10, and 11", coverage: true }
+  "workspace-start": { title: "Workspaces", subtitle: "Create, load, and save", left: "files", workspace: "start" },
+  "workspace-loaded": { title: "c4os2", subtitle: "Loaded workspace", left: "files", workspace: "loaded" },
+  "workspace-missing-project": { title: "Workspaces", subtitle: "Missing project", left: "files", workspace: "missing-project" },
+  "workspace-search": { title: "Search", subtitle: "Projects and chats", workspace: "search" },
+  "workspace-non-git": { title: "Client operations", subtitle: "Non-Git workspace", left: "files", workspace: "non-git" },
+  "files-left-panel": { title: "Files", subtitle: "c4os2", left: "editor", fileCanvas: "explorer-left" },
+  "files-right-panel": { title: "Files", subtitle: "c4os2", right: "editor", fileCanvas: "explorer-right" },
+  "file-editor": { title: "main.js", subtitle: "c4os2", right: "editor", fileCanvas: "editor" },
+  "file-context-menu": { title: "main.js", subtitle: "File menu", right: "editor", fileCanvas: "context-menu" },
+  "file-operations": { title: "client-notes.txt", subtitle: "File operation", right: "editor", fileCanvas: "operations" },
+  "file-editor-dirty": { title: "main.js", subtitle: "Unsaved", right: "editor", fileCanvas: "dirty" },
+  "file-external-conflict": { title: "main.js", subtitle: "External change", right: "editor", fileCanvas: "conflict" },
+  "file-empty-states": { title: "Files", subtitle: "No file open", right: "editor", fileCanvas: "empty" },
+  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03, 04, 05, 06, 07, 10, and 11", coverage: true }
 };
 
 const chats = [
@@ -75,6 +92,29 @@ const chats = [
   { title: "Draft wireframes", active: false },
   { title: "Plugin panel restore", active: false }
 ];
+
+const explorerRows = [
+  { name: "backend", icon: "folder", href: "#files-right-panel" },
+  { name: "frontend", icon: "folder", href: "#files-right-panel" },
+  { name: "main.js", icon: "file", href: "#file-editor" },
+  { name: "index.html", icon: "file", href: "#file-editor" },
+  { name: ".env.example", icon: "file", href: "#file-editor" },
+  { name: "tests", icon: "folder", href: "#files-right-panel" }
+];
+
+const editorPreview = {
+  breadcrumbs: ["c4os2", "frontend", "main.js"],
+  lines: [
+    'import { startWorkspace } from "./runtime";',
+    "",
+    'const project = "c4os2";',
+    "const trustedRoot = true;",
+    "",
+    "startWorkspace({ project, trustedRoot });",
+    "",
+    "// Code view fills the file editor panel."
+  ]
+};
 
 const pluginCatalog = [
   { name: "File system", description: "Activates Workspaces, Projects, and chat items per project.", logo: "FS", tone: "filesystem" },
@@ -165,14 +205,14 @@ function settingsButton(active) {
 function headerFor(state) {
   return h("header", { class: "shell-header" }, [
     h("div", { class: "header-icons left", "aria-label": "Left plugin icons" },
-      ["chats", "files"].map((id) => iconButton(plugins[id], state.left === id, state.activity === id))
+      ["chats", "files"].map((id) => iconButton(plugins[id], state.left === id || state.right === id, state.activity === id))
     ),
     h("div", { class: "header-title" }, [
       h("strong", { text: state.title }),
       h("span", { text: state.subtitle })
     ]),
     h("div", { class: "header-icons right", "aria-label": "Right plugin icons" }, [
-      ...["browser", "terminal", "debug"].map((id) => iconButton(plugins[id], state.right === id, state.activity === id)),
+      ...["editor", "browser", "terminal", "debug"].map((id) => iconButton(plugins[id], state.left === id || state.right === id, state.activity === id)),
       settingsButton(Boolean(state.settings))
     ])
   ]);
@@ -188,10 +228,10 @@ function resizeHandle(side) {
   });
 }
 
-function pluginPanel(id) {
+function pluginPanel(id, side = plugins[id]?.side) {
   const plugin = plugins[id];
   if (!plugin) return null;
-  return h("aside", { class: `plugin-panel ${plugin.side} ${id}`, "aria-label": `${plugin.label} panel` }, [
+  return h("aside", { class: `plugin-panel ${side} ${id}`, "aria-label": `${plugin.label} panel` }, [
     h("div", { class: "panel-shell" }, [
       h("div", { class: "panel-body" }, panelBody(id))
     ])
@@ -208,13 +248,11 @@ function panelBody(id) {
     ];
   }
   if (id === "files") {
-    return [h("div", { class: "file-tree" }, [
-      fileRow("backend", "folder"),
-      fileRow("frontend", "folder"),
-      fileRow("main.js", "file", true),
-      fileRow("index.html", "file"),
-      fileRow("tests", "folder")
-    ])];
+    const workspaceMode = routeStates[routeFromHash()]?.workspace;
+    return workspacePanel(workspaceMode || "loaded");
+  }
+  if (id === "editor") {
+    return editorPanelBody(routeFromHash());
   }
   if (id === "browser") {
     return [h("div", { class: "browser-frame" }, [
@@ -259,8 +297,150 @@ function fileRow(name, icon, active = false) {
   return h("div", { class: `file-row${active ? " is-active" : ""}` }, [svgIcon(icon), h("span", { text: name })]);
 }
 
+function editorPanelBody(route) {
+  const fileMode = routeStates[route]?.fileCanvas || "explorer-right";
+  if (["editor", "dirty", "conflict", "empty"].includes(fileMode)) {
+    return [fileEditorTool(fileMode)];
+  }
+  return [
+    h("div", { class: "files-panel-head" }, [
+      h("strong", { text: "c4os2" }),
+      h("div", { class: "icon-action-row" }, [
+        h("button", { class: "icon-button", type: "button", "aria-label": "Create file" }, [svgIcon("plus")]),
+        h("button", { class: "icon-button", type: "button", "aria-label": "Search files" }, [svgIcon("search")])
+      ])
+    ]),
+    h("div", { class: "file-tree enhanced" }, [
+      ...explorerRows.map((row) => fileTreeRow(row, row.name === "main.js" && fileMode === "context-menu")),
+      fileMode === "operations" ? explorerCreateRow() : null
+    ]),
+    fileMode === "context-menu" ? fileContextMenu() : null,
+    fileMode === "operations" ? fileOperationDialog() : null
+  ];
+}
+
+function fileTreeRow(row, active = false) {
+  return h("a", { class: `file-row${active ? " is-active" : ""}${row.icon === "file" ? " is-file" : ""}`, href: row.href }, [
+    svgIcon(row.icon),
+    h("span", { text: row.name })
+  ]);
+}
+
+function workspacePanel(mode) {
+  return [
+    mode === "start" ? workspaceStartPanel() : workspaceLoadedPanel(mode)
+  ];
+}
+
+function workspaceStartPanel() {
+  return h("section", { class: "fs-start-panel" }, [
+    h("p", { class: "kicker", text: "No trusted project folder" }),
+    h("h2", { text: "Open a folder to start working" }),
+    h("p", { text: "Scope file access, instructions, runtime policy, approvals, and workspace persistence before prompting." }),
+    h("div", { class: "fs-action-stack" }, [
+      h("button", { class: "button primary", type: "button" }, [svgIcon("folder"), h("span", { text: "Open Folder" })]),
+      h("button", { class: "button secondary", type: "button" }, [svgIcon("plus"), h("span", { text: "Clone Repository" })]),
+      h("button", { class: "button secondary", type: "button" }, [svgIcon("file"), h("span", { text: "Open Workspace File" })])
+    ]),
+    h("section", { class: "recent-workspaces-panel" }, [
+      h("h3", { text: "Recent folder-backed workspaces" }),
+      recentWorkspacePanelRow("c4os2", "Trusted", "#workspace-loaded"),
+      recentWorkspacePanelRow("client-ops", "Non-Git", "#workspace-non-git"),
+      recentWorkspacePanelRow("moved-marketing-site", "Missing", "#workspace-missing-project", true)
+    ])
+  ]);
+}
+
+function recentWorkspacePanelRow(name, badge, href, missing = false) {
+  return h("a", { class: `recent-workspace-row${missing ? " is-missing" : ""}`, href }, [
+    h("strong", { text: name }),
+    h("span", { text: badge })
+  ]);
+}
+
+function workspaceLoadedPanel(mode) {
+  const rows = [
+    projectNavRow("suite"),
+    projectNavRow("c4os2", mode === "loaded"),
+    ...(mode === "loaded" ? [
+      sessionNavRow("Locate Tauri integration"),
+      sessionNavRow("Draft wireframes")
+    ] : []),
+    projectNavRow("techops"),
+    projectNavRow("ingest"),
+    projectNavRow("chrisai")
+  ];
+  if (mode === "missing-project") {
+    rows.push(
+      projectNavRow("moved-marketing-site", true, true, true),
+      sessionNavRow("Homepage refresh", true),
+      sessionNavRow("Launch copy", true)
+    );
+  }
+  if (mode === "non-git") {
+    rows.push(projectNavRow("client-ops", true));
+  }
+  return h("section", { class: "fs-workspace-panel" }, [
+    h("button", { class: "chat-search workspace-search-link", type: "button", "data-route": "workspace-search", "aria-label": "Search projects and chats" }, [svgIcon("search"), h("span", { text: "Search projects and chats" })]),
+    h("div", { class: "projects-heading" }, [
+      h("span", { text: "Projects" }),
+      h("button", { class: "icon-button", type: "button", "aria-label": "Add project" }, [svgIcon("plus")])
+    ]),
+    h("div", { class: "project-list" }, rows)
+  ]);
+}
+
+function projectNavRow(name, active = false, missing = false, menuOpen = false) {
+  const menuId = `project-menu-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  return h("div", { class: `project-row r04-project-row${active ? " is-active" : ""}${missing ? " is-missing" : ""}` }, [
+    svgIcon("folder"),
+    h("span", { text: name }),
+    h("span", { class: "row-tools" }, [
+      h("button", {
+        class: "project-action-button",
+        type: "button",
+        "aria-label": `${name} project actions`,
+        "aria-controls": menuId,
+        "aria-expanded": menuOpen ? "true" : "false",
+        "data-project-menu-toggle": menuId
+      }, [svgIcon("moreHorizontal")]),
+      h("button", { class: "project-action-button", type: "button", "aria-label": `New chat in ${name}` }, [svgIcon("pencil")])
+    ]),
+    projectActionsMenu(menuId, missing, !menuOpen)
+  ]);
+}
+
+function sessionNavRow(label, readonly = false) {
+  return h("a", { class: `session-row r04-session-row${readonly ? " is-readonly" : ""}`, href: readonly ? "#workspace-missing-project" : "#per-chat-restore" }, [h("span", { text: label })]);
+}
+
+function projectActionsMenu(id, missing, hidden = true) {
+  return h("section", {
+    class: "panel-popover project-actions-menu",
+    id,
+    role: "menu",
+    "aria-label": missing ? "Missing project actions" : "Project actions",
+    hidden
+  }, [
+    missing ? projectMenuButton("Relocate", "folder") : null,
+    missing ? null : projectMenuButton("Reveal", "folder"),
+    projectMenuButton("Copy path", "copy"),
+    projectMenuButton("Rename", "pencil"),
+    projectMenuButton("Remove", "x")
+  ]);
+}
+
+function projectMenuButton(label, icon = "") {
+  return h("button", { class: "popover-row", type: "button", role: "menuitem" }, [
+    icon ? svgIcon(icon) : null,
+    h("span", { text: label })
+  ]);
+}
+
 function chatWorkbench(state) {
   if (state.prompt) return promptWorkbench(state.prompt);
+  if (state.workspace) return workspaceWorkbench(state.workspace);
+  if (state.fileCanvas) return shellPromptWorkbench();
   if (state.collision) return collisionWorkbench();
   return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
     h("section", { class: "chat-surface" }, [
@@ -282,6 +462,192 @@ function chatWorkbench(state) {
         ])
       ]),
       composer()
+    ])
+  ]);
+}
+
+function workspaceWorkbench(mode) {
+  if (mode === "search") return workspaceSearchTakeover();
+  if (mode === "file-panel") return shellPromptWorkbench();
+  return h("main", { class: "workbench workspace-workbench", id: "main", tabindex: "-1" }, [
+    h("section", { class: "empty-workspace workspace-center-prompt" }, [
+      h("h1", { text: mode === "non-git" ? "What should we do in client-ops?" : "What should we build in c4os2?" }),
+      mode === "non-git" ? nonGitComposerState() : composer()
+    ])
+  ]);
+}
+
+function shellPromptWorkbench() {
+  return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
+    h("section", { class: "empty-workspace workspace-center-prompt" }, [
+      h("h1", { text: "What should we build in c4os2?" }),
+      composer()
+    ])
+  ]);
+}
+
+function nonGitComposerState() {
+  return h("footer", { class: "non-git-composer" }, [
+    h("div", { class: "prompt-text", role: "textbox", "aria-label": "Prompt", text: "Summarize the client handoff notes and list follow-up tasks." }),
+    h("div", { class: "composer-row" }, [
+      h("button", { class: "icon-button", type: "button", "aria-label": "Attach file" }, [svgIcon("paperclip")]),
+      h("span", { class: "chip" }, [svgIcon("shield"), h("span", { text: "Ask for approval" })]),
+      h("span", { class: "spacer" }),
+      h("span", { class: "readonly-chip" }, [svgIcon("folder"), h("span", { text: "client-ops" })]),
+      h("span", { class: "readonly-chip" }, [svgIcon("bot"), h("span", { text: "openai-compatible/default" })]),
+      h("button", { class: "icon-button is-active", type: "button", "aria-label": "Send prompt" }, [svgIcon("send")])
+    ])
+  ]);
+}
+
+function workspaceSearchTakeover() {
+  return h("main", { class: "workbench search-takeover", id: "main", tabindex: "-1" }, [
+    h("section", { class: "search-panel", role: "dialog", "aria-label": "Search projects and chats" }, [
+      h("div", { class: "search-head" }, [
+        h("label", { class: "search-field" }, [svgIcon("search"), h("input", { type: "search", value: "release", "aria-label": "Search projects and chats" })]),
+        h("a", { class: "icon-button", href: "#workspace-start", "aria-label": "Close search" }, [svgIcon("x")])
+      ]),
+      h("div", { class: "search-results" }, [
+        searchResult("Chat", "Release checklist", "c4os / Draft release notes"),
+        searchResult("Project", "release-site", "/Users/chris/Work/release-site"),
+        searchResult("Chat", "Browser screenshot review", "client-ops / Non-Git folder")
+      ])
+    ])
+  ]);
+}
+
+function searchResult(type, title, meta) {
+  return h("a", { class: "search-result", href: "#per-chat-restore" }, [
+    h("span", { class: "status-pill", text: type }),
+    h("strong", { text: title }),
+    h("span", { text: meta })
+  ]);
+}
+
+function fileWorkbench(mode) {
+  return h("main", { class: "workbench file-workbench", id: "main", tabindex: "-1" }, [
+    h("section", { class: "editor-shell" }, [
+      editorToolbar(mode),
+      mode === "operations" ? explorerCreateRow() : null,
+      editorBody(mode),
+      mode === "context-menu" ? fileContextMenu() : null,
+      mode === "operations" ? fileOperationDialog() : null,
+      mode === "conflict" ? externalConflictDialog() : null
+    ])
+  ]);
+}
+
+function fileEditorTool(mode) {
+  if (mode === "empty") {
+    return h("section", { class: "tool-body editor-tool" }, [
+      h("div", { class: "editor-empty" }, [
+        h("h2", { text: "No file open" }),
+        h("p", { text: "Select a note, document, config, or text file from Files." }),
+        h("div", { class: "empty-file-picks" }, [
+          h("a", { class: "button secondary", href: "#file-editor" }, [svgIcon("file"), h("span", { text: "Open main.js" })]),
+          h("a", { class: "button secondary", href: "#file-editor" }, [svgIcon("file"), h("span", { text: "Open index.html" })]),
+          h("a", { class: "button secondary", href: "#file-editor" }, [svgIcon("file"), h("span", { text: "Open .env.example" })])
+        ])
+      ])
+    ]);
+  }
+  const dirty = mode === "dirty" || mode === "conflict";
+  return h("section", { class: "tool-body editor-tool" }, [
+    h("nav", { class: "breadcrumbs", "aria-label": "File breadcrumbs" }, editorPreview.breadcrumbs.flatMap((crumb, index) =>
+      index < editorPreview.breadcrumbs.length - 1
+        ? [h("a", { href: "#files-right-panel", text: crumb }), h("span", { text: ">" })]
+        : [h("span", { text: crumb })]
+    )),
+    dirty ? h("div", { class: "editor-toolbar compact-editor-toolbar" }, [
+      h("div", {}, [
+        h("strong", { text: "main.js" }),
+        h("span", { text: "Unsaved changes" })
+      ]),
+      h("div", { class: "inline-actions" }, [
+        h("button", { class: "button secondary", type: "button", text: "Revert" }),
+        h("button", { class: "button primary", type: "button" }, [svgIcon("check"), h("span", { text: "Save" })])
+      ])
+    ]) : null,
+    h("div", { class: "code-pane", role: "region", tabindex: "0", "aria-label": "File editor" }, editorPreview.lines.map((line, index) =>
+      h("div", { class: "code-line" }, [
+        h("span", { class: "line-number", text: String(index + 1) }),
+        h("code", { class: "line-code", text: line })
+      ])
+    )),
+    mode === "conflict" ? externalConflictDialog() : null
+  ]);
+}
+
+function editorToolbar(mode) {
+  const dirty = mode === "dirty" || mode === "conflict";
+  return h("div", { class: "editor-toolbar" }, [
+    h("div", {}, [
+      h("strong", { text: mode === "empty" ? "client-notes.txt" : "main.js" }),
+      h("span", { text: dirty ? "Unsaved changes" : "Saved" })
+    ]),
+    h("div", { class: "inline-actions" }, [
+      h("button", { class: `button secondary${dirty ? "" : " is-disabled"}`, type: "button" }, [h("span", { text: "Revert" })]),
+      h("button", { class: `button primary${dirty ? "" : " is-disabled"}`, type: "button" }, [svgIcon("check"), h("span", { text: "Save" })])
+    ])
+  ]);
+}
+
+function explorerCreateRow() {
+  return h("div", { class: "explorer-create-row" }, [
+    h("span", { class: "status-pill", text: "New file" }),
+    h("input", { value: "client-notes.txt", "aria-label": "New file name" }),
+    h("button", { class: "icon-button", type: "button", "aria-label": "Confirm create" }, [svgIcon("check")]),
+    h("button", { class: "icon-button", type: "button", "aria-label": "Cancel create" }, [svgIcon("x")])
+  ]);
+}
+
+function editorBody(mode) {
+  if (mode === "empty") {
+    return h("div", { class: "editor-empty" }, [
+      h("h2", { text: "No file open" }),
+      h("p", { text: "Select a note, document, config, or text file from Files." }),
+      h("div", { class: "empty-file-picks" }, [
+        h("button", { class: "button secondary", type: "button" }, [svgIcon("file"), h("span", { text: "Open client-notes.txt" })]),
+        h("button", { class: "button secondary", type: "button" }, [svgIcon("file"), h("span", { text: "Open handbook.md" })]),
+        h("button", { class: "button secondary", type: "button" }, [svgIcon("file"), h("span", { text: "Open .env.example" })])
+      ])
+    ]);
+  }
+  return h("div", { class: "editor-body" }, [
+    h("pre", { text: editorPreview.lines.join("\n") })
+  ]);
+}
+
+function fileContextMenu() {
+  return h("div", { class: "file-menu" }, [
+    h("button", { type: "button" }, [svgIcon("file"), h("span", { text: "Open" })]),
+    h("button", { type: "button" }, [svgIcon("plus"), h("span", { text: "Add to chat" }), h("kbd", { text: "@frontend/main.js" })]),
+    h("button", { type: "button" }, [h("span", { text: "Copy path" })]),
+    h("button", { type: "button" }, [h("span", { text: "Reveal in file manager" })]),
+    h("button", { type: "button" }, [svgIcon("pencil"), h("span", { text: "Rename" })]),
+    h("button", { type: "button" }, [svgIcon("trash"), h("span", { text: "Move to Trash..." })])
+  ]);
+}
+
+function fileOperationDialog() {
+  return h("section", { class: "modal-sim file-op-dialog" }, [
+    h("h2", { text: "Move client-notes.txt to Trash?" }),
+    h("p", { text: "This removes the file from the workspace folder using the operating system Trash or Recycle Bin." }),
+    h("div", { class: "inline-actions" }, [
+      h("button", { class: "button secondary", type: "button", text: "Cancel" }),
+      h("button", { class: "button primary", type: "button" }, [svgIcon("trash"), h("span", { text: "Move to Trash" })])
+    ])
+  ]);
+}
+
+function externalConflictDialog() {
+  return h("section", { class: "modal-sim conflict-dialog" }, [
+    h("h2", { text: "File changed outside C4OS" }),
+    h("p", { text: "Saving now would overwrite newer disk content. Choose before C4OS writes through the backend file service." }),
+    h("div", { class: "inline-actions" }, [
+      h("button", { class: "button secondary", type: "button", text: "Keep editor copy" }),
+      h("button", { class: "button secondary", type: "button", text: "Reload from disk" }),
+      h("button", { class: "button primary", type: "button", text: "Save anyway" })
     ])
   ]);
 }
@@ -1119,7 +1485,26 @@ function coverageWorkbench() {
   return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
     h("section", { class: "coverage-main" }, [
       h("h1", { text: "Wireframe coverage" }),
-      h("p", { text: "Batch 3 adds focused prompt, approval, suggestion, branch, and attachment states for spec 05 and direct overlaps in specs 04, 07, 10, and 11. Batch 2 Settings coverage remains listed below for continuity." }),
+      h("p", { text: "Batch 4 adds focused workspace, project, file explorer, and editor states for specs 06 and 07. Earlier approved Settings and prompt coverage remains listed below for continuity." }),
+      h("h2", { text: "Batch 4 workspace and files coverage" }),
+      h("table", { class: "matrix" }, [
+        h("thead", {}, [h("tr", {}, ["r05 state", "Spec 06", "Spec 07", "Review intent"].map((text) => h("th", { text })))]),
+        h("tbody", {}, [
+          matrixRow("#workspace-start", "REQ-001, REQ-002, REQ-003, REQ-005, AC-001, AC-007", "-", "Create/load/save workspace file boundary, user-level chat ownership, and workspace membership controls"),
+          matrixRow("#workspace-loaded", "REQ-001, REQ-002, REQ-003, REQ-005, REQ-011, AC-001, AC-007", "-", "Normal loaded workspace state after opening a trusted folder-backed workspace"),
+          matrixRow("#workspace-missing-project", "REQ-004, REQ-009, AC-005", "-", "Muted strike-through missing project, last-known path, relocate/copy/rename/remove actions, and read-only chats"),
+          matrixRow("#workspace-search", "REQ-006, AC-007", "-", "Center-screen project/chat search takeover with close control and typed shell event boundary"),
+          matrixRow("#workspace-non-git", "REQ-010, AC-006", "REQ-010, AC-007", "First-class non-Git folder state with repository-only controls hidden"),
+          matrixRow("#files-left-panel", "-", "REQ-001, REQ-002, REQ-005, AC-001, AC-007", "File Editor plugin explorer mounted on the left with icon theme and hidden-file behavior"),
+          matrixRow("#files-right-panel", "-", "REQ-002, AC-007", "Same file surface mounted on the right through configurable plugin placement"),
+          matrixRow("#file-editor", "-", "REQ-001, REQ-006, REQ-007, AC-001, AC-003", "File click opens the File Editor plugin code view with breadcrumbs"),
+          matrixRow("#file-context-menu", "-", "REQ-003, REQ-004, REQ-009, AC-002, AC-006", "File context menu with Copy Path and Add to chat inline @ reference insertion behavior"),
+          matrixRow("#file-operations", "REQ-008, AC-004", "REQ-006, REQ-007, REQ-008, AC-004, AC-005, AC-006", "Create, rename, guarded delete-to-trash confirmation, platform adapter, and backend file-service authority"),
+          matrixRow("#file-editor-dirty", "-", "REQ-006, REQ-007, REQ-009, AC-003, AC-006", "Save/revert dirty buffer state and typed editor lifecycle events"),
+          matrixRow("#file-external-conflict", "-", "REQ-006, REQ-007, REQ-008, AC-003, AC-006", "External change conflict requiring user choice before overwrite"),
+          matrixRow("#file-empty-states", "REQ-010, AC-006", "REQ-010, AC-007", "Non-code empty state and fallback icons for docs, text, config, and operations files")
+        ])
+      ]),
       h("h2", { text: "Batch 3 prompt interaction coverage" }),
       h("table", { class: "matrix" }, [
         h("thead", {}, [h("tr", {}, ["r05 state", "Spec 05", "Spec 04", "Spec 07", "Spec 10", "Spec 11", "Review intent"].map((text) => h("th", { text })))]),
@@ -1308,9 +1693,9 @@ function render() {
   if (state.right) classes.push("has-right");
 
   const children = [headerFor(state)];
-  if (state.left) children.push(pluginPanel(state.left), resizeHandle("left"));
+  if (state.left) children.push(pluginPanel(state.left, "left"), resizeHandle("left"));
   children.push(state.settings ? settingsWorkbench(route === "repair-state" ? "repair" : state.settings) : chatWorkbench(state));
-  if (state.right) children.push(resizeHandle("right"), pluginPanel(state.right));
+  if (state.right) children.push(resizeHandle("right"), pluginPanel(state.right, "right"));
   app.replaceChildren(h("div", { class: classes.join(" ") }, children));
   bindPluginConnectDialog();
   bindMarketplaceControls();
@@ -1318,6 +1703,7 @@ function render() {
   bindShowMore();
   bindApprovalAdvanced();
   bindPromptTypeahead();
+  bindProjectMenus();
 }
 
 function bindShowMore() {
@@ -1417,6 +1803,24 @@ function bindPromptTypeahead() {
       }, 0);
     });
     renderMenu();
+  });
+}
+
+function bindProjectMenus() {
+  document.querySelectorAll("[data-project-menu-toggle]").forEach((control) => {
+    control.addEventListener("click", () => {
+      const target = document.getElementById(control.dataset.projectMenuToggle);
+      if (!target) return;
+      const willOpen = target.hidden;
+      document.querySelectorAll(".project-actions-menu").forEach((menu) => {
+        if (menu !== target) menu.hidden = true;
+      });
+      document.querySelectorAll("[data-project-menu-toggle]").forEach((toggle) => {
+        if (toggle !== control) toggle.setAttribute("aria-expanded", "false");
+      });
+      target.hidden = !willOpen;
+      control.setAttribute("aria-expanded", String(willOpen));
+    });
   });
 }
 
@@ -1542,6 +1946,7 @@ document.addEventListener("click", (event) => {
     const current = routeStates[routeFromHash()] || routeStates[defaultRoute];
     const side = plugins[id].side;
     if (current[side] === id) go("shell-foundation");
+    else if (id === "editor") go("files-right-panel");
     else if (side === "left") go(id === "files" ? "same-side-replacement" : "per-chat-restore");
     else go(id === "terminal" ? "same-side-replacement" : id === "debug" ? "debug" : "per-chat-restore");
   } else if (routeButton) {

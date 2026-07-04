@@ -1,12 +1,14 @@
 # Wireframe Screens
 
 Status: active
-Updated: 2026-07-02
+Updated: 2026-07-04
 Source:
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
 - `.agents/specs/01-shell-plugin-architecture-refactor/`
 - `.agents/specs/02-core-app-shell-ux/`
+- `.agents/specs/06-file-system-plugin/`
+- `.agents/specs/07-file-editor-plugin/`
 
 ## Screen Pegs
 
@@ -47,6 +49,20 @@ Source:
   trigger duplicate backend calls.
 - Invalid shell layout declarations must surface repair/disable states instead
   of corrupting shell layout.
+- r05 final-implementation Batch 4 supersedes r04 only for focused workspace,
+  project, file explorer, and file editor states in specs 06 and 07.
+- Workspace start, loaded workspace, missing project, search, and non-Git
+  workspace states belong inside the FS plugin panel. The center pane remains
+  the normal new-chat prompt surface.
+- Missing projects use muted strike-through project rows and read-only chat
+  rows until relocated. Missing project menus show Relocate, Copy path, Rename,
+  and Remove. Found project menus show Reveal, Copy path, Rename, and Remove.
+- File Editor is a separate plugin from File System. It may mount on the left
+  or right, uses r04-style file explorer density, and opens files into the File
+  Editor code view through file-row clicks.
+- File Editor dirty, conflict, create/rename/delete-to-trash, context-menu,
+  icon-theme, hidden-file, and non-code empty states are represented in r05
+  Batch 4 and should not be inferred from stale r04 fixed-tab behavior.
 - The prompt composer is disabled until a trusted project exists.
 - The empty-state prompt asks `What should we build in c4os2?` until final product copy is decided.
 - User messages align right and agent messages align left.
@@ -69,4 +85,4 @@ The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
 | r02-functional-interface-draft | `r02-functional-interface-draft/index.html` | ready-for-review | HTML/CSS/JS desktop interface draft with scalable CSS tokens, peg-backed screen coverage, distinct app-start state, and review-only simulated interactions. |
 | r03-functional-frontend-architecture | `r03-functional-frontend-architecture/index.html` | ready-for-review | Fresh HTML/CSS/JS desktop interface draft with route-level screen declarations, component-style DOM helpers, layered CSS, trust-spine state treatment, and review-only simulated interactions. |
 | r04-single-page-app | `r04-single-page-app/index.html` | accepted MVP baseline | HTML/CSS/JS single-page app baseline for original MVP shell, settings, right-tool tabs, and implementation handoff. |
-| r05-final-implementation | `r05-final-implementation/index.html` | approved Batch 1 | Final-implementation shell-foundation revision for specs 01 and 02. Supersedes only the approved shell behavior named above; later plugin-specific routes remain pending. |
+| r05-final-implementation | `r05-final-implementation/index.html` | approved Batches 1-4 | Final-implementation review artifact. Batch 1 covers shell foundation, Batch 2 covers Settings, Batch 3 covers prompt/approval flows, and Batch 4 covers workspace/files states for specs 06 and 07. |
