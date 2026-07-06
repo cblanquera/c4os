@@ -9,6 +9,12 @@ Status: proposed
   Load when: verifying Terminal plugin lifecycle, cwd defaults, or runtime/tool separation.
   Skip when: the spec-local POC result already answers the question.
 
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#terminal-user-pty`; `wireframes/r05-final-implementation/index.html#coverage`; `wireframes/r05-final-implementation/review-round-37.md`; `wireframes/r05-final-implementation/review-round-38.md`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-06 as Batch 5 Terminal plugin panel evidence. The approved UI shows the r04 user terminal output pane with the agent debug/results pane removed. Runtime terminal tool output is kept out of Terminal and belongs to thread context plus Chat Debug. Lifecycle, cleanup, UI preferences, shell/env/tool policy split, bounded output, backpressure, and scrollback remain spec/coverage behavior instead of standalone wireframe routes. |
+
 ## Primary Source Routing
 
 - `.agents/references/research/final-implementation-import/adhoc-goals.md`

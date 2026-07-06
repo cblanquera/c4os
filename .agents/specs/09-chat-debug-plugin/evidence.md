@@ -67,3 +67,9 @@ Status: proposed
   Load when: verifying the Chat Debug POC result, proof harness, or evidence
   README.
   Skip when: the spec-local POC result and decision are enough.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#debug`; `wireframes/r05-final-implementation/index.html#debug-timeline`; `wireframes/r05-final-implementation/index.html#debug-event-detail`; `wireframes/r05-final-implementation/index.html#coverage`; `wireframes/r05-final-implementation/review-round-44.md`; `wireframes/r05-final-implementation/review-round-45.md`; `wireframes/r05-final-implementation/review-round-46.md`; `wireframes/r05-final-implementation/review-round-47.md`; `wireframes/r05-final-implementation/review-round-50.md`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-06 as Batch 5 Chat Debug plugin evidence. The approved UI shows realistic CLI command/result and tool call/result records, an active-chat current/historical run selector, selected-run event rows, structured event detail with redacted sensitive fields, and no export control. Disabled-by-default visibility, retention/limit, and deletion cleanup remain settings/spec behavior instead of standalone panel routes. |

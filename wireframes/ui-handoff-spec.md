@@ -1,7 +1,7 @@
 # C4OS UI Handoff Specification
 
 Status: draft handoff
-Updated: 2026-07-04
+Updated: 2026-07-06
 Primary artifact for final-implementation shell behavior: `wireframes/r05-final-implementation/index.html`
 Legacy MVP baseline artifact: `wireframes/r04-single-page-app/index.html`
 
@@ -9,7 +9,8 @@ This document explains the approved C4OS wireframe behavior as an
 implementation handoff. r04 remains the accepted MVP baseline for the original
 app shell and detailed screen set, while approved r05 batches supersede r04
 only for their focused final-implementation surfaces: Batch 1 shell foundation,
-Batch 2 Settings, and Batch 4 workspace/files behavior.
+Batch 2 Settings, Batch 4 workspace/files behavior, and Batch 5 runtime
+plugin panel behavior.
 
 ## 1. How To Use This Document
 
@@ -92,14 +93,18 @@ The handoff is derived from:
 - `.agents/specs/04-runtime-tool-policy/`
 - `.agents/specs/06-file-system-plugin/`
 - `.agents/specs/07-file-editor-plugin/`
+- `.agents/specs/08-terminal-plugin/`
+- `.agents/specs/09-chat-debug-plugin/`
+- `.agents/specs/10-browser-plugin/`
 - `.agents/specs/11-skills-settings/`
 
 The r05 prototype is the approved final-implementation shell-foundation review
 target for specs 01 and 02 and the approved focused Settings review target for
 specs 03, 04, and 11. It is also the approved focused Workspace and Files
-review target for specs 06 and 07. The r04 prototype remains the legacy MVP
-handoff baseline for routes and surfaces not superseded by an approved r05
-batch.
+review target for specs 06 and 07, and the approved focused runtime plugin
+panel review target for specs 08, 09, and 10 with direct spec 04 overlap. The
+r04 prototype remains the legacy MVP handoff baseline for routes and surfaces
+not superseded by an approved r05 batch.
 
 ## 3A. r05 Final-Implementation Shell Addendum
 
@@ -296,6 +301,69 @@ r05 Batch 4 review routes:
 | `#file-external-conflict` | External-change conflict requiring user choice before overwrite. |
 | `#file-empty-states` | Non-code empty state and fallback file picks. |
 | `#coverage` | Specs 06 and 07 Batch 4 coverage matrix. |
+
+## 3D. r05 Batch 5 Runtime Plugin Panel Addendum
+
+Revision: `wireframes/r05-final-implementation/`
+
+Approval status: approved Batch 5 Terminal, Browser, and Chat Debug runtime
+plugin panel behavior.
+
+This revision supersedes r04 only for the focused runtime plugin panel routes
+needed by specs 08, 09, and 10, plus direct runtime/tool-policy overlap in spec
+04. It does not recreate all r04 tool-panel routes and does not approve product
+code.
+
+Normative r05 Batch 5 Terminal behavior:
+
+- Terminal is the user PTY panel only.
+- Runtime terminal tool commands and results are not shown inside the Terminal
+  panel. They belong to thread context and Chat Debug.
+- Terminal lifecycle, per-chat cleanup, shell/env/tool policy split,
+  preferences, bounded output, backpressure, and scrollback remain spec
+  behavior, not separate visible panel routes.
+
+Normative r05 Batch 5 Browser behavior:
+
+- Browser visible routes cover back, forward, refresh, screenshot, toolbar menu,
+  page right-click menu, and document preview hosting.
+- Browser annotation capture and evidence-bundle behavior is documented in
+  `browser-annotations.md` and spec evidence instead of rendered as a product
+  route.
+- Browser preview hosting shows the product preview surface only; explanatory
+  document-boundary labels stay out of rendered wireframes.
+- Clear-after-send, invisible runtime action hydration, local-file access,
+  profile isolation, and privileged bridge boundaries remain spec behavior
+  unless a visible product state is later requested.
+
+Normative r05 Batch 5 Chat Debug behavior:
+
+- Chat Debug is the developer/support runtime visibility surface for command,
+  tool-call, result, approval, and event history.
+- The active Debug console shows realistic CLI command/result and tool
+  call/result records.
+- The timeline route shows current and historical runs for the active chat plus
+  selected-run event rows.
+- Event detail shows structured event fields with sensitive values redacted.
+- The event-detail close affordance is an icon-only X control back to timeline.
+- No export control is shown in Chat Debug; no-export behavior is represented
+  by the absence of an export surface rather than explanatory callouts.
+- Disabled-by-default, retention/limit, and cleanup behavior remain
+  settings/spec behavior rather than standalone panel wireframes.
+
+r05 Batch 5 review routes:
+
+| Route | Durable handoff meaning |
+| --- | --- |
+| `#terminal-user-pty` | User terminal output pane with the r04 agent debug/results pane removed. |
+| `#browser-navigation` | Browser navigation/actions and screenshot attach control. |
+| `#browser-menu` | Browser toolbar menu with zoom, reload, find, device toolbar, and settings actions. |
+| `#browser-page-context-menu` | Browser page right-click menu with annotate, back/forward/reload, and inspect actions. |
+| `#browser-preview-host` | Browser-native PDF preview and document-family rendered-output hosting. |
+| `#debug` | Chat Debug command, tool call, result, and approval history. |
+| `#debug-timeline` | Current/historical run selector with selected-run events. |
+| `#debug-event-detail` | Event detail view with sensitive field redaction. |
+| `#coverage` | Specs 08, 09, and 10 Batch 5 coverage matrix with direct spec 04 overlap. |
 
 ## 4. Product Frame
 

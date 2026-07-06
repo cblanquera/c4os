@@ -24,6 +24,10 @@ Created: 2026-07-02
 - Batch 2 Settings wireframes are accepted for this spec. Do not treat this spec
   as implementation-ready until acceptance criteria are converted into
   executable verification and scoped work orders are created after freeze.
+- Batch 5 runtime plugin panel wireframes are accepted for direct Terminal,
+  Browser, Chat Debug, structured event, and tool result visibility overlap.
+  This closes the named runtime panel wireframe gap only; it does not freeze the
+  spec or authorize implementation.
 - `remember` approval semantics are resolved by the 2026-07-02 grill
   follow-up: remembered rules are keyed by tool/action/target scope with
   plugin id for plugin tools, duration is user-selected as session-only or

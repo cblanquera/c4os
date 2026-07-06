@@ -3,27 +3,32 @@ const app = document.querySelector("#app");
 
 const icons = {
   arrowLeft: "M19 12H5m7 7-7-7 7-7",
+  arrowRight: "M5 12h14m-7-7 7 7-7 7",
   bot: "M12 8V4H8m0 4h8a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4Zm1 5v2m6-2v2M2 14h2m16 0h2",
   bug: "m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3 3 0 0 1 6 0v1M12 20c-3.3 0-6-2.7-6-6v-3a6 6 0 0 1 12 0v3c0 3.3-2.7 6-6 6ZM4 13H2m20 0h-2M6.2 18 4.8 19.4m14.4 0L17.8 18M6.2 8 4.8 6.6m14.4 0L17.8 8",
   check: "m5 12 4 4L19 6",
   chevronDown: "m6 9 6 6 6-6",
   chevronRight: "m9 18 6-6-6-6",
   circleAlert: "M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
+  commentPlus: "M21 15a4 4 0 0 1-4 4H8l-5 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Zm-9-6v6m-3-3h6",
   copy: "M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Zm-4 8H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
   globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-20a15 15 0 0 1 0 20m0-20a15 15 0 0 0 0 20M2 12h20",
+  focus: "M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m18 0v3a2 2 0 0 1-2 2h-3M12 8v8m-4-4h8",
   gitBranch: "M6 3v12m0 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0a9 9 0 0 1-9 9",
   key: "M7 14a5 5 0 1 1 3.5-8.5A5 5 0 0 1 7 14Zm7-4 7-7m-3 3 3 3m-6 0 3 3",
   messages: "M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z",
   mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm7 8v2a7 7 0 0 1-14 0v-2m7 9v3",
   moreHorizontal: "M12 12h.01M19 12h.01M5 12h.01",
+  moreVertical: "M12 8h.01M12 12h.01M12 16h.01",
   panelLeft: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm6-2v18",
   panelRight: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm12-2v18",
   paperclip: "m21 11-9 9a6 6 0 0 1-8-8l9-9a4 4 0 0 1 6 6l-9 9a2 2 0 0 1-3-3l8-8",
   pencil: "M21 6 7 20H3v-4L17 2a3 3 0 0 1 4 4Z",
   plug: "M9 2v6m6-6v6m3 0v5a6 6 0 0 1-12 0V8Zm-6 14v-5",
   plus: "M12 5v14M5 12h14",
+  plusCircle: "M12 8v8m-4-4h8m10 0a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
   quote: "M3 21c3 0 7-2 7-8V5H3v8h4c0 3-2 5-4 5Zm11 0c3 0 7-2 7-8V5h-7v8h4c0 3-2 5-4 5Z",
   rotate: "M21 12a9 9 0 1 1-3-6.7M21 3v6h-6",
   search: "m21 21-4-4m2-6a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
@@ -50,7 +55,14 @@ const routeStates = {
   "per-chat-restore": { title: "Draft wireframes", subtitle: "c4os2", left: "chats", right: "browser" },
   "resize-collision": { title: "Build shell state", subtitle: "c4os2", left: "files", right: "terminal", collision: true },
   "hidden-activity": { title: "Review hidden updates", subtitle: "c4os2", left: null, right: null, activity: "browser" },
-  debug: { title: "Debug run history", subtitle: "c4os2", left: "chats", right: "debug" },
+  debug: { title: "Debug run history", subtitle: "c4os2", left: "chats", right: "debug", debug: "active" },
+  "terminal-user-pty": { title: "Run local server", subtitle: "User terminal", left: "chats", right: "terminal", terminal: "user-pty", batch5: "terminal-user-pty" },
+  "browser-navigation": { title: "Inspect preview", subtitle: "Browser", left: "chats", right: "browser", browser: "navigation", batch5: "browser-navigation" },
+  "browser-menu": { title: "Browser menu", subtitle: "Context menu", left: "chats", right: "browser", browser: "menu", batch5: "browser-menu" },
+  "browser-page-context-menu": { title: "Browser right click", subtitle: "Page menu", left: "chats", right: "browser", browser: "page-context-menu", batch5: "browser-page-context-menu" },
+  "browser-preview-host": { title: "Preview document", subtitle: "Browser host", left: "chats", right: "browser", browser: "preview-host", batch5: "browser-preview-host" },
+  "debug-timeline": { title: "Debug run history", subtitle: "Active chat timeline", left: "chats", right: "debug", debug: "timeline", batch5: "debug-timeline" },
+  "debug-event-detail": { title: "Debug event detail", subtitle: "Event detail", left: "chats", right: "debug", debug: "detail", batch5: "debug-event-detail" },
   "repair-state": { title: "Settings", subtitle: "Plugin repair", settings: "plugins" },
   settings: { title: "Settings", subtitle: "Plugins", settings: "plugins" },
   "settings-plugins": { title: "Settings", subtitle: "Plugins", settings: "plugins" },
@@ -84,7 +96,7 @@ const routeStates = {
   "file-editor-dirty": { title: "main.js", subtitle: "Unsaved", right: "editor", fileCanvas: "dirty" },
   "file-external-conflict": { title: "main.js", subtitle: "External change", right: "editor", fileCanvas: "conflict" },
   "file-empty-states": { title: "Files", subtitle: "No file open", right: "editor", fileCanvas: "empty" },
-  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03, 04, 05, 06, 07, 10, and 11", coverage: true }
+  coverage: { title: "Wireframe Coverage", subtitle: "Specs 03 through 11", coverage: true }
 };
 
 const chats = [
@@ -255,33 +267,293 @@ function panelBody(id) {
     return editorPanelBody(routeFromHash());
   }
   if (id === "browser") {
-    return [h("div", { class: "browser-frame" }, [
-      h("div", { class: "browser-bar" }, [svgIcon("globe"), h("span", { text: "http://127.0.0.1:13000" })]),
-      h("div", { class: "browser-page" }, [h("p", { text: "it's true." })])
-    ])];
+    return [browserPanel(routeStates[routeFromHash()]?.browser || "navigation")];
   }
   if (id === "terminal") {
-    return [h("div", { class: "terminal-frame", text: "$ npm run dev\nready in 614ms\nlocal preview available at 127.0.0.1:3000" })];
+    return [terminalPanel(routeStates[routeFromHash()]?.terminal || "user-pty")];
   }
-  return [debugPanel()];
+  return [debugPanel(routeStates[routeFromHash()]?.debug || "timeline")];
 }
 
-function debugPanel() {
-  return h("div", { class: "debug-shell" }, [
-    h("div", { class: "debug-tabs" }, [
-      h("span", { class: "debug-tab is-active", text: "Runs" }),
-      h("span", { class: "debug-tab", text: "Tools" }),
-      h("span", { class: "debug-tab", text: "Approvals" })
+function terminalPanel(mode = "user-pty") {
+  return h("section", { class: `terminal-panel-ui terminal-${mode}` }, [
+    h("pre", { class: "terminal-output-block", text: terminalOutput() })
+  ]);
+}
+
+function terminalOutput() {
+  return "$ pwd\n/Users/chris/Work/c4os2\n$ npm run dev\nready in 614ms\nlocal preview available at http://127.0.0.1:3000\n$";
+}
+
+function browserPanel(mode = "navigation") {
+  return h("section", { class: `browser-frame browser-mode-${mode}` }, [
+    browserToolbar(mode),
+    browserViewport(mode)
+  ]);
+}
+
+function browserToolbar(mode) {
+  const address = {
+    navigation: "iamawesome.com",
+    menu: "iamawesome.com",
+    "page-context-menu": "iamawesome.com",
+    "preview-host": "Q4 Partner Brief.pdf",
+    hydration: "https://docs.example.com/pricing",
+    security: "file:///Users/chris/Work/c4os2/private/report.html"
+  }[mode] || "http://127.0.0.1:3000";
+  return h("div", { class: "browser-bar advanced-browser-bar" }, [
+    h("div", { class: "browser-bar-group browser-bar-left" }, [
+      h("button", { class: "browser-icon-button", type: "button", "aria-label": "Back" }, [svgIcon("arrowLeft")]),
+      h("button", { class: "browser-icon-button", type: "button", "aria-label": "Forward" }, [svgIcon("arrowRight")]),
+      h("button", { class: "browser-icon-button", type: "button", "aria-label": "Refresh" }, [svgIcon("rotate")])
     ]),
-    h("div", { class: "debug-terminal" }, [
-      h("pre", { text: "Agent command terminal\n\n$ git log -1 && ls -la\ncommit 9b90fc07d24804e264df14106f40334f0fd1df68\nAuthor: Chris Blanquera <chris@incept.asia>\nDate:   Mon Sep 1 16:22:05 2025 +0800\n\n    converting human documents to AI rules\n\ntotal 336\ndrwxr-xr-x  25 cblanquera  staff    800 Jun 22 19:53 .\ndrwxr-xr-x  13 cblanquera  staff    416 Jun 25 19:29 ..\n-rw-r--r--   1 cblanquera  staff   6148 Sep  5  2025 .DS_Store\ndrwxr-xr-x   9 cblanquera  staff    288 Sep  1  2025 .build\ndrwxr-xr-x   3 cblanquera  staff     96 Jun 22 19:53 .c4os" })
+    h("div", { class: "browser-address", text: address }),
+    h("div", { class: "browser-bar-group browser-bar-right" }, [
+      h("button", { class: "browser-icon-button", type: "button", "aria-label": "Screenshot" }, [svgIcon("focus")]),
+      mode === "preview-host" ? null : h("button", { class: "browser-icon-button", type: "button", "aria-label": "Annotate" }, [svgIcon("commentPlus")]),
+      h("button", {
+        class: `browser-icon-button${mode === "menu" ? " is-active" : ""}`,
+        type: "button",
+        "aria-label": "Browser menu",
+        "data-route": mode === "menu" ? "browser-navigation" : "browser-menu"
+      }, [svgIcon("moreVertical")])
     ]),
-    h("div", { class: "debug-events" }, [
-      debugEvent("terminal.run", "completed", "command: git log -1 && ls -la"),
-      debugEvent("tool_call_requested", "recorded", "files.list cwd=."),
-      debugEvent("tool_output_delta", "streamed", "336 directory entries"),
-      debugEvent("approval_policy", "allowed", "workspace read")
+    mode === "menu" ? browserToolbarMenu() : null
+  ]);
+}
+
+function browserViewport(mode) {
+  if (mode === "menu") return browserSimplePage(false);
+  if (mode === "page-context-menu") return browserSimplePage(true);
+  if (mode === "preview-host") return browserPreviewHostView();
+  if (mode === "hydration") return browserHydrationView();
+  if (mode === "security") return browserSecurityView();
+  return browserSimplePage(false);
+}
+
+function browserSimplePage(showPageMenu) {
+  return h("div", { class: "browser-page browser-document-page", "data-browser-document": "true" }, [
+    h("p", { text: "it's true." }),
+    showPageMenu ? browserPageContextMenu() : null
+  ]);
+}
+
+function browserToolbarMenu() {
+  return h("section", { class: "browser-toolbar-menu", role: "menu", "aria-label": "Browser menu" }, [
+    h("button", { class: "browser-menu-item browser-menu-link", type: "button", role: "menuitem" }, [
+      h("span", { text: "Clear browsing data" }),
+      svgIcon("chevronRight")
+    ]),
+    h("div", { class: "browser-menu-divider" }),
+    h("div", { class: "browser-menu-item browser-zoom-row", role: "menuitem" }, [
+      h("span", { text: "Zoom" }),
+      h("span", { class: "browser-zoom-control" }, [
+        h("button", { type: "button", "aria-label": "Zoom out", text: "-" }),
+        h("span", { text: "100%" }),
+        h("button", { type: "button", "aria-label": "Zoom in", text: "+" })
+      ]),
+      h("button", { class: "browser-menu-icon", type: "button", "aria-label": "Reset zoom" }, [svgIcon("rotate")])
+    ]),
+    h("div", { class: "browser-menu-divider" }),
+    browserMenuButton("Force reload"),
+    browserMenuButton("Find in page"),
+    browserMenuButton("Show device toolbar"),
+    h("div", { class: "browser-menu-divider" }),
+    browserMenuButton("Browser settings")
+  ]);
+}
+
+function browserPageContextMenu() {
+  return h("section", { class: "browser-page-context-menu", role: "menu", "aria-label": "Page context menu" }, [
+    browserMenuButton("Quick annotate"),
+    browserMenuButton("Annotate"),
+    h("div", { class: "browser-menu-divider" }),
+    browserMenuButton("Back"),
+    browserMenuButton("Forward", true),
+    browserMenuButton("Reload"),
+    h("div", { class: "browser-menu-divider" }),
+    browserMenuButton("Inspect")
+  ]);
+}
+
+function browserMenuButton(label, disabled = false) {
+  return h("button", { class: `browser-menu-item${disabled ? " is-disabled" : ""}`, type: "button", role: "menuitem", disabled }, [
+    h("span", { text: label })
+  ]);
+}
+
+function browserPreviewHostView() {
+  return h("div", { class: "browser-page preview-host-page" }, [
+    h("div", { class: "pdf-sheet" }, [
+      h("h2", { text: "Q4 Partner Brief.pdf" }),
+      h("div", { class: "pdf-lines" }, Array.from({ length: 7 }, (_, index) => h("span", { style: `width: ${88 - index * 6}%` })))
     ])
+  ]);
+}
+
+function browserHydrationView() {
+  return h("div", { class: "browser-page hydration-page" }, [
+    h("section", { class: "mock-browser-card" }, [
+      h("span", { class: "status-pill", text: "Hydrated from runtime action" }),
+      h("h2", { text: "Pricing documentation" }),
+      h("p", { text: "A hidden browser.open result is now inspectable in this compatible Browser view." })
+    ]),
+    h("div", { class: "hydration-state-list" }, [
+      browserStateLine("Source state", "browser.open + docs.example.com/pricing"),
+      browserStateLine("View state", "Zoom 100%"),
+      browserStateLine("Shared with", "Compatible Browser views for this chat")
+    ])
+  ]);
+}
+
+function browserSecurityView() {
+  return h("div", { class: "browser-page security-page" }, [
+    h("section", { class: "state-card" }, [
+      h("div", {}, [
+        h("strong", {}, [svgIcon("shield"), h("span", { text: "Local file boundary" })]),
+        h("p", { text: "This file is outside the trusted project. Browser preview is blocked until the user selects an allowed source." })
+      ]),
+      h("button", { class: "button secondary", type: "button" }, [h("span", { text: "Choose allowed file" })])
+    ]),
+    browserStateLine("Profile", "Isolated per workspace"),
+    browserStateLine("Page bridge", "No privileged bridge exposed"),
+    browserStateLine("Downloads", "Unavailable in this scope")
+  ]);
+}
+
+function browserStateLine(label, value) {
+  return h("div", { class: "browser-state-line" }, [
+    h("strong", { text: label }),
+    h("span", { text: value })
+  ]);
+}
+
+function browserFooter(mode) {
+  const rows = {
+    navigation: [["Actions", "Back / Forward / Refresh"], ["Event", "browser.navigation.completed"], ["Prompt attach", "Screenshot ready"]],
+    "preview-host": [["PDF", "Browser-native"], ["Documents", "Hosted rendered output"]],
+    hydration: [["Tool result", "App-owned per-chat state"], ["Views", "Hydrate without claiming source"]],
+    security: [["Access", "User-selected local files only"], ["Sensitive bridge", "Blocked"]]
+  }[mode] || [];
+  return h("div", { class: "browser-event-footer" }, rows.map(([label, value]) => browserStateLine(label, value)));
+}
+
+function debugPanel(mode = "active") {
+  if (mode === "detail") return debugDetailPanel();
+  if (mode === "timeline") return debugTimelinePanel();
+  return h("div", { class: "debug-shell runtime-debug-shell agent-debug-console" }, [
+    h("div", { class: "debug-tabs" }, [
+      h("a", { class: "debug-tab is-active", href: "#debug", text: "Current run" }),
+      h("a", { class: "debug-tab", href: "#debug-timeline", text: "Run 3" })
+    ]),
+    h("div", { class: "debug-terminal", role: "region", "aria-label": "Agent command log" }, [
+      h("pre", { text: debugCommandOutput() })
+    ]),
+    h("div", { class: "debug-results-panel", "aria-label": "Tool calls and results" }, [
+      debugResultRow(
+        "09:42:14",
+        "terminal.run",
+        "{ \"cwd\": \"/Users/chris/Work/c4os2\", \"command\": \"npm test -- --runInBand\" }",
+        "{ \"exitCode\": 0, \"stdout\": \"18 tests passed\", \"stderr\": \"\" }"
+      ),
+      debugResultRow(
+        "09:42:18",
+        "browser.screenshot",
+        "{ \"url\": \"http://127.0.0.1:3000/pricing\", \"viewport\": \"1440x900\", \"attach\": true }",
+        "{ \"attachment\": \"pricing-page.png\", \"width\": 1440, \"height\": 900 }"
+      )
+    ])
+  ]);
+}
+
+function debugTimelinePanel() {
+  return h("section", { class: "debug-run-history" }, [
+    h("nav", { class: "debug-run-list", "aria-label": "Chat Debug runs" }, [
+      debugRunCard("Current run", "09:42", "2 tool calls", true),
+      debugRunCard("Run 3", "09:17", "1 approval", false),
+      debugRunCard("Run 2", "Yesterday", "3 events", false)
+    ]),
+    h("div", { class: "debug-history-events", "aria-label": "Selected run events" }, [
+      h("div", { class: "debug-history-head" }, [
+        h("strong", { text: "Current run" }),
+        h("a", { class: "text-button", href: "#debug", text: "Open console" })
+      ]),
+      debugTimelineRow("09:42:11", "run.started", "Run migration check"),
+      debugTimelineRow("09:42:14", "terminal.run", "npm test -- --runInBand"),
+      debugTimelineRow("09:42:18", "browser.screenshot", "pricing-page.png"),
+      debugTimelineRow("09:42:21", "approval_policy", "terminal.run allowed")
+    ])
+  ]);
+}
+
+function debugRunCard(name, time, detail, active) {
+  return h("a", { class: `debug-run-card${active ? " is-active" : ""}`, href: "#debug-timeline" }, [
+    h("strong", { text: name }),
+    h("span", { text: time }),
+    h("small", { text: detail })
+  ]);
+}
+
+function debugCommandOutput() {
+  return [
+    "[09:42:11] run.started",
+    "$ npm test -- --runInBand",
+    "> c4os@0.0.0 test",
+    "> vitest --runInBand",
+    "stdout  PASS tests/server/runtime-tool-gateway.test.ts",
+    "stdout  PASS tests/server/chat-debug-events.test.ts",
+    "stdout  18 tests passed",
+    "exit_code 0",
+    "",
+    "[09:42:14] tool_call_requested  terminal.run",
+    "params  { \"cwd\": \"/Users/chris/Work/c4os2\", \"command\": \"npm test -- --runInBand\" }",
+    "[09:42:16] tool_output_delta  terminal.run",
+    "result  { \"exitCode\": 0, \"stdout\": \"18 tests passed\", \"stderr\": \"\" }",
+    "",
+    "[09:42:18] tool_call_requested  browser.screenshot",
+    "params  { \"url\": \"http://127.0.0.1:3000/pricing\", \"viewport\": \"1440x900\", \"attach\": true }",
+    "[09:42:19] tool_result  browser.screenshot",
+    "result  { \"attachment\": \"pricing-page.png\", \"width\": 1440, \"height\": 900 }"
+  ].join("\n");
+}
+
+function debugTimelineRows() {
+  return [
+    debugTimelineRow("09:42:11", "run.started", "Open pricing page and collect evidence"),
+    debugTimelineRow("09:42:12", "browser.navigation.requested", "https://docs.example.com/pricing"),
+    debugTimelineRow("09:42:13", "browser.screenshot.attached", "viewport 1440x900"),
+    debugTimelineRow("09:42:14", "terminal.run", "npm test -- --runInBand"),
+    debugTimelineRow("09:42:16", "approval_policy", "allow remembered rule matched")
+  ];
+}
+
+function debugTimelineRow(time, kind, detail) {
+  return h("a", { class: "debug-timeline-row", href: "#debug-event-detail" }, [
+    h("span", { text: time }),
+    h("strong", { text: kind }),
+    h("small", { text: detail })
+  ]);
+}
+
+function debugDetailPanel() {
+  return h("section", { class: "debug-detail-panel" }, [
+    h("div", { class: "debug-detail-head" }, [
+      h("a", { class: "icon-button", href: "#debug-timeline", "aria-label": "Close event detail" }, [svgIcon("x")])
+    ]),
+    h("h2", { text: "browser.screenshot.captured" }),
+    debugField("request_id", "req_9mb2"),
+    debugField("trace_id", "trace_c4os_pricing"),
+    debugField("capture_target", "pricing page viewport"),
+    debugField("viewport", "1440x900"),
+    debugField("auth_header", "[redacted]"),
+    debugField("plugin_secret", "[redacted sensitive setting]")
+  ]);
+}
+
+function debugField(label, value) {
+  return h("div", { class: "debug-field" }, [
+    h("strong", { text: label }),
+    h("code", { text: value })
   ]);
 }
 
@@ -290,6 +562,17 @@ function debugEvent(kind, status, detail) {
     h("strong", { text: kind }),
     h("span", { text: status }),
     h("p", { text: detail })
+  ]);
+}
+
+function debugResultRow(time, kind, input, result) {
+  return h("a", { class: "debug-result-row", href: "#debug-event-detail" }, [
+    h("span", { text: time }),
+    h("div", {}, [
+      h("strong", { text: kind }),
+      h("code", { text: input }),
+      h("small", { text: result })
+    ])
   ]);
 }
 
@@ -438,6 +721,7 @@ function projectMenuButton(label, icon = "") {
 }
 
 function chatWorkbench(state) {
+  if (state.batch5) return runtimePluginWorkbench(state.batch5);
   if (state.prompt) return promptWorkbench(state.prompt);
   if (state.workspace) return workspaceWorkbench(state.workspace);
   if (state.fileCanvas) return shellPromptWorkbench();
@@ -464,6 +748,76 @@ function chatWorkbench(state) {
       composer()
     ])
   ]);
+}
+
+function runtimePluginWorkbench(mode) {
+  const details = runtimeCenterDetails(mode);
+  return h("main", { class: "workbench runtime-plugin-workbench", id: "main", tabindex: "-1" }, [
+    h("section", { class: "runtime-thread" }, [
+      h("div", { class: "thread-list", "aria-label": "Runtime plugin panel review thread" }, [
+        h("article", { class: "message user thread-item" }, [
+          h("p", { text: details.prompt }),
+          details.attachments ? h("div", { class: "message-attachments" }, details.attachments) : null
+        ]),
+        h("article", { class: "message agent thread-item" }, [
+          h("p", { text: details.reply }),
+          details.link ? h("a", { class: "button secondary", href: details.link.href }, [svgIcon(details.link.icon), h("span", { text: details.link.text })]) : null
+        ])
+      ]),
+      h("div", { class: "composer-dock" }, [
+        runtimeComposer(mode, details)
+      ])
+    ])
+  ]);
+}
+
+function runtimeComposer(mode, details) {
+  return h("section", { class: "composer prompt-composer runtime-composer", "aria-label": "Prompt composer" }, [
+    h("div", { class: "prompt-text tagged prompt-box", role: "textbox", "aria-label": "Prompt", "aria-multiline": "true", contenteditable: "true", spellcheck: "true" }, [details.prompt]),
+    h("div", { class: "composer-row" }, [
+      h("button", { class: "icon-button", type: "button", "aria-label": "Attach file" }, [svgIcon("paperclip")]),
+      h("a", { class: "chip", href: mode.startsWith("browser") ? "#browser-navigation" : "#approval-dialog" }, [svgIcon(mode.startsWith("browser") ? "globe" : "shield"), h("span", { text: mode.startsWith("browser") ? "Browser evidence" : "Ask for approval" })]),
+      h("span", { class: "spacer" }),
+      h("span", { class: "readonly-chip" }, [svgIcon("bot"), h("span", { text: "openai-compatible/default" })]),
+      h("button", { class: "icon-button is-active", type: "button", "aria-label": "Send prompt" }, [svgIcon("send")])
+    ])
+  ]);
+}
+
+function runtimeCenterDetails(mode) {
+  const details = {
+    "terminal-user-pty": {
+      prompt: "Run the local server and keep my shell open.",
+      reply: "The server is running in the Terminal panel."
+    },
+    "browser-navigation": {
+      prompt: "Open the product page and attach a screenshot.",
+      reply: "The screenshot is attached with the current URL and viewport.",
+      attachments: [h("span", { class: "attachment-chip" }, [svgIcon("globe"), h("span", { text: "Browser screenshot" }), h("small", { text: "ready" })])]
+    },
+    "browser-menu": {
+      prompt: "Open the Browser menu.",
+      reply: "The Browser menu is open."
+    },
+    "browser-page-context-menu": {
+      prompt: "Open the page context menu.",
+      reply: "The page context menu is open."
+    },
+    "browser-preview-host": {
+      prompt: "Preview this PDF and keep document parsing boundaries clear.",
+      reply: "The Browser is showing the PDF preview."
+    },
+    "debug-timeline": {
+      prompt: "Show the current and historical runs for this chat.",
+      reply: "The current run is selected.",
+      link: { href: "#debug-event-detail", icon: "chevronRight", text: "Inspect selected event" }
+    },
+    "debug-event-detail": {
+      prompt: "Inspect the Browser screenshot event.",
+      reply: "The event detail exposes typed fields without raw credentials, cookies, headers, or sensitive plugin settings."
+    }
+  };
+  return details[mode] || details["terminal-user-pty"];
 }
 
 function workspaceWorkbench(mode) {
@@ -702,7 +1056,7 @@ function promptText(mode) {
     return ["Create a small branch for the prompt interaction wireframes before changing the review artifact."];
   }
   if (mode === "attachments" || mode === "fallback") {
-    return ["Use the attached file, Browser screenshot, and annotations to explain what changed."];
+    return ["Use the attached file and Browser screenshot to explain what changed."];
   }
   if (mode === "blocked") {
     return ["Use ", token("@", "hubspot/company-record"), " and ", token("$", "customer-research"), " to prepare a brief."];
@@ -732,7 +1086,7 @@ function agentReply(mode) {
     remembered: "A remembered terminal rule applies to this trusted project command, so the run can continue with the recorded policy summary.",
     blocked: "That resource is not available to execute from the prompt because its plugin dependency is blocked.",
     branch: "This project is a Git repository, so this prompt can be sent on a selected or newly created branch.",
-    attachments: "I will send the file, screenshot, and Browser annotation records as structured C4OS attachments.",
+    attachments: "I will send the file and screenshot records as structured C4OS attachments.",
     fallback: "The selected model cannot consume the Browser image records directly, so C4OS will keep the records and send the safe fallback payload."
   };
   return replies[mode] || replies.suggestions;
@@ -797,7 +1151,7 @@ function workLogItems(mode) {
     ];
   }
   return [
-    ["Collected file, Browser screenshot, and Browser annotation records."],
+    ["Collected file and Browser screenshot records."],
     ["Marked provider compatibility, redaction, source plugin, and fallback metadata."]
   ];
 }
@@ -851,7 +1205,6 @@ const typeaheadCatalog = {
   ],
   "@": [
     ["browser:screenshot-14", "Browser screenshot record", "selected"],
-    ["browser:annotation-bundle-14", "Browser annotation bundle"],
     ["docs:release-plan", "Plugin resource"],
     ["wireframes/ui-handoff-spec.md", "File"]
   ],
@@ -982,8 +1335,7 @@ function agentExtra(mode) {
 function attachmentCards(fallback) {
   return [
     attachmentCard("File", "@wireframes/ui-handoff-spec.md", "source: file editor - redaction: none - cap: 64 KB", false),
-    attachmentCard("Browser screenshot", "screenshot-14.png", "source: Browser - viewport: 1440x900 - URL captured", fallback),
-    attachmentCard("Annotation bundle", "3 target comments", "markers, comments, selectors, frame, viewport, screenshot evidence", fallback)
+    attachmentCard("Browser screenshot", "screenshot-14.png", "source: Browser - viewport: 1440x900 - URL captured", fallback)
   ];
 }
 
@@ -999,8 +1351,7 @@ function attachmentCard(title, name, detail, warning) {
 function attachmentChips(fallback) {
   return [
     h("span", { class: "attachment-chip" }, [svgIcon("file"), h("span", { text: "ui-handoff-spec.md" }), h("small", { text: "file" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove file attachment", text: "x" })]),
-    h("span", { class: `attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon(fallback ? "circleAlert" : "globe"), h("span", { text: "Browser screenshot" }), h("small", { text: fallback ? "fallback" : "image" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove screenshot attachment", text: "x" })]),
-    h("span", { class: `attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon("quote"), h("span", { text: "3 annotations" }), h("small", { text: "bundle" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove annotation bundle", text: "x" })])
+    h("span", { class: `attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon(fallback ? "circleAlert" : "globe"), h("span", { text: "Browser screenshot" }), h("small", { text: fallback ? "fallback" : "image" }), h("button", { class: "attachment-remove", type: "button", "aria-label": "Remove screenshot attachment", text: "x" })])
   ];
 }
 
@@ -1008,7 +1359,7 @@ function fallbackWarning() {
   return h("section", { class: "permission-prompt fallback-warning", role: "status" }, [
     h("p", { text: "Unsupported attachment warning" }),
     h("code", { text: "Selected model cannot consume Browser image attachments directly." }),
-    h("p", { text: "C4OS keeps the screenshot and annotation records, then sends a safe text-plus-metadata fallback to the adapter." })
+    h("p", { text: "C4OS keeps the screenshot metadata, then sends a safe text-plus-metadata fallback to the adapter." })
   ]);
 }
 
@@ -1485,7 +1836,23 @@ function coverageWorkbench() {
   return h("main", { class: "workbench", id: "main", tabindex: "-1" }, [
     h("section", { class: "coverage-main" }, [
       h("h1", { text: "Wireframe coverage" }),
-      h("p", { text: "Batch 4 adds focused workspace, project, file explorer, and editor states for specs 06 and 07. Earlier approved Settings and prompt coverage remains listed below for continuity." }),
+      h("p", { text: "Batch 5 keeps only visible runtime plugin panel states as review routes. Backend lifecycle, cleanup, retention, hydration, and policy requirements are tracked as coverage notes instead of standalone wireframe screens." }),
+      h("h2", { text: "Batch 5 runtime plugin panel coverage" }),
+      h("table", { class: "matrix" }, [
+        h("thead", {}, [h("tr", {}, ["r05 state", "Spec 08", "Spec 09", "Spec 10", "Spec 04 overlap", "Review intent"].map((text) => h("th", { text })))]),
+        h("tbody", {}, [
+          matrixRow("#terminal-user-pty", "REQ-001, REQ-005, REQ-010, AC-001, AC-005", "REQ-002, AC-002", "-", "AC-002, REQ-009, REQ-010, AC-009", "r04 terminal output pane with the agent debug/results pane removed"),
+          matrixRow("Spec-only terminal behavior", "REQ-002, REQ-003, REQ-004, REQ-006, REQ-008, REQ-009, AC-002, AC-004, AC-005", "REQ-008, AC-004", "-", "REQ-004, REQ-007, REQ-008, AC-005, AC-007", "Per-chat lifecycle, deletion cleanup, preferences/config split, output bounds, and scrollback are not standalone wireframe routes"),
+          matrixRow("#browser-navigation", "-", "-", "REQ-001, REQ-008, AC-003, AC-005", "REQ-002, REQ-007, AC-004", "Visible Browser navigation/actions and screenshot attach control"),
+          matrixRow("#browser-menu", "-", "-", "REQ-001, REQ-008, AC-003", "REQ-002, AC-004", "Visible Browser toolbar context menu"),
+          matrixRow("#browser-page-context-menu", "-", "-", "REQ-001, REQ-002, REQ-003, REQ-008, AC-003, AC-005", "REQ-002, AC-004", "Visible Browser page right-click context menu"),
+          matrixRow("#browser-preview-host", "-", "-", "REQ-005, REQ-010, AC-002, AC-006", "REQ-010, AC-009", "Visible PDF/document preview host surface"),
+          matrixRow("Spec-only Browser behavior", "-", "-", "REQ-002, REQ-003, REQ-004, REQ-007, REQ-008, REQ-009, REQ-010, AC-001, AC-004, AC-005, AC-006", "REQ-002, REQ-007, REQ-010, AC-004, AC-005, AC-009, AC-010", "Browser evidence capture, clear-after-send, invisible state hydration, profile isolation, local-file limits, and privileged bridge boundaries are captured as markdown/spec behavior"),
+          matrixRow("#debug-timeline", "REQ-005, REQ-010, AC-001, AC-005", "REQ-002, REQ-003, REQ-006, AC-002, AC-003", "REQ-008, AC-005", "REQ-009, REQ-010, AC-009", "Visible active chat timeline and run selector"),
+          matrixRow("#debug-event-detail", "-", "REQ-004, REQ-006, REQ-007, AC-001, AC-003", "REQ-009, AC-005", "REQ-010, AC-010", "Visible event detail with redacted fields"),
+          matrixRow("Spec-only Chat Debug behavior", "REQ-004", "REQ-001, REQ-005, REQ-008, REQ-009, AC-004, AC-005", "-", "REQ-010, AC-010", "Disabled-by-default plugin visibility, retention limits, and deletion cleanup are acceptance/settings behavior, not separate panel screens")
+        ])
+      ]),
       h("h2", { text: "Batch 4 workspace and files coverage" }),
       h("table", { class: "matrix" }, [
         h("thead", {}, [h("tr", {}, ["r05 state", "Spec 06", "Spec 07", "Review intent"].map((text) => h("th", { text })))]),
@@ -1514,7 +1881,7 @@ function coverageWorkbench() {
           matrixRow("#remembered-rule-summary", "REQ-001, AC-004, AC-005", "REQ-003, REQ-008, AC-006, AC-007", "-", "-", "-", "Applied rule summary plus Settings > Configuration route for user-global review/edit/revoke"),
           matrixRow("#blocked-suggestion-repair", "REQ-003, REQ-007, AC-006", "REQ-008", "REQ-001, AC-001", "-", "REQ-008, AC-002, AC-005", "Dependency-blocked suggestion hidden from execution with repair path"),
           matrixRow("#branch-popover", "REQ-004, AC-002", "-", "-", "-", "-", "Choose/create branch control shown only for Git-backed project; current chat branch read-only"),
-          matrixRow("#attachment-states", "REQ-005, REQ-006, REQ-008, AC-003, AC-007", "REQ-010, AC-003, AC-010", "REQ-004, REQ-009, AC-002, AC-006", "REQ-002, REQ-003, REQ-004, REQ-009, AC-001, AC-005", "-", "File chips, Browser screenshot chip, and Browser annotation bundle records"),
+          matrixRow("#attachment-states", "REQ-005, REQ-006, REQ-008, AC-003, AC-007", "REQ-010, AC-003, AC-010", "REQ-004, REQ-009, AC-002, AC-006", "REQ-002, REQ-003, REQ-004, REQ-009, AC-001, AC-005", "-", "File and Browser screenshot attachment records"),
           matrixRow("#safe-fallback", "REQ-005, REQ-008, AC-003, AC-007", "REQ-010, AC-003, AC-010", "-", "REQ-009, AC-005", "-", "Unsupported attachment warning and safe provider adapter fallback")
         ])
       ]),
@@ -1948,12 +2315,19 @@ document.addEventListener("click", (event) => {
     if (current[side] === id) go("shell-foundation");
     else if (id === "editor") go("files-right-panel");
     else if (side === "left") go(id === "files" ? "same-side-replacement" : "per-chat-restore");
-    else go(id === "terminal" ? "same-side-replacement" : id === "debug" ? "debug" : "per-chat-restore");
+    else go(id === "terminal" ? "terminal-user-pty" : id === "debug" ? "debug" : "browser-navigation");
   } else if (routeButton) {
     go(routeButton.dataset.route);
   } else if (closeButton) {
     go("shell-foundation");
   }
+});
+
+document.addEventListener("contextmenu", (event) => {
+  const browserDocument = event.target.closest("[data-browser-document]");
+  if (!browserDocument) return;
+  event.preventDefault();
+  go("browser-page-context-menu");
 });
 
 window.addEventListener("hashchange", render);

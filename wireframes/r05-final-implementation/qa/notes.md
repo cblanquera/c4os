@@ -594,3 +594,400 @@ Date: 2026-07-02
 - `./index.html#file-external-conflict`
 - `./index.html#file-empty-states`
 - `./index.html#coverage`
+
+## Review Round 36 Batch 5 Runtime Plugin Panels
+
+- Added Batch 5 runtime plugin panel routes for Terminal, Browser, Chat Debug,
+  and related runtime state:
+  - `./index.html#terminal-user-pty`
+  - `./index.html#terminal-lifecycle`
+  - `./index.html#terminal-cleanup`
+  - `./index.html#terminal-settings`
+  - `./index.html#terminal-scrollback`
+  - `./index.html#browser-navigation`
+  - `./index.html#browser-annotations`
+  - `./index.html#browser-clear-after-send`
+  - `./index.html#browser-preview-host`
+  - `./index.html#browser-state-hydration`
+  - `./index.html#browser-security-boundary`
+  - `./index.html#debug-disabled-entry`
+  - `./index.html#debug-timeline`
+  - `./index.html#debug-event-detail`
+  - `./index.html#debug-retention`
+  - `./index.html#coverage`
+- Added `./batch-5-links.html` as the Batch 5 acceptance review hub with
+  document-relative route links.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static link scan found no root-relative links in Batch 5 review files.
+- In-app Browser blocked direct `file://` review; QA continued through the
+  supported local URL `http://127.0.0.1:4191/`.
+- In-app Browser verified all 16 Batch 5 routes rendered expected text,
+  expected route state, workbench content, and panel count.
+- In-app Browser representative screenshot byte checks were nonblank for
+  `#terminal-user-pty`, `#browser-annotations`, `#debug-event-detail`, and
+  `#coverage`.
+- In-app Browser click QA passed for Terminal, Browser, Debug, Terminal close,
+  timeline-to-detail navigation, and the Batch 5 link hub route.
+- In-app Browser console error log was empty during click QA.
+- In-app Browser layout pass across all 16 Batch 5 routes found no overflowing
+  button, link, chip, status pill, or Debug tab text.
+- Follow-up in-app Browser requirement audit found `#browser-navigation`
+  needed visible Back / Forward / Refresh action text. Added that state row and
+  reran the audit with a fresh-load URL.
+- Fresh-load in-app Browser requirement audit passed all 15 focused Batch 5
+  routes, with no rendered review-note, TODO, or implementation note terms.
+- Continuation audit confirmed the current worktree remains limited to
+  `wireframes/r05-final-implementation/`, `node --check` still passes,
+  `git diff --check -- wireframes/r05-final-implementation` still passes, and
+  the root-relative link scan remains clean.
+- Continuation in-app Browser live audit reloaded the Batch 5 review hub and
+  sampled `#terminal-user-pty`, `#browser-navigation`,
+  `#browser-annotations`, `#browser-clear-after-send`,
+  `#debug-event-detail`, `#debug-retention`, and `#coverage`; all sampled
+  routes showed the expected state evidence, no export button, and no rendered
+  review/TODO/implementation-note terms.
+
+## Review Round 37 Terminal Scope Correction
+
+- Applied feedback that the Batch 5 Terminal wireframe should be the r04 user
+  terminal output pane with the agent debug/results pane removed, not a set of
+  standalone backend-state screens.
+- Removed the Terminal lifecycle/cleanup/settings/scrollback, Browser
+  clear-after-send/hydration/security-boundary, and Chat Debug retention routes
+  from the current route map and link hub.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no stale removed Batch 5 route names in current review
+  files: `script.js`, `batch-5-links.html`, `README.md`, `notes.md`, and
+  `review-round-37.md`.
+- Static scan found no root-relative links in the revised r05 review files.
+- Local static server ran at `http://127.0.0.1:4191/`.
+- In-app Browser verified the revised link hub has 8 links only:
+  `#terminal-user-pty`, `#browser-navigation`, `#browser-annotations`,
+  `#browser-preview-host`, `#debug-disabled-entry`, `#debug-timeline`,
+  `#debug-event-detail`, and `#coverage`.
+- In-app Browser route sweep passed all 8 current routes with no stale removed
+  route links, no rendered runtime-state cards, no horizontal overflow, and no
+  old r04 agent-results pane copy on `#terminal-user-pty`.
+- In-app Browser click QA passed for the link hub Terminal route, Terminal
+  header close, Browser header open, Debug header open, and Debug inspect link.
+- In-app Browser console error log was empty during click QA.
+- In-app Browser mobile viewport sweep at 390x844 passed all 8 current routes
+  with no document overflow or visible control text overflow after excluding the
+  hidden skip link.
+
+## Review Round 38 User Terminal Annotation Removal
+
+- Applied feedback that `#terminal-user-pty` still annotated the user terminal
+  with explanatory chrome.
+- Removed the `Interactive terminal` status strip from the Terminal panel.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Existing `file://` tab reload was blocked by Browser policy, so rendered QA
+  used a local static server at `http://127.0.0.1:4192/`.
+- In-app Browser verified `#terminal-user-pty` has the terminal panel and output
+  block, no `.terminal-status-strip`, no `.runtime-state-card`, no
+  `Interactive terminal`, no `User PTY`, no `zsh -` chrome, and no console
+  errors.
+
+## Review Round 39 Terminal Spacing and Browser Chrome
+
+- Applied feedback to reduce top padding and add left padding in the user
+  Terminal panel.
+- Updated Browser toolbar controls to show Back, Forward, Refresh, centered
+  `iamawesome.com`, Screenshot, Annotate, and Browser menu.
+- Added Browser toolbar menu and page right-click context menu states matching
+  the provided reference contents.
+- Repaired a missing CSS brace that prevented later Browser/Terminal rules from
+  applying in the in-app Browser.
+- Added document-relative asset cache tokens in `index.html` for reliable
+  Browser QA of current CSS/JS.
+- Renamed Browser frame state classes to `browser-mode-*` so
+  `.browser-page-context-menu` applies only to the actual page menu.
+- Tightened Browser toolbar spacing and constrained the Browser toolbar menu to
+  the approved right plugin panel width.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4194/`.
+- In-app Browser verified `#terminal-user-pty` has `4px` top padding, `20px`
+  left padding, no `.terminal-status-strip`, and no console errors.
+- In-app Browser verified `#browser-navigation`, `#browser-menu`, and
+  `#browser-page-context-menu` with current asset token `batch5-r40`, expected
+  toolbar controls, expected menu text, one scoped page context menu, and no
+  console errors.
+
+## Review Round 40 Browser Wireframe Chrome
+
+- Applied feedback that the Browser navigation chrome was too black for the
+  gray/white wireframe artifact.
+- Changed Browser toolbar, toolbar menu, and page context menu surfaces to
+  light gray/white styling.
+- Added a dedicated `commentPlus` icon and used it for the Annotate toolbar
+  control.
+- Bumped document-relative CSS/JS asset references to `batch5-r41`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#browser-navigation` has toolbar background
+  `rgb(247, 247, 247)`, `blackChrome: false`, `iamawesome.com`, all six
+  toolbar controls, and an Annotate icon using the comment-plus path.
+- In-app Browser verified `#browser-menu` and
+  `#browser-page-context-menu` use light gray/white menu panels, retain the
+  expected menu text, and show no console errors.
+
+## Review Round 41 Browser Menu Access
+
+- Applied feedback that Browser navigation was missing visible access to the
+  Browser context menu and page right-click context menu.
+- Wired the Browser toolbar menu button in `#browser-navigation` to navigate to
+  `#browser-menu`.
+- Wired right-click on the Browser document page in `#browser-navigation` to
+  navigate to `#browser-page-context-menu`.
+- Added `data-browser-document` to scope the right-click handler to the Browser
+  preview only.
+- Bumped document-relative CSS/JS asset references to `batch5-r42`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#browser-navigation` starts without open menus,
+  clicking the three-dot Browser menu opens `#browser-menu` with expected menu
+  text, right-clicking the Browser document opens
+  `#browser-page-context-menu` with expected page menu text, and no console
+  errors were reported.
+
+## Review Round 42 Browser Menu Typography
+
+- Applied feedback that Browser context menu and right-click context menu type
+  was too large for the r05 wireframe typography.
+- Reduced Browser menu item type to `13px`.
+- Set Browser menu containers to `var(--font-ui)` so the page context menu no
+  longer inherits the Browser document serif type.
+- Reduced menu row height, divider spacing, and zoom-control type/height.
+- Bumped document-relative CSS/JS asset references to `batch5-r43`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#browser-menu` and
+  `#browser-page-context-menu` both use `13px` `var(--font-ui)` menu
+  typography, retain the expected menu text, and show no console errors.
+
+## Review Round 43 Browser Menu Weight
+
+- Applied feedback to remove bold item text from the Browser navigation context
+  menu and right-click context menu.
+- Set shared Browser menu item weight to `400` while preserving `13px`
+  `var(--font-ui)` typography.
+- Bumped document-relative CSS/JS asset references to `batch5-r44`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#browser-menu` opens from `#browser-navigation` and
+  computes Browser menu item typography as `13px` with `font-weight: 400`.
+- In-app Browser verified right-clicking the Browser document opens
+  `#browser-page-context-menu` and computes page menu item typography as
+  `13px` with `font-weight: 400`.
+- In-app Browser console error log was empty during the affected-route checks.
+
+## Review Round 44 Chat Debug r04 Correction
+
+- Applied feedback that Agent/Chat Debug should be based on the r04
+  command/results panel rather than opening on the disabled-entry card.
+- Changed Debug header icon routing to `#debug`.
+- Reworked active Debug content as a command log plus visible result rows for
+  CLI command, tool call, tool result, and approval result.
+- Tightened `#debug-disabled-entry` so the status pill and settings button do
+  not stretch into oversized shapes.
+- Added `#debug` to the Batch 5 route hub.
+- Bumped document-relative CSS/JS asset references to `batch5-r45`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified clicking the Debug header icon from
+  `#shell-foundation` opens `#debug`, not `#debug-disabled-entry`.
+- In-app Browser verified `#debug` renders `.agent-debug-console`, command log
+  text including `npm test -- --runInBand`, `tool_call_requested`,
+  `tool_output_delta`, and `approval_policy`, plus four result rows.
+- In-app Browser verified the four result rows include `terminal.run`,
+  `browser.screenshot`, `browser.annotation.created`, and `approval_policy`.
+- In-app Browser verified `#debug-disabled-entry` remains available with a
+  compact status pill (`141x27`) and settings button (`189x36`).
+- In-app Browser console error log was empty during the affected-route checks.
+
+## Review Round 45 Chat Debug Label Removal
+
+- Applied feedback that the active Agent/Chat Debug wireframe still contained
+  annotation-like record type labels.
+- Removed visible `CLI command`, `Tool call`, `Tool result`, and `Approval`
+  labels from `#debug`.
+- Replaced the active Debug result rows with realistic `terminal.run` and
+  `browser.screenshot` debug records.
+- Added visible JSON-like parameter and result payloads for both records.
+- Bumped document-relative CSS/JS asset references to `batch5-r46`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#debug` renders `.agent-debug-console` with two
+  result rows.
+- In-app Browser verified the active Debug panel contains `terminal.run`, the
+  `npm test -- --runInBand` command, command parameters, `exitCode: 0`, and
+  `stdout: 18 tests passed`.
+- In-app Browser verified the active Debug panel contains `browser.screenshot`,
+  screenshot parameters, and returned screenshot metadata for
+  `pricing-page.png`.
+- In-app Browser verified the scoped Debug panel no longer visibly contains
+  `CLI command`, `Tool call`, `Tool result`, or `Approval`.
+- In-app Browser console error log was empty during the affected-route check.
+
+## Review Round 46 Chat Debug Secondary States
+
+- Applied feedback to fix `#debug-disabled-entry` and `#debug-timeline`
+  without adding backend/background functionality screens.
+- Kept `#debug-disabled-entry` as a compact off state with a settings path.
+- Removed the extra disabled notice from the center composer dock.
+- Reworked `#debug-timeline` into a distinct run-history selector with current
+  and historical run rows plus selected-run event rows.
+- Bumped document-relative CSS/JS asset references to `batch5-r48`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `#debug-disabled-entry` at
+  `?qa=r48-final#debug-disabled-entry` shows `Debug off`, `Off`, and
+  `Debug records are hidden for this chat.`
+- In-app Browser verified `#debug-disabled-entry` no longer contains
+  `Disabled by default`, the old diagnostic explanation copy, the duplicated
+  disabled notice, retention wording, or backend/background wording.
+- In-app Browser verified `#debug-timeline` at
+  `?qa=r48-final#debug-timeline` renders three run cards and four selected-run
+  event rows with `terminal.run`, `browser.screenshot`, and `approval_policy`.
+- In-app Browser verified `#debug-timeline` does not render
+  `.agent-debug-console`, keeping it distinct from the active `#debug` console.
+- In-app Browser console error log was empty during the affected-route checks.
+
+## Review Round 47 Remove Chat Debug Off Route
+
+- Applied feedback that `#debug-disabled-entry` is background plugin state and
+  should not be represented as a wireframe panel.
+- Removed `#debug-disabled-entry` from live route wiring, Batch 5 link hub, and
+  README route table.
+- Removed the unused disabled panel component and disabled notice.
+- Moved disabled-by-default Chat Debug into the spec/settings behavior coverage
+  row.
+- Bumped document-relative CSS/JS asset references to `batch5-r49`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no live `#debug-disabled-entry` references in rendered
+  HTML/CSS/JS, README route table, or Batch 5 link hub.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `?qa=r49-final#debug-disabled-entry` falls back to
+  the default shell with no `.debug-disabled-panel`, no `.debug-enable-notice`,
+  no Chat Debug off copy, and no link to `#debug-disabled-entry`.
+- In-app Browser verified `?qa=r49-final#debug` still renders the active
+  `.agent-debug-console` with command/tool result content.
+- In-app Browser verified `?qa=r49-final#debug-timeline` still renders
+  `.debug-run-history` with current/historical run rows and selected events.
+- In-app Browser verified `?qa=r49-final#coverage` no longer lists
+  `#debug-disabled-entry` and now treats disabled-by-default plugin visibility
+  as spec/settings behavior.
+- In-app Browser console error log was empty during the affected-route checks.
+
+## Review Round 48 Move Browser Annotation Flow To Markdown
+
+- Applied feedback to remove `#browser-annotations`, remove annotations from
+  `#browser-preview-host`, and move annotation behavior into Markdown.
+- Removed `#browser-annotations` from live route wiring, Batch 5 link hub, and
+  README route table.
+- Removed rendered annotation-marker/comment UI and related CSS.
+- Removed the annotation control from `#browser-preview-host`.
+- Added `browser-annotations.md` as the markdown-only note for annotation
+  behavior.
+- Replaced visible annotation sample data in prompt attachments and Debug event
+  detail with file/screenshot/evidence samples.
+- Bumped document-relative CSS/JS asset references to `batch5-r50`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no live `#browser-annotations` links in rendered
+  HTML/CSS/JS, README route table, or Batch 5 link hub.
+- Static scan found no rendered annotation marker/comment component names in
+  HTML/CSS/JS.
+- Filesystem check verified `browser-annotations.md` contains the markdown-only
+  annotation behavior note.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified `?qa=r50-final#browser-annotations` falls back to the
+  default shell with no annotation route content, no annotation classes, and no
+  route link.
+- In-app Browser verified `?qa=r50-final#browser-preview-host` renders the
+  PDF/document preview host with one Screenshot control, no `Annotate` toolbar
+  control, no annotation text, and no annotation classes.
+- In-app Browser verified `?qa=r50-final#coverage` no longer lists
+  `#browser-annotations` and treats Browser evidence capture as markdown/spec
+  behavior.
+- In-app Browser verified `?qa=r50-final#attachment-states` uses file and
+  Browser screenshot attachment records without annotation content.
+- In-app Browser verified `?qa=r50-final#debug-event-detail` uses
+  `browser.screenshot.captured` sample data without annotation content.
+- In-app Browser console error log was empty during the affected-route checks.
+
+## Review Round 49 Remove Preview Host Helper Labels
+
+- Applied screenshot feedback that `#browser-preview-host` still contained
+  helper/callout text.
+- Removed `Browser-native PDF preview` from the preview sheet.
+- Removed `DOCX/XLSX rendered by document-family plugins` and
+  `Browser hosts rendered output` from the rendered preview host.
+- Removed unused document-boundary strip CSS.
+- Added the removed helper text to `browser-annotations.md` as Markdown-only
+  review context.
+- Bumped document-relative CSS/JS asset references to `batch5-r51`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- Static scan found the removed helper/callout text only in companion Markdown
+  and review notes, not in rendered `index.html`, `script.js`, or `styles.css`.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified
+  `?qa=r51-final#browser-preview-host` renders with no
+  `Browser-native PDF preview`, no
+  `DOCX/XLSX rendered by document-family plugins`, no
+  `Browser hosts rendered output`, and no `.document-boundary-strip`.
+- In-app Browser verified `#browser-preview-host` still has one Screenshot
+  control, no Annotate control, the `Q4 Partner Brief.pdf` preview title, and
+  seven PDF line placeholders.
+- In-app Browser console error log was empty during the affected-route check.
+
+## Review Round 50 Debug Event Detail Cleanup
+
+- Applied screenshot feedback that `#debug-event-detail` still contained
+  annotation-like header and footer text.
+- Removed the `Typed event` pill from `#debug-event-detail`.
+- Replaced the `Back to timeline` text link with an icon-only X control that
+  links to `#debug-timeline`.
+- Removed the bottom no-export callout from `#debug-event-detail`.
+- Updated the route subtitle and coverage row wording to avoid visible
+  `Typed event` and no-export callout copy.
+- Bumped document-relative CSS/JS asset references to `batch5-r52`.
+- `node --check wireframes/r05-final-implementation/script.js` passed.
+- `git diff --check -- wireframes/r05-final-implementation` passed.
+- Static scan found no root-relative links in the edited review files.
+- Static scan found no `Typed event`, `Back to timeline`,
+  `No export action is available`, or `.debug-no-export` text/class in
+  rendered `index.html`, `script.js`, or `styles.css`.
+- In-app Browser QA used local server `http://127.0.0.1:4195/`.
+- In-app Browser verified
+  `?qa=r52-final#debug-event-detail` renders with no `Typed event`, no
+  visible `Back to timeline`, no bottom no-export callout, and no status pill
+  inside the detail panel.
+- In-app Browser verified the event detail header has one icon-only X control
+  linking to `#debug-timeline`.
+- In-app Browser clicked the X control and verified it navigates to
+  `?qa=r52-final#debug-timeline` with the timeline visible.
+- In-app Browser returned to `?qa=r52-final#debug-event-detail` for review.
+- In-app Browser console error log was empty during the affected-route checks.

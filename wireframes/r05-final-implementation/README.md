@@ -1,12 +1,13 @@
 # C4OS r05 Final Implementation Shell Foundation Wireframe
 
-Approval stage: approved wireframe review, Batch 4.
+Approval stage: Batches 1, 2, 3, 4, and 5 approved.
 
 This revision is the continuing r05 final-implementation wireframe because Batch
 1 was approved and not rejected. It keeps the approved r05 shell model,
-Settings structure, and prompt conventions, uses r04 project/file routes only
-where still relevant, and adds only the workspace, project, file explorer, and
-editor states needed for pending specs 06 and 07 review.
+Settings structure, prompt conventions, and workspace/files behavior. Batch 5
+now keeps only visible Terminal, Browser, and Chat Debug panel surfaces as
+review routes. Backend lifecycle, cleanup, hydration, retention, and policy
+requirements are tracked in coverage and notes instead of standalone screens.
 
 ## Scope
 
@@ -39,9 +40,8 @@ editor states needed for pending specs 06 and 07 review.
   summary, and Settings > Configuration routing.
 - Disabled/dependency-blocked suggestion repair path.
 - Branch choose/create popover shown only for Git-backed projects.
-- File attachment chips, Browser screenshot attachments, Browser annotation
-  bundle attachments, unsupported attachment warning, and safe fallback
-  messaging.
+- File attachment chips, Browser screenshot attachments, unsupported
+  attachment warning, and safe fallback messaging.
 - Batch 3 prompt routes use the chat-session shape: Chats panel, thread list,
   work log, agent response, permission prompt, and composer dock.
 - Workspace create/load/save, folder/repository opening controls, sidebar
@@ -52,6 +52,24 @@ editor states needed for pending specs 06 and 07 review.
   menu, Add to chat reference insertion, create/rename/delete-to-trash
   confirmation, save/revert dirty state, external-change conflict, icon theme
   behavior, hidden-file behavior, and non-code empty states.
+- Terminal plugin user terminal panel derived from the r04 terminal output pane
+  with the agent debug/results pane removed.
+- Terminal lifecycle, chat deletion cleanup, UI preferences, config.toml
+  shell/env/tool policy split, bounded output, backpressure, and scrollback are
+  treated as spec/coverage behavior rather than standalone wireframe screens.
+- Browser plugin visible navigation/actions, screenshot attach control,
+  toolbar context menu, page right-click context menu, and PDF/document preview
+  host state.
+- Browser annotation behavior is captured in `./browser-annotations.md`
+  instead of a rendered route.
+- Browser clear-after-send, invisible runtime action hydration, local-file
+  access, profile isolation, and security boundary behavior are treated as
+  spec/coverage behavior unless a visible product state is later requested.
+- Chat Debug active chat event timeline, current/historical run selector,
+  event detail view, redacted sensitive fields, and no export controls.
+- Chat Debug disabled-by-default plugin visibility, retention/limit, and
+  cleanup behavior are treated as spec/settings/coverage behavior rather than
+  standalone wireframe screens.
 
 ## Review Routes
 
@@ -63,6 +81,13 @@ editor states needed for pending specs 06 and 07 review.
 | `./index.html#resize-collision` | Center minimum width and collision behavior. |
 | `./index.html#hidden-activity` | Hidden compatible plugin activity indicator behavior. |
 | `./index.html#debug` | Chat Debug command, tool call, result, and approval history. |
+| `./index.html#terminal-user-pty` | r04 Terminal output pane with the agent debug/results pane removed. |
+| `./index.html#browser-navigation` | Browser navigation/actions and screenshot attach control. |
+| `./index.html#browser-menu` | Browser toolbar menu with zoom, reload, find, device toolbar, and settings actions. |
+| `./index.html#browser-page-context-menu` | Browser page right-click menu with annotate, back/forward/reload, and inspect actions. |
+| `./index.html#browser-preview-host` | Browser-native PDF preview and document-family rendered-output hosting. |
+| `./index.html#debug-timeline` | Current/historical run selector with selected-run events. |
+| `./index.html#debug-event-detail` | Event detail view with sensitive field redaction. |
 | `./index.html#repair-state` | Invalid shell layout repair/disable state. |
 | `./index.html#settings` | Settings center route and panel restore contract. |
 | `./index.html#settings-plugins` | Settings > Plugins list with status, source, panel, icon order, fallback icon, and flow links. |
@@ -81,7 +106,7 @@ editor states needed for pending specs 06 and 07 review.
 | `./index.html#remembered-rule-summary` | Applied remembered-rule summary plus Settings > Configuration route. |
 | `./index.html#blocked-suggestion-repair` | Disabled/dependency-blocked suggestion repair path. |
 | `./index.html#branch-popover` | Branch choose/create popover and read-only current chat branch. |
-| `./index.html#attachment-states` | File, Browser screenshot, and Browser annotation attachment records. |
+| `./index.html#attachment-states` | File and Browser screenshot attachment records. |
 | `./index.html#safe-fallback` | Unsupported attachment warning and safe provider fallback. |
 | `./index.html#workspace-start` | Create, load, and save workspace file behavior without project-root metadata. |
 | `./index.html#workspace-loaded` | Normal loaded workspace state with FS project list and center new-chat prompt. |
@@ -96,7 +121,7 @@ editor states needed for pending specs 06 and 07 review.
 | `./index.html#file-editor-dirty` | Editor dirty state with save/revert controls. |
 | `./index.html#file-external-conflict` | External-change conflict requiring user choice before overwrite. |
 | `./index.html#file-empty-states` | Non-code file and empty editor state. |
-| `./index.html#coverage` | Batch 2, Batch 3, and Batch 4 route/state coverage matrix for specs 03, 04, 05, 06, 07, 10, and 11. |
+| `./index.html#coverage` | Batch 2 through Batch 5 route/state coverage matrix for specs 03 through 11. |
 
 ## r04 Route Carry-Forward Decision
 
@@ -109,7 +134,7 @@ editor states needed for pending specs 06 and 07 review.
 | `#models-popover` | Deferred | Prompt/model picker behavior belongs to later prompt interaction review. |
 | `#file-explorer` | Carried forward as File Editor plugin explorer states | The r04 explorer density and click-to-editor behavior remain relevant, but the surface is now the File Editor plugin. |
 | `#file-editor` | Carried forward as File Editor plugin code view | The r04 code-view/breadcrumb pattern remains relevant inside the File Editor plugin panel. |
-| `#terminal` | Superseded as fixed right tab; deferred as plugin content | Terminal becomes a plugin panel contribution. |
+| `#terminal` | Superseded as fixed right tab; Batch 5 keeps the user terminal output pane only | The r04 agent command preview/results pane moved out of Terminal review and belongs to Chat Debug/runtime output surfaces. |
 | `#settings-providers` | Deferred | Provider settings are outside Batch 1 shell foundation. |
 | `#settings-add-provider` | Deferred | Provider form details are outside Batch 1 shell foundation. |
 | `#settings-models` | Deferred | Model settings are outside Batch 1 shell foundation. |
@@ -127,7 +152,11 @@ marketplace install, policy editing, config fallback, skill customization,
 prompt resolution, approval decisions, remembered policy application, branch
 creation, attachment records, provider fallback, workspace load/save, folder
 selection, clone registration, project relocation, file operations, editor
-conflict resolution, and repair states are simulated to make the behavior
-reviewable before implementation.
+conflict resolution, Browser navigation, Browser preview hosting, Chat Debug
+timeline, redaction, and repair states are simulated to make the visible
+behavior reviewable before implementation. Terminal lifecycle, cleanup, output
+limits, Browser annotation behavior, Browser hydration/security, and Chat Debug
+retention are tracked as markdown/coverage/spec behavior rather than visible
+wireframe screens.
 
 Safe to delete: yes. This is a review artifact, not product code.
