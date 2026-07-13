@@ -1,6 +1,6 @@
 # fs-workspace-file-and-relink
 
-Proof for `.agents/specs/06-file-system-plugin/`.
+Proof for `.agents/specs/00007-file-system-plugin/`.
 
 ## Question
 

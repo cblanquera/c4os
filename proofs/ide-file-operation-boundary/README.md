@@ -1,6 +1,6 @@
 # ide-file-operation-boundary
 
-Proof for `.agents/specs/07-file-editor-plugin/`.
+Proof for `.agents/specs/00008-file-editor-plugin/`.
 
 ## Question
 

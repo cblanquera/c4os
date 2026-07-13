@@ -20,10 +20,10 @@ deployment, unclear acceptance, blocked validation, or high rollback risk.
 3. Pick a coherent batch and split unrelated or risky items out.
 4. Implement the batch only when active execution is already authorized.
 5. Verify the changed surfaces together.
-6. Update progress, logs, status, and durable records once at the end.
-7. Run document integrity before closeout.
+6. Update the owning spec-local task, task status, verification notes, and durable records once at the end.
+7. Run the Agent Workspace validator before closeout.
 
 ## Stop
 
-Stop when batch membership, verification, progress impact, remaining split-out
+Stop when batch membership, verification, task-status impact, remaining split-out
 items, and the recommended next step are explicit.

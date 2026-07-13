@@ -1,6 +1,6 @@
 # project-chat-sharing-across-workspaces
 
-Proof for `.agents/specs/06-file-system-plugin/`.
+Proof for `.agents/specs/00007-file-system-plugin/`.
 
 ## Question
 

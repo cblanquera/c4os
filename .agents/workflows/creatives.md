@@ -21,7 +21,7 @@ implementation depends on visual styling rules.
 - root `creatives/<direction-or-screen-set>/guidelines.md` after approval
 - root `creatives/<direction-or-screen-set>/reviews.md`
 - `.agents/context/creative-specs.md` after accepted guideline creation
-- `.agents/references/` for provenance, rationale, or large examples
+- `.agents/resources/` for Raw Source and `.agents/references/` for flat numbered support owned by an active Agent File
 - spec records when creative direction changes scope, acceptance, or product truth
 
 ## Process

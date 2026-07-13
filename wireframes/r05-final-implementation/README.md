@@ -2,6 +2,8 @@
 
 Approval stage: Batches 1, 2, 3, 4, and 5 approved.
 
+Migration note: historical review-round notes use legacy spec labels `01` through `11`. The active five-digit mapping is `01`→`00002`, `02`→`00003`, `03`→`00004`, `04`→`00005`, `05`→`00006`, `06`→`00007`, `07`→`00008`, `08`→`00009`, `09`→`00010`, `10`→`00011`, and `11`→`00012`.
+
 This revision is the continuing r05 final-implementation wireframe because Batch
 1 was approved and not rejected. It keeps the approved r05 shell model,
 Settings structure, prompt conventions, and workspace/files behavior. Batch 5

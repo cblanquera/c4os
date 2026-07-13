@@ -1,6 +1,6 @@
 # terminal-user-pty-lifecycle
 
-Proof for `.agents/specs/08-terminal-plugin/`.
+Proof for `.agents/specs/00009-terminal-plugin/`.
 
 ## Question
 

@@ -1,0 +1,80 @@
+# File Editor Plugin Evidence
+
+Status: proposed
+
+## POC Evidence Routing
+
+- `proofs/ide-file-operation-boundary/`
+  Purpose: Executable proof for editor save/create/rename/delete-to-trash, external-change conflicts, backend file-service authority, and prompt tag insertion.
+  Load when: verifying File Editor authority boundaries, conflict behavior, guarded delete, or Add to chat semantics.
+  Skip when: the spec-local POC result already answers the question.
+
+## Primary Source Routing
+
+- `.agents/resources/research/final-implementation-import/adhoc-goals.md`
+  Purpose: Original user-stated final implementation goals and task inventory.
+  Load when: checking the original requested task inventory or whether scope was imported correctly.
+  Skip when: current context and spec records already answer the task.
+
+- `.agents/resources/research/final-implementation-import/accepted-instructions.md`
+  Purpose: Accepted replay and workflow instructions, including source-of-truth and ADR placement constraints.
+  Load when: checking replay instructions, workflow constraints, source-of-truth placement, or migration rules.
+  Skip when: current context and spec records already answer the task.
+
+- `.agents/resources/research/final-implementation-source-inventory.md`
+  Purpose: Inventory of imported final-implementation sources, grill counts, and provenance status.
+  Load when: auditing source coverage, imported grill data, or provenance completeness.
+  Skip when: current context and spec records already answer the task.
+
+- `.agents/context/product-specs.md`
+  Purpose: Shared product behavior, feature surfaces, and customer workflow truth.
+  Load when: checking product behavior, workflow, or feature-surface expectations.
+  Skip when: the task is unrelated to this source boundary.
+
+- `.agents/context/creative-specs.md`
+  Purpose: Shared UI, interaction, layout, accessibility, and visual direction.
+  Load when: checking shell layout, UI behavior, visual direction, accessibility, or interaction constraints.
+  Skip when: the task is unrelated to this source boundary.
+
+- `.agents/context/technical-specs.md`
+  Purpose: Shared technical boundaries for runtime, tools, plugins, approvals, persistence, and execution surfaces.
+  Load when: checking architecture, runtime, tool, plugin, approval, storage, or execution boundaries.
+  Skip when: the task is unrelated to this source boundary.
+
+- `.agents/resources/grill/final-implementation/answers/032-c4os-grill-question-032-file-explorer-add-to-chat.json`
+  Purpose: Exact accepted grill answer JSON for this spec decision set.
+  Load when: verifying the exact accepted user answer, notes, or answer key for this grill question.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+- `.agents/resources/grill/final-implementation/answers/033-c4os-grill-question-033-file-icons-scope.json`
+  Purpose: Exact accepted grill answer JSON for this spec decision set.
+  Load when: verifying the exact accepted user answer, notes, or answer key for this grill question.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+- `.agents/resources/grill/final-implementation/answers/046-c4os-grill-question-046-ide-file-operation-boundary.json`
+  Purpose: Exact accepted grill answer JSON for this spec decision set.
+  Load when: verifying the exact accepted user answer, notes, or answer key for this grill question.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## Grill Answer Routing
+
+- `.agents/resources/grill/final-implementation/answers/032-c4os-grill-question-032-file-explorer-add-to-chat.json`
+  Purpose: Exact accepted grill answer for 032: C4OS Grill Question 032 - File Explorer Add To Chat.
+  Load when: verifying answer text, notes, conflicts, or decision provenance for 032.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+- `.agents/resources/grill/final-implementation/answers/033-c4os-grill-question-033-file-icons-scope.json`
+  Purpose: Exact accepted grill answer for 033: C4OS Grill Question 033 - File Icons Scope.
+  Load when: verifying answer text, notes, conflicts, or decision provenance for 033.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+- `.agents/resources/grill/final-implementation/answers/046-c4os-grill-question-046-ide-file-operation-boundary.json`
+  Purpose: Exact accepted grill answer for 046: C4OS Grill Question 046 - IDE File Operation Boundary.
+  Load when: verifying answer text, notes, conflicts, or decision provenance for 046.
+  Skip when: the spec-local decision already contains enough detail and the exact answer is not under audit.
+
+## Approved Wireframe Evidence
+
+| Evidence | Source | Result |
+| --- | --- | --- |
+| EVD-WF-001 | `wireframes/r05-final-implementation/index.html#prompt-suggestions`; `wireframes/r05-final-implementation/index.html#attachment-states`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-03 as Batch 3 File Editor overlap evidence. The approved UI shows `@` typeahead matching plugins first and files/folders second, inline resolved file references that serialize to runtime references, and file attachment chips that preserve attachment/reference boundaries. |
+| EVD-WF-002 | `wireframes/r05-final-implementation/index.html#blocked-suggestion-repair`; `wireframes/r05-final-implementation/index.html#coverage` | Approved on 2026-07-03 as Batch 3 dependency-blocked suggestion evidence. The approved UI keeps dependency-blocked resources out of executable prompt state unless a visible repair path is shown. |
+| EVD-WF-003 | `wireframes/r05-final-implementation/index.html#files-left-panel`; `wireframes/r05-final-implementation/index.html#files-right-panel`; `wireframes/r05-final-implementation/index.html#file-editor`; `wireframes/r05-final-implementation/index.html#file-context-menu`; `wireframes/r05-final-implementation/index.html#file-operations`; `wireframes/r05-final-implementation/index.html#file-editor-dirty`; `wireframes/r05-final-implementation/index.html#file-external-conflict`; `wireframes/r05-final-implementation/index.html#file-empty-states`; `wireframes/r05-final-implementation/qa/notes.md` | Approved on 2026-07-04 as Batch 4 File Editor evidence. The approved UI separates File System and File Editor plugin icons, lets the File Editor panel mount left or right, uses r04-style explorer density with click-to-editor navigation, keeps the base editor as breadcrumbs plus code view, and covers file menu, Add to chat, create/rename/delete-to-trash, dirty save/revert, external conflict, hidden-file/icon behavior, and non-code empty states. |

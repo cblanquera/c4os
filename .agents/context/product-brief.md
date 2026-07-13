@@ -2,8 +2,8 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-07-02
-Source Note: Normalized from the previous context documents. Detailed source slices are preserved under `.agents/references/context/`.
+Updated: 2026-07-13
+Source Note: Replayed from the preserved legacy Agent Workspace. Detailed source slices remain available as Raw Source.
 
 ## Purpose
 
@@ -21,12 +21,12 @@ Use this as the first context gate for C4OS product prework. It defines the prod
 - You already know the product frame and only need detailed feature behavior; load `product-specs.md`.
 - You only need architecture, runtime, persistence, security, Browser, or Terminal constraints; load `technical-specs.md`.
 - You only need UI layout, interaction, or visual direction; load `creative-specs.md`.
-- You only need accepted sequencing, deferred work, or validation work packages; load `work-orders.md`.
+- You only need temporary sequencing, deferred work, or validation queues; load the relevant spec status rather than context.
 
 ## Owns
 
 - Product thesis, target users, product goals, success measures, principles, and vocabulary routing.
-- The five-document map for `.agents/context/`.
+- The four-topic map routed by `.agents/context/index.md`.
 
 ## Does Not Own
 
@@ -42,33 +42,31 @@ After this gate, load only the document that matches the task:
 | Customer workflow, feature surfaces, MVP product behavior | `product-specs.md` | Product specs own what the user can do. |
 | Runtime, product model, persistence, trust, security, Browser, Terminal | `technical-specs.md` | Technical specs own enforcement and architecture. |
 | UI layout, interaction behavior, visual tone, accessibility | `creative-specs.md` | Creative specs own the interface contract. |
-| Accepted decisions, sequencing, deferred work, validation work packages | `work-orders.md` | Work orders own pre-execution routing. |
-
-Expanded breakdowns live in `.agents/references/context/`. Source paths, provenance, imported chunks, and historical handoff material stay in references rather than in the five context entry documents.
+Expanded breakdowns and provenance are preserved as Raw Source in the legacy Agent Workspace snapshot. Active supporting detail should be promoted into flat numbered Reference Files only when a current Context File or Spec File needs it.
 
 ## Reference Routing
 
-- `.agents/references/context/product/product.md`
+- [Legacy expanded product background](../resources/history/references/context/product/product.md)
   Purpose: Expanded product thesis, users, goals, workflow, and principles from retired detailed context.
   Load when: checking product framing beyond the compact brief.
   Skip when: product-brief.md already answers the question.
 
-- `.agents/references/context/product/terms.md`
+- [Legacy canonical product vocabulary](../resources/history/references/context/product/terms.md)
   Purpose: Canonical vocabulary definitions and scope distinctions.
   Load when: checking exact term meanings or naming boundaries.
   Skip when: the term is already defined in the current context section.
 
-- `.agents/references/context/product/feature-goals.md`
+- [Legacy feature-goal inputs](../resources/history/references/context/product/feature-goals.md)
   Purpose: High-level feature-goal inputs preserved from prior context.
   Load when: routing or auditing feature-goal origin.
   Skip when: working on implementation mechanics that do not affect goals.
 
-- `.agents/references/context/source-provenance.md`
+- [Legacy context source provenance](../resources/history/references/context/source-provenance.md)
   Purpose: Source and artifact provenance kept out of compact context.
   Load when: tracing where product facts came from.
   Skip when: current context already supplies the accepted fact.
 
-- `.agents/references/research/final-implementation-source-inventory.md`
+- [Legacy final-implementation source inventory](../resources/research/final-implementation-source-inventory.md)
   Purpose: Final-implementation archive provenance, grill answer counts, and research-source classification.
   Load when: auditing replay inputs, grill coverage, or research evidence routing.
   Skip when: working from accepted context/spec records only.
@@ -92,10 +90,9 @@ policy, and app-owned persistence. Workspaces, projects, file editing,
 Terminal, Chat Debug, Browser, and Skills are planned as bounded plugin or
 settings surfaces with their own proposed specs.
 
-Input for this stream comes from `.agents/references/research/final-implementation-import`; that archive is import
-provenance only. Accepted reusable truth must live in `.agents/context/`, long
-support in `.agents/references/`, and spec decisions in the affected spec
-packages.
+Input for this stream is preserved under the legacy Agent Workspace Raw Source.
+Accepted reusable truth lives in `.agents/context/`; current bounded decisions,
+Gaps, research, and Proofs live in the affected spec packages.
 
 ## Target Users
 
@@ -138,4 +135,4 @@ packages.
 
 ## Vocabulary
 
-The canonical vocabulary is preserved in `.agents/references/context/product/terms.md`. Core terms include Workspace, Workspace file, Project folder, Trust record, Session, Agent run, Approval request, Artifact, Provider profile, Model profile, Local memory record, Extension inventory item, Extension enablement, and Extension prompt tag.
+The full legacy vocabulary is available through the Resource Link above. Core terms include Workspace, Workspace file, Project folder, Trust record, Session, Agent run, Approval request, Artifact, Provider profile, Model profile, Local memory record, Extension inventory item, Extension enablement, and Extension prompt tag.

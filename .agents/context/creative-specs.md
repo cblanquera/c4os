@@ -2,8 +2,8 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-07-04
-Source Note: Normalized from interface, product-experience, and UI handoff context. Detailed UI handoff material is preserved under `.agents/references/context/creative-specs/` and `.agents/references/context/ui-handoff/`.
+Updated: 2026-07-13
+Source Note: Replayed from accepted legacy interface, product-experience, and UI handoff context. Detailed source material remains preserved as Raw Source.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ Use this as the interface and creative gate. It summarizes C4OS experience direc
 - You only need product thesis, users, goals, or vocabulary; load `product-brief.md`.
 - You only need feature inventory or user-facing product behavior without layout detail; load `product-specs.md`.
 - You only need runtime, security, persistence, Browser isolation, or Terminal ownership; load `technical-specs.md`.
-- You only need sequencing, accepted work packages, validation needs, or deferred work; load `work-orders.md`.
+- You only need sequencing, validation work, or deferred work; load the relevant spec status rather than context.
 
 ## Owns
 
@@ -32,27 +32,27 @@ Use this as the interface and creative gate. It summarizes C4OS experience direc
 
 ## Reference Routing
 
-- `.agents/references/context/creative-specs/interface.md`
+- [Legacy detailed interface contract](../resources/history/references/context/creative-specs/interface.md)
   Purpose: Current shell, composer, model selector, session thread, panel, and settings interface details.
   Load when: checking current interface contract details.
   Skip when: the compact creative context already answers the layout rule.
 
-- `.agents/references/context/creative-specs/ui-handoff.md`
+- [Legacy detailed UI handoff](../resources/history/references/context/creative-specs/ui-handoff.md)
   Purpose: Historical r04 handoff summary and current-vs-historical caution.
   Load when: checking inherited wireframe decisions or historical UI caution.
   Skip when: working on final shell rules that supersede r04 details.
 
-- `.agents/references/context/ui-handoff/index.md`
+- [Legacy chunked UI handoff index](../resources/history/references/context/ui-handoff/index.md)
   Purpose: Full r04 UI chunks for implementation or detailed spec conversion.
   Load when: detailed handoff behavior is required.
   Skip when: the task only needs accepted compact UI guidance.
 
-- `.agents/references/context/product-specs/product-experience.md`
+- [Legacy detailed product experience](../resources/history/references/context/product-specs/product-experience.md)
   Purpose: Product-experience flow detail for first-run, workspace, session, prework, and composer behavior.
   Load when: UX flow matters more than screen layout.
   Skip when: the task is visual-only or already covered by creative context.
 
-- `.agents/references/context/source-provenance.md`
+- [Legacy context source provenance](../resources/history/references/context/source-provenance.md)
   Purpose: Source and artifact provenance for UI facts.
   Load when: tracing where UI facts came from.
   Skip when: current context already supplies the accepted fact.
@@ -66,8 +66,8 @@ desktop shell: persistent chat in the center, one header, Settings as a shell
 route, and optional plugin panels activated by configured plugin icons.
 
 The earlier three-panel MVP shell with fixed Browser/Files/Terminal right tabs
-is historical MVP scope. It is preserved in `.agents/specs/mvp/decisions.md`
-and detailed references, but it is not the active shared creative contract for
+is historical MVP scope. It is preserved in the legacy MVP decisions Resource
+File and detailed legacy references, but it is not the active shared creative contract for
 the final implementation planning stream.
 
 ## Shell Layout

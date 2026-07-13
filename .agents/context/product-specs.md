@@ -2,8 +2,8 @@
 
 Status: active
 Created: 2026-06-21
-Updated: 2026-07-02
-Source Note: Normalized from previous feature, experience, and MVP context documents. Detailed inventories are preserved under `.agents/references/context/product-specs/`.
+Updated: 2026-07-13
+Source Note: Replayed from accepted legacy feature, experience, and MVP context. Detailed inventories remain preserved as Raw Source.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ Use this as the product-behavior gate. It summarizes what the product must do, w
 - You only need product identity, users, goals, or terms; load `product-brief.md`.
 - You only need runtime, persistence, security, Browser isolation, or Terminal ownership; load `technical-specs.md`.
 - You only need UI layout, interaction, visual, or accessibility guidance; load `creative-specs.md`.
-- You only need sequencing, validation work, accepted decisions, or deferred work; load `work-orders.md`.
+- You only need sequencing, validation work, or deferred work; load the relevant spec status rather than context.
 
 ## Owns
 
@@ -32,22 +32,22 @@ Use this as the product-behavior gate. It summarizes what the product must do, w
 
 ## Reference Routing
 
-- `.agents/references/context/product-specs/product-experience.md`
+- [Legacy detailed product experience](../resources/history/references/context/product-specs/product-experience.md)
   Purpose: Detailed first-run, workspace, session flow, prework, and composer behavior.
   Load when: checking experiential behavior before UI detail.
   Skip when: only compact product behavior is needed.
 
-- `.agents/references/context/product-specs/feature-surfaces.md`
+- [Legacy detailed feature surfaces](../resources/history/references/context/product-specs/feature-surfaces.md)
   Purpose: Detailed workspace, approvals, providers, files, artifacts, Browser, Terminal, settings, extensions, and memory surfaces.
   Load when: checking surface-level product capabilities.
   Skip when: the spec-local requirement already names the accepted behavior.
 
-- `.agents/references/context/product-specs/mvp-feature-list.md`
+- [Legacy detailed MVP feature inventory](../resources/history/references/context/product-specs/mvp-feature-list.md)
   Purpose: Complete MVP feature inventory, exclusions, and guardrails.
   Load when: checking MVP scope or detailed acceptance history.
   Skip when: working only on final-implementation planning that does not reopen MVP scope.
 
-- `.agents/references/context/source-provenance.md`
+- [Legacy context source provenance](../resources/history/references/context/source-provenance.md)
   Purpose: Source and artifact provenance for product facts.
   Load when: tracing where product behavior came from.
   Skip when: current context already supplies the accepted fact.

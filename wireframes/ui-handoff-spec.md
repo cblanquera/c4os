@@ -85,24 +85,24 @@ The handoff is derived from:
 - `wireframes/screens.md`
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
-- `.agents/specs/research/requirements.md`
-- `.agents/specs/research/acceptance.md`
-- `.agents/specs/01-shell-plugin-architecture-refactor/`
-- `.agents/specs/02-core-app-shell-ux/`
-- `.agents/specs/03-plugin-system-settings-management/`
-- `.agents/specs/04-runtime-tool-policy/`
-- `.agents/specs/06-file-system-plugin/`
-- `.agents/specs/07-file-editor-plugin/`
-- `.agents/specs/08-terminal-plugin/`
-- `.agents/specs/09-chat-debug-plugin/`
-- `.agents/specs/10-browser-plugin/`
-- `.agents/specs/11-skills-settings/`
+- `.agents/context/product-specs.md`
+- `.agents/context/creative-specs.md`
+- `.agents/specs/00002-shell-plugin-architecture-refactor/`
+- `.agents/specs/00003-core-app-shell-ux/`
+- `.agents/specs/00004-plugin-system-settings-management/`
+- `.agents/specs/00005-runtime-tool-policy/`
+- `.agents/specs/00007-file-system-plugin/`
+- `.agents/specs/00008-file-editor-plugin/`
+- `.agents/specs/00009-terminal-plugin/`
+- `.agents/specs/00010-chat-debug-plugin/`
+- `.agents/specs/00011-browser-plugin/`
+- `.agents/specs/00012-skills-settings/`
 
 The r05 prototype is the approved final-implementation shell-foundation review
-target for specs 01 and 02 and the approved focused Settings review target for
-specs 03, 04, and 11. It is also the approved focused Workspace and Files
-review target for specs 06 and 07, and the approved focused runtime plugin
-panel review target for specs 08, 09, and 10 with direct spec 04 overlap. The
+target for specs 00002 and 00003 and the approved focused Settings review target for
+specs 00004, 00005, and 00012. It is also the approved focused Workspace and Files
+review target for specs 00007 and 00008, and the approved focused runtime plugin
+panel review target for specs 00009, 00010, and 00011 with direct spec 00005 overlap. The
 r04 prototype remains the legacy MVP handoff baseline for routes and surfaces
 not superseded by an approved r05 batch.
 
@@ -113,7 +113,7 @@ Revision: `wireframes/r05-final-implementation/`
 Approval status: approved Batch 1 shell foundation.
 
 The r05 shell-foundation revision supersedes the r04 global shell model for
-specs 01 and 02. It does not recreate every r04 route and must not be treated
+specs 00002 and 00003. It does not recreate every r04 route and must not be treated
 as approval for later plugin-specific behavior.
 
 Normative r05 shell behavior:
@@ -173,7 +173,7 @@ Revision: `wireframes/r05-final-implementation/`
 Approval status: approved Batch 2 Settings and Configuration behavior.
 
 This revision supersedes r04 only for the focused Settings routes needed by
-specs 03, 04, and 11. It does not recreate or approve all r04 Settings routes.
+specs 00004, 00005, and 00012. It does not recreate or approve all r04 Settings routes.
 
 Normative r05 Batch 2 Settings behavior:
 
@@ -231,7 +231,7 @@ Revision: `wireframes/r05-final-implementation/`
 Approval status: approved Batch 4 Workspace and Files behavior.
 
 This revision supersedes r04 only for the focused workspace, project, file
-explorer, and file editor states needed by specs 06 and 07. It does not
+explorer, and file editor states needed by specs 00007 and 00008. It does not
 approve unrelated product routes, final copy, final styling, or production file
 operation implementation.
 
@@ -310,8 +310,8 @@ Approval status: approved Batch 5 Terminal, Browser, and Chat Debug runtime
 plugin panel behavior.
 
 This revision supersedes r04 only for the focused runtime plugin panel routes
-needed by specs 08, 09, and 10, plus direct runtime/tool-policy overlap in spec
-04. It does not recreate all r04 tool-panel routes and does not approve product
+needed by specs 00009, 00010, and 00011, plus direct runtime/tool-policy overlap in spec
+00005. It does not recreate all r04 tool-panel routes and does not approve product
 code.
 
 Normative r05 Batch 5 Terminal behavior:
@@ -363,7 +363,7 @@ r05 Batch 5 review routes:
 | `#debug` | Chat Debug command, tool call, result, and approval history. |
 | `#debug-timeline` | Current/historical run selector with selected-run events. |
 | `#debug-event-detail` | Event detail view with sensitive field redaction. |
-| `#coverage` | Specs 08, 09, and 10 Batch 5 coverage matrix with direct spec 04 overlap. |
+| `#coverage` | Specs 00009, 00010, and 00011 Batch 5 coverage matrix with direct spec 00005 overlap. |
 
 ## 4. Product Frame
 
@@ -384,9 +384,9 @@ a trusted local project folder.
 ## 5. r04 Artifact Contract
 
 This section records the legacy MVP artifact contract. For
-final-implementation shell behavior in specs 01 and 02, use section 3A first.
+final-implementation shell behavior in specs 00002 and 00003, use section 3A first.
 For approved workspace, project, file explorer, and file editor behavior in
-specs 06 and 07, use section 3C first.
+specs 00007 and 00008, use section 3C first.
 
 The r04 artifact is a single page app prototype:
 
@@ -424,7 +424,7 @@ Unknown or stale routes fall back to App Start.
 ## 6. Global Layout Model
 
 This section describes the legacy r04 MVP shell model. For
-final-implementation shell behavior in specs 01 and 02, section 3A supersedes
+final-implementation shell behavior in specs 00002 and 00003, section 3A supersedes
 the fixed right-tool-tab model.
 
 The r04 shell uses three functional regions:
@@ -1347,11 +1347,8 @@ the r04 examples.
 
 ## 28. Required Reconciliation Before Freeze
 
-Before MVP freeze, accepted UI behavior should be reconciled into:
-
-- `.agents/specs/research/requirements.md`
-- `.agents/specs/research/acceptance.md`
-- `.agents/specs/research/traceability.md`
+Before a current spec is Frozen, accepted UI behavior should be reconciled into
+that spec's requirements, acceptance, evidence, and traceability records.
 
 Reconcile as product behavior, not as prototype implementation detail.
 

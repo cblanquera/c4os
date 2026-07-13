@@ -1,144 +1,88 @@
-# .agents Rules
+# Agent Workspace Rules
 
-This folder is the agent-readable project knowledge base, planning surface, and execution state store for C4OS.
+This file is the local operating contract for the project root `.agents/` workspace.
 
-## Start Here
+<!-- agent-workspace-rules:start -->
+## Read First
 
-Read the workflow that matches the task:
+- [Agent Workspace Terms](TERMS.md): load when a task depends on Agent Workspace terminology or when adding new local terms.
+- [Agent File Creation Workflow](workflows/agent-file-creation.md): use when creating, revising, splitting, or linking Agent Files.
+- [Agent File Ingestion Workflow](workflows/agent-file-ingestion.md): use when importing Source Material into Agent Files.
+- [Context Initialization Workflow](workflows/context-initialization.md): use when bootstrapping or substantially rebuilding `.agents/context/` from mixed project inputs.
+- [Spec Driven Development Workflow](workflows/spec-driven-development.md): use when creating, researching, resolving gaps for, or freezing `.agents/specs/*/` work.
+- [Spec Task Implementation Workflow](workflows/spec-task-implementation.md): use when planning or implementing tasks from a Frozen spec.
+- [Spec Grill Session Workflow](workflows/spec-grill-session.md): use when pressure-testing, clarifying, or resuming unresolved spec questions.
+- [Spec User Journeys Workflow](workflows/spec-user-journeys.md): use when mapping user journeys, actors, scope boundaries, or implementable journey steps for a spec.
+- [Zombie Reference File Repair Workflow](workflows/repair-zombie-reference-files.md): use when Reference Files have no clear inbound owner.
+- [Agent Workspace Rules Reference](references/00001-agent-workspace-rules.md): load for detailed folder, line-cap, reference-link, and resource-link rules.
 
-- `workflows/context-ingestion.md` for adding files, links, pasted text, or raw resources to project context.
-- `workflows/goal-manager.md` for coordinating a documented goal across planning, design, implementation, QA, and handoff.
-- `workflows/document-integrity.md` for checking context routing, specs, derived views, and progress state.
-- `workflows/import.md` for converting existing planning material into compact records.
-- `workflows/mvp.md` for creating or repairing `.agents/specs/mvp/`, the customer-usable MVP contract.
-- `workflows/feature-development.md` for bounded work after MVP scope is accepted.
-- `workflows/poc.md` for feasibility proofs that can change architecture, security, runtime, browser, terminal, or extension scope.
-- `workflows/wireframes.md` for low-fidelity screens, flows, and interface review.
-- `workflows/creatives.md` for visual direction, asset notes, creative review rounds, and approved creative guidelines.
-- `workflows/review.md` for readiness, risk, consistency, and traceability review.
-- `workflows/validation.md` for evidence-gathering on risky claims or blockers.
-- `workflows/manual-qa.md` for built desktop app acceptance passes, visible navigation checks, and runtime log capture.
-- `workflows/freeze.md` for turning accepted MVP or bounded feature records into implementation contracts.
-- `workflows/progress.md` for active execution packets, logs, and handoffs after a frozen spec exists.
-- `workflows/batch-reconciliation.md` for validated QA, feedback, and polish batches.
-- `workflows/source-retirement.md` before declaring old planning sources obsolete.
-- `workflows/handoff.md` before stopping, switching sessions, or leaving substantial work for a future agent.
-- `workflows/ad-hoc.md` for unplanned requests.
+## Operating Scope
 
-## Source Of Truth
+All markdown files under `.agents/` are Agent Files unless explicitly excluded. Raw Source markdown under `.agents/resources/` is an excluded Resource File.
 
-- `plans/product-brief.md` and `plans/product-interface.md` are the imported human planning sources for this restart.
-- `plans/pegs/*.png` are the visual peg sources for the UI direction.
-- `.agents/context/` contains five shared prework documents. Start with `.agents/context/product-brief.md` for the document map, then load only the context document or reference needed for the task: product brief, product specs, technical specs, creative specs, or work orders.
-- `.agents/references/` is the non-entry detail, evidence, provenance, and historical-support layer. Do not load references by default; load them only through routed references with `Purpose:` and `Load when:` metadata or a workflow-specific need.
-- `.agents/specs/research/` contains the current imported research, MVP-scope analysis, wireframe acceptance, and POC validation records. It is discovery input only.
-- `.agents/specs/research/research-freeze.md` closes the research round and recommends the next planning path. It is not an implementation contract.
-- `.agents/specs/mvp/` is the required contract for the distributable desktop MVP. Create or repair it before active MVP implementation.
-- `proofs/` contains repo-level POC implementation artifacts. Put runnable proof code, harnesses, fixtures, and proof-specific evidence files there instead of burying implementation code inside `.agents/`.
-- `wireframes/` contains wireframe routing notes and links back to the visual pegs.
-- `creatives/` contains creative direction, asset, and guideline artifacts only when creative work is created or approved.
-- `.agents/development/mvp/` contains historical MVP execution state.
-- `.agents/development/<spec-id>/` contains future active execution state for the matching frozen spec. Do not use one global progress folder for unrelated specs.
+Keep every Agent File under 500 lines. Prefer less than 200 lines.
 
-## QA And Acceptance Boundary
+When creating or revising an Agent File, finish the unprocessed draft first. After the draft is complete, split oversized content into Reference Files and add Reference Links from the original file.
 
-Agents must not ask the user to perform incremental QA for implementation
-behavior that the agent can reasonably verify in the local app. Before marking
-an implementation item ready for stakeholder acceptance, run the relevant
-automated checks and, when the behavior is visible in the desktop product,
-perform a manual built-app QA pass through `workflows/manual-qa.md`.
+## Folder Rules
 
-Use the user as a stakeholder acceptance reviewer after agent verification is
-complete, not as the first tester for routine navigation, persistence,
-workspace switching, Browser, Files, Terminal, provider/model, or settings
-behavior. If manual QA cannot be run, record the blocker explicitly in the
-progress item and do not present the behavior as accepted or ready.
+`.agents/context/` is the only agent source-of-truth folder. Store only Accepted Reusable Truth there.
 
-## Context And References
+Agents finding truth must start with `.agents/context/index.md` when context exists.
 
-Use `.agents/context/` for compact, accepted, reusable product truth that future agents should read first. Keep it limited to the five major documents:
+Promote accepted reusable truth into `.agents/context/`. Demote content out of `.agents/context/` when it is not Accepted Reusable Truth, but preserve useful material in the right Spec File, Reference File, or Resource File. If the correct demotion destination is unclear, ask the user where to demote it before editing.
 
-- `product-brief.md` for product identity, users, goals, principles, vocabulary, and the document map.
-- `product-specs.md` for customer workflow, product behavior, feature surfaces, and MVP user-facing scope.
-- `technical-specs.md` for product model, runtime boundary, persistence, security, Browser, Terminal, and implementation constraints.
-- `creative-specs.md` for experience direction, interface contract, UI behavior, visual tone, and accessibility.
-- `work-orders.md` for accepted decisions, sequencing, validation needs, deferred work, and implementation guardrails.
+`.agents/specs/` stores planning, evidence, gap resolution, and frozen implementation contracts. Spec Files must never be treated as the source of truth over `.agents/context/`.
 
-Use `.agents/references/` for material that supports context or specs but should not be loaded by default:
+`.agents/references/` stores flat, numbered Reference Files used by Agent Files.
 
-- `.agents/references/context/product/` for expanded product background, vocabulary detail, and feature-goal inputs.
-- `.agents/references/context/product-specs/` for detailed product experience, feature surfaces, and MVP inventory.
-- `.agents/references/context/technical-specs/` for detailed product model, runtime adapter, constraints, and validation caveats.
-- `.agents/references/context/creative-specs/` and `.agents/references/context/ui-handoff/` for detailed interface and handoff material.
-- `.agents/references/context/work-orders/` for decision history and work-order support.
-- `.agents/references/research/` for research support, grill-session material, schemas, validation evidence, and long-form research notes.
+`.agents/resources/` stores Raw Source and other Resource Files. Zombie Resource Files are allowed.
 
-When contributing context, choose one major context document as the owner, add only compact accepted reusable truth there, route long detail to the matching references folder, and update that context document's `Reference Routing` section when the new reference should be discoverable. Do not add a sixth `.agents/context/` document unless the folder contract is intentionally changed.
+`.agents/workflows/` stores reusable Agent Workspace maintenance workflows.
 
-## Reference Routing
+`.agents/scripts/` stores deterministic helper scripts for Agent Workspace checks.
 
-Do not emit bare links to `.agents/context/`, `.agents/references/`, specs, progress files, proof artifacts, wireframes, imported sources, or evidence. Every linked support file must carry enough routing metadata for a future agent to decide whether to load it without opening the file first.
+## Reference Rules
 
-Use this repeated block shape by default:
+Name Reference Files as `.agents/references/00001-meta-title.md`, incrementing the five-digit number for each new Reference File.
 
-```md
-- `.agents/references/research/example.md`
-  Purpose: What this file proves, preserves, or owns.
-  Load when: The task needs this evidence, source detail, rationale, or decision context.
-  Skip when: The task is unrelated or the owner context already answers the question.
+Every Reference Link must use enough description for an agent to decide whether to load it for the current task.
+
+Reference Files may link to Context Files, Resource Files, or other Reference Files.
+
+There must never be a zombie Reference File. Every Reference File must be linked by another Agent File. If no owner can be found after repair review, notify the user.
+
+## Validation
+
+Run the deterministic validator after creating, splitting, or repairing Agent Files:
+
+```bash
+python .agents/scripts/validate-agent-workspace.py
 ```
 
-`Purpose:` and `Load when:` are required. `Skip when:` is optional but preferred. Tables are allowed only when the same routing metadata stays readable and complete. Root `docs/adr` and non-implementable decision specs are not valid decision-record destinations for this repository.
+Use `python3` instead of `python` on systems where that is the Python 3 executable.
 
-## Implementation Locations
+## Workflow Closeout
 
-For the distributable desktop MVP, production work belongs only in:
+After setup and after each workflow pass, tell the user what changed, the validation result, any blocker or user decision still needed, and the recommended next step.
 
-- `backend/`: Rust/Tauri backend authority, native commands, state, security boundaries, runtime adapter, trusted filesystem access, terminal execution, Browser records, extension records, approvals, persistence, and restart/resume behavior.
-- `frontend/`: desktop app UI loaded by the product shell. It renders state and calls backend commands, but does not own security decisions.
-- `tests/server/`: backend, integration, and MVP acceptance tests for authoritative behavior.
+When several next steps are realistic, include up to two useful alternatives. Use the [Agent Workspace Rules Reference](references/00001-agent-workspace-rules.md) when choosing the next step.
+<!-- agent-workspace-rules:end -->
 
-Do not create or use `src-tauri/`.
+## C4OS Project Rules
 
-Use `proofs/<proof-name>/` only for POCs, spikes, throwaway harnesses, and proof evidence.
-
-## Planning Lifecycle
-
-Use this sequence for MVP work:
-
-1. Research records live under `.agents/specs/research/`.
-2. Research closeout writes or updates `.agents/specs/research/research-freeze.md`.
-3. Accepted reusable findings are promoted or reconciled into the relevant major `.agents/context/` document.
-4. The MVP workflow creates or repairs `.agents/specs/mvp/`.
-5. MVP freeze marks `.agents/specs/mvp/status.md` as `frozen-for-implementation`.
-6. Progress converts accepted MVP tasks into `.agents/development/mvp/` items.
-7. Implementation changes are made in `backend/`, `frontend/`, and `tests/server/`.
-
-If `.agents/specs/mvp/status.md` does not exist or is not frozen for implementation, route MVP/distribution work to `workflows/mvp.md` before creating progress items or editing product code.
-
-## Record Rules
-
-- Use stable IDs such as `REQ-001`, `CAP-001`, `CON-001`, `DEC-001`, `RISK-001`, `AC-001`, `EVD-001`, and `TASK-001`.
-- Keep records short, source-linked, and explicit about status and confidence.
-- Proposed `TASK` records are not active work until converted into progress items.
-- MVP `TASK` records are not active work until they live in `.agents/specs/mvp/` and the MVP spec is frozen for implementation.
-- Future spec execution must use scoped task IDs under `.agents/development/<spec-id>/`; do not reuse one global task-number sequence across unrelated specs.
-- Do not invent completed implementation, verification, runtime behavior, or user decisions.
-- Raw feedback must be validated, rejected, classified, or reconciled before becoming implementation work unless evidence is already explicit.
-- Treat imported plan content as product intent unless a later review, validation result, or user decision changes it.
-- Promote only final accepted reusable findings into the relevant major `.agents/context/` document and route long detail through `.agents/references/`.
-- Create ADRs lazily under `.agents/specs/<spec-id>/adrs/NNNN-short-title.md`
-  when a spec needs a hard-to-reverse architectural decision record. Keep the
-  concise accepted decision in that spec's `decisions.md`. If the same ADR
-  affects multiple specs, copy the ADR into each affected spec's `adrs/`
-  folder and cite the same source or grill QID in each copy.
-- Keep `.agents/specs/<spec-id>/poc/` focused on proof questions, expected proof, results, links, and promotion decisions. Link to `proofs/<proof-name>/` for the implementation artifact.
-
-## Boundaries
-
-- Keep generated `.agents/**/*.md` files under 500 lines.
-- Put long rationale, research, source excerpts, screenshots, QA notes, and detailed evidence under `.agents/references/` when needed.
-- Keep POC implementations under `proofs/<proof-name>/` with proof-local source, harnesses, fixtures, README/evidence notes, and ignored build output. Do not commit generated build directories such as `target/`, `node_modules/`, caches, or other bulky artifacts.
-- Put creative assets and approved guidelines under root `creatives/` when creative work exists. Promote accepted creative rules into `.agents/context/creative-specs.md` before frontend implementation depends on them.
-- Do not retire or delete source planning docs without `workflows/source-retirement.md`.
-- Do not start implementation unless the user explicitly asks for active execution and the relevant MVP or feature spec is frozen for implementation.
+- [C4OS Agent Workspace Migration](migration.md): read while the 2026-07-13 clean-room replay is active or when auditing how legacy records map into the managed workspace.
+- [C4OS Proof Execution Workflow](workflows/proof-execution.md): use when executing a spec Proof under root `proofs/`.
+- [C4OS Validation Workflow](workflows/validation.md): use when a local claim, risk, blocker, or implementation assertion needs evidence.
+- [C4OS Wireframes Workflow](workflows/wireframes.md): use for low-fidelity interface artifacts and review reconciliation.
+- [C4OS Creatives Workflow](workflows/creatives.md): use for visual direction, brand exploration, asset guidance, and creative review.
+- [C4OS Manual QA Workflow](workflows/manual-qa.md): use for built desktop-app verification before stakeholder acceptance.
+- [C4OS Batch Reconciliation Workflow](workflows/batch-reconciliation.md): use for related validated low-to-medium-risk fixes after implementation is authorized.
+- [C4OS Source Retirement Workflow](workflows/source-retirement.md): use before declaring plans, pegs, notes, or imported sources obsolete.
+- [C4OS Handoff Workflow](workflows/handoff.md): use before leaving substantial work for a later session or agent.
+- Product plans remain under root `plans/`.
+- Visual review and UI handoff artifacts remain under root `wireframes/`.
+- Runnable proof implementations remain under root `proofs/<proof-name>/`; spec Proof records contain questions, expected signals, results, and links to those implementations.
+- Production implementation belongs in root `backend/`, `frontend/`, and `tests/server/`. Do not create or use `src-tauri/`.
+- Do not start implementation unless the user explicitly requests execution and the relevant spec is Frozen.
+- Legacy records retained under `.agents/resources/grill/`, `.agents/resources/research/`, and `.agents/resources/history/` are Raw Source. They are not an active operating contract or source of truth.

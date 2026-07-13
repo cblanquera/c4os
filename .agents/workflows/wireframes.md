@@ -14,9 +14,9 @@ Use this for low-fidelity screens, flows, layout notes, and interface review.
 1. Treat the PNG pegs as visual references and `plans/product-interface.md` as the textual interaction source.
 2. Convert accepted UI behavior into requirements or acceptance criteria before freeze.
 3. Record mismatches as review findings, not implementation tasks, until accepted.
-4. Keep review notes in `wireframes/` unless they are long enough for `.agents/references/`.
+4. Keep review notes in `wireframes/` unless an active Context File or Spec File needs them as a flat numbered Reference File.
 5. Promote accepted handoff decisions into `.agents/context/creative-specs.md` and relevant specs before implementation depends on them.
 
 ## Stop
 
-Stop when screens, flows, and open UI decisions are clear enough for review, validation, or implementation planning.
+Stop when screens, flows, and open UI decisions are clear enough for review, validation, journey reconciliation, or implementation planning.

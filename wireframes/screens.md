@@ -1,17 +1,17 @@
 # Wireframe Screens
 
 Status: active
-Updated: 2026-07-06
+Updated: 2026-07-13
 Source:
 - `plans/product-interface.md`
 - `plans/pegs/*.png`
-- `.agents/specs/01-shell-plugin-architecture-refactor/`
-- `.agents/specs/02-core-app-shell-ux/`
-- `.agents/specs/06-file-system-plugin/`
-- `.agents/specs/07-file-editor-plugin/`
-- `.agents/specs/08-terminal-plugin/`
-- `.agents/specs/09-chat-debug-plugin/`
-- `.agents/specs/10-browser-plugin/`
+- `.agents/specs/00002-shell-plugin-architecture-refactor/`
+- `.agents/specs/00003-core-app-shell-ux/`
+- `.agents/specs/00007-file-system-plugin/`
+- `.agents/specs/00008-file-editor-plugin/`
+- `.agents/specs/00009-terminal-plugin/`
+- `.agents/specs/00010-chat-debug-plugin/`
+- `.agents/specs/00011-browser-plugin/`
 
 ## Screen Pegs
 
@@ -35,8 +35,8 @@ Source:
 
 - r04 remains the accepted MVP baseline for the original three-panel desktop
   shell and route set.
-- r05 final-implementation Batch 1 supersedes the r04 shell model for specs 01
-  and 02 only: use one global header, left/right plugin icon groups, no default
+- r05 final-implementation Batch 1 supersedes the r04 shell model for specs
+  00002 and 00003 only: use one global header, left/right plugin icon groups, no default
   right panel, and icon-owned plugin panel toggle/close behavior.
 - Left and right plugin panels are resizable when visible.
 - The final shell allows one visible plugin panel per side. Same-side plugin
@@ -53,7 +53,7 @@ Source:
 - Invalid shell layout declarations must surface repair/disable states instead
   of corrupting shell layout.
 - r05 final-implementation Batch 4 supersedes r04 only for focused workspace,
-  project, file explorer, and file editor states in specs 06 and 07.
+  project, file explorer, and file editor states in specs 00007 and 00008.
 - Workspace start, loaded workspace, missing project, search, and non-Git
   workspace states belong inside the FS plugin panel. The center pane remains
   the normal new-chat prompt surface.
@@ -67,7 +67,7 @@ Source:
   icon-theme, hidden-file, and non-code empty states are represented in r05
   Batch 4 and should not be inferred from stale r04 fixed-tab behavior.
 - r05 final-implementation Batch 5 supersedes r04 only for focused runtime
-  plugin panel states in specs 08, 09, and 10, plus directly affected spec 04
+  plugin panel states in specs 00009, 00010, and 00011, plus directly affected spec 00005
   overlap. Terminal is the user PTY panel only; runtime terminal tool output
   belongs to thread context and Chat Debug. Browser visible routes cover
   navigation/actions, toolbar menu, page context menu, and preview hosting,
@@ -84,7 +84,7 @@ Source:
 
 ## Promotion Notes
 
-Before freeze, accepted wireframe behavior should be promoted into `.agents/specs/research/requirements.md` and `.agents/specs/research/acceptance.md`.
+Before a current spec is Frozen, accepted wireframe behavior should be reconciled into that spec's requirements, acceptance, evidence, and traceability records.
 
 The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
 
@@ -96,4 +96,4 @@ The implementation-facing UI handoff is `wireframes/ui-handoff-spec.md`.
 | r02-functional-interface-draft | `r02-functional-interface-draft/index.html` | ready-for-review | HTML/CSS/JS desktop interface draft with scalable CSS tokens, peg-backed screen coverage, distinct app-start state, and review-only simulated interactions. |
 | r03-functional-frontend-architecture | `r03-functional-frontend-architecture/index.html` | ready-for-review | Fresh HTML/CSS/JS desktop interface draft with route-level screen declarations, component-style DOM helpers, layered CSS, trust-spine state treatment, and review-only simulated interactions. |
 | r04-single-page-app | `r04-single-page-app/index.html` | accepted MVP baseline | HTML/CSS/JS single-page app baseline for original MVP shell, settings, right-tool tabs, and implementation handoff. |
-| r05-final-implementation | `r05-final-implementation/index.html` | approved Batches 1-5 | Final-implementation review artifact. Batch 1 covers shell foundation, Batch 2 covers Settings, Batch 3 covers prompt/approval flows, Batch 4 covers workspace/files states for specs 06 and 07, and Batch 5 covers runtime plugin panel states for specs 08, 09, and 10 with direct spec 04 overlap. |
+| r05-final-implementation | `r05-final-implementation/index.html` | approved Batches 1-5 | Final-implementation review artifact. Batch 1 covers shell foundation, Batch 2 covers Settings, Batch 3 covers prompt/approval flows, Batch 4 covers workspace/files states for specs 00007 and 00008, and Batch 5 covers runtime plugin panel states for specs 00009, 00010, and 00011 with direct spec 00005 overlap. |

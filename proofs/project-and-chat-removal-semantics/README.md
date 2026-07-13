@@ -1,6 +1,6 @@
 # project-and-chat-removal-semantics
 
-Proof for `.agents/specs/06-file-system-plugin/`.
+Proof for `.agents/specs/00007-file-system-plugin/`.
 
 ## Question
 
