@@ -25,11 +25,18 @@ const routes = [
   ["Settings Configuration", "./settings-configuration.html", "Approval policy, sandbox settings, and config access."],
   ["Settings Plugins", "./settings-plugins.html", "Installed plugin controls grouped below configuration."],
   ["Settings Skills", "./settings-skills.html", "Installed skill controls and detail state."],
-  ["Settings MCP Servers", "./settings-mcp.html", "MCP server connections and custom server form."]
+  ["Settings MCP Servers", "./settings-mcp.html", "MCP server connections and custom server form."],
+  ["Prompt Suggestions", "./prompt-suggestions.html", "Resolve skill, resource, and command references in the chat composer."],
+  ["Approval Dialog", "./approval-dialog.html", "Review terminal approval choices and advanced decision context."],
+  ["Remembered Rule Summary", "./remembered-rule-summary.html", "Show the remembered approval rule applied to the current chat."],
+  ["Blocked Suggestion Repair", "./blocked-suggestion-repair.html", "Keep dependency-blocked resources out of executable suggestions."],
+  ["Branch Popover", "./branch-popover.html", "Choose or create a Git branch from the prompt composer."],
+  ["Attachment States", "./attachment-states.html", "Review structured file and Browser screenshot attachments."],
+  ["Safe Fallback", "./safe-fallback.html", "Explain the safe adapter fallback for unsupported image attachments."]
 ];
 
 const routeIds = new Set(routes.map(([, href]) => routeFromHref(href)).filter(Boolean));
-const batch1Routes = new Set(["shell-foundation", "same-side-replacement", "per-chat-restore", "resize-collision", "hidden-activity", "repair-state", "settings", "settings-configuration", "settings-plugins"]);
+const batch1Routes = new Set(["shell-foundation", "same-side-replacement", "per-chat-restore", "resize-collision", "hidden-activity", "repair-state", "settings", "settings-configuration", "settings-plugins", "prompt-suggestions", "approval-dialog", "remembered-rule-summary", "blocked-suggestion-repair", "branch-popover", "attachment-states", "safe-fallback"]);
 const projects = [
   { name: "suite", trusted: false },
   { name: "c4os2", trusted: true, sessions: ["Locate Tauri integration", "Draft wireframes"] },
@@ -503,6 +510,16 @@ const batch1Chats = {
   draft: { title: "Draft wireframes", left: "chats", right: "browser" }
 };
 
+const batch3Routes = {
+  "prompt-suggestions": { mode: "suggestions", title: "Draft release notes", left: "chats", right: null },
+  "approval-dialog": { mode: "approval", title: "Run migration check", left: "chats", right: "debug" },
+  "remembered-rule-summary": { mode: "remembered", title: "Run migration check", left: "chats", right: "debug" },
+  "blocked-suggestion-repair": { mode: "blocked", title: "Prepare customer brief", left: "chats", right: null },
+  "branch-popover": { mode: "branch", title: "Ship focused fix", left: "chats", right: null },
+  "attachment-states": { mode: "attachments", title: "Review evidence bundle", left: "chats", right: "browser" },
+  "safe-fallback": { mode: "fallback", title: "Review evidence bundle", left: "chats", right: "browser" }
+};
+
 const batch1State = {
   activeChat: "locate",
   widths: { left: 300, right: 360 },
@@ -521,6 +538,8 @@ const batch1State = {
   repairedPlugins: new Set(),
   revokedPolicies: new Set(),
   uninstalledPlugins: new Set(),
+  batch3Mode: null,
+  batch3Title: null,
   inSettings: false
 };
 
@@ -554,9 +573,18 @@ function seedBatch1State(screen) {
   batch1State.repairedPlugins.clear();
   batch1State.revokedPolicies.clear();
   batch1State.uninstalledPlugins.clear();
+  batch1State.batch3Mode = null;
+  batch1State.batch3Title = null;
 
   const chat = batch1Chats[batch1State.activeChat];
-  if (screen === "same-side-replacement") {
+  const batch3 = batch3Routes[screen];
+  if (batch3) {
+    batch1State.activeChat = "draft";
+    batch1Chats.draft.left = batch3.left;
+    batch1Chats.draft.right = batch3.right;
+    batch1State.batch3Mode = batch3.mode;
+    batch1State.batch3Title = batch3.title;
+  } else if (screen === "same-side-replacement") {
     chat.left = "files";
     chat.right = "terminal";
   } else if (screen === "resize-collision") {
@@ -592,6 +620,7 @@ function renderBatch1App() {
   bindBatch1Controls();
   bindComposerControls();
   bindShowMore();
+  bindBatch3Controls();
   if (batch1State.inSettings) {
     bindBatch2PluginControls();
     bindMarketplaceControls();
@@ -622,7 +651,7 @@ function batch1Header(left, right) {
 
   return h("header", { class: "batch1-header" }, [
     group("left", left),
-    h("strong", { class: "batch1-title", text: batch1State.inSettings ? "Settings" : batch1State.newChat ? activeWorkspace.project : batch1Chats[batch1State.activeChat].title }),
+    h("strong", { class: "batch1-title", text: batch1State.inSettings ? "Settings" : batch1State.newChat ? activeWorkspace.project : batch1State.batch3Title || batch1Chats[batch1State.activeChat].title }),
     h("div", { class: "batch1-header-right" }, [
       group("right", right),
       h("button", {
@@ -762,10 +791,403 @@ function batch1Workspace(chat) {
       })
     ]);
   }
+  if (batch1State.batch3Mode) return batch3PromptWorkspace(batch1State.batch3Mode);
   return h("section", { class: "thread-view batch1-thread-view" }, [
     h("div", { class: "thread-list", "aria-label": copy["thread.list"] }, threadItems.map(renderThreadItem)),
     h("div", { class: "composer-dock" }, [composer(copy["composer.threadPlaceholder"], { readonlyContext: true })])
   ]);
+}
+
+function batch3PromptWorkspace(mode) {
+  const disclosureId = `batch3-${mode}-agent-extra`;
+  return h("section", { class: `thread-view batch1-thread-view batch3-workspace prompt-${mode}` }, [
+    h("div", { class: "thread-list", "aria-label": copy["thread.list"] }, [
+      h("article", { class: "message user batch3-thread-item" }, [
+        h("p", {}, batch3MessageText(mode)),
+        mode === "attachments" || mode === "fallback" ? h("div", { class: "batch3-message-attachments" }, batch3AttachmentChips(mode === "fallback")) : null
+      ]),
+      batch3RunSummary(mode),
+      h("article", { class: "message agent batch3-thread-item has-actions" }, [
+        h("p", { text: batch3AgentReply(mode) }),
+        h("div", { class: "message-extra", id: disclosureId }, batch3AgentExtra(mode)),
+        h("button", {
+          class: "text-button batch3-show-more",
+          type: "button",
+          "data-toggle": "message",
+          "data-collapsed-label": copy["message.showMore"],
+          "data-expanded-label": copy["message.showLess"],
+          "aria-controls": disclosureId,
+          "aria-expanded": "false",
+          text: copy["message.showMore"]
+        })
+      ])
+    ]),
+    h("div", { class: "composer-dock batch3-composer-dock" }, [
+      mode === "approval" ? batch3ApprovalRequest(false) : null,
+      mode === "remembered" ? batch3ApprovalRequest(true) : null,
+      mode === "blocked" ? batch3BlockedRepairPanel() : null,
+      mode === "fallback" ? batch3FallbackWarning() : null,
+      batch3PromptComposer(mode)
+    ])
+  ]);
+}
+
+function batch3PromptText(mode) {
+  if (mode === "suggestions") return ["use ", batch3Token("$", "grill", { active: true }), " to ask me questions"];
+  if (mode === "branch") return ["Create a small branch for the prompt interaction wireframes before changing the review artifact."];
+  if (mode === "attachments" || mode === "fallback") return ["Use the attached file and Browser screenshot to explain what changed."];
+  if (mode === "blocked") return ["Use ", batch3Token("@", "hubspot/company-record"), " and ", batch3Token("$", "customer-research"), " to prepare a brief."];
+  return ["Run the terminal migration check and continue only if it passes."];
+}
+
+function batch3MessageText(mode) {
+  return mode === "suggestions"
+    ? ["use ", batch3Token("$", "grill-me-with-docs", { resolved: true }), " to ask me questions"]
+    : batch3PromptText(mode);
+}
+
+function batch3Token(kind, value, options = {}) {
+  const type = kind === "$" ? "skill" : kind === "@" ? "resource" : "command";
+  return h("span", { class: `batch3-prompt-token token-${type}${options.resolved ? " is-resolved" : ""}${options.active ? " is-active-query" : ""}`, text: `${kind}${value}` });
+}
+
+function batch3AgentReply(mode) {
+  return {
+    suggestions: "Choose a skill from the menu or keep typing in the composer.",
+    approval: "I need approval before running the terminal command for this turn.",
+    remembered: "A remembered terminal rule applies to this trusted project command, so the run can continue with the recorded policy summary.",
+    blocked: "That resource is not available to execute from the prompt because its plugin dependency is blocked.",
+    branch: "This project is a Git repository, so this prompt can be sent on a selected or newly created branch.",
+    attachments: "I will send the file and screenshot records as structured C4OS attachments.",
+    fallback: "The selected model cannot consume the Browser image records directly, so C4OS will keep the records and send the safe fallback payload."
+  }[mode];
+}
+
+function batch3RunSummary(mode) {
+  const detailsId = `batch3-${mode}-run-details`;
+  return h("article", { class: "activity-card batch3-run-summary batch3-thread-item" }, [
+    h("button", { class: "batch3-activity-toggle", type: "button", "data-batch3-activity": "true", "aria-controls": detailsId, "aria-expanded": "false" }, [
+      h("span", { text: mode === "approval" ? "Waiting for approval" : "Worked for 5sec" }),
+      svgIcon("chevronRight")
+    ]),
+    h("div", { class: "batch3-run-details", id: detailsId, hidden: "true" }, [
+      h("ul", {}, batch3WorkLogItems(mode).map((item) => h("li", {}, item)))
+    ])
+  ]);
+}
+
+function batch3WorkLogItems(mode) {
+  if (mode === "suggestions") return [
+    ["Prompt resolver is ready for ", batch3Token("$", "skills", { resolved: true }), ", ", batch3Token("@", "resources", { resolved: true }), ", and ", batch3Token("/", "commands", { resolved: true }), "."],
+    ["The current active query is editable in the composer."]
+  ];
+  if (mode === "approval" || mode === "remembered") return [
+    ["Prepared ", h("code", { text: "terminal.run" }), " through the C4OS tool gateway."],
+    ["Recorded the approval event for thread context, Chat Debug, audit, and runtime resume."]
+  ];
+  if (mode === "blocked") return [
+    ["Filtered dependency-blocked ", batch3Token("@", "hubspot/company-record"), " from executable suggestions."],
+    ["Kept repair visible without allowing frontend-only execution."]
+  ];
+  if (mode === "branch") return [["Detected Git project state and exposed branch choose/create control."], ["Kept the current chat branch read-only for this thread."]];
+  return [["Collected file and Browser screenshot records."], ["Marked provider compatibility, redaction, source plugin, and fallback metadata."]];
+}
+
+function batch3AgentExtra(mode) {
+  if (mode === "attachments" || mode === "fallback") return [h("div", { class: "batch3-attachment-grid" }, batch3AttachmentCards(mode === "fallback"))];
+  if (mode === "blocked") return [h("p", {}, [link("text-button", "./settings-plugins.html", ["Open plugin repair state"])])];
+  if (mode === "remembered") return [h("p", {}, [link("text-button", "./settings-configuration.html", ["Review remembered rules in Settings > Configuration"])])];
+  return [h("p", { text: mode === "suggestions" ? "The composer keeps typed trigger text editable while the menu follows the active token." : "Decision and state details remain available in the thread without crowding the default message view." })];
+}
+
+function batch3PromptComposer(mode) {
+  const suggestions = mode === "suggestions";
+  const attachments = mode === "attachments" || mode === "fallback";
+  return h("section", { class: "composer batch3-prompt-composer", "aria-label": copy["composer.label"] }, [
+    attachments ? h("div", { class: "attachment-preview batch3-attachment-preview", "aria-label": copy["composer.attachments"] }, batch3AttachmentChips(mode === "fallback")) : null,
+    h("div", { class: "prompt-box batch3-prompt-box", role: "textbox", "aria-label": copy["composer.promptLabel"], "aria-multiline": "true", contenteditable: "true", spellcheck: "true", "data-placeholder": copy["composer.threadPlaceholder"], "data-batch3-typeahead": suggestions ? "true" : null }, batch3PromptText(mode)),
+    suggestions ? batch3InlineSuggestions("$", "grill") : null,
+    mode === "branch" ? batch3BranchPopover() : null,
+    h("div", { class: "composer-controls" }, [
+      iconButton(copy["composer.attach"], "paperclip"),
+      link("chip", "./approval-dialog.html", [svgIcon("shield"), h("span", { text: "Ask for approval" })]),
+      h("span", { class: "spacer" }),
+      iconButton(copy["composer.microphone"], "mic"),
+      iconButton(copy["composer.send"], "send", "send-button")
+    ]),
+    h("div", { class: "context-strip" }, [
+      link("chip readonly-chip", "./branch-popover.html", [svgIcon("gitBranch"), h("span", { text: mode === "branch" ? "feature/prompt-approvals" : "main" })], { "aria-label": copy["composer.branchReadonly"] }),
+      h("span", { class: "spacer" }),
+      h("span", { class: "chip readonly-chip" }, [svgIcon("bot"), h("span", { text: "openai-compatible/default" })])
+    ])
+  ]);
+}
+
+const batch3TypeaheadCatalog = {
+  "$": [["grill-me-with-docs", "/User/cblanquera/.c4os/skills/grill-me-with-docs", true], ["grill-with-docs", "/User/cblanquera/.c4os/skills/grill-with-docs"], ["spec-grill-me-with-docs", "/User/cblanquera/.c4os/skills/spec-grill-me-with-docs"], ["chrisai-designing", "/User/cblanquera/.c4os/skills/chrisai-designing"]],
+  "@": [["browser:screenshot-14", "Browser screenshot record", true], ["docs:release-plan", "Plugin resource"], ["wireframes/ui-handoff-spec.md", "File"]],
+  "/": [["summarize-run", "C4OS command", true], ["attach-browser-evidence", "C4OS command"], ["new-chat", "C4OS command"], ["wireframes/review-round-11.md", "Accepted file match"]]
+};
+
+function batch3InlineSuggestions(trigger, query) {
+  return h("div", { class: "batch3-suggestion-popover", role: "listbox", "aria-label": "Prompt reference typeahead menu", "data-batch3-menu": "true" }, [batch3SuggestionGroup(trigger, query)]);
+}
+
+function batch3SuggestionGroup(trigger, query) {
+  const title = trigger === "$" ? "$ Skills" : trigger === "@" ? "@ Resources" : "/ Commands";
+  const rows = (batch3TypeaheadCatalog[trigger] || []).filter(([label]) => !query || label.toLowerCase().includes(query.toLowerCase()));
+  return h("section", { class: "batch3-suggestion-group" }, [
+    h("h3", { text: title }),
+    ...(rows.length ? rows : [["No matches", "Keep typing or delete the trigger", true]]).map(([label, meta, selected]) => h("button", { class: `batch3-suggestion-row${selected ? " is-selected" : ""}`, type: "button", role: "option", "aria-selected": selected ? "true" : "false", "data-batch3-option": label }, [h("strong", { text: label }), h("span", { text: meta })]))
+  ]);
+}
+
+function batch3ApprovalRequest(remembered) {
+  const advancedId = `batch3-${remembered ? "remembered" : "approval"}-advanced`;
+  return h("section", { class: "batch3-permission batch3-approval-card", role: "dialog", "aria-label": "Approval request" }, [
+    h("p", { class: "batch3-approval-title", text: remembered ? "Remembered approval applied for terminal.run" : "Approve terminal.run for this chat?" }),
+    h("code", { text: "npm run test -- --runInBand" }),
+    h("section", { class: "batch3-approval-advanced" }, [
+      h("button", { class: "batch3-approval-toggle", type: "button", "data-batch3-approval-toggle": "true", "aria-expanded": "false", "aria-controls": advancedId }, [h("span", { text: "Advanced" }), svgIcon("chevronRight")]),
+      h("div", { class: "batch3-approval-body", id: advancedId, hidden: "true" }, [
+        h("div", { class: "batch3-approval-impact" }, [
+          batch3ApprovalLine("Tool", "terminal.run"), batch3ApprovalLine("Action/risk", "execute command - terminal"), batch3ApprovalLine("Target scope", "trusted project"), batch3ApprovalLine("Decision event", remembered ? "approval_policy remembered.applied" : "approval_requested pending")
+        ]),
+        remembered ? batch3RememberedSummary() : batch3RememberChoices()
+      ])
+    ]),
+    h("div", { class: "batch3-approval-actions" }, [button("button secondary", "Deny"), button("button secondary", "Deny and wait"), button("button secondary", "Allow once"), button("button primary", remembered ? "Continue" : "Allow and remember")])
+  ]);
+}
+
+function batch3ApprovalLine(label, value) {
+  return h("div", { class: "batch3-approval-line" }, [h("strong", { text: label }), h("span", { text: value })]);
+}
+
+function batch3RememberChoices() {
+  return h("div", { class: "batch3-remember-box" }, [h("strong", { text: "Remember this decision" }), h("label", {}, [h("input", { type: "radio", name: "remember", checked: "true" }), " Session only - expires with this chat session"]), h("label", {}, [h("input", { type: "radio", name: "remember" }), " User global - save to Settings > Configuration"])]);
+}
+
+function batch3RememberedSummary() {
+  return h("div", { class: "batch3-remember-box" }, [h("strong", { text: "Applied remembered rule" }), batch3ApprovalLine("Rule key", "terminal.run + terminal risk + trusted project scope"), batch3ApprovalLine("Duration", "Session only for this chat"), link("button secondary", "./settings-configuration.html", [svgIcon("settings"), h("span", { text: "Open Settings > Configuration" })])]);
+}
+
+function batch3BlockedRepairPanel() {
+  return h("section", { class: "batch3-permission batch3-blocked-panel" }, [h("div", {}, [h("strong", { text: "Resource hidden from executable suggestions" }), h("p", { text: "The HubSpot resource belongs to an enabled plugin with a missing service dependency. It is not selectable in the prompt resolver." })]), link("button secondary", "./settings-plugins.html", ["Repair dependency"])]);
+}
+
+function batch3BranchPopover() {
+  return h("div", { class: "batch3-branch-popover" }, [h("strong", { text: "Choose branch" }), batch3BranchOption("main", "Current chat branch - read-only", true), batch3BranchOption("feature/prompt-approvals", "Use for accepted separate work"), h("div", { class: "fake-input", text: "feature/new-safe-scope" }), button("button primary", "Create branch", "plus")]);
+}
+
+function batch3BranchOption(name, detail, disabled = false) {
+  return h("button", { class: `batch3-branch-option${disabled ? " is-disabled" : ""}`, type: "button", disabled }, [h("strong", { text: name }), h("span", { text: detail })]);
+}
+
+function batch3AttachmentCards(fallback) {
+  return [batch3AttachmentCard("File", "@wireframes/ui-handoff-spec.md", "source: file editor - redaction: none - cap: 64 KB", false), batch3AttachmentCard("Browser screenshot", "screenshot-14.png", "source: Browser - viewport: 1440x900 - URL captured", fallback)];
+}
+
+function batch3AttachmentCard(title, name, detail, warning) {
+  return h("article", { class: `batch3-attachment-card${warning ? " has-warning" : ""}` }, [h("span", { class: "batch3-attachment-icon" }, [svgIcon(warning ? "circleAlert" : "paperclip")]), h("strong", { text: title }), h("p", { text: name }), h("span", { text: warning ? `${detail} - adapter fallback required` : detail })]);
+}
+
+function batch3AttachmentChips(fallback) {
+  return [h("span", { class: "batch3-attachment-chip" }, [svgIcon("file"), h("span", { text: "ui-handoff-spec.md" }), h("small", { text: "file" }), h("button", { type: "button", "aria-label": "Remove file attachment", text: "x" })]), h("span", { class: `batch3-attachment-chip${fallback ? " has-warning" : ""}` }, [svgIcon(fallback ? "circleAlert" : "globe"), h("span", { text: "Browser screenshot" }), h("small", { text: fallback ? "fallback" : "image" }), h("button", { type: "button", "aria-label": "Remove screenshot attachment", text: "x" })])];
+}
+
+function batch3FallbackWarning() {
+  return h("section", { class: "batch3-permission batch3-fallback-warning", role: "status" }, [h("strong", { text: "Unsupported attachment warning" }), h("code", { text: "Selected model cannot consume Browser image attachments directly." }), h("p", { text: "C4OS keeps the screenshot metadata, then sends a safe text-plus-metadata fallback to the adapter." })]);
+}
+
+function bindBatch3Controls() {
+  document.querySelectorAll("[data-batch3-activity]").forEach((control) => control.addEventListener("click", () => {
+    const target = document.getElementById(control.getAttribute("aria-controls"));
+    const expanded = control.getAttribute("aria-expanded") === "true";
+    control.setAttribute("aria-expanded", String(!expanded));
+    control.classList.toggle("is-expanded", !expanded);
+    if (target) target.hidden = expanded;
+  }));
+  document.querySelectorAll("[data-batch3-approval-toggle]").forEach((control) => control.addEventListener("click", () => {
+    const target = document.getElementById(control.getAttribute("aria-controls"));
+    const expanded = control.getAttribute("aria-expanded") === "true";
+    control.setAttribute("aria-expanded", String(!expanded));
+    control.classList.toggle("is-expanded", !expanded);
+    if (target) target.hidden = expanded;
+  }));
+  bindBatch3Typeahead();
+}
+
+function bindBatch3Typeahead() {
+  document.querySelectorAll("[data-batch3-typeahead]").forEach((prompt) => {
+    const composerNode = prompt.closest(".batch3-prompt-composer");
+    const menu = composerNode?.querySelector("[data-batch3-menu]");
+    if (!composerNode || !menu) return;
+    let activeIndex = 0;
+    let activeKey = "";
+    let lastActive = null;
+
+    const renderMenu = () => {
+      const active = batch3ActiveReferenceAtCaret(prompt);
+      if (!active) {
+        menu.hidden = true;
+        lastActive = null;
+        return;
+      }
+      const nextKey = `${active.trigger}:${active.query}`;
+      if (nextKey !== activeKey) {
+        activeIndex = 0;
+        activeKey = nextKey;
+      }
+      lastActive = active;
+      menu.hidden = false;
+      menu.replaceChildren(batch3SuggestionGroup(active.trigger, active.query));
+      batch3UpdateTypeaheadSelection(menu, activeIndex);
+    };
+
+    const chooseOption = (event) => {
+      const option = event.target.closest("[data-batch3-option]");
+      if (!option || option.dataset.batch3Option === "No matches") return;
+      const active = batch3ActiveReferenceAtCaret(prompt) || lastActive;
+      if (!active) return;
+      batch3ResolvePromptReference(prompt, active, option.dataset.batch3Option);
+      menu.hidden = true;
+      lastActive = null;
+    };
+
+    menu.addEventListener("pointerdown", chooseOption);
+    menu.addEventListener("click", chooseOption);
+    prompt.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+      if (menu.hidden) renderMenu();
+      if (menu.hidden) return;
+      const options = batch3TypeaheadOptions(menu).filter((option) => option.dataset.batch3Option !== "No matches");
+      if (!options.length) return;
+      event.preventDefault();
+      if (event.key === "ArrowDown") {
+        activeIndex = (activeIndex + 1) % options.length;
+        batch3UpdateTypeaheadSelection(menu, activeIndex);
+      } else if (event.key === "ArrowUp") {
+        activeIndex = (activeIndex - 1 + options.length) % options.length;
+        batch3UpdateTypeaheadSelection(menu, activeIndex);
+      } else {
+        batch3ResolvePromptReference(prompt, lastActive || batch3ActiveReferenceAtCaret(prompt), options[activeIndex].dataset.batch3Option);
+        menu.hidden = true;
+        lastActive = null;
+      }
+    });
+    prompt.addEventListener("input", () => {
+      batch3NormalizePromptMarkup(prompt);
+      renderMenu();
+    });
+    prompt.addEventListener("keyup", renderMenu);
+    prompt.addEventListener("click", renderMenu);
+    prompt.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (!composerNode.contains(document.activeElement)) menu.hidden = true;
+      }, 0);
+    });
+    renderMenu();
+  });
+}
+
+function batch3NormalizePromptMarkup(prompt) {
+  const caret = batch3CaretOffset(prompt);
+  if (caret == null) return;
+  batch3RenderResolvedPrompt(prompt, prompt.textContent || "", caret);
+}
+
+function batch3TypeaheadOptions(menu) {
+  return Array.from(menu.querySelectorAll("[data-batch3-option]"));
+}
+
+function batch3UpdateTypeaheadSelection(menu, activeIndex) {
+  batch3TypeaheadOptions(menu).forEach((option, index) => {
+    const selected = index === activeIndex;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-selected", String(selected));
+  });
+}
+
+function batch3ActiveReferenceAtCaret(prompt) {
+  const selection = window.getSelection();
+  const focusElement = selection?.focusNode?.nodeType === Node.TEXT_NODE ? selection.focusNode.parentElement : selection?.focusNode;
+  if (focusElement?.closest?.(".batch3-prompt-token.is-resolved")) return null;
+  const caret = batch3CaretOffset(prompt);
+  if (caret == null) return null;
+  return batch3ActiveReference(prompt.textContent || "", caret);
+}
+
+function batch3CaretOffset(root) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !root.contains(selection.focusNode)) return null;
+  const range = selection.getRangeAt(0).cloneRange();
+  range.selectNodeContents(root);
+  range.setEnd(selection.focusNode, selection.focusOffset);
+  return range.toString().length;
+}
+
+function batch3ActiveReference(text, caret = text.length) {
+  if (!text || caret == null) return null;
+  const beforeCaret = text.slice(0, caret);
+  if (!beforeCaret || /\s$/.test(beforeCaret)) return null;
+  const segmentMatch = beforeCaret.match(/\S+$/);
+  if (!segmentMatch) return null;
+  const segment = segmentMatch[0];
+  const segmentStart = caret - segment.length;
+  const triggerPositions = ["$", "@", "/"].map((trigger) => ({ trigger, index: segment.lastIndexOf(trigger) }))
+    .filter((item) => item.index >= 0)
+    .sort((a, b) => b.index - a.index);
+  if (!triggerPositions.length) return null;
+  const { trigger, index } = triggerPositions[0];
+  return { trigger, query: segment.slice(index + 1), start: segmentStart + index, end: caret };
+}
+
+function batch3ResolvePromptReference(prompt, active, label) {
+  if (!active) return;
+  const text = prompt.textContent || "";
+  const replacement = `${active.trigger}${label}`;
+  const nextText = `${text.slice(0, active.start)}${replacement}${text.slice(active.end)}`;
+  batch3RenderResolvedPrompt(prompt, nextText, active.start + replacement.length);
+}
+
+function batch3RenderResolvedPrompt(prompt, text, caret) {
+  const fragment = document.createDocumentFragment();
+  const references = batch3ResolvedReferenceSet();
+  for (const part of text.match(/\s+|\S+/g) || []) {
+    if (references.has(part)) fragment.append(batch3Token(part[0], part.slice(1), { resolved: true }));
+    else fragment.append(document.createTextNode(part));
+  }
+  prompt.replaceChildren(fragment);
+  batch3SetCaretOffset(prompt, caret);
+}
+
+function batch3ResolvedReferenceSet() {
+  return new Set(Object.entries(batch3TypeaheadCatalog).flatMap(([trigger, rows]) => rows.filter(([label]) => label !== "No matches").map(([label]) => `${trigger}${label}`)));
+}
+
+function batch3SetCaretOffset(root, offset) {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  let remaining = offset;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (remaining <= node.nodeValue.length) {
+      range.setStart(node, remaining);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    remaining -= node.nodeValue.length;
+    node = walker.nextNode();
+  }
+  range.selectNodeContents(root);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function batch1ComposerModelPopover() {

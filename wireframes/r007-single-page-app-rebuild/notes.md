@@ -588,3 +588,76 @@ Date: 2026-07-14
 ### Approval Path
 
 Batch 2 is closed. The next authorized work is the accepted r05 Batch 3 prompt and workspace behavior applied over the approved r007 shell and r04 chat-session body.
+
+## Review Round 13 - Batch 3 Prompt And Workspace Behavior
+
+Date: 2026-07-14
+
+### Changed
+
+- Applied the complete accepted r05 Batch 3 set as seven hash-addressable routes in the existing r007 SPA.
+- Kept Chats in the main shell and retained the r04 chat-session body shape for the center workspace.
+- Added prompt reference resolution for `$` Skills, `@` resources, and `/` commands with active-query and resolved-token states.
+- Added explicit approval, remembered approval, dependency-blocked suggestion, Git branch, structured attachment, and safe fallback states.
+- Kept Browser and Chat Debug as plugin surfaces on the accepted routes while preserving the Batch 1 center-minimum collision behavior.
+- Added Batch 3 starting points to `workflows.html`.
+
+### Batch 2 Boundary Preserved
+
+- Batch 2 remains complete and closed.
+- No rejected Batch 2 Skills or other proposed states were revived or reclassified as deferred work.
+
+### Verified
+
+- All seven Batch 3 routes render inside the single `index.html` document.
+- Route titles, left Chats ownership, route-specific state bodies, and narrow-viewport collision behavior match the accepted r05 route map.
+- Approval Advanced expands to four decision-context rows.
+- Browser diagnostics report no warnings or errors.
+- No document-level horizontal overflow appears across the seven routes at the active review viewport.
+- `script.js` passes `node --check` and `git diff --check` passes.
+
+### Review Now
+
+- Whether prompt suggestions feel native to the composer rather than like a separate settings surface.
+- Whether the approval and remembered-rule hierarchy is sufficiently clear inside the r04-style chat body.
+- Whether blocked repair, branch choice, structured attachments, and the safe fallback match the accepted r05 behavior without changing shell ownership.
+
+### Simulated Or Deferred
+
+- Prompt execution, persisted approval decisions, dependency repair, Git creation, attachment transport, and adapter serialization remain simulated wireframe interactions.
+- Batch 4 file/editor changes and Batch 5 Browser/Terminal/Chat Debug detail remain deferred.
+
+### Approval Path
+
+Approval of Review Round 13 closes Batch 3 and makes Batch 4 the next available revision boundary.
+
+## Review Round 14 - r05 Prompt Resolver Parity
+
+Date: 2026-07-14
+
+### Changed
+
+- Replaced the simplified r007 prompt suggestion handler with the final accepted r05 caret-scoped resolver behavior.
+- The `$`, `@`, and `/` menus now open from the unresolved token containing the caret rather than from the last trigger in the prompt.
+- Added Arrow Up, Arrow Down, and Enter selection; pointer selection; active-row ARIA state; focus-preserving caret restoration; and whitespace-boundary closure.
+- Added input normalization so multiple recognized references remain blue, edited references return to unresolved text, and backspacing to a pending trigger immediately reruns resolution.
+- Restored the complete r05 suggestion catalog metadata used by the review route.
+- Removed the r007-only behavior that left the suggestion menu open before the composer had an active caret token.
+
+### Feedback Applied
+
+- Applied the user's direction that `r05-final-implementation/#prompt-suggestions` is the correct functionality.
+- Ported the final r05 behavior without reinterpreting or simplifying its interaction model.
+
+### Review Now
+
+- Batch 3 is approved and ready to commit; this correction is a parity fix inside that approved boundary.
+
+### Simulated Or Deferred
+
+- Suggestion catalogs and reference serialization remain wireframe simulations; production resolution remains backend-authoritative.
+- Batch 4 File System and File Editor behavior remains the next unstarted batch.
+
+### Approval Path
+
+This round closes Batch 3. The next revision activity is Batch 4 File System and File Editor behavior.

@@ -3046,6 +3046,332 @@ svg {
 .batch1-repair > p { color: var(--ink-soft); }
 .batch1-repair-actions { display: flex; gap: 10px; margin-top: 22px; }
 
+/* Layer 10.5: Batch 3 Prompt And Workspace States */
+.batch3-workspace .thread-list {
+  padding-bottom: 24px;
+}
+
+.batch3-thread-item {
+  min-height: auto;
+}
+
+.batch3-prompt-token {
+  color: inherit;
+  display: inline;
+  font: inherit;
+}
+
+.batch3-prompt-token.is-resolved {
+  color: #0b57d0;
+}
+
+.batch3-prompt-composer {
+  margin: 0 auto;
+  position: relative;
+}
+
+.batch3-prompt-box {
+  min-height: 72px;
+}
+
+.batch3-suggestion-popover,
+.batch3-branch-popover {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+  display: grid;
+  gap: 10px;
+  left: 18px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  position: absolute;
+  right: 18px;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+}
+
+.batch3-suggestion-popover[hidden] {
+  display: none;
+}
+
+.batch3-suggestion-group {
+  display: grid;
+  gap: 4px;
+}
+
+.batch3-suggestion-group h3 {
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.batch3-suggestion-row,
+.batch3-branch-option {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  display: grid;
+  gap: 2px;
+  min-height: 42px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.batch3-suggestion-row:hover,
+.batch3-suggestion-row.is-selected,
+.batch3-branch-option:hover {
+  background: var(--rail);
+  border-color: var(--line);
+}
+
+.batch3-suggestion-row span,
+.batch3-branch-option span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.batch3-branch-popover {
+  bottom: 50px;
+  left: auto;
+  max-height: none;
+  right: 18px;
+  width: min(360px, calc(100% - 36px));
+}
+
+.batch3-branch-option.is-disabled,
+.batch3-branch-option:disabled {
+  color: var(--ink-soft);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.batch3-run-summary {
+  padding: 0;
+  overflow: hidden;
+}
+
+.batch3-activity-toggle,
+.batch3-approval-toggle {
+  align-items: center;
+  background: var(--rail);
+  border: 0;
+  color: var(--ink);
+  display: flex;
+  font-weight: 700;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 0 14px;
+  width: 100%;
+}
+
+.batch3-activity-toggle .icon,
+.batch3-approval-toggle .icon {
+  height: 14px;
+  transition: transform 140ms ease;
+  width: 14px;
+}
+
+.batch3-activity-toggle.is-expanded .icon,
+.batch3-approval-toggle.is-expanded .icon {
+  transform: rotate(90deg);
+}
+
+.batch3-run-details {
+  border-top: 1px solid var(--line);
+  padding: 12px 18px;
+}
+
+.batch3-run-details[hidden],
+.batch3-approval-body[hidden] {
+  display: none;
+}
+
+.batch3-run-details ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.batch3-show-more {
+  margin-top: 14px;
+}
+
+.batch3-permission {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  display: grid;
+  gap: 14px;
+  margin: 0 auto 12px;
+  max-width: 1160px;
+  padding: 18px;
+  width: 100%;
+}
+
+.batch3-permission p,
+.batch3-permission strong {
+  color: var(--ink);
+  margin: 0;
+}
+
+.batch3-permission code {
+  background: #1f1f1f;
+  border: 1px solid #2c2c2c;
+  border-radius: 6px;
+  color: #fff;
+  display: block;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
+.batch3-approval-title {
+  font-weight: 700;
+}
+
+.batch3-approval-advanced,
+.batch3-approval-impact {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.batch3-approval-body {
+  display: grid;
+  gap: 14px;
+  padding: 12px;
+}
+
+.batch3-approval-line {
+  align-items: center;
+  background: var(--field);
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 140px minmax(0, 1fr);
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+.batch3-approval-line + .batch3-approval-line {
+  border-top: 1px solid var(--line);
+}
+
+.batch3-approval-line strong,
+.batch3-attachment-card > span:last-child {
+  color: var(--ink-soft);
+}
+
+.batch3-remember-box {
+  background: var(--rail);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.batch3-remember-box label {
+  align-items: center;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.batch3-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.batch3-blocked-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.batch3-message-attachments,
+.batch3-attachment-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.batch3-attachment-preview {
+  border-bottom: 1px solid var(--line);
+  margin-top: 0;
+  min-height: 48px;
+  padding: 8px 12px;
+}
+
+.batch3-attachment-chip {
+  align-items: center;
+  background: var(--rail);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 220px;
+  padding: 0 8px;
+}
+
+.batch3-attachment-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch3-attachment-chip button {
+  background: transparent;
+  border: 0;
+  color: var(--ink-soft);
+}
+
+.batch3-attachment-chip.has-warning,
+.batch3-attachment-card.has-warning {
+  border-color: var(--danger);
+}
+
+.batch3-attachment-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.batch3-attachment-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  padding: 12px;
+}
+
+.batch3-attachment-icon {
+  align-items: center;
+  background: var(--rail);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.batch3-attachment-card p {
+  font-weight: 700;
+}
+
 /* Layer 11: Desktop-Narrow Behavior */
 @media (max-width: 1180px) {
   .app-shell {

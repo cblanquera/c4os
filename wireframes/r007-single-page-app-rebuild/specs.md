@@ -7,10 +7,11 @@
 - Revision type: new major revision
 - Baseline source: `wireframes/r04-single-page-app/`
 - Product area: complete C4OS desktop application shell
-- Current approved scope: r05 Batch 1 shell plus the accepted r007 Batch 2 Configuration and Plugins work over the restored r04 bodies
+- Current review scope: r05 Batch 1 shell, accepted r007 Batch 2 Configuration and Plugins, and the full r05 Batch 3 prompt/workspace set over the restored r04 bodies
 - Included from r05 Batch 1: one global header, left/right plugin icon groups, plugin-panel toggling and same-side replacement, per-chat panel restoration, Settings closure/restoration, resize collision handling, hidden activity, and invalid-layout repair
 - Batch 2 boundary: complete and closed; Configuration and Plugins are accepted, while the proposed remaining Batch 2 additions were rejected as mistaken scope rather than deferred work
-- Explicitly deferred: Batch 3 prompt/workspace behavior, Batch 4 file/editor changes, and Batch 5 Browser/Terminal/Chat Debug detail
+- Batch 3 review boundary: all seven accepted r05 prompt/workspace states are implemented together as SPA routes; no rejected Batch 2 scope is carried forward
+- Explicitly deferred: Batch 4 file/editor changes and Batch 5 Browser/Terminal/Chat Debug detail
 - Body-source boundary: later r05 additions remain deferred, but the complete r04 body for each corresponding surface is required now and is not a later-batch addition
 - Explicitly excluded: `wireframes/r06-final-implementation/`
 - Trigger: user requested a truth-oriented SPA rebuilt through `chrisai-designing`, using the bundled wireframe library as a guide
@@ -23,7 +24,7 @@
   - It is the direct baseline for this round, not a source to redesign.
 - `wireframes/r05-final-implementation/README.md`
   - Supplies the accepted additions and removals applied batch-by-batch after r04 parity approval.
-  - Batch 1 and the accepted r007 Batch 2 boundary govern the current artifact; Batch 3 and later batches remain deferred until started.
+  - Batch 1, the accepted r007 Batch 2 boundary, and the full Batch 3 prompt/workspace set govern the current artifact; Batch 4 and later remain deferred.
 - `wireframes/r05-final-implementation/notes.md` and `review-round-*.md`
   - Supply the accepted correction history needed to avoid restoring rejected intermediate r05 states.
 - `wireframes/screens.md`
@@ -95,6 +96,26 @@ The wireframe is an explicit single page app. `index.html` is the only product a
 - Goal: navigate providers and select the active model.
 - Layout: New Session shell with a composer popover.
 - States: provider list, active provider models, selected model.
+
+### Prompt And Workspace Behavior - Batch 3
+
+- Routes:
+  - `./index.html#prompt-suggestions`
+  - `./index.html#approval-dialog`
+  - `./index.html#remembered-rule-summary`
+  - `./index.html#blocked-suggestion-repair`
+  - `./index.html#branch-popover`
+  - `./index.html#attachment-states`
+  - `./index.html#safe-fallback`
+- Goal: apply the complete accepted r05 Batch 3 prompt behavior without changing the approved r007 shell or regressing the center body away from the r04 chat-session shape.
+- Shared layout: Chats remains the main-shell left plugin; each center state retains the r04 thread, work summary, agent response, composer dock, branch, and model context. Browser or Chat Debug opens only where the accepted route calls for it and still obeys the 640px center collision rule.
+- Prompt suggestions: `$`, `@`, and `/` resolve Skills, resources, and commands; the active query remains editable and a selected reference serializes into a blue inline token.
+- Approval: exposes Deny, Deny and wait, Allow once, and Allow and remember, with an Advanced disclosure for tool, risk, target scope, decision event, and session/global memory choice.
+- Remembered rule: shows the applied terminal rule, duration, and direct route to Settings > Configuration.
+- Blocked suggestion: hides a dependency-blocked resource from executable resolution and routes repair to the accepted Plugins surface.
+- Branch: exposes Git-only choose/create controls while the chat's existing branch remains read-only.
+- Attachments: renders structured file and Browser screenshot records in the message, agent disclosure, and composer.
+- Safe fallback: retains screenshot metadata and explains the safe text-plus-metadata adapter fallback when the selected model cannot consume image records.
 
 ### File Explorer And Editor
 
@@ -172,6 +193,12 @@ The wireframe is an explicit single page app. `index.html` is the only product a
 - Configure C4OS
   - Start: `./index.html#settings-providers`
   - Happy path: navigate the complete settings route set and open representative forms or details.
+- Exercise prompt resolution and execution states
+  - Starts: `./index.html#prompt-suggestions`, `./index.html#approval-dialog`, and `./index.html#remembered-rule-summary`
+  - Happy path: resolve a prompt reference, inspect approval details, and compare an explicit decision with an applied remembered rule.
+- Review blocked, branch, and attachment behavior
+  - Starts: `./index.html#blocked-suggestion-repair`, `./index.html#branch-popover`, `./index.html#attachment-states`, and `./index.html#safe-fallback`
+  - Happy path: follow the plugin repair route, inspect Git branch creation, compare supported attachments, and review the safe adapter fallback.
 
 ## Layout System
 
