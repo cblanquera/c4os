@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>C4OS r007 Workflow Starting Points</title>
+    <link rel="stylesheet" href="./lib/base/tokens.css">
+    <link rel="stylesheet" href="./lib/base/reset.css">
+    <link rel="stylesheet" href="./lib/base/base.css">
+    <style>
+      body { background: var(--wf-surface); }
+      main { width: min(100% - 32px, 820px); margin-inline: auto; padding-block: var(--wf-space-10); }
+      header { border-bottom: 1px solid var(--wf-border); padding-bottom: var(--wf-space-5); }
+      h1 { margin: 0; font-size: var(--wf-text-2xl); }
+      header p { margin: var(--wf-space-2) 0 0; color: var(--wf-text-muted); }
+      nav { display: grid; gap: var(--wf-space-3); padding-top: var(--wf-space-6); }
+      a { display: grid; gap: var(--wf-space-1); padding: var(--wf-space-4); border: 1px solid var(--wf-border); border-radius: var(--wf-radius-4); text-decoration: none; }
+      a:hover { background: var(--wf-surface-muted); border-color: var(--wf-border-strong); }
+      a strong { color: var(--wf-text); }
+      a span { color: var(--wf-text-muted); font-size: var(--wf-text-sm); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>C4OS workflow starting points</h1>
+        <p>Open an accepted r05 Batch 1 shell workflow in the r007 single page app.</p>
+      </header>
+      <nav aria-label="C4OS workflow starting points">
+        <a href="./index.html#shell-foundation"><strong>Review the plugin-first shell</strong><span>Start with no default side panel, then open and close plugins from the global header.</span></a>
+        <a href="./index.html#same-side-replacement"><strong>Replace a same-side panel</strong><span>Switch the visible plugin on one side without disturbing the opposite panel.</span></a>
+        <a href="./index.html#per-chat-restore"><strong>Start or restore a chat</strong><span>Use + New Chat for the r04 empty prompt, or switch chats and recover each chat's panels.</span></a>
+        <a href="./index.html#resize-collision"><strong>Resolve a resize collision</strong><span>Drag a panel toward the 640px center minimum and close the opposite side first.</span></a>
+        <a href="./index.html#hidden-activity"><strong>Review hidden activity</strong><span>See unread plugin activity without opening or focusing its panel.</span></a>
+        <a href="./index.html#repair-state"><strong>Repair an invalid layout</strong><span>Keep the shell usable and expose a repair path for reserved plugin fields.</span></a>
+        <a href="./index.html#settings"><strong>Restore the shell after Settings</strong><span>Close both panels while Settings owns the center, then return to the prior chat state.</span></a>
+      </nav>
+    </main>
+  </body>
+</html>
