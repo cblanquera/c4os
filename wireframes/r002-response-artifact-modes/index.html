@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Artifact Workspace</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell" data-panel-shell data-left-open="true" data-right-open="false">
+      <aside class="side-panel side-panel--left" id="left-panel" aria-label="Left panel"></aside>
+      <div class="resize-handle resize-handle--left" data-panel-resize="left" role="separator" tabindex="0" aria-label="Resize left panel" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="228"></div>
+
+      <main class="chat-center">
+        <header class="chat-header">
+          <button class="icon-button" type="button" data-panel-toggle="left" aria-controls="left-panel" aria-expanded="true" aria-label="Toggle left panel" title="Toggle left panel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg>
+          </button>
+          <div class="thread-title"><strong>Artifact workspace</strong><span>Chat, files, browser, and terminal</span></div>
+          <button class="icon-button" type="button" data-panel-toggle="right" aria-controls="right-panel" aria-expanded="false" aria-label="Toggle artifact panel" title="Toggle artifact panel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path></svg>
+          </button>
+        </header>
+
+        <section class="thread" data-thread aria-label="Conversation" aria-live="polite">
+          <div class="message message--user" data-message-id="message-1">
+            <div class="message__body"><p>Can you help me inspect the project workspace?</p></div>
+            <div class="message-actions" aria-label="Message actions">
+              <button type="button" data-copy data-copy-kind="message" aria-label="Copy user message" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+              <button type="button" data-reply data-target-kind="message" data-target-id="message-1" data-target-title="You" data-target-excerpt="Can you help me inspect the project workspace?" aria-label="Reply to user message" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button>
+            </div>
+          </div>
+
+          <article class="message message--assistant" data-message-id="message-2">
+            <details class="thinking-process">
+              <summary><span>Worked for 18 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary>
+              <div class="thinking-process__content"><p>I’m keeping the conversation as the control surface while files, webpages, and terminal sessions remain attached as artifacts.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 22h8M12 18v4M8 9l2 2 4-4"></path></svg><span>Prepared the workspace modes and artifact states</span></div></div>
+            </details>
+            <div class="message-model-row"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Z"></path><path d="M18.5 15l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg></div><div class="message__speaker">GPT-5</div></div>
+            <div class="message__content">
+              <div class="message__body response-container"><p>Yes. You can open a file, webpage, or terminal session and continue talking to each result directly from the thread.</p></div>
+              <div class="message-actions" aria-label="Message actions">
+                <button type="button" data-copy data-copy-kind="message" aria-label="Copy assistant response" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path></svg></button>
+                <button type="button" data-reply data-target-kind="message" data-target-id="message-2" data-target-title="GPT-5" data-target-excerpt="You can open a file, webpage, or terminal session." aria-label="Reply to assistant response" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button>
+              </div>
+            </div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-3"><div class="message__body"><p>Open https://example.com</p></div></div>
+          <article class="artifact artifact--browser" data-artifact-card data-artifact-id="browser-1" data-artifact-type="browser" tabindex="0" aria-label="Browser artifact example.com">
+            <details class="thinking-process artifact-thinking"><summary><span>Worked for 8 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>I prepared this response artifact from the requested workspace action.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Created the artifact response</span></div></div></details>
+            <div class="artifact-model-row"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Z"></path><path d="M18.5 15l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg></div><div class="message__speaker">GPT-5</div></div>
+            <div class="artifact-surface response-container">
+            <header class="artifact__header">
+              <div class="artifact__identity"><span class="artifact__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span><div><strong data-artifact-title>Example Domain</strong><span data-artifact-meta>Browser · 1 page</span></div></div>
+              <div class="artifact-header-actions">
+                <button type="button" data-expand="browser-1" aria-label="Expand browser artifact" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+              </div>
+            </header>
+            <div class="browser-bar">
+              <button type="button" data-browser-action="back" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+              <button type="button" data-browser-action="forward" aria-label="Forward"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+              <button type="button" data-browser-action="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7L20 14"></path><path d="M20 6v5h-5"></path></svg></button>
+              <label class="sr-only" for="browser-address-1">Browser address</label><input id="browser-address-1" data-browser-address value="https://example.com">
+            </div>
+            <div class="browser-preview" data-browser-preview><span>EXAMPLE DOMAIN</span><h3>A simple page for examples</h3><p>This domain is ready for browsing and testing.</p></div>
+            <footer class="artifact__footer"><span data-artifact-status>Ready</span><span data-browser-history>1 navigation</span></footer>
+            </div>
+            <div class="artifact-actions" aria-label="Browser artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy current browser URL" title="Copy URL"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="browser" data-target-id="browser-1" data-target-title="Browser · example.com" data-target-excerpt="https://example.com" aria-label="Reply to browser artifact" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-4"><div class="message__body"><p>Open notes.md</p></div></div>
+          <article class="artifact artifact--file" data-artifact-card data-artifact-id="file-1" data-artifact-type="file" tabindex="0" aria-label="File artifact notes.md">
+            <details class="thinking-process artifact-thinking"><summary><span>Worked for 11 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>I read the requested file and prepared a read-only artifact.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Loaded the file response</span></div></div></details>
+            <div class="artifact-model-row"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Z"></path><path d="M18.5 15l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg></div><div class="message__speaker">GPT-5</div></div>
+            <div class="artifact-surface response-container">
+            <header class="artifact__header">
+              <div class="artifact__identity"><span class="artifact__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6M8 13h8M8 17h6"></path></svg></span><div><strong data-artifact-title>notes.md</strong><span data-artifact-meta>Markdown · Version 1</span></div></div>
+              <div class="artifact-header-actions">
+                <button type="button" data-expand="file-1" aria-label="Expand file artifact" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+              </div>
+            </header>
+            <pre class="file-preview" data-file-preview># Project notes&#10;&#10;The desktop shell keeps chat at the center.&#10;Artifact modes extend the same conversation.</pre>
+            <div class="file-approval" data-file-approval hidden><div><strong>2 edits proposed</strong><span>Typography and punctuation</span></div><div><button type="button" data-file-reject>Reject</button><button type="button" data-file-approve>Approve &amp; save</button></div></div>
+            <footer class="artifact__footer"><span data-artifact-status>Read only</span><span data-file-version>Version 1</span></footer>
+            </div>
+            <div class="artifact-actions" aria-label="File artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy file contents" title="Copy contents"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="file" data-target-id="file-1" data-target-title="File · notes.md" data-target-excerpt="Project notes and next steps" aria-label="Reply to file artifact" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-5"><div class="message__body"><p><code>$ ls</code></p></div></div>
+          <article class="artifact artifact--terminal" data-artifact-card data-artifact-id="terminal-1" data-artifact-type="terminal" data-terminal-session="shell-1" tabindex="0" aria-label="Terminal artifact ls output">
+            <details class="thinking-process artifact-thinking"><summary><span>Worked for 6 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>I ran the requested command in the active terminal session.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Captured the command output</span></div></div></details>
+            <div class="artifact-model-row"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Z"></path><path d="M18.5 15l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg></div><div class="message__speaker">GPT-5</div></div>
+            <div class="artifact-surface response-container">
+            <header class="artifact__header">
+              <div class="artifact__identity"><span class="artifact__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3M13 15h4"></path></svg></span><div><strong data-artifact-title>Terminal</strong><span data-artifact-meta>~/project · shell-1</span></div></div>
+              <div class="artifact-header-actions">
+                <button type="button" data-expand="terminal-session" aria-label="Expand terminal session" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+              </div>
+            </header>
+            <pre class="terminal-output" data-terminal-output><span>$ ls</span>&#10;index.html  notes.md  src  wireframes</pre>
+            <footer class="artifact__footer"><span>Exit 0</span><span>shell-1</span></footer>
+            </div>
+            <div class="artifact-actions" aria-label="Terminal artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy terminal command and output" title="Copy output"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="terminal" data-target-id="terminal-1" data-target-title="Terminal · ls" data-target-excerpt="index.html  notes.md  src" aria-label="Reply to terminal output" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+        </section>
+
+        <div class="copy-notifier" data-copy-notifier role="status" aria-live="polite" hidden>Copied</div>
+
+        <div class="composer-dock">
+          <form class="composer composer--modes" data-composer data-mode="chat">
+            <div class="mode-row" data-mode-row>
+              <div class="mode-switch" role="tablist" aria-label="Composer mode">
+                <button type="button" role="tab" data-mode-option="chat" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"></path></svg><span>Chat</span></button>
+                <button type="button" role="tab" data-mode-option="files" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"></path></svg><span>Files</span></button>
+                <button type="button" role="tab" data-mode-option="browser" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg><span>Browser</span></button>
+                <button type="button" role="tab" data-mode-option="terminal" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3M13 15h4"></path></svg><span>Terminal</span></button>
+              </div>
+            </div>
+
+            <div class="reply-strip" data-reply-strip hidden><span class="reply-strip__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></span><span class="reply-strip__copy"><strong data-reply-title></strong><span data-reply-excerpt></span></span><button type="button" data-reply-cancel aria-label="Cancel reply" title="Cancel reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+
+            <div class="mode-panel" data-mode-panel="chat"><label class="sr-only" for="chat-input">Message AI</label><textarea id="chat-input" data-mode-input="chat" rows="1" placeholder="Ask anything, use @ to add context"></textarea></div>
+            <div class="mode-panel mode-panel--single" data-mode-panel="files" hidden><button class="browse-button" type="button" data-browse-file><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg><span>Browse</span></button><label class="sr-only" for="file-path-input">File path</label><input id="file-path-input" data-mode-input="files" value="notes.md" placeholder="Choose one local file"><input class="sr-only" type="file" data-file-picker tabindex="-1"></div>
+            <div class="mode-panel mode-panel--single" data-mode-panel="browser" hidden><span class="input-prefix"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path></svg></span><label class="sr-only" for="browser-input">Web address</label><input id="browser-input" data-mode-input="browser" value="https://example.com" placeholder="Enter an address"></div>
+            <div class="mode-panel mode-panel--single mode-panel--terminal" data-mode-panel="terminal" hidden><span class="terminal-prefix">$</span><label class="sr-only" for="terminal-input">Terminal command</label><input id="terminal-input" data-mode-input="terminal" value="ls" placeholder="Enter a command" autocomplete="off" spellcheck="false"></div>
+            <div class="mode-panel" data-reply-panel hidden><label class="sr-only" for="reply-input">Reply with an instruction</label><textarea id="reply-input" data-reply-input rows="1" placeholder="Reply with an instruction"></textarea></div>
+
+            <div class="composer-toolbar">
+              <div class="toolbar-start">
+                <button class="tool-button tool-button--icon" type="button" data-attach-button data-chat-only aria-label="Attach file" title="Attach file"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg></button>
+                <div class="option-control"><button class="tool-button" type="button" data-menu-trigger="model" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-option-value="model">GPT-5</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="model" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="GPT-5">GPT-5</button><button type="button" role="menuitemradio" aria-checked="false" data-option="GPT-5 fast">GPT-5 fast</button></div></div>
+                <div class="option-control"><button class="tool-button" type="button" data-menu-trigger="approval" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-option-value="approval">Ask</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="approval" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="Ask">Ask for approval</button><button type="button" role="menuitemradio" aria-checked="false" data-option="Auto">Approve automatically</button></div></div>
+                <div class="option-control"><button class="tool-button" type="button" data-menu-trigger="branch" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="6" r="2"></circle><circle cx="6" cy="19" r="2"></circle><path d="M6 7v10M8 7c5 0 4-1 8-1"></path></svg><span data-option-value="branch">main</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="branch" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="main">main</button><button type="button" role="menuitemradio" aria-checked="false" data-option="codex/artifacts">codex/artifacts</button></div></div>
+              </div>
+              <div class="toolbar-end"><span class="prompt-status" data-prompt-status aria-live="polite"></span><button class="tool-button tool-button--icon" type="button" data-mic data-chat-only aria-pressed="false" aria-label="Use microphone" title="Use microphone"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"></path></svg></button><button class="send-button" type="submit" data-primary-action aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 19V5"></path></svg></button></div>
+            </div>
+          </form>
+          <p class="composer-caption">AI can make mistakes. Check important work.</p>
+        </div>
+      </main>
+
+      <div class="resize-handle resize-handle--right" data-panel-resize="right" role="separator" tabindex="0" aria-label="Resize artifact panel" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="380"></div>
+      <aside class="side-panel side-panel--right artifact-pane" id="right-panel" aria-label="Artifact panel">
+        <header class="artifact-pane__header"><div class="artifact-tabs" data-artifact-tabs role="tablist" aria-label="Open artifacts"></div><button class="icon-button" type="button" data-close-artifact-pane aria-label="Close artifact panel" title="Close panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header>
+        <div class="artifact-pane__viewer" data-artifact-viewer><div class="artifact-pane__empty">Select an artifact from the thread.</div></div>
+      </aside>
+    </div>
+    <script src="./script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>C4OS Desktop</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <section class="launch-spa" data-launch-spa hidden>
+      <div class="launch-view launch-view--provider" data-launch-view="onboarding" hidden>
+        <main class="provider-onboarding" aria-labelledby="onboarding-title">
+          <div class="launch-brand" aria-label="C4OS"><span aria-hidden="true">C4</span><strong>C4OS</strong></div>
+          <header class="provider-onboarding__header">
+            <h1 id="onboarding-title">Connect your AI provider</h1>
+            <p>Add a provider to choose the models C4OS can use.</p>
+          </header>
+          <form class="onboarding-provider-form" data-onboarding-provider-form novalidate>
+            <label><span>Provider type</span><select name="providerType" data-onboarding-provider-type><option value="openrouter">OpenRouter</option><option value="huggingface">Hugging Face</option><option value="openai">OpenAI</option><option value="compatible">OpenAI Compatible</option></select></label>
+            <label><span>Profile label</span><input name="label" value="OpenRouter - Personal" autocomplete="off" required></label>
+            <label data-onboarding-base-url hidden><span>API base URL</span><input name="baseUrl" value="http://127.0.0.1:4000/v1" required></label>
+            <label data-onboarding-auth hidden><span>Authentication</span><select name="auth"><option value="bearer">Bearer token</option><option value="header">API key header</option><option value="none">None</option></select></label>
+            <label data-onboarding-header-name hidden><span>API key header name</span><input name="headerName" value="X-API-Key" required></label>
+            <div class="onboarding-provider-field" data-onboarding-api-key data-onboarding-field>
+              <label for="onboarding-api-key">API key</label>
+              <div class="onboarding-password"><input id="onboarding-api-key" name="apiKey" type="password" autocomplete="new-password" required><button class="icon-button" type="button" data-onboarding-password-toggle aria-label="Show API key" title="Show API key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></div>
+              <small>Required for this provider.</small>
+            </div>
+            <label data-onboarding-headers hidden><span>Additional headers</span><textarea name="headers" rows="3" spellcheck="false">{}</textarea></label>
+            <p class="onboarding-form-status" data-onboarding-status role="status" aria-live="polite"></p>
+            <footer><button class="launch-button" type="button" data-onboarding-test>Test Connection</button><button class="launch-button launch-button--primary" type="submit">Continue</button></footer>
+          </form>
+        </main>
+      </div>
+
+      <div class="launch-view launch-view--start" data-launch-view="start" hidden>
+        <main class="workspace-start" aria-labelledby="workspace-start-title">
+          <header class="workspace-start__bar">
+            <div class="launch-brand" aria-label="C4OS"><span aria-hidden="true">C4</span><strong>C4OS</strong></div>
+          </header>
+          <section class="workspace-start__content">
+            <header class="workspace-start__intro"><p>Workspace</p><h1 id="workspace-start-title">What would you like to open?</h1><span>Start something new or continue where you left off.</span></header>
+            <div class="workspace-start__actions">
+              <a class="workspace-action" href="#chat" data-workspace-action="Opening folder"><span class="workspace-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span><strong>Open a folder</strong><small>Use a local folder as your project</small></a>
+              <a class="workspace-action" href="#chat" data-workspace-action="Opening workspace"><span class="workspace-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16M8 9h13"></path></svg></span><strong>Open a workspace</strong><small>Open a saved C4OS workspace</small></a>
+              <a class="workspace-action" href="#chat" data-workspace-action="Cloning repository"><span class="workspace-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="7" r="2"></circle><circle cx="6" cy="19" r="2"></circle><path d="M6 7v10M8 5h4a6 6 0 0 1 6 6v-2"></path></svg></span><strong>Clone Repository</strong><small>Clone from a Git repository URL</small></a>
+            </div>
+            <section class="recent-workspaces" aria-labelledby="recent-workspaces-title">
+              <h2 id="recent-workspaces-title">Recent workspaces</h2>
+              <div class="recent-workspaces__list">
+                <a class="recent-workspace" href="#chat" data-workspace-action="Opening AI Desktop UI"><span class="recent-workspace__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span><span><strong>AI Desktop UI</strong><small>~/Documents/AI Desktop UI</small></span><time>Today</time><svg class="recent-workspace__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></a>
+                <a class="recent-workspace" href="#chat" data-workspace-action="Opening quotable-ai"><span class="recent-workspace__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span><span><strong>quotable-ai</strong><small>~/Projects/shoppable/quotable-ai</small></span><time>Yesterday</time><svg class="recent-workspace__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></a>
+                <a class="recent-workspace" href="#chat" data-workspace-action="Opening stackpress"><span class="recent-workspace__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></span><span><strong>stackpress</strong><small>~/Projects/stackpress/stackpress</small></span><time>Jul 14</time><svg class="recent-workspace__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></a>
+              </div>
+            </section>
+            <p class="workspace-start__status" data-workspace-start-status role="status" aria-live="polite"></p>
+          </section>
+        </main>
+      </div>
+    </section>
+    <div class="app-shell" data-panel-shell data-left-open="true">
+      <aside class="side-panel side-panel--left" id="left-panel" aria-label="Left panel">
+        <section class="workspace-projects" data-workspace-projects aria-label="Projects and chat sessions">
+          <label class="session-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search chat sessions</span><input type="search" placeholder="Search chat sessions" data-session-search autocomplete="off"></label>
+          <header class="projects-heading"><strong>Projects</strong><button type="button" data-project-add aria-label="Add project folder" title="Add project"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></header>
+          <input class="sr-only" type="file" data-project-folder-input webkitdirectory directory multiple aria-label="Choose project folder">
+          <div class="project-list" data-project-list>
+            <article class="project-item" data-project-id="desktop-ui" data-project-path="~/Documents/AI Desktop UI" data-project-found="true" data-project-expanded="true" draggable="true">
+              <div class="project-row">
+                <button class="project-toggle" type="button" data-project-toggle aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg><span>AI Desktop UI</span></button>
+                <div class="project-actions"><button type="button" data-project-menu-trigger aria-haspopup="menu" aria-expanded="false" aria-label="More actions for AI Desktop UI" title="More"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button><button type="button" data-project-new-chat aria-label="New chat in AI Desktop UI" title="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></div>
+                <div class="project-menu" data-project-menu role="menu" hidden><button type="button" role="menuitem" data-project-action="reveal">Reveal</button><button type="button" role="menuitem" data-project-action="copy">Copy path</button><button type="button" role="menuitem" data-project-action="rename">Rename</button><span></span><button class="project-menu__danger" type="button" role="menuitem" data-project-action="remove">Remove</button></div>
+              </div>
+              <div class="project-sessions" data-project-sessions>
+                <div class="session-item" data-session-id="session-onboarding" data-session-title="Build onboarding start screens"><button type="button" data-session-open>Build onboarding start screens</button><button type="button" data-session-remove aria-label="Remove Build onboarding start screens" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+                <div class="session-item session-item--active" data-session-id="session-projects" data-session-title="Design workspace projects"><button type="button" data-session-open>Design workspace projects</button><button type="button" data-session-remove aria-label="Remove Design workspace projects" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+                <div class="session-item" data-session-id="session-artifacts" data-session-title="Refine response artifacts"><button type="button" data-session-open>Refine response artifacts</button><button type="button" data-session-remove aria-label="Remove Refine response artifacts" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+              </div>
+            </article>
+
+            <article class="project-item" data-project-id="quotable" data-project-path="~/Projects/shoppable/quotable-ai" data-project-found="true" data-project-expanded="true" draggable="true">
+              <div class="project-row">
+                <button class="project-toggle" type="button" data-project-toggle aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg><span>quotable-ai</span></button>
+                <div class="project-actions"><button type="button" data-project-menu-trigger aria-haspopup="menu" aria-expanded="false" aria-label="More actions for quotable-ai" title="More"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button><button type="button" data-project-new-chat aria-label="New chat in quotable-ai" title="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></div>
+                <div class="project-menu" data-project-menu role="menu" hidden><button type="button" role="menuitem" data-project-action="reveal">Reveal</button><button type="button" role="menuitem" data-project-action="copy">Copy path</button><button type="button" role="menuitem" data-project-action="rename">Rename</button><span></span><button class="project-menu__danger" type="button" role="menuitem" data-project-action="remove">Remove</button></div>
+              </div>
+              <div class="project-sessions" data-project-sessions>
+                <div class="session-item" data-session-id="session-kb" data-session-title="Establish project knowledge base"><button type="button" data-session-open>Establish project knowledge base</button><button type="button" data-session-remove aria-label="Remove Establish project knowledge base" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+                <div class="session-item" data-session-id="session-provider" data-session-title="Review provider settings"><button type="button" data-session-open>Review provider settings</button><button type="button" data-session-remove aria-label="Remove Review provider settings" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+              </div>
+            </article>
+
+            <article class="project-item project-item--missing" data-project-id="legacy" data-project-path="~/Projects/archive/legacy-ui" data-project-found="false" data-project-expanded="false" draggable="true">
+              <div class="project-row">
+                <button class="project-toggle" type="button" data-project-toggle aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg><span>legacy-ui</span></button>
+                <div class="project-actions"><button type="button" data-project-menu-trigger aria-haspopup="menu" aria-expanded="false" aria-label="More actions for missing legacy-ui project" title="More"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button><button type="button" data-project-new-chat aria-label="New chat in legacy-ui" title="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button></div>
+                <div class="project-menu" data-project-menu role="menu" hidden><button type="button" role="menuitem" data-project-action="relocate">Relocate</button><button type="button" role="menuitem" data-project-action="copy">Copy path</button><button type="button" role="menuitem" data-project-action="rename">Rename</button><span></span><button class="project-menu__danger" type="button" role="menuitem" data-project-action="remove">Remove</button></div>
+              </div>
+              <div class="project-sessions" data-project-sessions hidden>
+                <div class="session-item" data-session-id="session-legacy" data-session-title="Recover legacy workspace"><button type="button" data-session-open>Recover legacy workspace</button><button type="button" data-session-remove aria-label="Remove Recover legacy workspace" title="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+              </div>
+            </article>
+          </div>
+          <p class="workspace-projects__status" data-project-status role="status" aria-live="polite"></p>
+        </section>
+        <section class="left-chat-pane" data-left-chat-pane aria-label="Chat pane" hidden>
+          <button class="left-chat-pane__resize" type="button" data-left-chat-pane-resize role="separator" aria-label="Resize Chat pane" aria-orientation="horizontal" aria-valuemin="220" aria-valuemax="432" aria-valuenow="288"></button>
+          <header class="left-chat-pane__header">
+            <div><strong>Chat</strong><span>Conversation thread</span></div>
+            <div class="left-chat-pane__header-actions">
+              <button type="button" data-detach-chat aria-label="Detach Chat to new window" title="Detach Chat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="2"></rect><path d="M13 11l7-7M15 4h5v5"></path></svg></button>
+              <button type="button" data-restore-chat aria-label="Restore Chat to workspace" title="Restore Chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+            </div>
+          </header>
+          <div class="left-chat-pane__thread" data-left-chat-pane-thread></div>
+        </section>
+      </aside>
+      <div class="resize-handle resize-handle--left" data-panel-resize="left" role="separator" tabindex="0" aria-label="Resize left panel" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="704" aria-valuenow="228"></div>
+
+      <main class="chat-center">
+        <header class="chat-header">
+          <button class="icon-button" type="button" data-panel-toggle="left" aria-controls="left-panel" aria-expanded="true" aria-label="Toggle left panel" title="Toggle left panel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg>
+          </button>
+          <div class="thread-title"><strong>Artifact workspace</strong></div>
+          <a class="icon-button app-settings-link" href="#settings/providers" aria-label="Open Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg></a>
+        </header>
+
+        <div class="workspace-stage" data-workspace-stage>
+          <div class="thread-host" data-thread-host>
+        <section class="new-thread-empty" data-new-thread-empty aria-live="polite" hidden>
+          <h1 data-new-thread-heading>What do you want to build?</h1>
+        </section>
+        <section class="thread" data-thread data-artifact-context="response" aria-label="Conversation" aria-live="polite">
+          <div class="message message--user" data-message-id="message-1">
+            <div class="message__body"><p>Can you help me inspect the project workspace?</p></div>
+            <div class="message-actions" aria-label="Message actions">
+              <button type="button" data-copy data-copy-kind="message" aria-label="Copy user message" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+              <button type="button" data-reply data-target-kind="message" data-target-id="message-1" data-target-title="You" data-target-excerpt="Can you help me inspect the project workspace?" aria-label="Reply to user message" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button>
+            </div>
+          </div>
+
+          <article class="message message--assistant" data-message-id="message-2">
+            <details class="thinking-process">
+              <summary><span>Worked for 18 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary>
+              <div class="thinking-process__content"><p>I’m keeping the conversation as the control surface while files, webpages, and terminal sessions remain attached as artifacts.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 22h8M12 18v4M8 9l2 2 4-4"></path></svg><span>Prepared the workspace modes and artifact states</span></div></div>
+            </details>
+            <div class="message-model-row"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Z"></path><path d="M18.5 15l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg></div><div class="message__speaker">GPT-5</div></div>
+            <div class="message__content">
+              <div class="message__body response-container"><p>Yes. You can open a file, webpage, or terminal session and continue talking to each result directly from the thread.</p></div>
+              <div class="message-actions" aria-label="Message actions">
+                <button type="button" data-copy data-copy-kind="message" aria-label="Copy assistant response" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path></svg></button>
+                <button type="button" data-reply data-target-kind="message" data-target-id="message-2" data-target-title="GPT-5" data-target-excerpt="You can open a file, webpage, or terminal session." aria-label="Reply to assistant response" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button>
+              </div>
+            </div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-3"><div class="message__body"><p>Open https://example.com</p></div></div>
+          <article class="artifact-shell artifact-shell--response artifact-provider artifact-provider--browser" data-artifact-card data-artifact-context="response" data-artifact-id="browser-1" data-artifact-type="browser" tabindex="0" aria-label="Browser artifact example.com">
+            <div class="artifact-shell__preamble">
+            <details class="thinking-process artifact-shell__thinking"><summary><span>Worked for 8 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>I prepared this response artifact from the requested workspace action.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Created the artifact response</span></div></div></details>
+            <div class="artifact-shell__identity"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></div><div class="message__speaker">C4OS</div></div>
+            </div>
+            <div class="artifact-frame response-container">
+            <header class="artifact-frame__header browser-toolbar">
+              <button type="button" data-browser-action="back" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+              <button type="button" data-browser-action="forward" aria-label="Forward"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+              <button type="button" data-browser-action="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7L20 14"></path><path d="M20 6v5h-5"></path></svg></button>
+              <label class="sr-only" for="browser-address-1">Current web address</label><input id="browser-address-1" data-browser-address value="https://example.com" readonly>
+              <div class="artifact-frame__actions"><button type="button" data-expand="browser-1" aria-label="Expand browser artifact" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button></div>
+            </header>
+            <div class="artifact-frame__body"><div class="browser-preview" data-browser-preview><span>EXAMPLE DOMAIN</span><h3>A simple page for examples</h3><p>This domain is ready for browsing and testing.</p></div></div>
+            <footer class="artifact-frame__footer"><span data-artifact-status>Ready</span><span data-browser-history>1 navigation</span></footer>
+            </div>
+            <div class="artifact-shell__actions" aria-label="Browser artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy current browser URL" title="Copy URL"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="browser" data-target-id="browser-1" data-target-title="Browser · example.com" data-target-excerpt="https://example.com" aria-label="Reply to browser artifact" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-4"><div class="message__body"><p>Open notes.md</p></div></div>
+          <article class="artifact-shell artifact-shell--response artifact-provider artifact-provider--file" data-artifact-card data-artifact-context="response" data-artifact-id="file-1" data-artifact-type="file" tabindex="0" aria-label="File artifact notes.md">
+            <div class="artifact-shell__preamble">
+            <details class="thinking-process artifact-shell__thinking"><summary><span>Worked for 11 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>I opened the requested file for review.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Loaded the file response</span></div></div></details>
+            <div class="artifact-shell__identity"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6M8 13h8M8 17h6"></path></svg></div><div class="message__speaker">C4OS</div></div>
+            </div>
+            <div class="artifact-frame response-container">
+            <header class="artifact-frame__header">
+              <nav class="file-breadcrumbs" aria-label="File path"><button type="button" data-open-folder="~/project">project</button><span class="file-breadcrumbs__separator">/</span><button type="button" data-open-folder="~/project/docs">docs</button><span class="file-breadcrumbs__separator">/</span><span aria-current="page">notes.md</span></nav>
+              <div class="artifact-frame__actions">
+                <button type="button" data-file-edit aria-label="Edit notes.md" title="Edit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg></button>
+                <button type="button" data-file-cancel aria-label="Discard changes to notes.md" title="Discard changes" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 10v6M14 10v6"></path></svg></button>
+                <button type="button" data-file-save aria-label="Save notes.md" title="Save" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg></button>
+                <button type="button" data-expand="file-1" aria-label="Expand file artifact" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+              </div>
+            </header>
+            <div class="artifact-frame__body">
+              <pre class="file-preview" data-file-preview># Project notes&#10;&#10;The desktop shell keeps chat at the center.&#10;Artifact modes extend the same conversation.</pre>
+              <div class="file-editor" data-file-editor hidden><pre class="file-editor__lines" data-file-lines aria-hidden="true">1&#10;2&#10;3&#10;4</pre><div class="file-editor__content" data-file-editor-input role="textbox" aria-label="Edit notes.md" aria-multiline="true" contenteditable="true" spellcheck="false"># Project notes&#10;&#10;The desktop shell keeps chat at the center.&#10;Artifact modes extend the same conversation.</div></div>
+              <div class="file-approval" data-file-approval hidden><div><strong>2 edits proposed</strong><span>Typography and punctuation</span></div><div><button type="button" data-file-reject>Reject</button><button type="button" data-file-approve>Approve &amp; save</button></div></div>
+            </div>
+            </div>
+            <div class="artifact-shell__actions" aria-label="File artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy file contents" title="Copy contents"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="file" data-target-id="file-1" data-target-title="File · notes.md" data-target-excerpt="Project notes and next steps" aria-label="Reply to file artifact" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+
+          <div class="message message--user message--command" data-message-id="message-5"><div class="message__body"><p><code>$ npm run dev</code></p></div></div>
+          <article class="artifact-shell artifact-shell--response artifact-provider artifact-provider--terminal artifact-provider--running" data-artifact-card data-artifact-context="response" data-artifact-id="terminal-1" data-artifact-type="terminal" data-terminal-session="shell-1" data-terminal-status="running" tabindex="0" aria-label="Running Terminal artifact npm run dev output">
+            <div class="artifact-shell__preamble">
+            <details class="thinking-process artifact-shell__thinking"><summary><span>Running for 18 sec</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></summary><div class="thinking-process__content"><p>The command is still running in the active terminal session.</p><div class="thinking-process__activity"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 9l2 2 4-4"></path></svg><span>Streaming process output</span></div></div></details>
+            <div class="artifact-shell__identity"><div class="message__avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3M13 15h4"></path></svg></div><div class="message__speaker">C4OS</div></div>
+            </div>
+            <div class="artifact-frame response-container">
+            <header class="artifact-frame__header">
+              <div class="artifact-frame__identity"><div><strong data-artifact-title>$ npm run dev</strong><span data-artifact-meta>~/project · shell-1</span></div></div>
+              <div class="artifact-frame__actions"><button class="terminal-stop" type="button" data-terminal-stop="terminal-1" aria-label="Stop npm run dev" title="Stop process"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button><button type="button" data-expand="terminal-1" aria-label="Expand terminal artifact" title="Expand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button></div>
+            </header>
+            <div class="artifact-frame__body"><pre class="terminal-output" data-terminal-output>&gt; workspace@1.0.0 dev&#10;&gt; vite --host 127.0.0.1&#10;&#10;Local: http://127.0.0.1:4179/&#10;ready in 412 ms&#10;GET / 200 14ms</pre></div>
+            <footer class="artifact-frame__footer"><span data-terminal-result><span class="terminal-live-dot" aria-hidden="true"></span>Running · 00:18</span><span>shell-1</span></footer>
+            </div>
+            <div class="artifact-shell__actions" aria-label="Terminal artifact actions"><button type="button" data-copy data-copy-kind="artifact" aria-label="Copy terminal command and output" title="Copy output"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button><button type="button" data-reply data-target-kind="terminal" data-target-id="terminal-1" data-target-title="Terminal · npm run dev" data-target-excerpt="Vite dev server running at 127.0.0.1:4179" aria-label="Reply to terminal output" title="Reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></button></div>
+          </article>
+        </section>
+            <button class="thread-scroll-bottom" type="button" data-thread-scroll-bottom aria-label="Scroll conversation to bottom" title="Scroll to bottom" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+          </div>
+
+          <section class="focus-viewer" data-focus-viewer aria-label="Focused artifact" hidden></section>
+
+        </div>
+
+        <div class="copy-notifier" data-copy-notifier role="status" aria-live="polite" hidden>Copied</div>
+
+        <div class="composer-dock">
+          <form class="composer composer--modes" data-composer data-mode="chat">
+            <input class="sr-only" id="composer-attachment-input" type="file" data-attachment-input multiple>
+            <div class="reply-strip" data-reply-strip hidden><span class="reply-strip__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 17-5-5 5-5"></path><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></span><span class="reply-strip__copy"><strong data-reply-title></strong><span data-reply-excerpt></span></span><button type="button" data-reply-cancel aria-label="Cancel reply" title="Cancel reply"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></div>
+
+            <div class="composer-attachments" data-attachment-tray aria-label="Attached files" hidden></div>
+
+            <div class="mode-panel" data-mode-panel="chat">
+              <div
+                aria-label="Message AI"
+                class="composer-markdown-editor"
+                data-markdown-editor
+                data-mode-input="chat"
+                data-placeholder="Ask anything, use @ to add context"
+                id="chat-input"
+              ></div>
+            </div>
+            <div class="mode-panel mode-panel--single" data-mode-panel="files" hidden>
+              <div class="file-source-control">
+                <button class="mode-input-icon" type="button" data-browse-file aria-label="Browse files or folders" aria-haspopup="menu" aria-expanded="false" title="Browse files or folders"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg></button>
+                <div class="file-source-popover" data-file-source-popover role="menu" aria-label="Choose a local source" hidden>
+                  <button type="button" role="menuitem" data-select-file-kind="file"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg><span><strong>Choose file</strong><small>Open one local file</small></span></button>
+                  <button type="button" role="menuitem" data-select-file-kind="folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></svg><span><strong>Choose folder</strong><small>Browse with File Explorer</small></span></button>
+                </div>
+              </div>
+              <label class="sr-only" for="file-path-input">File or folder path</label><input id="file-path-input" data-mode-input="files" data-selection-kind="file" value="notes.md" placeholder="Choose a local file or folder">
+            </div>
+            <div class="mode-panel mode-panel--single" data-mode-panel="browser" hidden><span class="mode-input-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span><label class="sr-only" for="browser-input">Web address</label><input id="browser-input" data-mode-input="browser" value="https://example.com" placeholder="Enter an address"></div>
+            <div class="mode-panel mode-panel--single mode-panel--terminal" data-mode-panel="terminal" hidden><span class="mode-input-icon terminal-prefix" aria-hidden="true">$</span><label class="sr-only" for="terminal-input">Terminal command or process input</label><input id="terminal-input" data-mode-input="terminal" value="" placeholder="Enter a command" autocomplete="off" spellcheck="false"></div>
+            <div class="mode-panel" data-reply-panel hidden>
+              <div
+                aria-label="Reply with an instruction"
+                class="composer-markdown-editor"
+                data-markdown-editor
+                data-placeholder="Reply with an instruction"
+                data-reply-input
+                id="reply-input"
+              ></div>
+            </div>
+
+            <div class="composer-toolbar">
+              <div class="toolbar-start">
+                <div class="option-control mode-control" data-mode-control>
+                  <button class="tool-button mode-trigger" type="button" data-mode-trigger aria-haspopup="menu" aria-expanded="false" aria-controls="composer-mode-menu" title="Change mode"><span class="mode-trigger__icon" data-mode-trigger-icon><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"></path></svg></span><span data-mode-trigger-label>Chat</span><svg class="chevron chevron--up" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"></path></svg></button>
+                  <div class="mode-popover" id="composer-mode-menu" data-mode-popover role="menu" aria-label="Composer mode" hidden>
+                    <button type="button" role="menuitemradio" data-mode-option="chat" aria-checked="true"><span class="mode-option__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"></path></svg></span><span class="mode-option__copy"><strong>Chat</strong><small>Ask and collaborate</small></span><span class="mode-option__check">✓</span></button>
+                    <button type="button" role="menuitemradio" data-mode-option="files" aria-checked="false"><span class="mode-option__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"></path></svg></span><span class="mode-option__copy"><strong>Files</strong><small>Open a local file</small></span><span class="mode-option__check">✓</span></button>
+                    <button type="button" role="menuitemradio" data-mode-option="browser" aria-checked="false"><span class="mode-option__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span><span class="mode-option__copy"><strong>Browser</strong><small>Open a webpage</small></span><span class="mode-option__check">✓</span></button>
+                    <button type="button" role="menuitemradio" data-mode-option="terminal" aria-checked="false"><span class="mode-option__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3M13 15h4"></path></svg></span><span class="mode-option__copy"><strong>Terminal</strong><small>Run a shell command</small></span><span class="mode-option__check">✓</span></button>
+                  </div>
+                </div>
+                <button class="tool-button tool-button--icon" type="button" data-attach-button data-chat-only aria-controls="composer-attachment-input" aria-label="Attach files" title="Attach files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg></button>
+                <div class="option-control" data-composer-control="model"><button class="tool-button" type="button" data-menu-trigger="model" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-option-value="model">GPT-5</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="model" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="GPT-5">GPT-5</button><button type="button" role="menuitemradio" aria-checked="false" data-option="GPT-5 fast">GPT-5 fast</button></div></div>
+                <div class="option-control" data-composer-control="approval"><button class="tool-button" type="button" data-menu-trigger="approval" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-option-value="approval">Ask</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="approval" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="Ask">Ask for approval</button><button type="button" role="menuitemradio" aria-checked="false" data-option="Auto">Approve automatically</button></div></div>
+                <div class="option-control" data-composer-control="branch"><button class="tool-button" type="button" data-menu-trigger="branch" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="6" r="2"></circle><circle cx="6" cy="19" r="2"></circle><path d="M6 7v10M8 7c5 0 4-1 8-1"></path></svg><span data-option-value="branch">main</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="option-menu" data-menu="branch" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-option="main">main</button><button type="button" role="menuitemradio" aria-checked="false" data-option="codex/artifacts">codex/artifacts</button></div></div>
+              </div>
+              <div class="toolbar-end"><span class="prompt-status" data-prompt-status aria-live="polite"></span><button class="tool-button tool-button--icon" type="button" data-mic data-chat-only aria-pressed="false" aria-label="Use microphone" title="Use microphone"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"></path></svg></button><button class="send-button" type="submit" data-primary-action aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 19V5"></path></svg></button></div>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <div class="app-dropzone" data-app-dropzone aria-hidden="true" hidden>
+        <div class="app-dropzone__prompt">
+          <span class="app-dropzone__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg></span>
+          <strong>Drop files to attach</strong>
+          <span>Multiple files are supported</span>
+        </div>
+      </div>
+    </div>
+    <section class="settings-spa" data-settings-spa hidden>
+      <main class="settings-window" data-settings-root data-policy-root>
+            <div class="settings-layout">
+              <aside class="settings-nav" aria-label="Settings navigation">
+                <a class="settings-back" href="#chat">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path><path d="M9 12h11"></path></svg>
+                  <span>Back to C4OS</span>
+                </a>
+                <p class="settings-nav-label">Settings</p>
+                <nav class="nav-items">
+                  <button class="nav-item" type="button" data-settings-nav="providers">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="4"></circle><path d="M12 12h8M17 9v6M20 10v4"></path></svg>
+                    <strong>Providers</strong>
+                  </button>
+                  <button class="nav-item" type="button" data-settings-nav="models">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="11" rx="3"></rect><path d="M9 4h6M12 4v3M8 12h.01M16 12h.01M9 15h6"></path></svg>
+                    <strong>Models</strong>
+                  </button>
+                  <button class="nav-item" type="button" data-settings-nav="runtimes">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 4 4-4 4M11 17h8"></path></svg>
+                    <strong>Runtimes</strong>
+                  </button>
+                  <button class="nav-item" type="button" data-settings-nav="configuration">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>
+                    <strong>Configuration</strong>
+                  </button>
+                  <span class="nav-divider" aria-hidden="true"></span>
+                  <button class="nav-item" type="button" data-settings-nav="plugins">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5M16 3v5M6 8h12v4a6 6 0 0 1-12 0ZM12 18v3"></path></svg>
+                    <strong>Plugins</strong>
+                  </button>
+                  <button class="nav-item" type="button" data-settings-nav="skills">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5Z"></path><path d="M16 3v4h4"></path></svg>
+                    <strong>Skills</strong>
+                  </button>
+                  <button class="nav-item" type="button" data-settings-nav="mcp">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="1"></rect><rect x="4" y="14" width="16" height="6" rx="1"></rect><path d="M8 7h.01M8 17h.01"></path></svg>
+                    <strong>MCP Servers</strong>
+                  </button>
+                </nav>
+              </aside>
+
+              <section class="settings-content" aria-live="polite">
+                <article class="settings-page" data-settings-page="providers">
+                  <header class="page-header"><div><h1>Providers</h1><p>Manage provider connection profiles. Labels must be unique.</p></div><button class="button button--primary" type="button" data-provider-add data-dialog-open="provider-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add Provider</button></header>
+                  <section class="section-block provider-profiles">
+                    <div class="resource-list" data-provider-list>
+                      <article class="resource-row" data-provider-row="openrouter" data-provider-type="openrouter" data-provider-label="OpenRouter - Personal" data-provider-url="https://openrouter.ai/api/v1" data-provider-active="true" data-provider-models="5"><div class="resource-icon">OR</div><div class="resource-copy"><strong>OpenRouter - Personal</strong><p>OpenRouter</p></div><button class="button" type="button" data-provider-configure data-dialog-open="provider-dialog">Edit</button><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable OpenRouter - Personal" data-provider-switch><span></span></button></article>
+                      <article class="resource-row" data-provider-row="huggingface" data-provider-type="huggingface" data-provider-label="Hugging Face - Personal" data-provider-url="https://router.huggingface.co/v1" data-provider-active="true" data-provider-models="3"><div class="resource-icon">HF</div><div class="resource-copy"><strong>Hugging Face - Personal</strong><p>Hugging Face</p></div><button class="button" type="button" data-provider-configure data-dialog-open="provider-dialog">Edit</button><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable Hugging Face - Personal" data-provider-switch><span></span></button></article>
+                      <article class="resource-row" data-provider-row="openai" data-provider-type="openai" data-provider-label="OpenAI - Work" data-provider-url="https://api.openai.com/v1" data-provider-active="true" data-provider-models="4"><div class="resource-icon">AI</div><div class="resource-copy"><strong>OpenAI - Work</strong><p>OpenAI</p></div><button class="button" type="button" data-provider-configure data-dialog-open="provider-dialog">Edit</button><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable OpenAI - Work" data-provider-switch><span></span></button></article>
+                      <article class="resource-row" data-provider-row="litellm" data-provider-type="compatible" data-provider-label="LiteLLM Local" data-provider-url="http://127.0.0.1:4000/v1" data-provider-auth="bearer" data-provider-headers="{}" data-provider-active="false" data-provider-models="4"><div class="resource-icon">LL</div><div class="resource-copy"><strong>LiteLLM Local</strong><p>OpenAI Compatible</p></div><button class="button" type="button" data-provider-configure data-dialog-open="provider-dialog">Edit</button><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Enable LiteLLM Local" data-provider-switch><span></span></button></article>
+                    </div>
+                  </section>
+                </article>
+
+                <article class="settings-page" data-settings-page="models" hidden>
+                  <header class="page-header"><div><h1>Models</h1><p>Choose which models from active providers appear in C4OS.</p></div><button class="button" type="button" data-refresh-models><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5M20 4v7h-7"></path></svg>Refresh Models</button></header>
+                  <div class="model-toolbar">
+                    <label class="page-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search models</span><input type="search" placeholder="Search models" data-model-search></label>
+                    <label class="model-provider-filter"><span class="sr-only">Filter by provider</span><select data-model-provider-filter><option value="all">All providers</option><option value="openrouter">OpenRouter - Personal</option><option value="huggingface">Hugging Face - Personal</option><option value="openai">OpenAI - Work</option></select></label>
+                    <button class="button" type="button" data-model-bulk>Disable results</button>
+                  </div>
+                  <div class="resource-list model-list" data-model-list>
+                    <article class="model-row" data-model-name="anthropic/claude-opus-4.1" data-model-provider="openrouter"><div><strong>anthropic/claude-opus-4.1</strong><span>OpenRouter - Personal · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable anthropic/claude-opus-4.1"><span></span></button></article>
+                    <article class="model-row" data-model-name="anthropic/claude-sonnet-4.5" data-model-provider="openrouter"><div><strong>anthropic/claude-sonnet-4.5</strong><span>OpenRouter - Personal · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable anthropic/claude-sonnet-4.5"><span></span></button></article>
+                    <article class="model-row" data-model-name="moonshotai/kimi-k2" data-model-provider="openrouter"><div><strong>moonshotai/kimi-k2</strong><span>OpenRouter - Personal · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable moonshotai/kimi-k2"><span></span></button></article>
+                    <article class="model-row" data-model-name="openai/gpt-5" data-model-provider="openai"><div><strong>openai/gpt-5</strong><span>OpenAI - Work · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable openai/gpt-5"><span></span></button></article>
+                    <article class="model-row" data-model-name="openai/gpt-5-mini" data-model-provider="openai"><div><strong>openai/gpt-5-mini</strong><span>OpenAI - Work · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable openai/gpt-5-mini"><span></span></button></article>
+                    <article class="model-row" data-model-name="Qwen/Qwen3-Coder" data-model-provider="huggingface"><div><strong>Qwen/Qwen3-Coder</strong><span>Hugging Face - Personal · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable Qwen/Qwen3-Coder"><span></span></button></article>
+                    <article class="model-row" data-model-name="deepseek-ai/DeepSeek-R1" data-model-provider="huggingface"><div><strong>deepseek-ai/DeepSeek-R1</strong><span>Hugging Face - Personal · Discovered</span></div><span class="badge" data-model-status>Enabled</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable deepseek-ai/DeepSeek-R1"><span></span></button></article>
+                  </div>
+                  <div class="empty-state" data-model-empty hidden><strong>No models found</strong><span>Try another search or activate a provider.</span></div>
+                </article>
+
+                <article class="settings-page" data-settings-page="runtimes" hidden>
+                  <header class="page-header"><div><h1>Runtimes</h1><p>Choose the runtime used to execute agent work in this workspace.</p></div><button class="button button--primary" type="button" data-runtime-save disabled>Save Runtime</button></header>
+                  <div class="runtime-list" role="radiogroup" aria-label="Workspace runtime">
+                    <button class="runtime-option" type="button" role="radio" aria-checked="true" data-runtime-option="opencode">
+                      <span class="runtime-copy"><strong>OpenCode</strong><span>https://opencode.ai/</span></span>
+                      <span class="badge runtime-selected" data-runtime-selected>Selected</span>
+                      <span class="runtime-radio" aria-hidden="true"><span></span></span>
+                    </button>
+                    <button class="runtime-option" type="button" role="radio" aria-checked="false" data-runtime-option="pi">
+                      <span class="runtime-copy"><strong>Pi</strong><span>https://pi.dev/</span></span>
+                      <span class="badge runtime-selected" data-runtime-selected hidden>Selected</span>
+                      <span class="runtime-radio" aria-hidden="true"><span></span></span>
+                    </button>
+                  </div>
+                </article>
+
+                <article class="settings-page plugins-page" data-settings-page="plugins" hidden>
+                  <header class="page-header"><div><h1>Plugins</h1><p>Install packaged capabilities that combine skills and connections.</p></div></header>
+                  <div class="plugin-tabs-row"><div class="segmented" role="tablist" aria-label="Plugin views"><button type="button" role="tab" aria-selected="true" data-plugin-tab="installed">Installed <span>2</span></button><button type="button" role="tab" aria-selected="false" data-plugin-tab="directory">Directory</button></div></div>
+                  <section data-plugin-panel="installed"><div class="card-grid" data-installed-plugins>
+                    <article class="extension-card" data-plugin-id="github"><header><span class="extension-icon">GH</span><span class="badge">Installed</span></header><h2>GitHub Workflow</h2><p>Review pull requests, inspect checks, and manage repository workflows.</p><div class="capability-line"><span>3 Skills</span><span>1 App</span><span>1 MCP</span></div><footer><button class="button button--ghost" type="button" data-plugin-details="github">View details</button><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable GitHub Workflow"><span></span></button></footer></article>
+                    <article class="extension-card" data-plugin-id="browser"><header><span class="extension-icon">WB</span><span class="badge">Installed</span></header><h2>Web Research</h2><p>Browse current sources and turn findings into structured research.</p><div class="capability-line"><span>2 Skills</span><span>1 App</span></div><footer><button class="button button--ghost" type="button" data-plugin-details="browser">View details</button><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Enable Web Research"><span></span></button></footer></article>
+                  </div></section>
+                  <section data-plugin-panel="directory" hidden><div class="plugin-directory-toolbar"><label class="page-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search plugin directory</span><input type="search" placeholder="Search plugins" data-plugin-search></label><div class="marketplace-picker"><button class="button marketplace-trigger" type="button" aria-expanded="false" data-marketplace-toggle>Built by C4OS<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg></button><div class="marketplace-popover" data-marketplace-menu hidden><button type="button" aria-current="true">Built by C4OS</button><span></span><button type="button" data-marketplace-add><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add Marketplace</button></div></div></div><div class="card-grid" data-plugin-directory>
+                    <article class="extension-card" data-plugin-id="analytics"><header><span class="extension-icon">AN</span><span class="badge">Verified</span></header><h2>Analytics Workspace</h2><p>Analyze product metrics and maintain reporting workbooks.</p><div class="capability-line"><span>4 Skills</span><span>1 App</span></div><footer><button class="button button--ghost" type="button" data-plugin-details="analytics">View details</button><button class="button" type="button" data-plugin-install="analytics">Install</button></footer></article>
+                    <article class="extension-card" data-plugin-id="calendar"><header><span class="extension-icon">CA</span><span class="badge">Verified</span></header><h2>Calendar Assistant</h2><p>Prepare meetings, find time, and build daily briefs.</p><div class="capability-line"><span>5 Skills</span><span>1 App</span></div><footer><button class="button button--ghost" type="button" data-plugin-details="calendar">View details</button><button class="button" type="button" data-plugin-install="calendar">Install</button></footer></article>
+                  </div></section>
+                </article>
+
+                <article class="settings-page settings-page--skills" data-settings-page="skills" hidden>
+                  <header class="page-header"><div><h1>Skills</h1><p>Manage installed skills and per-project availability.</p></div></header>
+                  <label class="page-search skills-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search skills</span><input type="search" placeholder="Search skills" data-skill-search></label>
+                  <div class="skill-resource-list" data-skill-list></div>
+                  <div class="empty-state" data-skill-empty hidden><strong>No skills found</strong><span>Try a different search.</span></div>
+                </article>
+
+                <article class="settings-page mcp-page" data-settings-page="mcp" hidden>
+                  <header class="page-header"><div><h1>MCP Servers</h1><p>Connect external tools and data sources. <a class="text-link" href="#" data-mcp-learn>Learn more</a></p></div><button class="button button--primary" type="button" data-mcp-add-server><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>Add Server</button></header>
+                  <section class="section-block mcp-servers"><div class="section-heading"><div><h2>Servers</h2></div></div><div class="mcp-list" data-mcp-list></div><div class="empty-state" data-mcp-empty hidden><strong>No MCP servers</strong><span>Add a server to connect external tools and data sources.</span></div></section>
+                </article>
+
+                <article class="settings-page" data-settings-page="configuration" hidden>
+                  <header class="page-header"><div><h1>Configuration</h1><p>Control approval defaults and environment behavior.</p></div></header>
+                  <section class="settings-card"><h2>Runtime</h2><div class="setting-row"><div><strong>Default Approval Policy</strong><p>Default behavior for tool and file actions.</p></div><div class="setting-actions"><select aria-label="Default Approval Policy"><option>Ask for approval</option><option>Approve safe actions</option><option>Approve automatically</option></select><a class="text-link" href="#settings/advanced-policies">Advanced</a></div></div><div class="setting-row"><div><strong>Restore last workspace</strong><p>Reopen the most recent workspace at launch.</p></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Restore last workspace"><span></span></button></div></section>
+                  <section class="settings-card"><h2>Environment</h2><div class="setting-row"><div><strong>Pass login shell environment</strong><p>Make PATH and shell variables available to tools.</p></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Pass login shell environment"><span></span></button></div><div class="setting-row"><div><strong>Browser Environment</strong><p>Choose how cookies and sessions are shared between browser instances.</p></div><select aria-label="Browser Environment"><option>All browsers</option><option>Per project</option><option>Per chat session</option><option>None</option></select></div><div class="setting-row"><div><strong>Customize Configuration</strong></div><button class="button" type="button" data-config-open-external>Open config.toml externally</button></div></section>
+                </article>
+                <article class="settings-page policy-page" data-settings-page="advanced-policies" hidden>
+                  <header class="page-header">
+                    <div><p class="eyebrow">Permissions</p><h1>Advanced Policies</h1><p>Set per-tool overrides for the default approval policy.</p></div>
+                    <button class="button button--primary" type="button" data-policy-save disabled>Save Policies</button>
+                  </header>
+
+                  <label class="page-search policy-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><span class="sr-only">Search policies</span><input type="search" placeholder="Search all policies" data-policy-search></label>
+
+                  <div class="policy-browser">
+                    <aside class="policy-groups" aria-label="Policy groups" data-policy-groups></aside>
+                    <section class="policy-results" aria-live="polite">
+                      <header class="policy-results-header"><div><h2 data-policy-title>Terminal</h2><p data-policy-summary></p></div><span class="badge" data-policy-count></span></header>
+                      <div class="policy-list" data-policy-list></div>
+                      <div class="policy-empty" data-policy-empty hidden><strong>No policies found</strong><span>Try another identity or description.</span></div>
+                    </section>
+                  </div>
+                </article>
+              </section>
+            </div>
+
+            <div class="dialog-backdrop" data-dialog-backdrop hidden>
+              <section class="dialog" id="provider-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title" data-dialog hidden>
+                <header><div><p class="eyebrow">Provider connection</p><h2 id="provider-dialog-title" data-provider-dialog-title>Add Provider</h2><p class="dialog-description">Save a connection profile for model discovery and use.</p></div><button class="icon-button" type="button" data-dialog-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header>
+                <form data-provider-form novalidate><div class="form-grid provider-form-grid">
+                  <label class="form-grid--full"><span>Provider type</span><select name="providerType" data-provider-type><option value="openrouter">OpenRouter</option><option value="huggingface">Hugging Face</option><option value="openai">OpenAI</option><option value="compatible">OpenAI Compatible</option></select></label>
+                  <label class="form-grid--full"><span>Label</span><input name="label" value="OpenRouter - Personal" required></label>
+                  <label class="form-grid--full" data-provider-base-url hidden><span>API base URL</span><input name="baseUrl" value="http://127.0.0.1:4000/v1"></label>
+                  <label class="form-grid--full" data-provider-auth hidden><span>Auth</span><select name="auth"><option value="bearer">Bearer token</option><option value="header">API key header</option><option value="none">None</option></select></label>
+                  <label class="form-grid--full" data-provider-header-name hidden><span>API key header name</span><input name="headerName" value="X-API-Key"></label>
+                  <div class="form-grid--full provider-field" data-provider-api-key data-provider-field>
+                    <label for="provider-api-key">API key</label>
+                    <div class="password-control"><input id="provider-api-key" name="apiKey" type="password" value="" autocomplete="new-password" required><button type="button" data-password-toggle aria-label="Show API key"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></div>
+                    <small data-provider-key-help>Required for this provider.</small>
+                  </div>
+                  <label class="form-grid--full" data-provider-headers hidden><span>Headers</span><textarea name="headers" rows="4" spellcheck="false">{}</textarea></label>
+                </div><p class="form-status" data-provider-form-status></p><footer><button class="button button--ghost" type="button" data-dialog-close>Cancel</button><button class="button" type="button" data-provider-test>Test Connection</button><button class="button button--primary" type="submit" data-provider-submit>Save Provider</button></footer></form>
+              </section>
+
+              <section class="dialog mcp-dialog" id="mcp-dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-dialog-title" data-dialog hidden>
+                <header><div><h2 id="mcp-dialog-title" data-mcp-dialog-title>Connect to a custom MCP</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header>
+                <form data-mcp-form novalidate>
+                  <div class="mcp-form-stack">
+                    <section class="mcp-field-card"><label><span>Name</span><input name="name" placeholder="MCP server name" required></label></section>
+                    <div class="mcp-transport" role="group" aria-label="MCP transport"><button type="button" aria-pressed="true" data-mcp-transport-option="stdio">STDIO</button><button type="button" aria-pressed="false" data-mcp-transport-option="http">Streamable HTTP</button><input type="hidden" name="transport" value="stdio" data-mcp-transport></div>
+                    <div class="mcp-transport-panel" data-mcp-panel="stdio">
+                      <section class="mcp-field-card"><label><span>Command to launch</span><input name="command" placeholder="openai-dev-mcp serve-sqlite"></label></section>
+                      <section class="mcp-field-card"><h3>Arguments</h3><div class="mcp-repeater" data-mcp-repeater="argument"></div><button class="mcp-add-row" type="button" data-mcp-add-row="argument">Add argument</button></section>
+                      <section class="mcp-field-card"><h3>Environment variables</h3><div class="mcp-repeater" data-mcp-repeater="environment"></div><button class="mcp-add-row" type="button" data-mcp-add-row="environment">Add environment variable</button></section>
+                      <section class="mcp-field-card"><h3>Environment variable passthrough</h3><div class="mcp-repeater" data-mcp-repeater="passthrough"></div><button class="mcp-add-row" type="button" data-mcp-add-row="passthrough">Add variable</button></section>
+                      <section class="mcp-field-card"><label><span>Working directory</span><input name="workingDirectory" placeholder="~/code"></label></section>
+                    </div>
+                    <div class="mcp-transport-panel" data-mcp-panel="http" hidden>
+                      <section class="mcp-field-card"><label><span>URL</span><input name="url" type="url" placeholder="https://mcp.example.com/mcp"></label></section>
+                      <section class="mcp-field-card"><label><span>Bearer token env var</span><input name="bearerTokenEnv" placeholder="MCP_BEARER_TOKEN"></label></section>
+                      <section class="mcp-field-card"><h3>Headers</h3><div class="mcp-repeater" data-mcp-repeater="header"></div><button class="mcp-add-row" type="button" data-mcp-add-row="header">Add header</button></section>
+                      <section class="mcp-field-card"><h3>Headers from environment variables</h3><div class="mcp-repeater" data-mcp-repeater="environmentHeader"></div><button class="mcp-add-row" type="button" data-mcp-add-row="environmentHeader">Add variable</button></section>
+                    </div>
+                  </div>
+                  <p class="form-status" data-mcp-form-status></p>
+                  <footer><button class="button" type="button" data-dialog-close>Cancel</button><button class="button button--primary" type="submit">Save</button></footer>
+                </form>
+              </section>
+
+              <section class="dialog dialog--compact" id="marketplace-dialog" role="dialog" aria-modal="true" aria-labelledby="marketplace-dialog-title" data-dialog hidden><header><div><h2 id="marketplace-dialog-title">Add plugin marketplace</h2><p class="dialog-description">Add from a GitHub repository, Git URL, or local folder.</p></div><button class="icon-button" type="button" data-dialog-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header><form data-marketplace-form novalidate><div class="form-grid"><label class="form-grid--full"><span>Source</span><input name="source" placeholder="openai/plugins or git@github.com:org/repo.git" required></label><label class="form-grid--full"><span>Git ref</span><input name="ref" value="main"></label><label class="form-grid--full"><span>Sparse paths</span><textarea name="paths" rows="4" placeholder="plugins/codex"></textarea></label></div><p class="form-status" data-marketplace-status></p><footer><button class="button" type="button" data-dialog-close>Cancel</button><button class="button button--primary" type="submit">Add Marketplace</button></footer></form></section>
+
+              <section class="dialog dialog--compact" id="plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="plugin-dialog-title" data-dialog hidden><header><div class="plugin-dialog-heading"><span class="plugin-dialog-icon" data-plugin-dialog-icon>PL</span><h2 id="plugin-dialog-title" data-plugin-dialog-title>Plugin</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header><div class="dialog-body" data-plugin-dialog-body></div><footer class="plugin-dialog-footer"><button class="button" type="button" data-plugin-install-dialog hidden>Install</button><button class="button" type="button" data-plugin-uninstall hidden>Uninstall</button><span></span><button class="button button--primary" type="button" data-dialog-close>Done</button></footer></section>
+
+              <section class="dialog dialog--compact" id="skill-dialog" role="dialog" aria-modal="true" aria-labelledby="skill-dialog-title" data-dialog hidden>
+                <header><div class="skill-dialog-heading"><span class="skill-circle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg></span><h2 id="skill-dialog-title" data-skill-dialog-title>Frontend Design</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"></path></svg></button></header>
+                <div class="dialog-body skill-dialog-body"><div class="skill-dialog-status"><p data-skill-dialog-description></p><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable skill for this project" data-skill-dialog-toggle><span></span></button></div><div class="skill-overview" data-skill-dialog-overview></div></div>
+                <footer class="skill-dialog-footer"><button class="button" type="button" data-skill-uninstall>Uninstall</button><span></span><button class="button button--primary" type="button" data-skill-try>Try in chat</button></footer>
+              </section>
+            </div>
+
+            <div class="notifier" role="status" aria-live="polite" data-notifier hidden></div>
+          </main>
+    </section>
+    <script src="./markdown.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
