@@ -661,3 +661,47 @@ Date: 2026-07-14
 ### Approval Path
 
 This round closes Batch 3. The next revision activity is Batch 4 File System and File Editor behavior.
+
+## Review Round 15 - Batch 4 Workspace And Files
+
+Date: 2026-07-14
+
+### Changed
+
+- Applied the final corrected r05 Batch 4 workspace and files set as thirteen SPA routes.
+- Preserved the accepted ownership boundary: File System owns folder-backed workspaces, local projects, and project chats; File Editor owns the folder/file tree and editor.
+- Added workspace start, loaded, missing-project recovery, center search takeover, and non-Git folder states.
+- Added File Editor left/right placement, r04-density explorer, click-to-editor navigation, context menu, create/delete-to-trash state, dirty save/revert state, external-change conflict, and empty/non-code state.
+- Applied the later r05 corrections that keep the center r04 prompt visible while File Editor is open and keep the normal editor limited to compact breadcrumbs plus code.
+- Kept Save/Revert controls out of the normal editor and limited them to dirty/conflict routes.
+
+### Feedback Applied
+
+- Kept File System distinct from File Editor, following the user's earlier correction that project folders/chats and the folder/file tree are different product surfaces.
+- Used the final r05 Review Rounds 29-31 corrections instead of the earlier Batch 4 explanatory drafts.
+
+### Verified
+
+- All thirteen Batch 4 routes render inside the single `index.html` document.
+- File System routes show the correct project/chat navigation or workspace-specific state.
+- File Editor renders on the configured side and its header icon remains active even when mounted left.
+- Clicking `main.js` from the explorer routes to the minimal editor with eight code lines and no default Save/Revert toolbar.
+- Project action menus expose Reveal, Copy path, Rename, and Remove; missing projects expose Relocate.
+- Dirty, conflict, context-menu, operations, and empty states render without document-level horizontal overflow.
+- Browser diagnostics report no warnings or errors.
+- `script.js` passes `node --check` and `git diff --check` passes.
+
+### Review Now
+
+- Whether File System now clearly owns workspaces/projects/chats without absorbing File Editor's tree.
+- Whether the File Editor explorer and normal editor are close enough to r04 in density and padding.
+- Whether the missing-project, context menu, guarded Trash, dirty, conflict, and empty states represent the accepted r05 additions without changing the main shell.
+
+### Simulated Or Deferred
+
+- Native folder pickers, workspace persistence, file-system operations, Trash, editor writes, external-change detection, and Add to chat insertion remain simulated.
+- Batch 5 Browser, Terminal, and Chat Debug detail remains deferred.
+
+### Approval Path
+
+Approval of Review Round 15 closes Batch 4 and makes Batch 5 the next available revision boundary.

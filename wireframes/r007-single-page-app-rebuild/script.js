@@ -32,11 +32,24 @@ const routes = [
   ["Blocked Suggestion Repair", "./blocked-suggestion-repair.html", "Keep dependency-blocked resources out of executable suggestions."],
   ["Branch Popover", "./branch-popover.html", "Choose or create a Git branch from the prompt composer."],
   ["Attachment States", "./attachment-states.html", "Review structured file and Browser screenshot attachments."],
-  ["Safe Fallback", "./safe-fallback.html", "Explain the safe adapter fallback for unsupported image attachments."]
+  ["Safe Fallback", "./safe-fallback.html", "Explain the safe adapter fallback for unsupported image attachments."],
+  ["Workspace Start", "./workspace-start.html", "Create, load, or open a folder-backed workspace."],
+  ["Workspace Loaded", "./workspace-loaded.html", "Normal loaded workspace with local projects and project chats."],
+  ["Missing Project", "./workspace-missing-project.html", "Recover or remove a missing local project."],
+  ["Workspace Search", "./workspace-search.html", "Search local projects and project chats in the center workspace."],
+  ["Non-Git Workspace", "./workspace-non-git.html", "Use a folder-backed project without repository-only controls."],
+  ["Files Left Panel", "./files-left-panel.html", "Mount the File Editor explorer on the left."],
+  ["Files Right Panel", "./files-right-panel.html", "Mount the File Editor explorer on the right."],
+  ["Batch 4 File Editor", "./file-editor.html", "Open the r04-style code editor from the File Editor explorer."],
+  ["File Context Menu", "./file-context-menu.html", "Review Add to chat and local file actions."],
+  ["File Operations", "./file-operations.html", "Create, rename, and confirm delete-to-trash behavior."],
+  ["Dirty File Editor", "./file-editor-dirty.html", "Review save and revert controls for an unsaved buffer."],
+  ["External File Conflict", "./file-external-conflict.html", "Choose how to resolve an external disk change."],
+  ["File Empty States", "./file-empty-states.html", "Review non-code and no-file-open states."]
 ];
 
 const routeIds = new Set(routes.map(([, href]) => routeFromHref(href)).filter(Boolean));
-const batch1Routes = new Set(["shell-foundation", "same-side-replacement", "per-chat-restore", "resize-collision", "hidden-activity", "repair-state", "settings", "settings-configuration", "settings-plugins", "prompt-suggestions", "approval-dialog", "remembered-rule-summary", "blocked-suggestion-repair", "branch-popover", "attachment-states", "safe-fallback"]);
+const batch1Routes = new Set(["shell-foundation", "same-side-replacement", "per-chat-restore", "resize-collision", "hidden-activity", "repair-state", "settings", "settings-configuration", "settings-plugins", "prompt-suggestions", "approval-dialog", "remembered-rule-summary", "blocked-suggestion-repair", "branch-popover", "attachment-states", "safe-fallback", "workspace-start", "workspace-loaded", "workspace-missing-project", "workspace-search", "workspace-non-git", "files-left-panel", "files-right-panel", "file-editor", "file-context-menu", "file-operations", "file-editor-dirty", "file-external-conflict", "file-empty-states"]);
 const projects = [
   { name: "suite", trusted: false },
   { name: "c4os2", trusted: true, sessions: ["Locate Tauri integration", "Draft wireframes"] },
@@ -337,6 +350,8 @@ const icons = {
   chevronDown: "m6 9 6 6 6-6",
   chevronLeft: "m15 18-6-6 6-6",
   chevronRight: "m9 18 6-6-6-6",
+  circleAlert: "M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
+  copy: "M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Zm-4 8H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1",
   external: "M7 17 17 7m0 0h-7m7 0v7",
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z",
@@ -344,11 +359,13 @@ const icons = {
   gitBranch: "M6 3v12m0 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12-12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0a9 9 0 0 1-9 9",
   key: "M7 14a5 5 0 1 1 3.5-8.5A5 5 0 0 1 7 14Zm7-4 7-7m-3 3 3 3m-6 0 3 3",
   mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm7 8v2a7 7 0 0 1-14 0v-2m7 9v3",
+  moreHorizontal: "M12 12h.01M19 12h.01M5 12h.01",
   paperclip: "m21 11-9 9a6 6 0 0 1-8-8l9-9a4 4 0 0 1 6 6l-9 9a2 2 0 0 1-3-3l8-8",
   pencil: "M21 6 7 20H3v-4L17 2a3 3 0 0 1 4 4Z",
   panelLeft: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm6-2v18",
   panelRight: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm12-2v18",
   plug: "M9 2v6m6-6v6m3 0v5a6 6 0 0 1-12 0V8Zm-6 14v-5",
+  plus: "M12 5v14M5 12h14",
   search: "m21 21-4-4m2-6a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
   send: "M3 4 21 12 3 20l3-8Zm3 8h15",
   server: "M3 3h18v7H3Zm0 11h18v7H3ZM7 6h.01M7 17h.01",
@@ -520,6 +537,22 @@ const batch3Routes = {
   "safe-fallback": { mode: "fallback", title: "Review evidence bundle", left: "chats", right: "browser" }
 };
 
+const batch4Routes = {
+  "workspace-start": { title: "Workspaces", left: "files", workspace: "start" },
+  "workspace-loaded": { title: "c4os2", left: "files", workspace: "loaded" },
+  "workspace-missing-project": { title: "Workspaces", left: "files", workspace: "missing-project" },
+  "workspace-search": { title: "Search", workspace: "search" },
+  "workspace-non-git": { title: "Client operations", left: "files", workspace: "non-git" },
+  "files-left-panel": { title: "Files", left: "editor", editor: "explorer" },
+  "files-right-panel": { title: "Files", right: "editor", editor: "explorer" },
+  "file-editor": { title: "main.js", right: "editor", editor: "editor" },
+  "file-context-menu": { title: "main.js", right: "editor", editor: "context-menu" },
+  "file-operations": { title: "client-notes.txt", right: "editor", editor: "operations" },
+  "file-editor-dirty": { title: "main.js", right: "editor", editor: "dirty" },
+  "file-external-conflict": { title: "main.js", right: "editor", editor: "conflict" },
+  "file-empty-states": { title: "Files", right: "editor", editor: "empty" }
+};
+
 const batch1State = {
   activeChat: "locate",
   widths: { left: 300, right: 360 },
@@ -540,6 +573,9 @@ const batch1State = {
   uninstalledPlugins: new Set(),
   batch3Mode: null,
   batch3Title: null,
+  batch4EditorMode: null,
+  batch4Title: null,
+  batch4WorkspaceMode: null,
   inSettings: false
 };
 
@@ -575,6 +611,9 @@ function seedBatch1State(screen) {
   batch1State.uninstalledPlugins.clear();
   batch1State.batch3Mode = null;
   batch1State.batch3Title = null;
+  batch1State.batch4EditorMode = null;
+  batch1State.batch4Title = null;
+  batch1State.batch4WorkspaceMode = null;
 
   const chat = batch1Chats[batch1State.activeChat];
   const batch3 = batch3Routes[screen];
@@ -584,6 +623,14 @@ function seedBatch1State(screen) {
     batch1Chats.draft.right = batch3.right;
     batch1State.batch3Mode = batch3.mode;
     batch1State.batch3Title = batch3.title;
+  } else if (batch4Routes[screen]) {
+    const batch4 = batch4Routes[screen];
+    batch1State.activeChat = "draft";
+    batch1Chats.draft.left = batch4.left || null;
+    batch1Chats.draft.right = batch4.right || null;
+    batch1State.batch4EditorMode = batch4.editor || null;
+    batch1State.batch4Title = batch4.title;
+    batch1State.batch4WorkspaceMode = batch4.workspace || null;
   } else if (screen === "same-side-replacement") {
     chat.left = "files";
     chat.right = "terminal";
@@ -621,6 +668,7 @@ function renderBatch1App() {
   bindComposerControls();
   bindShowMore();
   bindBatch3Controls();
+  bindBatch4Controls();
   if (batch1State.inSettings) {
     bindBatch2PluginControls();
     bindMarketplaceControls();
@@ -639,21 +687,24 @@ function normalizeBatch1Panels(preferredSide = "left") {
 }
 
 function batch1Header(left, right) {
-  const group = (side, active) => h("div", { class: `batch1-plugin-group is-${side}` }, batch1Plugins
+  const group = (side) => h("div", { class: `batch1-plugin-group is-${side}` }, batch1Plugins
     .filter((plugin) => plugin.side === side)
-    .map((plugin) => h("button", {
-      class: `batch1-plugin-button${active === plugin.id ? " is-active" : ""}${batch1State.activity[plugin.id] && active !== plugin.id ? " has-activity" : ""}`,
+    .map((plugin) => {
+      const active = left === plugin.id || right === plugin.id;
+      return h("button", {
+      class: `batch1-plugin-button${active ? " is-active" : ""}${batch1State.activity[plugin.id] && !active ? " has-activity" : ""}`,
       type: "button",
       "data-batch1-plugin": plugin.id,
-      "aria-label": `${plugin.label}${active === plugin.id ? ", close panel" : ", open panel"}`,
-      "aria-pressed": active === plugin.id ? "true" : "false"
-    }, [svgIcon(plugin.icon), h("span", { class: "batch1-activity-dot", "aria-hidden": "true" })])));
+      "aria-label": `${plugin.label}${active ? ", close panel" : ", open panel"}`,
+      "aria-pressed": active ? "true" : "false"
+    }, [svgIcon(plugin.icon), h("span", { class: "batch1-activity-dot", "aria-hidden": "true" })]);
+  }));
 
   return h("header", { class: "batch1-header" }, [
-    group("left", left),
-    h("strong", { class: "batch1-title", text: batch1State.inSettings ? "Settings" : batch1State.newChat ? activeWorkspace.project : batch1State.batch3Title || batch1Chats[batch1State.activeChat].title }),
+    group("left"),
+    h("strong", { class: "batch1-title", text: batch1State.inSettings ? "Settings" : batch1State.newChat ? activeWorkspace.project : batch1State.batch4Title || batch1State.batch3Title || batch1Chats[batch1State.activeChat].title }),
     h("div", { class: "batch1-header-right" }, [
-      group("right", right),
+      group("right"),
       h("button", {
         class: `batch1-plugin-button batch1-settings-button${batch1State.inSettings ? " is-active" : ""}`,
         type: "button",
@@ -694,10 +745,10 @@ function batch1PanelBody(pluginId) {
     ]);
   }
   if (pluginId === "files") {
-    return batch1FileSystemBody();
+    return batch1State.batch4WorkspaceMode ? batch4WorkspacePanel(batch1State.batch4WorkspaceMode) : batch1FileSystemBody();
   }
   if (pluginId === "editor") {
-    return batch1FileEditorBody();
+    return batch1State.batch4EditorMode ? batch4EditorPanel(batch1State.batch4EditorMode) : batch1FileEditorBody();
   }
   if (pluginId === "browser") {
     return browserTool();
@@ -792,10 +843,185 @@ function batch1Workspace(chat) {
     ]);
   }
   if (batch1State.batch3Mode) return batch3PromptWorkspace(batch1State.batch3Mode);
+  if (batch1State.batch4WorkspaceMode) return batch4Workspace(batch1State.batch4WorkspaceMode);
+  if (batch1State.batch4EditorMode) return batch4EmptyPromptWorkspace();
   return h("section", { class: "thread-view batch1-thread-view" }, [
     h("div", { class: "thread-list", "aria-label": copy["thread.list"] }, threadItems.map(renderThreadItem)),
     h("div", { class: "composer-dock" }, [composer(copy["composer.threadPlaceholder"], { readonlyContext: true })])
   ]);
+}
+
+function batch4WorkspacePanel(mode) {
+  if (mode === "start") {
+    return h("section", { class: "batch4-fs-start" }, [
+      h("p", { class: "kicker", text: "No trusted project folder" }),
+      h("h2", { text: "Open a folder to start working" }),
+      h("p", { text: "Scope file access, instructions, runtime policy, approvals, and workspace persistence before prompting." }),
+      h("div", { class: "batch4-fs-actions" }, [
+        button("button primary", "Open Folder", "folder"),
+        button("button secondary", "Clone Repository", "plus"),
+        button("button secondary", "Open Workspace File", "file")
+      ]),
+      h("section", { class: "batch4-recent-workspaces" }, [
+        h("h3", { text: "Recent folder-backed workspaces" }),
+        batch4RecentWorkspace("c4os2", "Trusted", "./workspace-loaded.html"),
+        batch4RecentWorkspace("client-ops", "Non-Git", "./workspace-non-git.html"),
+        batch4RecentWorkspace("moved-marketing-site", "Missing", "./workspace-missing-project.html", true)
+      ])
+    ]);
+  }
+
+  const rows = [
+    batch4ProjectRow("suite"),
+    batch4ProjectRow("c4os2", mode === "loaded"),
+    ...(mode === "loaded" ? [batch4SessionRow("Locate Tauri integration"), batch4SessionRow("Draft wireframes")] : []),
+    batch4ProjectRow("techops"),
+    batch4ProjectRow("ingest"),
+    batch4ProjectRow("chrisai")
+  ];
+  if (mode === "missing-project") rows.push(batch4ProjectRow("moved-marketing-site", true, true, true), batch4SessionRow("Homepage refresh", true), batch4SessionRow("Launch copy", true));
+  if (mode === "non-git") rows.push(batch4ProjectRow("client-ops", true, false, false, true));
+
+  return h("section", { class: "batch4-fs-workspace" }, [
+    link("batch4-workspace-search", "./workspace-search.html", [svgIcon("search"), h("span", { text: "Search projects and chats" })], { "aria-label": "Search projects and chats" }),
+    h("div", { class: "batch4-projects-heading" }, [h("span", { text: "Projects" }), iconButton("Add project", "plus")]),
+    h("div", { class: "batch4-project-list" }, rows)
+  ]);
+}
+
+function batch4RecentWorkspace(name, badge, href, missing = false) {
+  return link(`batch4-recent-workspace${missing ? " is-missing" : ""}`, href, [h("strong", { text: name }), h("span", { text: badge })]);
+}
+
+function batch4ProjectRow(name, active = false, missing = false, menuOpen = false, nonGit = false) {
+  const menuId = `batch4-project-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  return h("div", { class: `batch4-project-row${active ? " is-active" : ""}${missing ? " is-missing" : ""}` }, [
+    svgIcon("folder"),
+    h("span", { text: name }),
+    nonGit ? h("small", { text: "Folder" }) : null,
+    h("span", { class: "batch4-row-tools" }, [
+      iconButton(`${name} project actions`, "moreHorizontal", "", { "aria-controls": menuId, "aria-expanded": menuOpen ? "true" : "false", "data-batch4-project-menu": menuId }),
+      iconButton(`New chat in ${name}`, "pencil")
+    ]),
+    h("section", { class: "batch4-project-menu", id: menuId, role: "menu", "aria-label": missing ? "Missing project actions" : "Project actions", hidden: menuOpen ? null : "true" }, [
+      missing ? batch4ProjectMenuButton("Relocate", "folder") : batch4ProjectMenuButton("Reveal", "folder"),
+      batch4ProjectMenuButton("Copy path", "copy"),
+      batch4ProjectMenuButton("Rename", "pencil"),
+      batch4ProjectMenuButton("Remove", "x")
+    ])
+  ]);
+}
+
+function batch4ProjectMenuButton(label, icon) {
+  return h("button", { class: "popover-row", type: "button", role: "menuitem" }, [svgIcon(icon), h("span", { text: label })]);
+}
+
+function batch4SessionRow(label, readonly = false) {
+  return link(`batch4-session-row${readonly ? " is-readonly" : ""}`, readonly ? "./workspace-missing-project.html" : "./per-chat-restore.html", [h("span", { text: label })]);
+}
+
+function batch4Workspace(mode) {
+  if (mode === "search") {
+    return h("section", { class: "batch4-search-takeover", role: "dialog", "aria-label": "Search projects and chats" }, [
+      h("div", { class: "batch4-search-head" }, [
+        h("label", { class: "search-field" }, [svgIcon("search"), h("input", { type: "search", value: "release", "aria-label": "Search projects and chats" })]),
+        link("icon-button", "./workspace-start.html", [svgIcon("x")], { "aria-label": "Close search" })
+      ]),
+      h("div", { class: "batch4-search-results" }, [
+        batch4SearchResult("Chat", "Release checklist", "c4os / Draft release notes"),
+        batch4SearchResult("Project", "release-site", "/Users/chris/Work/release-site"),
+        batch4SearchResult("Chat", "Browser screenshot review", "client-ops / Non-Git folder")
+      ])
+    ]);
+  }
+  return h("section", { class: "empty-workspace batch1-empty-workspace batch4-workspace-center" }, [
+    h("h1", { text: mode === "non-git" ? "What should we do in client-ops?" : copy["empty.title"] }),
+    mode === "non-git" ? batch4NonGitComposer() : composer(copy["composer.emptyPlaceholder"], { inlineModelPicker: true, modelLabel: batch1State.modelLabel, popover: batch1ComposerModelPopover() })
+  ]);
+}
+
+function batch4SearchResult(type, title, meta) {
+  return link("batch4-search-result", "./per-chat-restore.html", [h("span", { class: "status-pill", text: type }), h("strong", { text: title }), h("span", { text: meta })]);
+}
+
+function batch4NonGitComposer() {
+  return h("section", { class: "composer batch4-non-git-composer", "aria-label": copy["composer.label"] }, [
+    h("div", { class: "prompt-box", role: "textbox", "aria-label": copy["composer.promptLabel"], "aria-multiline": "true", contenteditable: "true", text: "Summarize the client handoff notes and list follow-up tasks." }),
+    h("div", { class: "composer-controls" }, [
+      iconButton(copy["composer.attach"], "paperclip"),
+      h("button", { class: "chip", type: "button" }, [svgIcon("shield"), h("span", { text: "Ask for approval" })]),
+      h("span", { class: "spacer" }),
+      iconButton(copy["composer.microphone"], "mic"),
+      iconButton(copy["composer.send"], "send", "send-button")
+    ]),
+    h("div", { class: "context-strip" }, [h("span", { class: "chip readonly-chip" }, [svgIcon("folder"), h("span", { text: "client-ops" })]), h("span", { class: "spacer" }), h("span", { class: "chip readonly-chip" }, [svgIcon("bot"), h("span", { text: "openai-compatible/default" })])])
+  ]);
+}
+
+function batch4EmptyPromptWorkspace() {
+  return h("section", { class: "empty-workspace batch1-empty-workspace batch4-file-center" }, [
+    h("h1", { text: copy["empty.title"] }),
+    composer(copy["composer.emptyPlaceholder"], { inlineModelPicker: true, modelLabel: batch1State.modelLabel, popover: batch1ComposerModelPopover() })
+  ]);
+}
+
+const batch4ExplorerRows = [
+  { name: "backend", icon: "folder", href: "./files-right-panel.html" },
+  { name: "frontend", icon: "folder", href: "./files-right-panel.html" },
+  { name: "main.js", icon: "file", href: "./file-editor.html" },
+  { name: "index.html", icon: "file", href: "./file-editor.html" },
+  { name: ".env.example", icon: "file", href: "./file-editor.html" },
+  { name: "tests", icon: "folder", href: "./files-right-panel.html" }
+];
+
+function batch4EditorPanel(mode) {
+  if (["editor", "dirty", "conflict", "empty"].includes(mode)) return batch4FileEditorTool(mode);
+  return h("section", { class: "batch4-explorer" }, [
+    h("header", { class: "batch4-files-head" }, [h("strong", { text: "c4os2" }), h("div", {}, [iconButton("Create file", "plus"), iconButton("Search files", "search")])]),
+    h("div", { class: "batch4-file-tree" }, batch4ExplorerRows.map((row) => batch4FileTreeRow(row, row.name === "main.js" && mode === "context-menu"))),
+    mode === "operations" ? batch4ExplorerCreateRow() : null,
+    mode === "context-menu" ? batch4FileContextMenu() : null,
+    mode === "operations" ? batch4FileOperationDialog() : null
+  ]);
+}
+
+function batch4FileTreeRow(row, active = false) {
+  return link(`batch4-file-row${active ? " is-active" : ""}${row.icon === "file" ? " is-file" : ""}`, row.href, [svgIcon(row.icon), h("span", { text: row.name })]);
+}
+
+function batch4FileEditorTool(mode) {
+  if (mode === "empty") {
+    return h("section", { class: "batch4-editor-tool" }, [h("div", { class: "batch4-editor-empty" }, [h("h2", { text: "No file open" }), h("p", { text: "Select a note, document, config, or text file from File Editor." }), h("div", { class: "batch4-empty-picks" }, [link("button secondary", "./file-editor.html", [svgIcon("file"), h("span", { text: "Open main.js" })]), link("button secondary", "./file-editor.html", [svgIcon("file"), h("span", { text: "Open index.html" })]), link("button secondary", "./file-editor.html", [svgIcon("file"), h("span", { text: "Open .env.example" })])])])]);
+  }
+  const dirty = mode === "dirty" || mode === "conflict";
+  return h("section", { class: `batch4-editor-tool${dirty ? " has-toolbar" : ""}` }, [
+    h("nav", { class: "batch4-breadcrumbs", "aria-label": copy["files.breadcrumbs"] }, editorPreview.breadcrumbs.flatMap((crumb, index) => index < editorPreview.breadcrumbs.length - 1 ? [link("", "./files-right-panel.html", [crumb]), h("span", { text: ">" })] : [h("span", { text: crumb })])),
+    dirty ? h("div", { class: "batch4-editor-toolbar" }, [h("div", {}, [h("strong", { text: "main.js" }), h("span", { text: "Unsaved changes" })]), h("div", {}, [button("button secondary", "Revert"), button("button primary", "Save", "check")])]) : null,
+    h("div", { class: "code-pane", role: "region", tabindex: "0", "aria-label": "File editor" }, editorPreview.lines.map((line, index) => h("div", { class: "code-line" }, [h("span", { class: "line-number", text: String(index + 1) }), h("code", { class: "line-code", text: line })]))),
+    mode === "conflict" ? batch4ExternalConflictDialog() : null
+  ]);
+}
+
+function batch4ExplorerCreateRow() {
+  return h("div", { class: "batch4-create-row" }, [h("span", { class: "status-pill", text: "New file" }), h("input", { value: "client-notes.txt", "aria-label": "New file name" }), iconButton("Confirm create", "check"), iconButton("Cancel create", "x")]);
+}
+
+function batch4FileContextMenu() {
+  return h("div", { class: "batch4-file-menu" }, [
+    h("button", { type: "button" }, [svgIcon("file"), h("span", { text: "Open" })]),
+    h("button", { type: "button" }, [svgIcon("plus"), h("span", { text: "Add to chat" }), h("kbd", { text: "@frontend/main.js" })]),
+    h("button", { type: "button", text: "Copy path" }), h("button", { type: "button", text: "Reveal in file manager" }),
+    h("button", { type: "button" }, [svgIcon("pencil"), h("span", { text: "Rename" })]),
+    h("button", { type: "button" }, [svgIcon("trash"), h("span", { text: "Move to Trash..." })])
+  ]);
+}
+
+function batch4FileOperationDialog() {
+  return h("section", { class: "batch4-panel-dialog" }, [h("h2", { text: "Move client-notes.txt to Trash?" }), h("p", { text: "This removes the file from the workspace folder using the operating system Trash or Recycle Bin." }), h("div", {}, [button("button secondary", "Cancel"), button("button primary", "Move to Trash", "trash")])]);
+}
+
+function batch4ExternalConflictDialog() {
+  return h("section", { class: "batch4-panel-dialog batch4-conflict-dialog" }, [h("h2", { text: "File changed outside C4OS" }), h("p", { text: "Saving now would overwrite newer disk content. Choose before C4OS writes through the backend file service." }), h("div", {}, [button("button secondary", "Keep editor copy"), button("button secondary", "Reload from disk"), button("button primary", "Save anyway")])]);
 }
 
 function batch3PromptWorkspace(mode) {
@@ -1016,6 +1242,18 @@ function bindBatch3Controls() {
     if (target) target.hidden = expanded;
   }));
   bindBatch3Typeahead();
+}
+
+function bindBatch4Controls() {
+  document.querySelectorAll("[data-batch4-project-menu]").forEach((control) => control.addEventListener("click", () => {
+    const target = document.getElementById(control.dataset.batch4ProjectMenu);
+    if (!target) return;
+    const willOpen = target.hidden;
+    document.querySelectorAll(".batch4-project-menu").forEach((menu) => { if (menu !== target) menu.hidden = true; });
+    document.querySelectorAll("[data-batch4-project-menu]").forEach((toggle) => { if (toggle !== control) toggle.setAttribute("aria-expanded", "false"); });
+    target.hidden = !willOpen;
+    control.setAttribute("aria-expanded", String(willOpen));
+  }));
 }
 
 function bindBatch3Typeahead() {
@@ -1332,7 +1570,9 @@ function bindBatch1Controls() {
     const plugin = batch1Plugins.find((item) => item.id === buttonNode.dataset.batch1Plugin);
     if (batch1State.inSettings) batch1State.inSettings = false;
     const chat = batch1Chats[batch1State.activeChat];
-    chat[plugin.side] = chat[plugin.side] === plugin.id ? null : plugin.id;
+    const activeSide = chat.left === plugin.id ? "left" : chat.right === plugin.id ? "right" : null;
+    if (activeSide) chat[activeSide] = null;
+    else chat[plugin.side] = plugin.id;
     batch1State.activity[plugin.id] = false;
     normalizeBatch1Panels(plugin.side);
     renderBatch1App();

@@ -3372,6 +3372,488 @@ svg {
   font-weight: 700;
 }
 
+/* Layer 10.75: Batch 4 Workspace And File States */
+.batch4-fs-start,
+.batch4-fs-workspace {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+  min-height: 100%;
+  padding: 12px 10px 18px;
+}
+
+.batch4-fs-start .kicker {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.batch4-fs-start h2 {
+  font-size: 21px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.batch4-fs-start p {
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.batch4-fs-actions,
+.batch4-recent-workspaces {
+  display: grid;
+  gap: 8px;
+}
+
+.batch4-fs-actions .button {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.batch4-recent-workspaces {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.batch4-recent-workspaces h3 {
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.batch4-recent-workspace {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.batch4-recent-workspace span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.batch4-recent-workspace.is-missing strong {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.batch4-workspace-search {
+  align-items: center;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 10px;
+}
+
+.batch4-workspace-search:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.batch4-projects-heading {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: space-between;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+.batch4-projects-heading .icon-button {
+  height: 28px;
+  width: 28px;
+}
+
+.batch4-project-list {
+  display: grid;
+  gap: 1px;
+}
+
+.batch4-project-row {
+  align-items: center;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  min-height: 38px;
+  padding: 0 8px;
+  position: relative;
+}
+
+.batch4-project-row.is-active,
+.batch4-project-row:hover {
+  background: var(--field);
+}
+
+.batch4-project-row.is-missing > span:nth-of-type(1) {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.batch4-project-row small {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.batch4-row-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.batch4-row-tools .icon-button {
+  height: 28px;
+  width: 28px;
+}
+
+.batch4-project-menu {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.12);
+  display: grid;
+  padding: 6px;
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  width: 170px;
+  z-index: 20;
+}
+
+.batch4-project-menu[hidden] {
+  display: none;
+}
+
+.batch4-project-menu .popover-row {
+  border: 0;
+  border-radius: 5px;
+  min-height: 34px;
+}
+
+.batch4-session-row {
+  color: var(--ink-soft);
+  min-height: 34px;
+  padding-left: 38px;
+}
+
+.batch4-session-row.is-readonly {
+  color: var(--ink-muted);
+}
+
+.batch4-search-takeover {
+  align-content: start;
+  background: var(--paper);
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  min-height: 100%;
+  padding: 86px 24px;
+}
+
+.batch4-search-head,
+.batch4-search-results {
+  width: min(820px, 100%);
+}
+
+.batch4-search-head {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.batch4-search-results {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  overflow: hidden;
+}
+
+.batch4-search-result {
+  align-items: center;
+  color: var(--ink);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 64px minmax(0, 1fr) minmax(160px, 0.8fr);
+  min-height: 60px;
+  padding: 8px 14px;
+}
+
+.batch4-search-result + .batch4-search-result {
+  border-top: 1px solid var(--line);
+}
+
+.batch4-search-result > span:last-child {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.batch4-workspace-center .composer,
+.batch4-file-center .composer {
+  width: min(700px, calc(100% - 32px));
+}
+
+.batch4-non-git-composer .prompt-box {
+  min-height: 74px;
+}
+
+.batch4-explorer,
+.batch4-editor-tool {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.batch4-explorer {
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+}
+
+.batch4-files-head {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 10px;
+}
+
+.batch4-files-head > div {
+  display: flex;
+  gap: 2px;
+}
+
+.batch4-file-tree {
+  align-content: start;
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.batch4-file-row {
+  align-items: center;
+  border-radius: 6px;
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.batch4-file-row.is-file {
+  margin-left: 24px;
+}
+
+.batch4-file-row:hover,
+.batch4-file-row.is-active {
+  background: var(--field);
+}
+
+.batch4-file-row.is-active {
+  outline: 1px solid var(--line-strong);
+}
+
+.batch4-editor-tool {
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+}
+
+.batch4-editor-tool.has-toolbar {
+  grid-template-rows: 32px auto minmax(0, 1fr);
+}
+
+.batch4-breadcrumbs {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  display: flex;
+  gap: 6px;
+  min-height: 32px;
+  overflow: hidden;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.batch4-breadcrumbs a,
+.batch4-breadcrumbs span {
+  color: inherit;
+  font-size: 12px;
+}
+
+.batch4-editor-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 6px 10px;
+}
+
+.batch4-editor-toolbar > div {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.batch4-editor-toolbar > div:first-child {
+  align-items: start;
+  flex-direction: column;
+}
+
+.batch4-editor-toolbar > div:first-child span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.batch4-editor-toolbar .button {
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.batch4-editor-empty {
+  align-content: center;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  min-height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.batch4-editor-empty h2,
+.batch4-editor-empty p {
+  margin: 0;
+}
+
+.batch4-editor-empty p {
+  color: var(--ink-soft);
+}
+
+.batch4-empty-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.batch4-create-row {
+  align-items: center;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto minmax(0, 1fr) 32px 32px;
+  left: 8px;
+  min-height: 48px;
+  padding: 6px;
+  position: absolute;
+  right: 8px;
+  top: 54px;
+  z-index: 8;
+}
+
+.batch4-file-menu {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.14);
+  display: grid;
+  padding: 6px;
+  position: absolute;
+  right: 12px;
+  top: 116px;
+  width: 220px;
+  z-index: 12;
+}
+
+.batch4-file-menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.batch4-file-menu button:hover {
+  background: var(--rail);
+}
+
+.batch4-file-menu kbd {
+  color: var(--ink-soft);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.batch4-panel-dialog {
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  bottom: 14px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.15);
+  display: grid;
+  gap: 10px;
+  left: 12px;
+  padding: 14px;
+  position: absolute;
+  right: 12px;
+  z-index: 15;
+}
+
+.batch4-panel-dialog h2,
+.batch4-panel-dialog p {
+  margin: 0;
+}
+
+.batch4-panel-dialog h2 {
+  font-size: 16px;
+}
+
+.batch4-panel-dialog p {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.batch4-panel-dialog > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.batch4-panel-dialog .button {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.batch4-conflict-dialog {
+  bottom: 12px;
+}
+
 /* Layer 11: Desktop-Narrow Behavior */
 @media (max-width: 1180px) {
   .app-shell {

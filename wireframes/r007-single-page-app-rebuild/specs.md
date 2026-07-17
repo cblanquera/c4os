@@ -7,11 +7,12 @@
 - Revision type: new major revision
 - Baseline source: `wireframes/r04-single-page-app/`
 - Product area: complete C4OS desktop application shell
-- Current review scope: r05 Batch 1 shell, accepted r007 Batch 2 Configuration and Plugins, and the full r05 Batch 3 prompt/workspace set over the restored r04 bodies
+- Current review scope: r05 Batch 1 shell, accepted r007 Batch 2 Configuration and Plugins, accepted Batch 3 prompt/workspace behavior, and the final corrected r05 Batch 4 workspace/files set over the restored r04 bodies
 - Included from r05 Batch 1: one global header, left/right plugin icon groups, plugin-panel toggling and same-side replacement, per-chat panel restoration, Settings closure/restoration, resize collision handling, hidden activity, and invalid-layout repair
 - Batch 2 boundary: complete and closed; Configuration and Plugins are accepted, while the proposed remaining Batch 2 additions were rejected as mistaken scope rather than deferred work
 - Batch 3 review boundary: all seven accepted r05 prompt/workspace states are implemented together as SPA routes; no rejected Batch 2 scope is carried forward
-- Explicitly deferred: Batch 4 file/editor changes and Batch 5 Browser/Terminal/Chat Debug detail
+- Batch 4 review boundary: workspace lifecycle, project recovery/search/non-Git states, File Editor placement, r04 explorer/editor parity, file actions, dirty state, conflict handling, and empty states
+- Explicitly deferred: Batch 5 Browser/Terminal/Chat Debug detail
 - Body-source boundary: later r05 additions remain deferred, but the complete r04 body for each corresponding surface is required now and is not a later-batch addition
 - Explicitly excluded: `wireframes/r06-final-implementation/`
 - Trigger: user requested a truth-oriented SPA rebuilt through `chrisai-designing`, using the bundled wireframe library as a guide
@@ -24,7 +25,7 @@
   - It is the direct baseline for this round, not a source to redesign.
 - `wireframes/r05-final-implementation/README.md`
   - Supplies the accepted additions and removals applied batch-by-batch after r04 parity approval.
-  - Batch 1, the accepted r007 Batch 2 boundary, and the full Batch 3 prompt/workspace set govern the current artifact; Batch 4 and later remain deferred.
+  - Batch 1, the accepted r007 Batch 2 boundary, accepted Batch 3, and the final corrected Batch 4 routes govern the current artifact; Batch 5 remains deferred.
 - `wireframes/r05-final-implementation/notes.md` and `review-round-*.md`
   - Supply the accepted correction history needed to avoid restoring rejected intermediate r05 states.
 - `wireframes/screens.md`
@@ -124,6 +125,29 @@ The wireframe is an explicit single page app. `index.html` is the only product a
 - Layout: shared shell with Files active in the right tool panel.
 - States: dense file tree, selected file, breadcrumbs, code view.
 
+### Workspace And Files - Batch 4
+
+- Workspace routes:
+  - `./index.html#workspace-start`
+  - `./index.html#workspace-loaded`
+  - `./index.html#workspace-missing-project`
+  - `./index.html#workspace-search`
+  - `./index.html#workspace-non-git`
+- File Editor routes:
+  - `./index.html#files-left-panel`
+  - `./index.html#files-right-panel`
+  - `./index.html#file-editor`
+  - `./index.html#file-context-menu`
+  - `./index.html#file-operations`
+  - `./index.html#file-editor-dirty`
+  - `./index.html#file-external-conflict`
+  - `./index.html#file-empty-states`
+- Ownership: File System owns folder-backed workspaces, local projects, and project chats. File Editor separately owns the folder/file tree and editor panel.
+- Workspace behavior: create/load/open entry, normal loaded state, project actions, missing-project recovery with read-only chats, center search takeover, and first-class non-Git folder state without repository-only controls.
+- File Editor behavior: configurable left/right placement, r04-density tree, click-to-editor navigation, hidden `.git` with visible `.env.example`, context menu with Add to chat, create/rename/delete-to-trash state, dirty save/revert state, external-change conflict choices, and non-code/no-file states.
+- Default editor parity: the normal editor route contains only the 32px breadcrumb row and compact code pane. Save/Revert controls appear only in dirty and external-conflict states.
+- Center-body rule: opening File Editor keeps the r04 new-chat prompt visible in the center workspace.
+
 ### Terminal
 
 - Route: `./index.html#terminal`
@@ -199,6 +223,12 @@ The wireframe is an explicit single page app. `index.html` is the only product a
 - Review blocked, branch, and attachment behavior
   - Starts: `./index.html#blocked-suggestion-repair`, `./index.html#branch-popover`, `./index.html#attachment-states`, and `./index.html#safe-fallback`
   - Happy path: follow the plugin repair route, inspect Git branch creation, compare supported attachments, and review the safe adapter fallback.
+- Manage workspaces and local projects
+  - Starts: `./index.html#workspace-start`, `./index.html#workspace-loaded`, `./index.html#workspace-missing-project`, `./index.html#workspace-search`, and `./index.html#workspace-non-git`
+  - Happy path: open a workspace, inspect project/chat navigation, use the project menu, recover a missing project, search, and compare a non-Git folder.
+- Browse and operate on files
+  - Starts: `./index.html#files-right-panel`, `./index.html#file-editor`, `./index.html#file-context-menu`, `./index.html#file-operations`, `./index.html#file-editor-dirty`, `./index.html#file-external-conflict`, and `./index.html#file-empty-states`
+  - Happy path: open a file from the r04-style tree, inspect the minimal editor, then review Add to chat, guarded Trash, dirty, conflict, and empty states.
 
 ## Layout System
 
