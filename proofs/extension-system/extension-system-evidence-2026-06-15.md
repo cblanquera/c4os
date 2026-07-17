@@ -1,8 +1,9 @@
-# Extension System POC Evidence: 2026-06-15
+# Extension System POC Evidence
 
 Status: passed
-Started: 2026-06-15T08:55:50.834Z
-Finished: 2026-06-15T08:55:50.877Z
+Last verified: 2026-07-17
+Started: 2026-07-17T15:47:19.673Z
+Finished: 2026-07-17T15:47:19.723Z
 
 ## Scope
 
@@ -11,11 +12,11 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
 
 ## Checks
 
-- PASS: static inventory reads manifests without executing extension code (1ms)
+- PASS: static inventory reads manifests without executing extension code (0ms)
 - PASS: skill is instruction content, not executable code (1ms)
-- PASS: plugin manifest metadata is visible without executing plugin module (1ms)
+- PASS: plugin manifest metadata is visible without executing plugin module (0ms)
 - PASS: hook proposal is represented without automatic execution (1ms)
-- PASS: harmless MCP server connects, lists tools, calls safe tool, and disconnects (36ms)
+- PASS: harmless MCP server connects, lists tools, calls safe tool, and disconnects (45ms)
 - PASS: unknown or high-risk extension actions route through policy (0ms)
 
 ## Security Findings
@@ -37,13 +38,13 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
 
 ```json
 {
-  "startedAt": "2026-06-15T08:55:50.834Z",
-  "fixtureRoot": "/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-R1rcxv",
+  "startedAt": "2026-07-17T15:47:19.673Z",
+  "fixtureRoot": "/var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-fVPCSq",
   "checks": [
     {
       "name": "static inventory reads manifests without executing extension code",
       "status": "pass",
-      "durationMs": 1,
+      "durationMs": 0,
       "evidence": {
         "inventory": [
           {
@@ -57,7 +58,7 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
             },
             "provenance": {
               "source": "local-fixture",
-              "installSource": "file:///var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-R1rcxv/skills/review-local-docs/SKILL.md"
+              "installSource": "file:///var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-fVPCSq/skills/review-local-docs/SKILL.md"
             },
             "permissions": [],
             "execution": {
@@ -141,9 +142,9 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
             "permissions": [],
             "execution": {
               "kind": "stdio-mcp-server",
-              "command": "/Users/cblanquera/.nvm/versions/node/v22.14.0/bin/node",
+              "command": "/Users/cblanquera/.nvm/versions/node/v26.2.0/bin/node",
               "args": [
-                "/Users/cblanquera/server/projects/cblanquera/c4os2/poc/extension-system/harmless-mcp-server.mjs"
+                "/Users/cblanquera/server/projects/cblanquera/c4os/proofs/extension-system/harmless-mcp-server.mjs"
               ]
             },
             "taint": "mcp-metadata-untrusted"
@@ -166,7 +167,7 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
         },
         "provenance": {
           "source": "local-fixture",
-          "installSource": "file:///var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-R1rcxv/skills/review-local-docs/SKILL.md"
+          "installSource": "file:///var/folders/w2/g12vs0ts64g_3k6kjf_dd_bc0000gn/T/c4os-extension-poc-fVPCSq/skills/review-local-docs/SKILL.md"
         },
         "permissions": [],
         "execution": {
@@ -179,7 +180,7 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
     {
       "name": "plugin manifest metadata is visible without executing plugin module",
       "status": "pass",
-      "durationMs": 1,
+      "durationMs": 0,
       "evidence": {
         "type": "plugin",
         "id": "sample-code-indexer",
@@ -248,7 +249,7 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
     {
       "name": "harmless MCP server connects, lists tools, calls safe tool, and disconnects",
       "status": "pass",
-      "durationMs": 36,
+      "durationMs": 45,
       "evidence": {
         "initialized": {
           "protocolVersion": "2025-03-26",
@@ -324,7 +325,7 @@ enable production Plugins, Skills, MCP Servers, or Hooks.
     "highRiskActions": "blocked_or_approval_required",
     "outputTaint": "extension-output-untrusted"
   },
-  "finishedAt": "2026-06-15T08:55:50.877Z",
+  "finishedAt": "2026-07-17T15:47:19.723Z",
   "summary": {
     "status": "passed",
     "passed": 6,

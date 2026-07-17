@@ -572,7 +572,7 @@ fn write_evidence(
         "failed"
     };
     let promotion_decision = if passed {
-        "Do not promote directly to production Browser plugin yet. Raw Wry on macOS proves the missing no-Tauri-IPC surface for item-051, with a guardrail: page content observes Wry's window.ipc object, so product Browser content must not register a Wry IPC handler or app command bridge. The next product prework can move to Browser state/permission modeling and cross-platform confirmation before implementation."
+        "Do not promote directly to the production Browser surface yet. Raw Wry on macOS proves the no-Tauri-IPC boundary with a guardrail: page content observes Wry's window.ipc object, so C4OS Browser content must not register a Wry IPC handler or app command bridge. Next validate Browser state and permission modeling plus cross-platform behavior."
     } else {
         "Do not promote to production Browser plugin. Raw Wry did not prove the no-IPC native Browser surface; continue native surface investigation before Browser state/permission or product implementation."
     };
@@ -605,7 +605,7 @@ fn write_evidence(
         "unresolvedRisks": [
             "remote internet navigation was represented by a second loopback origin, not a live external website",
             "Windows and Linux WebView behavior remains untested",
-            "production embedding inside the round-003 right rail remains a later product slice",
+            "production embedding in the C4OS Browser surface remains a later product slice",
             "downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope"
         ],
         "warnings": if wry_ipc_visible {
@@ -623,7 +623,7 @@ Status: {status}\n\
 Started: {started_at}\n\
 Finished: {finished_at}\n\n\
 ## Scope\n\n\
-Disposable raw Wry/native WebView isolation POC for `item-051` / `TASK-019`. \
+Disposable raw Wry/native WebView isolation POC for the C4OS Browser surface. \
 This is not production Browser plugin implementation.\n\n\
 ## Checks\n\n\
 {checks}\n\n\
@@ -633,7 +633,7 @@ This is not production Browser plugin implementation.\n\n\
 - Remote internet navigation was represented by a second loopback origin, not a \
 live external website.\n\
 - Windows and Linux WebView behavior remains untested.\n\
-- Production embedding inside the round-003 right rail remains a later product \
+- Production embedding in the C4OS Browser surface remains a later product \
 slice.\n\
 - Downloads, persistent cookies, logged-in sessions, and browser automation \
 remain out of scope.\n\n\
@@ -659,8 +659,7 @@ remain out of scope.\n\n\
 }
 
 fn evidence_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("native-browser-wry-evidence-2026-06-20.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native-browser-wry-evidence-2026-06-20.md")
 }
 
 enum PageKind {

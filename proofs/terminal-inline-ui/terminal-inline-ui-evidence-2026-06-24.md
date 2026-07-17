@@ -6,15 +6,14 @@ Scope: disposable UI proof only
 
 ## Finding
 
-The current TASK-011 production UI is not the intended terminal interaction
-model. It uses a separate command form and split output panes. User feedback
-requests a terminal transcript model where command input, submitted command
-text, command output, and the next prompt/cursor all live in one continuous
-terminal stream.
+The reviewed C4OS terminal UI was not the intended interaction model. It used a
+separate command form and split output panes. User feedback requested a
+terminal transcript model where command input, submitted command text, command
+output, and the next prompt/cursor all live in one continuous terminal stream.
 
 ## Tauri CLI Plugin Check
 
-C4OS is not using Tauri's CLI plugin for TASK-011. Repository search found no
+C4OS was not using Tauri's CLI plugin for this terminal surface. Repository search found no
 `tauri-plugin-cli`, `@tauri-apps/plugin-cli`, or `tauri_plugin_cli` usage in
 the current backend or frontend sources.
 
@@ -49,8 +48,8 @@ Screenshot: `/private/tmp/c4os-terminal-inline-ui-proof.png`
 
 ## Expected Product Promotion
 
-If accepted, TASK-011 production UI should replace the command-form/split-pane
-Terminal tab with a transcript-driven terminal surface:
+If accepted, the production Terminal UI should replace the
+command-form/split-pane surface with a transcript-driven terminal surface:
 
 - one terminal viewport;
 - prompt and cursor in the transcript;

@@ -6,7 +6,7 @@ Finished: SystemTime { tv_sec: 1781963624, tv_nsec: 300962000 }
 
 ## Scope
 
-Disposable raw Wry/native WebView isolation POC for `item-051` / `TASK-019`. This is not production Browser plugin implementation.
+Disposable raw Wry/native WebView isolation POC for the C4OS Browser surface. This is not production Browser implementation.
 
 ## Checks
 
@@ -31,12 +31,12 @@ Disposable raw Wry/native WebView isolation POC for `item-051` / `TASK-019`. Thi
 
 - Remote internet navigation was represented by a second loopback origin, not a live external website.
 - Windows and Linux WebView behavior remains untested.
-- Production embedding inside the round-003 right rail remains a later product slice.
+- Production embedding in the C4OS Browser surface remains a later product slice.
 - Downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope.
 
 ## Promotion Decision
 
-Do not promote directly to production Browser plugin yet. Raw Wry on macOS proves the missing no-Tauri-IPC surface for item-051, with a guardrail: page content observes Wry's window.ipc object, so product Browser content must not register a Wry IPC handler or app command bridge. The next product prework can move to Browser state/permission modeling and cross-platform confirmation before implementation.
+Do not promote directly to the production Browser surface yet. Raw Wry on macOS proves the no-Tauri-IPC boundary with a guardrail: page content observes Wry's window.ipc object, so C4OS Browser content must not register a Wry IPC handler or app command bridge. Next validate Browser state and permission modeling plus cross-platform behavior.
 
 ## Raw Result
 
@@ -333,7 +333,7 @@ Do not promote directly to production Browser plugin yet. Raw Wry on macOS prove
       "window": "wry-browser-surface"
     }
   ],
-  "promotionDecision": "Do not promote directly to production Browser plugin yet. Raw Wry on macOS proves the missing no-Tauri-IPC surface for item-051, with a guardrail: page content observes Wry's window.ipc object, so product Browser content must not register a Wry IPC handler or app command bridge. The next product prework can move to Browser state/permission modeling and cross-platform confirmation before implementation.",
+  "promotionDecision": "Do not promote directly to the production Browser surface yet. Raw Wry on macOS proves the no-Tauri-IPC boundary with a guardrail: page content observes Wry's window.ipc object, so C4OS Browser content must not register a Wry IPC handler or app command bridge. Next validate Browser state and permission modeling plus cross-platform behavior.",
   "reports": [
     {
       "c4os_bridge": false,
@@ -377,7 +377,7 @@ Do not promote directly to production Browser plugin yet. Raw Wry on macOS prove
   "unresolvedRisks": [
     "remote internet navigation was represented by a second loopback origin, not a live external website",
     "Windows and Linux WebView behavior remains untested",
-    "production embedding inside the round-003 right rail remains a later product slice",
+    "production embedding in the C4OS Browser surface remains a later product slice",
     "downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope"
   ],
   "warnings": [

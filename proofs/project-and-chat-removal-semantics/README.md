@@ -1,6 +1,8 @@
-# project-and-chat-removal-semantics
+# Project and Chat Removal Semantics Proof
 
-Proof for `.agents/specs/00007-file-system-plugin/`.
+This proof checks that C4OS keeps workspace-membership removal separate from
+chat-history deletion. It is self-contained and does not depend on a separate
+planning record.
 
 ## Question
 

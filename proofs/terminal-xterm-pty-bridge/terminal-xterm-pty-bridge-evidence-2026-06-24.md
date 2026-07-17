@@ -88,4 +88,4 @@ Screenshot: `/private/tmp/c4os-terminal-xterm-pty-bridge-proof.png`
 ## Decision Target
 
 If this proof passes, the combined `@xterm/xterm` plus `portable-pty` stack is
-ready to be promoted into production design for TASK-011.
+ready to be considered for the C4OS production Terminal design.

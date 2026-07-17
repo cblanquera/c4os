@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import readline from 'node:readline';
 
 const repoRoot = new URL('../../', import.meta.url).pathname.replace(/\/$/, '');
-const evidencePath = join(repoRoot, 'poc/extension-system/extension-system-evidence-2026-06-15.md');
+const evidencePath = join(repoRoot, 'proofs/extension-system/extension-system-evidence-2026-06-15.md');
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'c4os-extension-poc-'));
 const sourceRoot = new URL('.', import.meta.url).pathname;
 
@@ -378,9 +378,10 @@ function summarize(checks) {
 async function writeEvidence() {
   const summary = result.summary || summarize(result.checks);
   const lines = [
-    '# Extension System POC Evidence: 2026-06-15',
+    '# Extension System POC Evidence',
     '',
     `Status: ${summary.status}`,
+    `Last verified: ${(result.finishedAt || result.startedAt).slice(0, 10)}`,
     `Started: ${result.startedAt}`,
     `Finished: ${result.finishedAt || ''}`,
     '',

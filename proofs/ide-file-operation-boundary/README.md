@@ -1,6 +1,8 @@
-# ide-file-operation-boundary
+# File Editor Operation Boundary Proof
 
-Proof for `.agents/specs/00008-file-editor-plugin/`.
+This proof checks the ownership boundary between C4OS editor interactions and
+backend file operations. It is self-contained and does not depend on a
+separate planning record.
 
 ## Question
 

@@ -1,6 +1,8 @@
-# terminal-user-pty-lifecycle
+# Terminal User PTY Lifecycle Proof
 
-Proof for `.agents/specs/00009-terminal-plugin/`.
+This proof checks the C4OS user-terminal lifecycle and its separation from
+runtime tool activity. It is self-contained and does not depend on a separate
+planning record.
 
 ## Question
 

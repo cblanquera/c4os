@@ -5,8 +5,8 @@ Updated: 2026-06-24
 
 ## Purpose
 
-This proof isolates the TASK-011 terminal UI question raised during review:
-the Terminal tab should behave visually like a terminal transcript, not like a
+This proof isolates the C4OS terminal UI question raised during review: the
+Terminal surface should behave visually like a terminal transcript, not like a
 form above separated output panes.
 
 ## How To Review

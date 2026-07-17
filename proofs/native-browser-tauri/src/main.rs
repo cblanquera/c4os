@@ -521,7 +521,7 @@ fn write_evidence(
         "unresolvedRisks": [
             "remote internet navigation was represented by a second loopback origin, not a live external website",
             "Windows and Linux WebView behavior remains untested",
-            "production embedding shape inside the round-003 right rail remains a later product slice",
+            "production embedding in the C4OS Browser surface remains a later product slice",
             "downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope"
         ],
         "promotionDecision": promotion_decision
@@ -532,7 +532,7 @@ Status: {status}\n\
 Started: {started_at}\n\
 Finished: {finished_at}\n\n\
 ## Scope\n\n\
-Disposable Tauri-native WebView isolation POC for `item-049` / `TASK-013`. \
+Disposable Tauri-native WebView isolation POC for the C4OS Browser surface. \
 This is not production Browser plugin implementation.\n\n\
 ## Checks\n\n\
 {checks}\n\
@@ -542,7 +542,7 @@ This is not production Browser plugin implementation.\n\n\
 - Remote internet navigation was represented by a second loopback origin, not a \
 live external website.\n\
 - Windows and Linux WebView behavior remains untested.\n\
-- Production embedding inside the round-003 right rail remains a later product \
+- Production embedding in the C4OS Browser surface remains a later product \
 slice.\n\
 - Downloads, persistent cookies, logged-in sessions, and browser automation \
 remain out of scope.\n\n\
@@ -568,8 +568,7 @@ remain out of scope.\n\n\
 }
 
 fn evidence_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("native-browser-tauri-evidence-2026-06-20.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native-browser-tauri-evidence-2026-06-20.md")
 }
 
 enum PageKind {

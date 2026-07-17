@@ -1,6 +1,7 @@
-# project-chat-sharing-across-workspaces
+# Project Chat Sharing Across Workspaces Proof
 
-Proof for `.agents/specs/00007-file-system-plugin/`.
+This proof checks how C4OS shares project chat state across workspace files. It
+is self-contained and does not depend on a separate planning record.
 
 ## Question
 

@@ -1,6 +1,7 @@
-# fs-workspace-file-and-relink
+# File-System Workspace File and Relink Proof
 
-Proof for `.agents/specs/00007-file-system-plugin/`.
+This proof checks C4OS workspace-file and project-relink behavior. It is
+self-contained and does not depend on a separate planning record.
 
 ## Question
 

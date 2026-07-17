@@ -6,7 +6,7 @@ Finished: SystemTime { tv_sec: 1781963643, tv_nsec: 626263000 }
 
 ## Scope
 
-Disposable Tauri-native WebView isolation POC for `item-049` / `TASK-013`. This is not production Browser plugin implementation.
+Disposable Tauri-native WebView isolation POC for the C4OS Browser surface. This is not production Browser implementation.
 
 ## Checks
 
@@ -29,7 +29,7 @@ Disposable Tauri-native WebView isolation POC for `item-049` / `TASK-013`. This 
 
 - Remote internet navigation was represented by a second loopback origin, not a live external website.
 - Windows and Linux WebView behavior remains untested.
-- Production embedding inside the round-003 right rail remains a later product slice.
+- Production embedding in the C4OS Browser surface remains a later product slice.
 - Downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope.
 
 ## Promotion Decision
@@ -366,7 +366,7 @@ Do not promote to production Browser plugin. Tauri WebviewWindow navigation/stat
   "unresolvedRisks": [
     "remote internet navigation was represented by a second loopback origin, not a live external website",
     "Windows and Linux WebView behavior remains untested",
-    "production embedding shape inside the round-003 right rail remains a later product slice",
+    "production embedding in the C4OS Browser surface remains a later product slice",
     "downloads, persistent cookies, logged-in sessions, and browser automation remain out of scope"
   ]
 }
