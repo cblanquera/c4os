@@ -4,7 +4,7 @@
 
 - Revision folder: `wireframes/r013-capability-aware-chat/`
 - Revision: `r013-capability-aware-chat`
-- Status: Accepted clickable grayscale revision through Review Round 4, with a chat-session search case study pending Review Round 7 on 2026-07-18; copied forward from `wireframes/r012-cleanup/` before capability-aware changes.
+- Status: Complete clickable grayscale revision accepted through Review Round 7 on 2026-07-18; copied forward from `wireframes/r012-cleanup/` before capability-aware changes.
 - Product area: Capability-aware chat composition, model selection, response activity, run provenance, and simplified approvals.
 - Requested scope:
   - Preserve the accepted r012 product surface and static SPA architecture.

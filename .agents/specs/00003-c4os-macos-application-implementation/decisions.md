@@ -52,7 +52,7 @@ State: Accepted by the user 2026-07-18. Chat and Reply submit natural-language A
 
 ### D-007 — Keep chat search results inside the project/session navigator
 
-State: Accepted by the user 2026-07-18. Search filters nested chat-session titles in place in the left panel. It shows matching sessions beneath their owning Projects and hides Projects with no match. It does not open a separate results page or replace the center workspace. The user assigned its rendered wireframe update to another Codex task.
+State: Accepted by the user 2026-07-18 and reconciled to the complete accepted r013 revision. A non-empty chat-session search replaces the Projects heading and hierarchy in the left navigator with flat session-title results. Every result identifies its owning Project. Opening a result preserves the search query and keeps the selected Chat in the center workspace rather than opening a search-results page. Explicit clear or Escape restores Projects with its prior ordering and expansion state.
 
 ### D-008 — Scope terminal shells to one chat
 

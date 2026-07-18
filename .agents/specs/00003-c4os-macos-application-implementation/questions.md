@@ -40,12 +40,12 @@ This is the lossless resumable ledger for the Spec 00003 grill pass. Evidence-re
 - **User answer:** “Acceptable answer. This will need to be checked during human acceptance phase once implemented and verified.”
 - **Follow-up:** Q-014 is resolved; ART-001 and ART-007 retain the required post-verification human acceptance.
 ### Q-006 — Chat search results
-- **Status:** accepted-decision; rendered update owned by another task.
+- **Status:** accepted-decision; reconciled to the complete accepted r013 revision.
 - **Source:** user, context, wireframe.
 - **Question:** “When I search for chat sessions, where do the results displayed?”
-- **Evidence answer:** Results remain in the left project/session navigator. The list filters nested session titles in place, shows matches beneath their owning Projects, and hides Projects with no match. The center workspace does not become a search-results page. See D-007.
+- **Evidence answer:** Results remain in the left project/session navigator. A non-empty query replaces the Projects heading and hierarchy with flat session-title results, and every result identifies its owning Project. Opening a result preserves the query and keeps the selected Chat in the center workspace. Explicit clear or Escape restores Projects with its prior ordering and expansion state. See D-007.
 - **User answer:** “We need to update the wireframes to reflect this.”
-- **Coordination note:** The user is updating the wireframe in another Codex task; this Spec pass does not edit or claim verification of that artifact.
+- **Reconciliation note:** The complete r013 wireframe through Review Round 7 now carries this accepted behavior and its deterministic verification record.
 - **Decision update:** D-007.
 ### Q-007 — Terminal and Browser sharing scope
 - **Status:** accepted-decision.

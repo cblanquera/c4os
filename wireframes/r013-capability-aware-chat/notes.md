@@ -40,9 +40,9 @@
 - Confirmed the checked route reports no console warnings or errors.
 - Confirmed `script.js` passes Node syntax validation and the scoped wireframe/KB changes pass `git diff --check`.
 
-### Approval Path
+### Approval
 
-- Approval of Review Round 7 accepts the chat-session search replacement, result, and clear behavior and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Further minor feedback remains in r013; a materially different navigation model creates r014.
+- Accepted by the user's complete-latest-r013 instruction on 2026-07-18. Review Round 7's chat-session search replacement, result, activation, and clear behavior is part of the implementation-handoff-ready r013 baseline. Further minor feedback remains in r013; a materially different navigation model creates r014.
 
 ## Review Round 6 — 2026-07-18 — Annotated provider and branch refinements
 
@@ -81,9 +81,9 @@
 - Confirmed the checked route reports no console warnings or errors.
 - Confirmed `script.js` passes Node syntax validation and the scoped wireframe/KB changes pass `git diff --check`.
 
-### Approval Path
+### Approval
 
-- Approval of Review Round 6 accepts the annotated provider and branch refinements and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Further minor feedback remains in r013; a materially different flow creates r014.
+- Accepted by the user's complete-latest-r013 instruction on 2026-07-18. Review Round 6's annotated provider and branch refinements are part of the implementation-handoff-ready r013 baseline. Further minor feedback remains in r013; a materially different flow creates r014.
 
 ## Review Round 5 — 2026-07-18 — Provider-to-model navigation
 
@@ -127,9 +127,9 @@
 - Confirmed the checked route reported no console warnings or errors.
 - Confirmed `script.js` passes Node syntax validation and the scoped wireframe changes pass `git diff --check`.
 
-### Approval Path
+### Approval
 
-- Approval of Review Round 5 accepts provider-to-model navigation and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Requested refinements remain in r013 when minor or create r014 if they materially change the flow.
+- Accepted by the user's complete-latest-r013 instruction on 2026-07-18. Review Round 5's provider-to-model navigation is part of the implementation-handoff-ready r013 baseline. Requested refinements remain in r013 when minor or create r014 if they materially change the flow.
 
 ## Review Round 4 — 2026-07-18 — Context-window provenance
 
@@ -180,7 +180,7 @@
 - Synchronized capability-aware Chat, Models, approvals, policy groups/exceptions, honest activity, provenance, deterministic fixtures, and superseded decisions into the narrow owning Context and Reference Files.
 - Classified provider/evidence data, conversions, context usage, service behavior, and persistence as simulated-only; deferred model price/latency signals and an exception detail drawer to a later accepted revision.
 - Agent Workspace validation passed with the pre-existing preferred-length warning for `specs/00001-c4os-ai-harness-research/journeys.md`.
-- Wide and narrow rendered checks, checked responsive breakpoints, and console state are recorded in Rounds 1–4. The static grayscale wireframe does not implement the accepted platform-native light/dark contract, so macOS, Windows, Linux, and live theme propagation remain unverified production acceptance work rather than r013 claims.
+- Wide and narrow rendered checks, checked responsive breakpoints, and console state are recorded in Rounds 1–7. The static grayscale wireframe does not implement the accepted platform-native light/dark contract, so macOS, Windows, Linux, and live theme propagation remain unverified production acceptance work rather than r013 claims.
 
 ## Review Round 3 — 2026-07-18 — Resize containment and attachment alignment
 

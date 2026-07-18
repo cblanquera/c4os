@@ -99,7 +99,7 @@ Full-screen terminal programs, password-entry flows, browser sub-tabs, multiple 
 
 - Processed sources: every revision-root `notes.md` and nested `qa/notes.md` from r001 through r013, plus the complete r012 and r013 specs and rendered artifact sources.
 - r012 was browser-verified with no console errors across the workspace, Providers, Plugins, onboarding, and all fourteen workflow launcher destinations.
-- r013 was browser-verified across capability-aware Chat, Models, Configuration, Advanced Policies, responsive toolbar states, and Chat information with no reported console errors or document-level overflow at the checked widths.
+- r013 was browser-verified across capability-aware Chat, Models, Configuration, Advanced Policies, responsive toolbar states, Chat information, provider-to-model navigation, provider/branch refinements, and chat-session search with no reported console errors or document-level overflow at the checked widths.
 - Earlier review limitations are preserved in the decision ledger but do not override later verified behavior.
 - The platform-native theme and system-following light/dark requirement comes from the user's accepted direction on 2026-07-18 and supersedes grayscale-only presentation requirements in structural wireframes.
 - The macOS feasibility fallback, semantic-token, standard-decoration, native Settings-menu, and representative visual-matrix results were accepted on 2026-07-18. Detailed target qualifications remain in the platform visual and theme reference.

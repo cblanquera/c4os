@@ -23,7 +23,7 @@ C4OS follows the host operating system's visual language and live light/dark pre
 ## Non-Goals
 
 - Redesigning the C4OS information architecture or interaction model.
-- Changing `wireframes/r012-cleanup/` or the pending r013 revision.
+- Changing `wireframes/r012-cleanup/` or the then-pending r013 revision.
 - Implementing the production theme system during research setup.
 - Reopening runtime, adapter, policy, or model-capability decisions from Frozen spec `00001`.
 - Treating macOS-only evidence as proof for Windows or Linux.
