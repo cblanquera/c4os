@@ -1,0 +1,6 @@
+{
+  "name": "settings-extension",
+  "version": "1.0.0",
+  "description": "C4OS settings extension fixture",
+  "settings": "./settings.json"
+}

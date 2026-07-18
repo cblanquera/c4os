@@ -1,0 +1,2 @@
+model = "gpt-nested"
+sandbox_mode = "workspace-write"

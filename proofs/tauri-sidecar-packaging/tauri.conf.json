@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "C4OS Sidecar Packaging Proof",
+  "version": "0.1.0",
+  "identifier": "com.cblanquera.c4os.sidecar-packaging-proof",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["../native-browser-tauri/icons/icon.png"],
+    "externalBin": ["binaries/c4os-sidecar"]
+  }
+}

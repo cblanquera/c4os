@@ -1,0 +1,7 @@
+{
+  "name": "app-mcp",
+  "version": "1.0.0",
+  "description": "App and MCP fixture",
+  "apps": "./.app.json",
+  "mcpServers": "./.mcp.json"
+}

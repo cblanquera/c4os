@@ -1,0 +1,56 @@
+{
+  "name": "c4os-proof-marketplace",
+  "interface": {
+    "displayName": "C4OS Proof Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "skills-only",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skills-only"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "app-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/app-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "settings-extension",
+      "source": {
+        "source": "local",
+        "path": "./plugins/settings-extension"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "hooks",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hooks"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

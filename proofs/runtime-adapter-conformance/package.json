@@ -1,0 +1,16 @@
+{
+  "name": "c4os-runtime-adapter-conformance-proof",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test conformance.test.mjs pi-live.test.mjs",
+    "smoke:opencode": "node opencode-live.mjs",
+    "proof:opencode-permission": "node opencode-permission-live.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@opencode-ai/sdk": "1.18.3",
+    "opencode-ai": "1.18.3"
+  }
+}

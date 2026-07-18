@@ -1,0 +1,6 @@
+{
+  "name": "skills-only",
+  "version": "1.0.0",
+  "description": "One portable skill",
+  "skills": "./skills/"
+}

@@ -1,0 +1,12 @@
+model = "gpt-user"
+sandbox_mode = "read-only"
+notify = ["desktop-notify"]
+unknown_user_key = "preserve-as-diagnostic"
+
+[mcp_servers.docs]
+command = "node"
+args = ["docs-server.mjs"]
+
+[model_providers.proxy]
+base_url = "https://proxy.example/v1"
+env_key = "PROXY_API_KEY"

@@ -1,23 +1,23 @@
 # Raw Wry Native Browser Isolation POC Evidence: 2026-06-20
 
 Status: passed-with-wry-ipc-warning
-Started: SystemTime { tv_sec: 1781963621, tv_nsec: 648892000 }
-Finished: SystemTime { tv_sec: 1781963624, tv_nsec: 300962000 }
+Started: SystemTime { tv_sec: 1784337445, tv_nsec: 938484000 }
+Finished: SystemTime { tv_sec: 1784337450, tv_nsec: 576045000 }
 
 ## Scope
 
-Disposable raw Wry/native WebView isolation POC for the C4OS Browser surface. This is not production Browser implementation.
+Disposable raw Wry/native WebView isolation POC for the C4OS Browser surface. This is not production Browser plugin implementation.
 
 ## Checks
 
-- PASS: native surface opens local preview (327ms)
-- PASS: controller loads remote-like URL (1ms)
-- PASS: native surface opens remote-like URL (54ms)
+- PASS: native surface opens local preview (1825ms)
+- PASS: controller loads remote-like URL (0ms)
+- PASS: native surface opens remote-like URL (37ms)
 - PASS: native boundary reports loading and loaded states (0ms)
 - PASS: browser page has no Tauri IPC internals or host command access (0ms)
-- PASS: privileged protocols are blocked (8ms)
-- PASS: controller loads error URL (2ms)
-- PASS: native boundary reports error state (2034ms)
+- PASS: privileged protocols are blocked (14ms)
+- PASS: controller loads error URL (0ms)
+- PASS: native boundary reports error state (2045ms)
 - PASS: native boundary reports stopped state (0ms)
 
 ## Security Boundary Findings
@@ -44,12 +44,12 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
 {
   "checks": [
     {
-      "duration_ms": 327,
+      "duration_ms": 1825,
       "evidence": {
         "report": {
           "c4os_bridge": false,
           "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-          "href": "http://127.0.0.1:63268/",
+          "href": "http://127.0.0.1:52077/",
           "label": "local-preview",
           "leaked_secret": false,
           "opener_visible": false,
@@ -64,21 +64,21 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "status": "pass"
     },
     {
-      "duration_ms": 1,
+      "duration_ms": 0,
       "evidence": {
-        "url": "http://127.0.0.1:63269/"
+        "url": "http://127.0.0.1:52078/"
       },
       "name": "controller loads remote-like URL",
       "status": "pass"
     },
     {
-      "duration_ms": 54,
+      "duration_ms": 37,
       "evidence": {
-        "currentUrl": "http://127.0.0.1:63269/",
+        "currentUrl": "http://127.0.0.1:52078/",
         "report": {
           "c4os_bridge": false,
           "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-          "href": "http://127.0.0.1:63269/",
+          "href": "http://127.0.0.1:52078/",
           "label": "remote-like-preview",
           "leaked_secret": false,
           "opener_visible": false,
@@ -99,13 +99,13 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           "event": "Finished",
           "kind": "page-load",
           "status": "loaded",
-          "url": "http://127.0.0.1:63269/"
+          "url": "http://127.0.0.1:52077/"
         },
         "loading": {
           "event": "Started",
           "kind": "page-load",
           "status": "loading",
-          "url": "http://127.0.0.1:63268/"
+          "url": "http://127.0.0.1:52077/"
         }
       },
       "name": "native boundary reports loading and loaded states",
@@ -118,7 +118,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           {
             "c4os_bridge": false,
             "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-            "href": "http://127.0.0.1:63268/",
+            "href": "http://127.0.0.1:52077/",
             "label": "local-preview",
             "leaked_secret": false,
             "opener_visible": false,
@@ -131,7 +131,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           {
             "c4os_bridge": false,
             "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-            "href": "http://127.0.0.1:63269/",
+            "href": "http://127.0.0.1:52078/",
             "label": "remote-like-preview",
             "leaked_secret": false,
             "opener_visible": false,
@@ -147,12 +147,12 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "status": "pass"
     },
     {
-      "duration_ms": 8,
+      "duration_ms": 14,
       "evidence": {
         "blocked": [
           {
             "blockedBy": "native-controller-policy",
-            "currentUrlBefore": "http://127.0.0.1:63269/",
+            "currentUrlBefore": "http://127.0.0.1:52078/",
             "kind": "blocked",
             "reason": "blocked protocol: file",
             "scheme": "file",
@@ -161,7 +161,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           },
           {
             "blockedBy": "native-controller-policy",
-            "currentUrlBefore": "http://127.0.0.1:63269/",
+            "currentUrlBefore": "http://127.0.0.1:52078/",
             "kind": "blocked",
             "reason": "blocked protocol: javascript",
             "scheme": "javascript",
@@ -170,7 +170,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           },
           {
             "blockedBy": "native-controller-policy",
-            "currentUrlBefore": "http://127.0.0.1:63269/",
+            "currentUrlBefore": "http://127.0.0.1:52078/",
             "kind": "blocked",
             "reason": "blocked protocol: data",
             "scheme": "data",
@@ -179,7 +179,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
           },
           {
             "blockedBy": "native-controller-policy",
-            "currentUrlBefore": "http://127.0.0.1:63269/",
+            "currentUrlBefore": "http://127.0.0.1:52078/",
             "kind": "blocked",
             "reason": "blocked protocol: tauri",
             "scheme": "tauri",
@@ -192,7 +192,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "status": "pass"
     },
     {
-      "duration_ms": 2,
+      "duration_ms": 0,
       "evidence": {
         "url": "http://127.0.0.1:9/native-browser-wry-poc-error"
       },
@@ -200,7 +200,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "status": "pass"
     },
     {
-      "duration_ms": 2034,
+      "duration_ms": 2045,
       "evidence": {
         "currentUrl": "about:blank",
         "kind": "load-error",
@@ -222,7 +222,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "status": "pass"
     }
   ],
-  "finishedAt": "SystemTime { tv_sec: 1781963624, tv_nsec: 300962000 }",
+  "finishedAt": "SystemTime { tv_sec: 1784337450, tv_nsec: 576045000 }",
   "nativeEvents": [
     {
       "blockedBy": null,
@@ -230,19 +230,19 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "reason": null,
       "scheme": "http",
       "status": "loading",
-      "url": "http://127.0.0.1:63268/"
+      "url": "http://127.0.0.1:52077/"
     },
     {
       "event": "Started",
       "kind": "page-load",
       "status": "loading",
-      "url": "http://127.0.0.1:63268/"
+      "url": "http://127.0.0.1:52077/"
     },
     {
       "event": "Finished",
       "kind": "page-load",
       "status": "loaded",
-      "url": "http://127.0.0.1:63269/"
+      "url": "http://127.0.0.1:52077/"
     },
     {
       "blockedBy": null,
@@ -250,23 +250,23 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
       "reason": null,
       "scheme": "http",
       "status": "loading",
-      "url": "http://127.0.0.1:63269/"
+      "url": "http://127.0.0.1:52078/"
     },
     {
       "event": "Started",
       "kind": "page-load",
       "status": "loading",
-      "url": "http://127.0.0.1:63269/"
+      "url": "http://127.0.0.1:52078/"
     },
     {
       "event": "Finished",
       "kind": "page-load",
       "status": "loaded",
-      "url": "http://127.0.0.1:63269/"
+      "url": "http://127.0.0.1:52078/"
     },
     {
       "blockedBy": "native-controller-policy",
-      "currentUrlBefore": "http://127.0.0.1:63269/",
+      "currentUrlBefore": "http://127.0.0.1:52078/",
       "kind": "blocked",
       "reason": "blocked protocol: file",
       "scheme": "file",
@@ -275,7 +275,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     },
     {
       "blockedBy": "native-controller-policy",
-      "currentUrlBefore": "http://127.0.0.1:63269/",
+      "currentUrlBefore": "http://127.0.0.1:52078/",
       "kind": "blocked",
       "reason": "blocked protocol: javascript",
       "scheme": "javascript",
@@ -284,7 +284,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     },
     {
       "blockedBy": "native-controller-policy",
-      "currentUrlBefore": "http://127.0.0.1:63269/",
+      "currentUrlBefore": "http://127.0.0.1:52078/",
       "kind": "blocked",
       "reason": "blocked protocol: data",
       "scheme": "data",
@@ -293,7 +293,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     },
     {
       "blockedBy": "native-controller-policy",
-      "currentUrlBefore": "http://127.0.0.1:63269/",
+      "currentUrlBefore": "http://127.0.0.1:52078/",
       "kind": "blocked",
       "reason": "blocked protocol: tauri",
       "scheme": "tauri",
@@ -338,7 +338,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     {
       "c4os_bridge": false,
       "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-      "href": "http://127.0.0.1:63268/",
+      "href": "http://127.0.0.1:52077/",
       "label": "local-preview",
       "leaked_secret": false,
       "opener_visible": false,
@@ -351,7 +351,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     {
       "c4os_bridge": false,
       "command_status": "wry-ipc-error:undefined is not an object (evaluating 'window.webkit.messageHandlers')",
-      "href": "http://127.0.0.1:63269/",
+      "href": "http://127.0.0.1:52078/",
       "label": "remote-like-preview",
       "leaked_secret": false,
       "opener_visible": false,
@@ -368,7 +368,7 @@ Do not promote directly to the production Browser surface yet. Raw Wry on macOS 
     "scope": "disposable raw Wry POC only; no production Browser plugin enabled",
     "stateBoundary": "Wry page-load callbacks, URL reads, controller policy, timeout, and close produced loading, loaded, current URL, blocked, error, and stopped states"
   },
-  "startedAt": "SystemTime { tv_sec: 1781963621, tv_nsec: 648892000 }",
+  "startedAt": "SystemTime { tv_sec: 1784337445, tv_nsec: 938484000 }",
   "status": "passed-with-wry-ipc-warning",
   "summary": {
     "failed": 0,

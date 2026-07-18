@@ -1,0 +1,9 @@
+model = "gpt-project"
+approval_policy = "on-request"
+notify = ["project-command"]
+model_provider = "project-proxy"
+raw_api_key = "sk-do-not-import"
+future_key = true
+
+[hooks]
+source = "./hooks.json"

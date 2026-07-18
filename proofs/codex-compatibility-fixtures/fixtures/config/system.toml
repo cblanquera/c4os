@@ -1,0 +1,3 @@
+model = "gpt-system"
+approval_policy = "untrusted"
+web_search = "cached"

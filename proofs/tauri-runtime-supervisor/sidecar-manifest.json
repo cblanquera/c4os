@@ -1,0 +1,7 @@
+{
+  "runtime": "proof-runtime",
+  "relativePath": "mock-sidecar.mjs",
+  "version": "1.0.0-proof",
+  "sha256": "2055d7852c2786cc7ee6a5bfc4cb2ff80e656a9de251f850c36ba1d0db868bef",
+  "signed": true
+}
