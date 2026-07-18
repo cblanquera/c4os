@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "qa:dev": "VITE_C4OS_QA_FIXTURES=1 vite --host 127.0.0.1 --port 1420 --strictPort",
+    "qa:test-server": "npm run build:qa && vite preview --host 127.0.0.1 --port 1420 --strictPort",
     "build:web": "tsc -b && vite build",
     "build:qa": "VITE_C4OS_QA_FIXTURES=1 tsc -b && VITE_C4OS_QA_FIXTURES=1 vite build",
     "build": "npm run protocol:check && npm run build:web && cargo build --workspace",

@@ -17,6 +17,8 @@ use thiserror::Error;
 pub const DATABASE_BUSY_TIMEOUT: Duration = Duration::from_millis(1_500);
 pub const DATABASE_QUEUE_CAPACITY: usize = 32;
 pub const MAX_READ_RECORDS: usize = 250;
+pub const MAX_SECURITY_CURRENT_RECORDS: usize = 4_096;
+pub const MAX_SECURITY_BATCH_RECORDS: usize = MAX_SECURITY_CURRENT_RECORDS;
 pub const MAX_CONCURRENT_AUXILIARY_CONNECTIONS: usize = 32;
 pub const MAX_TEXT_FIELD_BYTES: usize = 1_048_576;
 pub const MAX_SNAPSHOT_TEXT_BYTES: usize = 4_194_304;
@@ -24,7 +26,7 @@ pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
-const APP_SCHEMA_VERSION: usize = 3;
+const APP_SCHEMA_VERSION: usize = 4;
 const WORKSPACE_SCHEMA_VERSION: usize = 2;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -282,6 +284,39 @@ pub struct DiagnosticRecord {
     pub created_at: i64,
 }
 
+/// Durable current state for an Action Gateway security record. The canonical
+/// document is the complete serialized authorization, approval, intent,
+/// decision, or result record. Every save also appends an immutable event row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecurityJournalRecord {
+    pub record_kind: String,
+    pub record_id: String,
+    pub run_id: String,
+    pub action_id: String,
+    pub state: String,
+    pub canonical_document: String,
+    pub recorded_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecurityJournalEvent {
+    pub event_id: i64,
+    pub record_kind: String,
+    pub record_id: String,
+    pub run_id: String,
+    pub action_id: String,
+    pub state: String,
+    pub canonical_document: String,
+    pub recorded_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecurityJournalPage {
+    pub events: Vec<SecurityJournalEvent>,
+    /// Pass this exclusive event identifier to the next page request.
+    pub next_before_event_id: Option<i64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleState {
     Active,
@@ -458,6 +493,10 @@ enum WriteCommand {
         record: DiagnosticRecord,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    SaveSecurityRecords {
+        records: Vec<SecurityJournalRecord>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     Inactivate {
         entity: InactiveEntity,
         inactivated_at: i64,
@@ -624,6 +663,75 @@ impl DatabaseActor {
     pub fn record_diagnostic(&self, record: DiagnosticRecord) -> DatabaseResult<u64> {
         self.require_workspace()?;
         self.request(|reply| WriteCommand::RecordDiagnostic { record, reply })
+    }
+
+    /// Saves the latest state and appends the same canonical record to the
+    /// immutable security event journal at one serialized writer barrier.
+    pub fn save_security_record(&self, record: SecurityJournalRecord) -> DatabaseResult<u64> {
+        self.save_security_records(vec![record])
+    }
+
+    pub fn save_security_records(
+        &self,
+        records: Vec<SecurityJournalRecord>,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        if records.is_empty() || records.len() > MAX_SECURITY_BATCH_RECORDS {
+            return Err(DatabaseError::InvalidInput(format!(
+                "security batch must contain between 1 and {MAX_SECURITY_BATCH_RECORDS} records"
+            )));
+        }
+        self.request(|reply| WriteCommand::SaveSecurityRecords { records, reply })
+    }
+
+    pub fn security_records(
+        &self,
+        query: SnapshotQuery,
+    ) -> DatabaseResult<Vec<SecurityJournalRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_security_records(&connection, query)
+    }
+
+    pub fn security_events(
+        &self,
+        query: SnapshotQuery,
+    ) -> DatabaseResult<Vec<SecurityJournalEvent>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        let page = read_security_event_page(&connection, None, query)?;
+        if page.next_before_event_id.is_some() {
+            return Err(DatabaseError::Validation(
+                "security event read is truncated; use security_event_page with its cursor".into(),
+            ));
+        }
+        Ok(page.events)
+    }
+
+    pub fn security_event_page(
+        &self,
+        before_event_id: Option<i64>,
+        query: SnapshotQuery,
+    ) -> DatabaseResult<SecurityJournalPage> {
+        self.require_app()?;
+        if before_event_id.is_some_and(|value| value <= 0) {
+            return Err(DatabaseError::InvalidInput(
+                "security event cursor must be positive".into(),
+            ));
+        }
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_security_event_page(&connection, before_event_id, query)
+    }
+
+    /// Returns the complete bounded set needed for fail-closed gateway restart.
+    pub fn recoverable_security_records(&self) -> DatabaseResult<Vec<SecurityJournalRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_recoverable_security_records(&connection)
     }
 
     pub fn inactivate(&self, entity: InactiveEntity, inactivated_at: i64) -> DatabaseResult<u64> {
@@ -861,6 +969,9 @@ fn writer_loop(
                 reply,
                 write_diagnostic(&mut connection, &descriptor.kind, record),
             ),
+            WriteCommand::SaveSecurityRecords { records, reply } => {
+                reply_result(reply, write_security_records(&mut connection, records))
+            }
             WriteCommand::Inactivate {
                 entity,
                 inactivated_at,
@@ -1168,6 +1279,35 @@ fn app_migrations() -> Migrations<'static> {
             );",
         )
         .comment("durable app configuration last-known-good document"),
+        M::up(
+            "CREATE TABLE security_records (
+                record_kind TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                canonical_document TEXT NOT NULL,
+                record_sha256 TEXT NOT NULL CHECK (length(record_sha256) = 64),
+                recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0),
+                PRIMARY KEY (record_kind, record_id)
+            );
+            CREATE TABLE security_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_kind TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                canonical_document TEXT NOT NULL,
+                record_sha256 TEXT NOT NULL CHECK (length(record_sha256) = 64),
+                recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0)
+            );
+            CREATE INDEX security_records_run_action
+                ON security_records(run_id, action_id, record_kind, record_id);
+            CREATE INDEX security_events_run_action_time
+                ON security_events(run_id, action_id, recorded_at_ms, event_id);",
+        )
+        .comment("app-owned Action Gateway current state and append-only transition journal"),
     ])
 }
 
@@ -1653,6 +1793,8 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "recent_workspaces",
             "app_diagnostics",
             "app_configuration_lkg",
+            "security_records",
+            "security_events",
             "durable_generation",
         ],
         DatabaseKind::Workspace { .. } => &[
@@ -1680,6 +1822,66 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
     validate_compiled_schema(connection, kind)?;
     if matches!(kind, DatabaseKind::App) {
         let _ = read_app_configuration_lkg(connection)?;
+        validate_security_journal(connection)?;
+    }
+    Ok(())
+}
+
+fn validate_security_journal(connection: &Connection) -> DatabaseResult<()> {
+    let count: i64 = connection.query_row("SELECT COUNT(*) FROM security_records", [], |row| {
+        row.get(0)
+    })?;
+    if !(0..=MAX_SECURITY_CURRENT_RECORDS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "security current-state count {count} exceeds {MAX_SECURITY_CURRENT_RECORDS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+         FROM security_records",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, i64>(7)?,
+        ))
+    })?;
+    for row in rows {
+        let (
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            digest,
+            recorded_at_ms,
+        ) = row?;
+        let record = SecurityJournalRecord {
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            recorded_at_ms: u64::try_from(recorded_at_ms).map_err(|_| {
+                DatabaseError::Validation("negative security timestamp in security_records".into())
+            })?,
+        };
+        validate_security_record(&record)?;
+        if security_record_digest(&record) != digest {
+            return Err(DatabaseError::Validation(format!(
+                "security journal digest mismatch in security_records for {}/{}",
+                record.record_kind, record.record_id
+            )));
+        }
     }
     Ok(())
 }
@@ -2183,6 +2385,113 @@ fn write_diagnostic(
         ],
     )?;
     let generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(generation)
+}
+
+fn write_security_records(
+    connection: &mut Connection,
+    records: Vec<SecurityJournalRecord>,
+) -> DatabaseResult<u64> {
+    if records.is_empty() || records.len() > MAX_SECURITY_BATCH_RECORDS {
+        return Err(DatabaseError::InvalidInput(format!(
+            "security batch must contain between 1 and {MAX_SECURITY_BATCH_RECORDS} records"
+        )));
+    }
+    let mut keys = HashSet::new();
+    for record in &records {
+        validate_security_record(record)?;
+        if !keys.insert((record.record_kind.clone(), record.record_id.clone())) {
+            return Err(DatabaseError::InvalidInput(
+                "security batch repeats a record identity".into(),
+            ));
+        }
+    }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current_count: i64 =
+        transaction.query_row("SELECT COUNT(*) FROM security_records", [], |row| {
+            row.get(0)
+        })?;
+    let new_count = records.iter().try_fold(0_i64, |count, record| {
+        let exists: i64 = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM security_records
+                           WHERE record_kind = ?1 AND record_id = ?2)",
+            params![record.record_kind, record.record_id],
+            |row| row.get(0),
+        )?;
+        Ok::<_, rusqlite::Error>(count + i64::from(exists == 0))
+    })?;
+    if current_count
+        .checked_add(new_count)
+        .is_none_or(|count| count > MAX_SECURITY_CURRENT_RECORDS as i64)
+    {
+        return Err(DatabaseError::InvalidInput(format!(
+            "security current-state capacity {MAX_SECURITY_CURRENT_RECORDS} reached"
+        )));
+    }
+
+    for record in records {
+        let recorded_at_ms = i64::try_from(record.recorded_at_ms).map_err(|_| {
+            DatabaseError::InvalidInput(
+                "security record timestamp exceeds SQLite's signed integer range".into(),
+            )
+        })?;
+        let previous = transaction
+            .query_row(
+                "SELECT run_id, action_id, state, recorded_at_ms
+                 FROM security_records WHERE record_kind = ?1 AND record_id = ?2",
+                params![record.record_kind, record.record_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        validate_security_transition(&record, previous.as_ref())?;
+        let record_sha256 = security_record_digest(&record);
+        transaction.execute(
+            "INSERT INTO security_records(
+                record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(record_kind, record_id) DO UPDATE SET
+                state = excluded.state,
+                canonical_document = excluded.canonical_document,
+                record_sha256 = excluded.record_sha256,
+                recorded_at_ms = excluded.recorded_at_ms",
+            params![
+                record.record_kind,
+                record.record_id,
+                record.run_id,
+                record.action_id,
+                record.state,
+                record.canonical_document,
+                record_sha256,
+                recorded_at_ms
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO security_events(
+                record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.record_kind,
+                record.record_id,
+                record.run_id,
+                record.action_id,
+                record.state,
+                record.canonical_document,
+                record_sha256,
+                recorded_at_ms
+            ],
+        )?;
+    }
+    let generation = bump_app_generation(&transaction)?;
     transaction.commit()?;
     Ok(generation)
 }
@@ -2767,6 +3076,29 @@ fn canonical_document_digest(document: &str) -> String {
     encoded
 }
 
+fn security_record_digest(record: &SecurityJournalRecord) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"c4os-security-record-v1\0");
+    for field in [
+        record.record_kind.as_bytes(),
+        record.record_id.as_bytes(),
+        record.run_id.as_bytes(),
+        record.action_id.as_bytes(),
+        record.state.as_bytes(),
+        record.canonical_document.as_bytes(),
+    ] {
+        hasher.update((field.len() as u64).to_le_bytes());
+        hasher.update(field);
+    }
+    hasher.update(record.recorded_at_ms.to_le_bytes());
+    let digest = hasher.finalize();
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
+}
+
 fn read_workspace_snapshot(
     connection: &Connection,
     workspace_id: &str,
@@ -3066,6 +3398,255 @@ fn read_diagnostics(
     Ok((records, truncated))
 }
 
+fn read_security_records(
+    connection: &Connection,
+    query: SnapshotQuery,
+) -> DatabaseResult<Vec<SecurityJournalRecord>> {
+    let mut statement = connection.prepare(
+        "SELECT record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+         FROM security_records
+         ORDER BY recorded_at_ms DESC, record_kind, record_id
+         LIMIT ?1",
+    )?;
+    let rows = statement.query_map([limit_plus_one(query.max_records)?], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, i64>(7)?,
+        ))
+    })?;
+    let mut records = Vec::new();
+    let mut bytes = 0_usize;
+    for row in rows {
+        let (
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            digest,
+            recorded_at_ms,
+        ) = row?;
+        let recorded_at_ms = u64::try_from(recorded_at_ms)
+            .map_err(|_| DatabaseError::Validation("negative security record timestamp".into()))?;
+        let record = SecurityJournalRecord {
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            recorded_at_ms,
+        };
+        if security_record_digest(&record) != digest {
+            return Err(DatabaseError::Validation(format!(
+                "security record {}/{} digest mismatch",
+                record.record_kind, record.record_id
+            )));
+        }
+        validate_security_record(&record)?;
+        bytes = bytes
+            .checked_add(security_record_text_bytes(&record))
+            .ok_or_else(|| {
+                DatabaseError::Validation("security record byte accounting overflowed".into())
+            })?;
+        if bytes > MAX_SNAPSHOT_TEXT_BYTES {
+            return Err(DatabaseError::Validation(format!(
+                "security record page exceeds {MAX_SNAPSHOT_TEXT_BYTES} bytes"
+            )));
+        }
+        records.push(record);
+    }
+    if records.len() > query.max_records {
+        return Err(DatabaseError::Validation(
+            "security current-state read is truncated; use the recoverable-state query or a narrower filter"
+                .into(),
+        ));
+    }
+    Ok(records)
+}
+
+fn read_security_event_page(
+    connection: &Connection,
+    before_event_id: Option<i64>,
+    query: SnapshotQuery,
+) -> DatabaseResult<SecurityJournalPage> {
+    let mut statement = connection.prepare(
+        "SELECT event_id, record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+         FROM security_events
+         WHERE (?1 IS NULL OR event_id < ?1)
+         ORDER BY event_id DESC LIMIT ?2",
+    )?;
+    let rows = statement.query_map(
+        params![before_event_id, limit_plus_one(query.max_records)?],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, i64>(8)?,
+            ))
+        },
+    )?;
+    let mut events = Vec::new();
+    let mut bytes = 0_usize;
+    let mut has_more = false;
+    for row in rows {
+        let (
+            event_id,
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            digest,
+            recorded_at_ms,
+        ) = row?;
+        let recorded_at_ms = u64::try_from(recorded_at_ms)
+            .map_err(|_| DatabaseError::Validation("negative security event timestamp".into()))?;
+        let current = SecurityJournalRecord {
+            record_kind: record_kind.clone(),
+            record_id: record_id.clone(),
+            run_id: run_id.clone(),
+            action_id: action_id.clone(),
+            state: state.clone(),
+            canonical_document: canonical_document.clone(),
+            recorded_at_ms,
+        };
+        if security_record_digest(&current) != digest {
+            return Err(DatabaseError::Validation(format!(
+                "security event {event_id} digest mismatch"
+            )));
+        }
+        validate_security_record(&current)?;
+        let next_bytes = bytes
+            .checked_add(security_record_text_bytes(&current))
+            .ok_or_else(|| {
+                DatabaseError::Validation("security event byte accounting overflowed".into())
+            })?;
+        if events.len() == query.max_records || next_bytes > MAX_SNAPSHOT_TEXT_BYTES {
+            has_more = true;
+            break;
+        }
+        bytes = next_bytes;
+        events.push(SecurityJournalEvent {
+            event_id,
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            recorded_at_ms,
+        });
+    }
+    let next_before_event_id = has_more
+        .then(|| events.last().map(|event| event.event_id))
+        .flatten();
+    Ok(SecurityJournalPage {
+        events,
+        next_before_event_id,
+    })
+}
+
+fn read_recoverable_security_records(
+    connection: &Connection,
+) -> DatabaseResult<Vec<SecurityJournalRecord>> {
+    let mut statement = connection.prepare(
+        "SELECT record_kind, record_id, run_id, action_id, state,
+                canonical_document, record_sha256, recorded_at_ms
+         FROM security_records current
+         WHERE (record_kind = 'authorization' AND state = 'issued')
+            OR (record_kind = 'approval-prompt' AND state IN ('pending', 'queued', 'approved'))
+            OR (record_kind = 'action-intent' AND state = 'effect-started'
+                AND NOT EXISTS (
+                    SELECT 1 FROM security_records result
+                    WHERE result.record_kind = 'action-result'
+                      AND result.action_id = current.action_id
+                ))
+         ORDER BY recorded_at_ms, record_kind, record_id
+         LIMIT ?1",
+    )?;
+    let limit = i64::try_from(MAX_SECURITY_CURRENT_RECORDS + 1)
+        .map_err(|_| DatabaseError::Validation("security recovery limit overflowed".into()))?;
+    let rows = statement.query_map([limit], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, i64>(7)?,
+        ))
+    })?;
+    let mut records = Vec::new();
+    let mut bytes = 0_usize;
+    for row in rows {
+        let (record_kind, record_id, run_id, action_id, state, canonical_document, digest, at) =
+            row?;
+        let record = SecurityJournalRecord {
+            record_kind,
+            record_id,
+            run_id,
+            action_id,
+            state,
+            canonical_document,
+            recorded_at_ms: u64::try_from(at).map_err(|_| {
+                DatabaseError::Validation("negative security recovery timestamp".into())
+            })?,
+        };
+        validate_security_record(&record)?;
+        if security_record_digest(&record) != digest {
+            return Err(DatabaseError::Validation(format!(
+                "security recovery record {}/{} digest mismatch",
+                record.record_kind, record.record_id
+            )));
+        }
+        bytes = bytes
+            .checked_add(security_record_text_bytes(&record))
+            .ok_or_else(|| {
+                DatabaseError::Validation("security recovery byte accounting overflowed".into())
+            })?;
+        if bytes > MAX_SNAPSHOT_TEXT_BYTES {
+            return Err(DatabaseError::Validation(format!(
+                "security recovery state exceeds {MAX_SNAPSHOT_TEXT_BYTES} bytes"
+            )));
+        }
+        records.push(record);
+    }
+    if records.len() > MAX_SECURITY_CURRENT_RECORDS {
+        return Err(DatabaseError::Validation(
+            "security recovery state exceeds its bounded capacity".into(),
+        ));
+    }
+    Ok(records)
+}
+
+fn security_record_text_bytes(record: &SecurityJournalRecord) -> usize {
+    record.record_kind.len()
+        + record.record_id.len()
+        + record.run_id.len()
+        + record.action_id.len()
+        + record.state.len()
+        + record.canonical_document.len()
+}
+
 fn validate_text_field(name: &str, value: &str, max_bytes: usize) -> DatabaseResult<()> {
     if value.len() > max_bytes {
         return Err(DatabaseError::InvalidInput(format!(
@@ -3130,6 +3711,200 @@ fn validate_diagnostic_record(record: &DiagnosticRecord) -> DatabaseResult<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_security_record(record: &SecurityJournalRecord) -> DatabaseResult<()> {
+    const KINDS: &[&str] = &[
+        "authorization",
+        "approval-prompt",
+        "action-intent",
+        "action-decision",
+        "action-result",
+    ];
+    if !KINDS.contains(&record.record_kind.as_str()) {
+        return Err(DatabaseError::InvalidInput(format!(
+            "unknown security record kind {}",
+            record.record_kind
+        )));
+    }
+    for (name, value) in [
+        ("security record_id", &record.record_id),
+        ("security run_id", &record.run_id),
+        ("security action_id", &record.action_id),
+        ("security state", &record.state),
+    ] {
+        require_nonempty(name, value)?;
+        validate_text_field(name, value, 256)?;
+        if value.chars().any(char::is_control) {
+            return Err(DatabaseError::InvalidInput(format!(
+                "{name} contains control characters"
+            )));
+        }
+    }
+    validate_text_field(
+        "security canonical document",
+        &record.canonical_document,
+        MAX_TEXT_FIELD_BYTES,
+    )?;
+    let document: serde_json::Value =
+        serde_json::from_str(&record.canonical_document).map_err(|_| {
+            DatabaseError::InvalidInput("security canonical document is not valid JSON".into())
+        })?;
+    let Some(envelope) = document.as_object() else {
+        return Err(DatabaseError::InvalidInput(
+            "security canonical document must be a JSON object".into(),
+        ));
+    };
+    let schema_version = envelope
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64);
+    let recorded_at_ms = envelope
+        .get("recordedAtMs")
+        .and_then(serde_json::Value::as_u64);
+    let matches_column = |field: &str, expected: &str| {
+        envelope.get(field).and_then(serde_json::Value::as_str) == Some(expected)
+    };
+    if schema_version != Some(1)
+        || recorded_at_ms != Some(record.recorded_at_ms)
+        || !matches_column("recordKind", &record.record_kind)
+        || !matches_column("recordId", &record.record_id)
+        || !matches_column("runId", &record.run_id)
+        || !matches_column("actionId", &record.action_id)
+        || !matches_column("state", &record.state)
+        || !envelope
+            .get("payload")
+            .is_some_and(serde_json::Value::is_object)
+    {
+        return Err(DatabaseError::InvalidInput(
+            "security canonical envelope does not match its indexed columns".into(),
+        ));
+    }
+    if security_document_has_raw_secret(
+        envelope
+            .get("payload")
+            .expect("payload presence was checked"),
+    ) {
+        return Err(DatabaseError::InvalidInput(
+            "security canonical document contains raw credential-like material".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_security_transition(
+    record: &SecurityJournalRecord,
+    previous: Option<&(String, String, String, i64)>,
+) -> DatabaseResult<()> {
+    if let Some((run_id, action_id, state, recorded_at_ms)) = previous {
+        if run_id != &record.run_id || action_id != &record.action_id {
+            return Err(DatabaseError::InvalidInput(
+                "security record identity cannot be rebound to another run or action".into(),
+            ));
+        }
+        if record.recorded_at_ms < u64::try_from(*recorded_at_ms).unwrap_or(u64::MAX) {
+            return Err(DatabaseError::InvalidInput(
+                "security record timestamp cannot move backwards".into(),
+            ));
+        }
+        if !allowed_security_transition(&record.record_kind, state, &record.state) {
+            return Err(DatabaseError::InvalidInput(format!(
+                "invalid {} security transition {state} -> {}",
+                record.record_kind, record.state
+            )));
+        }
+    } else if !allowed_initial_security_state(&record.record_kind, &record.state) {
+        return Err(DatabaseError::InvalidInput(format!(
+            "invalid initial {} security state {}",
+            record.record_kind, record.state
+        )));
+    }
+    Ok(())
+}
+
+fn allowed_initial_security_state(kind: &str, state: &str) -> bool {
+    match kind {
+        "authorization" => state == "issued",
+        "approval-prompt" => matches!(state, "pending" | "queued"),
+        "action-intent" => state == "proposed",
+        "action-decision" => matches!(state, "allow" | "ask" | "deny"),
+        "action-result" => matches!(
+            state,
+            "succeeded" | "failed" | "cancelled" | "denied" | "unknown-after-interruption"
+        ),
+        _ => false,
+    }
+}
+
+fn allowed_security_transition(kind: &str, from: &str, to: &str) -> bool {
+    match kind {
+        "authorization" => {
+            from == "issued"
+                && matches!(
+                    to,
+                    "consumed" | "expired" | "cancelled" | "revoked" | "invalidated"
+                )
+        }
+        "approval-prompt" => match from {
+            "queued" => matches!(to, "pending" | "expired" | "cancelled"),
+            "pending" => matches!(to, "approved" | "denied" | "expired" | "cancelled"),
+            "approved" => matches!(to, "completed" | "cancelled"),
+            _ => false,
+        },
+        "action-intent" => match from {
+            "proposed" => matches!(to, "effect-started" | "interrupted" | "effect-finished"),
+            "effect-started" => matches!(to, "effect-finished" | "interrupted"),
+            _ => false,
+        },
+        // Decisions and results are immutable terminal facts.
+        "action-decision" | "action-result" => false,
+        _ => false,
+    }
+}
+
+fn security_document_has_raw_secret(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+            let normalized = key
+                .chars()
+                .filter(|character| character.is_ascii_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>();
+            let sensitive_key = [
+                "password",
+                "passwd",
+                "secret",
+                "credential",
+                "token",
+                "cookie",
+                "authorization",
+                "apikey",
+            ]
+            .iter()
+            .any(|marker| normalized.contains(marker));
+            let safe_reference = normalized.ends_with("id")
+                || normalized.ends_with("hash")
+                || normalized.ends_with("reference")
+                || normalized.ends_with("kind")
+                || normalized.ends_with("state");
+            (sensitive_key && !safe_reference) || security_document_has_raw_secret(value)
+        }),
+        serde_json::Value::Array(values) => values.iter().any(security_document_has_raw_secret),
+        serde_json::Value::String(value) => {
+            let lower = value.to_ascii_lowercase();
+            [
+                "bearer ",
+                "basic ",
+                "cookie=",
+                "password=",
+                "passwd=",
+                "secret=",
+                "token=",
+            ]
+            .iter()
+            .any(|marker| lower.contains(marker))
+        }
+        _ => false,
+    }
 }
 
 fn sanitize_internal_diagnostic(message: &str, max_bytes: usize) -> String {

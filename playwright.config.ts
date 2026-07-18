@@ -18,9 +18,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run qa:dev",
+    command: "npm run qa:test-server",
     url: "http://127.0.0.1:1420",
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 240_000,
   },
 });

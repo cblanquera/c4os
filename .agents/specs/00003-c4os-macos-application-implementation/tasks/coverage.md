@@ -13,12 +13,12 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | UX-007 | 00007 | 00004, 00008, 00009, 00010 | open | Not yet recorded |
 | UX-008 | 00008 | 00006, 00007, 00009, 00010 | open | Not yet recorded |
 | UX-009 | 00015 | 00005, 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
-| UX-010 | 00003 | 00002, 00004, 00008 through 00014 | open | Not yet recorded |
+| UX-010 | 00003 | 00002, 00004, 00008 through 00014 | open | [Task 00003](00003-policy-credentials-action-gateway.md) production policy, credential, journal, and exact executor boundary acceptance passed; provider and facility integrations remain open. |
 | UX-011 | 00006 | 00007, 00009, 00010, 00015 | open | Not yet recorded |
-| UX-012 | 00003 | 00004, 00007, 00013 | open | Not yet recorded |
+| UX-012 | 00003 | 00004, 00007, 00013 | open | [Task 00003](00003-policy-credentials-action-gateway.md) four-preset, seven-group, exception, guardrail, activity, and native Advanced Policies acceptance passed; capability-aware Chat and Settings integration remain open. |
 | UX-013 | 00002 | 00003, 00011, 00012, 00014 | open | [Task 00002](00002-durable-core-configuration-workspace.md) persistence/configuration/archive acceptance passed; supporting security and extension lifecycle remain open. |
 | UX-014 | 00002 | 00007, 00011, 00012 | open | [Task 00002](00002-durable-core-configuration-workspace.md) exact inactivation/no-delete acceptance passed; integrated scoped-process and extension behavior remain open. |
-| UX-015 | 00003 | 00004, 00007, 00011, 00012, 00015A | open | Not yet recorded |
+| UX-015 | 00003 | 00004, 00007, 00011, 00012, 00015A | open | [Task 00003](00003-policy-credentials-action-gateway.md) exact one-use action binding, serialized within-run approval, visible independent-run queue, lifecycle, expiry, replay, and denial-before-effect acceptance passed; integrated runtime/extension audit remains open. |
 | UI-001 | 00005 | 00006, 00015B | open | Not yet recorded |
 | UI-002 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
 | UI-003 | 00005 | 00006, 00013, 00015B | open | Not yet recorded |
@@ -32,8 +32,8 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | CHAT-006 | 00007 | 00004, 00013 | open | Not yet recorded |
 | CHAT-007 | 00007 | 00003, 00004, 00008, 00009, 00010 | open | Not yet recorded |
 | CHAT-008 | 00007 | 00006, 00008, 00009, 00010 | open | Not yet recorded |
-| CHAT-009 | 00003 | 00002, 00004, 00007, 00008, 00015A | open | Not yet recorded |
-| CHAT-010 | 00003 | 00002, 00005, 00007, 00015A | open | Not yet recorded |
+| CHAT-009 | 00003 | 00002, 00004, 00007, 00008, 00015A | open | [Task 00003](00003-policy-credentials-action-gateway.md) repository-sensitive in/out-of-Project and explicit-Ask policy matrix plus denial-before-effect passed; Chat activity and final changed-file artifacts remain open. |
+| CHAT-010 | 00003 | 00002, 00005, 00007, 00015A | open | [Task 00003](00003-policy-credentials-action-gateway.md) Git-only visibility/scope, safe dirty switch, conflict paths, unchanged-worktree, and no automatic stash/commit/reset/discard acceptance passed; native composer integration remains open. |
 | ART-001 | 00008 | 00006, 00007, 00009, 00010 | open | Not yet recorded |
 | ART-002 | 00010 | 00003, 00005, 00008, 00015A, 00015B | open | Not yet recorded |
 | ART-003 | 00008 | 00002, 00003, 00007, 00015A | open | Not yet recorded |
@@ -51,7 +51,7 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | SET-008 | 00011 | 00003, 00004, 00006, 00013, 00015A | open | Not yet recorded |
 | SET-009 | 00012 | 00003, 00004, 00006, 00013, 00014, 00015A | open | Not yet recorded |
 | SET-010 | 00010 | 00002, 00003, 00005, 00013, 00015A | open | Not yet recorded |
-| SET-011 | 00003 | 00006, 00013, 00015A | open | Not yet recorded |
+| SET-011 | 00003 | 00006, 00013, 00015A | open | [Task 00003](00003-policy-credentials-action-gateway.md) production-built and native-reviewed seven-group rules, search, exceptions, dirty/revert/save, guardrails, ceilings, and revocation acceptance passed; Settings-shell integration remains open. |
 | QA-001 | 00015 | 00001, 00002, 00004, 00006, 00013 | open | Not yet recorded |
 | QA-002 | 00015 | Every implementation task and 00015A through 00015C | open | Not yet recorded |
 
