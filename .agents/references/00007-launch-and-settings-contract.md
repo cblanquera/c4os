@@ -61,10 +61,11 @@ Shared patterns: concise page header, scan-oriented rows/cards, search fields, s
 
 ## Models
 
-- Search by model identity and filter by provider.
-- Rows show provider/model identity and availability switch.
+- Search by model identity and filter by provider and effective capability: Vision, Tools, Reasoning, or Audio.
+- Rows show a clickable provider/model identity, compact effective-capability chips, context size, and availability switch. Hover/focus underlines the model name; activation opens route-specific capability details and evidence.
 - Models default enabled when discovered unless policy says otherwise.
-- Bulk action affects only visible results: `Disable results`, switching to `Enable results` when every visible row is disabled.
+- Bulk action affects only visible results: `Disable`, switching to `Enable` when every visible row is disabled.
+- At 992px and wider, search, both filters, and the bulk action share one row. Below 992px, search spans the first row and both filters plus the bulk action share the second row without document overflow.
 - Refresh exposes progress and completion feedback.
 
 ## Runtimes
@@ -120,6 +121,8 @@ Do not restore removed Default model or the `Advanced` eyebrow.
 ## Advanced Policies
 
 The forward product uses seven understandable policy groups plus concrete remembered exceptions. The detailed r012 tool identities remain an internal classifier/proof corpus, not permanent settings rows. Preserve search, dirty/revert/save behavior, clear action/target/scope descriptions, and the ability to inspect the effective policy result.
+
+The seven groups are Workspace files, Commands and processes, Version control, Network and sharing, Browser and desktop, Credentials, and Extensions and C4OS. Category rules expose Use default, Allow, Ask, and Deny. Keep concrete Exceptions in a separate left-aligned tab view; revoking an exception does not change category defaults. The current-preset guardrail aligns with and spans the policy content width.
 
 ### Literal r012 reconstruction profile
 

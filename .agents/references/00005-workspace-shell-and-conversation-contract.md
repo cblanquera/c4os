@@ -36,7 +36,7 @@ Promote the pending chat on the first valid text-only, attachment-only, or combi
 
 - User messages align right and omit a visible `You` label.
 - Assistant responses align left.
-- Every assistant response begins with a full-width `Worked for <duration>` disclosure, followed by an identity row, then content.
+- Every assistant response begins with a full-width work disclosure, followed by an identity row, then content. Use generic Activity/elapsed work for ordinary execution and a Reasoning summary only when the effective route exposes one; never fabricate private reasoning.
 - The identity row shows the assistant/C4OS icon and active model for ordinary Chat; Response Artifacts identify the responder as `C4OS` regardless of selected Chat model.
 - Expanded work details are unboxed progress paragraphs and muted icon-led activity rows. Do not label them `Work summary` or present private reasoning.
 - Assistant bubble and response-artifact surfaces share a family resemblance; the historical proof used a 16px radius with a compact 5px lower-left corner.
@@ -65,6 +65,16 @@ Chat and Reply use one toolbar-free source-preserving Markdown editor. Requireme
 - Preserve original one-based reference numbers while displaying newest attachments first.
 - Allow attachment-only send.
 - Submitted attachments remain a distinct group attached to the user turn, not inside the ordinary text bubble.
+- Every draft attachment shows route-specific compatibility such as Ready, Needs Vision, Needs Audio, or Converted. Top-align the file icon, metadata, status, and remove control.
+- Adding a file, switching model, or sending runs the same preflight. Unresolved incompatible content remains visible and blocks send; it is never silently dropped.
+- A conflict offers explicit Use compatible model, Convert, Remove file, and Cancel actions. Cancel preserves the draft and active model.
+
+## Model And Session Controls
+
+- The model menu filters by All, Vision, Tools, Reasoning, and Audio and shows model capability/context summaries.
+- Changing model atomically recomputes dependent controls. Reasoning effort offers Off, Low, Medium, and High only when the effective route supports it; unsupported routes hide the control and clear stale effort.
+- The title header retains the centered thread title plus an icon-only Chat information control. Its popover contains runtime, environment, workspace, model, health, and effective context-window usage; adapter details belong to individual run provenance.
+- Each assistant response exposes expandable route and effective-capability details while retaining C4OS as the assistant identity.
 
 ## Composer Modes
 

@@ -106,6 +106,17 @@ Each entry records the durable effect of a revision or review round. Later entri
 - R1 changed source organization only: consistent formatting, alphabetized CSS, ownership comments, component class naming, and section/JSDoc comments while preserving all r011 behavior.
 - Browser QA verified project More/Rename/New chat, Providers, Plugins, onboarding, and all fourteen launcher destinations with no console errors.
 
+## r013 — Capability-Aware Chat
+
+- R1 preserved the r012 SPA and accepted the forward four-preset approval model: Ask for approval, Approve safe actions, Approve for me, and Custom. Approve for me remains bounded by sandbox, trusted-root, maximum-authority, and managed-policy constraints.
+- R1 replaced the user-facing nine-group/71-identity policy browser with seven understandable category groups plus separate concrete Exceptions; the detailed corpus remains historical parity and internal classifier/proof material.
+- R1 added capability filters/details, route-scoped context limits, capability-aware attachment labels and preflight, explicit conflict resolution, atomic model-dependent controls, honest Activity/reasoning-summary presentation, and expandable run provenance.
+- R2 replaced persistent header provenance chips with an icon-only Chat information popover, made model names the details trigger, established the 992px Models toolbar reflow, left-aligned policy tabs/guardrail, and refined attachment status spacing.
+- R3 shortened visible-result bulk actions to Enable/Disable, contained the toolbar near the breakpoint, and top-aligned attachment contents.
+- R4 removed adapter identity from the session summary and added effective context-window used/remaining proportions, token totals, and progress semantics. Adapter/native version remains per-run provenance.
+- The user approved r013 through R4 on 2026-07-18. r013 supersedes r012 as the forward behavioral and visual-interaction baseline; r012 remains the historical parity profile. Provider data, evidence timestamps, conversions, token usage, service calls, and persistence in the wireframe remain simulated rather than implementation evidence.
+- Price/latency signals in the compact model picker and a dedicated exception detail drawer remain deferred to a later accepted revision.
+
 ## Superseded Directions
 
 - Blank side panels → left project/session navigation.
@@ -115,3 +126,7 @@ Each entry records the durable effect of a revision or review round. Later entri
 - Terminal without Expand → every Terminal card expandable in one persistent session.
 - Grayscale-only product styling → platform-native light/dark styling; grayscale remains structural evidence.
 - Separate Settings pages/files → one stateful application shell.
+- r012 three-preset/nine-group policy presentation → four presets, seven user-facing groups, and concrete Exceptions; the 71 identities remain internal fixtures.
+- Persistent header provenance chips → icon-triggered Chat information with session summary and context-window utilization.
+- Universal Thinking presentation → generic Activity plus provider reasoning summary only when the effective route supplies one.
+- Unqualified attachment acceptance/model switching → route-aware compatibility preflight with explicit resolution and no silent drops.

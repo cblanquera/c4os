@@ -3,12 +3,12 @@
 ## Status And Authority
 
 - Status: Accepted reusable truth.
-- Behavioral baseline: the complete `r012-cleanup` single-page artifact, including behavior inherited from revisions r001 through r011.
-- Visual baseline: the structure, density, hierarchy, and interaction geometry captured by r012.
-- Visual direction that supersedes r012 grayscale styling: C4OS follows the host operating system's default visual language and current light/dark preference.
-- The KB contract is sufficient to reconstruct an equivalent r012 experience without the `wireframes/` folder. Historical HTML, CSS, JavaScript, screenshots, and notes remain evidence, not required runtime inputs.
+- Behavioral baseline: the complete accepted `r013-capability-aware-chat` single-page artifact, including preserved behavior inherited from r012 and the accepted capability-aware delta.
+- Visual-interaction baseline: the structure, density, hierarchy, and interaction geometry captured by r013. `r012-cleanup` remains the historical parity profile.
+- Visual direction that supersedes r012/r013 grayscale wireframe styling: C4OS follows the host operating system's default visual language and current light/dark preference.
+- The KB contract is sufficient to reconstruct an equivalent accepted r013 experience without the `wireframes/` folder. Historical HTML, CSS, JavaScript, screenshots, and notes remain evidence, not required runtime inputs.
 - “Equivalent” means the same screens, hierarchy, workflows, state transitions, responsive behavior, accessibility semantics, and reviewable content. It does not require preserving cleanup-only class names or illustrative IDs.
-- The accepted Runtime and Session Architecture remains authoritative over forward product behavior. In particular, new design work uses its four approval presets, capability-aware model/session behavior, compact provenance, and simplified policy presentation. The literal r012 policy UI remains documented only as a reconstruction fixture until a later wireframe is accepted.
+- The accepted Runtime and Session Architecture remains authoritative over forward product behavior. r013 now expresses its four approval presets, capability-aware model/session behavior, on-demand provenance, and simplified policy presentation. The literal r012 policy UI remains documented only as a historical reconstruction fixture.
 
 ## Product Model
 
@@ -30,6 +30,7 @@ The application is one stateful shell. Onboarding, workspace start, workspace mo
 | First-provider onboarding | `#onboarding` | Configure one provider before use |
 | Workspace start | `#start` | Open, clone, or resume a workspace |
 | Chat workspace | `#chat` | Continue ordinary AI conversation |
+| Capability-aware Chat fixture | `#chat-capabilities` | Review incompatible-attachment preflight and model-dependent controls |
 | Files mode | `#files` | Open a file or browse a folder |
 | Browser mode | `#browser` | Open and operate a webpage |
 | Terminal mode | `#terminal` | Run a command in the chat's shell session |
@@ -88,13 +89,14 @@ Full-screen terminal programs, password-entry flows, browser sub-tabs, multiple 
 
 ## Reconstruction Versus Forward Design
 
-- To reproduce r012 for parity testing, use its three default approval choices and nine-group/71-identity policy browser as specified in the reconstruction reference.
-- To create a new revision or production UI, use the accepted four presets (`Ask for approval`, `Approve safe actions`, `Approve for me`, `Custom`), seven user-facing policy groups, concrete exceptions, capability-aware model/attachment behavior, and compact run provenance from the Runtime and Session Architecture.
-- A pending wireframe may demonstrate the forward model, but it does not replace the accepted visual-interaction baseline until reviewed and accepted.
+- To reproduce r012 for historical parity testing, use its three default approval choices and nine-group/71-identity policy browser as specified in the reconstruction reference.
+- To reproduce the accepted forward baseline or create production UI, use r013's four presets (`Ask for approval`, `Approve safe actions`, `Approve for me`, `Custom`), seven user-facing policy groups, concrete exceptions, capability-aware model/attachment behavior, dynamic controls, honest activity presentation, and on-demand provenance.
+- A later pending wireframe may demonstrate another forward model, but it does not replace r013 until reviewed and accepted.
 
 ## Source Provenance
 
-- Processed sources: every revision-root `notes.md` and nested `qa/notes.md` from r001 through r012, plus the complete r012 spec and rendered artifact source.
+- Processed sources: every revision-root `notes.md` and nested `qa/notes.md` from r001 through r013, plus the complete r012 and r013 specs and rendered artifact sources.
 - r012 was browser-verified with no console errors across the workspace, Providers, Plugins, onboarding, and all fourteen workflow launcher destinations.
+- r013 was browser-verified across capability-aware Chat, Models, Configuration, Advanced Policies, responsive toolbar states, and Chat information with no reported console errors or document-level overflow at the checked widths.
 - Earlier review limitations are preserved in the decision ledger but do not override later verified behavior.
-- The platform-native theme and system-following light/dark requirement comes from the user's accepted direction on 2026-07-18 and supersedes grayscale-only presentation requirements.
+- The platform-native theme and system-following light/dark requirement comes from the user's accepted direction on 2026-07-18 and supersedes grayscale-only presentation requirements in structural wireframes.

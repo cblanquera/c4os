@@ -94,12 +94,12 @@ Each chat owns one persistent shell session, represented as `shell-1` in the det
 Only newly generated assistant turns animate:
 
 1. Open the work disclosure.
-2. Show/type `Thinking…` and concise progress.
-3. Show/type `Working…` and tool activity.
+2. Show/type generic starting activity and concise progress.
+3. Show/type working/tool activity; show a reasoning summary only when supplied by the effective route.
 4. Collapse to `Worked for <duration>`.
 5. Reveal the identity and final output.
 
-Ordinary Chat final Markdown may progressively render with a cursor, followed by one clean final render. Artifact frames remain hidden until work completes, then reveal as a unit; do not type provider-owned body content character-by-character. Set `aria-busy` during generation and remove it at completion. Reduced motion jumps to the same final state.
+Never present private chain-of-thought or fabricate a reasoning summary. Ordinary Chat final Markdown may progressively render with a cursor, followed by one clean final render. Artifact frames remain hidden until work completes, then reveal as a unit; do not type provider-owned body content character-by-character. Set `aria-busy` during generation and remove it at completion. Reduced motion jumps to the same final state.
 
 ## Artifact Acceptance
 

@@ -5,9 +5,9 @@ Accepted: 2026-07-18
 
 ## Product intent and wireframe authority
 
-`wireframes/r012-cleanup/` remains the current product-intent and visual-interaction reference until a later revision is reviewed and accepted. A research-spec Freeze closes its decision and evidence set; it does not retire the wireframes or make visual design unnecessary. Wireframe behavior is not implementation evidence.
+`wireframes/r013-capability-aware-chat/` is the current accepted product-intent and visual-interaction reference. `wireframes/r012-cleanup/` remains the historical parity profile. A research-spec Freeze closes its decision and evidence set; it does not retire wireframes or make visual design unnecessary. Wireframe behavior is not implementation evidence.
 
-A future wireframe revision must express the accepted four-preset approval model and capability-aware model/session experience while preserving the established product surface. Research supplies architectural and behavioral constraints for that revision; the revised wireframes remain the human-reviewable UI contract.
+r013 expresses the accepted four-preset approval model and capability-aware model/session experience while preserving the established product surface. Research supplies architectural and behavioral constraints; the accepted wireframe remains the human-reviewable UI contract.
 
 ## Authority boundary
 
@@ -80,7 +80,7 @@ C4OS does not claim cross-runtime checkpoint continuation. If a prior effect has
 
 The assistant identity remains C4OS. Provenance appears where it changes user understanding or authority:
 
-- The chat header shows runtime, execution environment or host alias, workspace, and health; the model control shows the current model.
+- The chat header uses an information control rather than persistent chips. Its popover shows runtime/native version, execution environment or host alias, workspace, current model, health, and effective context-window usage with used/remaining proportions and token totals. Adapter identity remains in per-run details rather than this session summary.
 - Each turn retains provider/model, adapter/native version, environment, and effective capability/configuration provenance in expandable details.
 - Approval surfaces show the action, target, workspace, environment/host, requesting runtime, and effective policy result.
 - File, Terminal, and Browser artifacts expose their source run and relevant path, shell, environment, or URL in compact details.
