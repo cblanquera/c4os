@@ -1,16 +1,29 @@
-import { RouterProvider, createHashRouter } from "react-router";
+import { Navigate, RouterProvider, createHashRouter } from "react-router";
 
-import { FoundationScreen } from "./features/foundation/FoundationScreen";
+import { WorkspaceStartRoute } from "./features/workspace/WorkspaceStartRoute";
 import { QA_FOUNDATION_PATH, QaFoundationRoute } from "./qa/route";
+import { QA_WORKSPACE_PATH, QaWorkspaceRoute } from "./qa/workspace-route";
 
 const routes = [
   {
     path: "/",
-    element: <FoundationScreen />,
+    element: <WorkspaceStartRoute />,
+  },
+  {
+    path: "/start",
+    element: <WorkspaceStartRoute />,
+  },
+  {
+    path: "/foundation",
+    element: <Navigate replace to="/" />,
   },
   {
     path: QA_FOUNDATION_PATH,
     element: <QaFoundationRoute />,
+  },
+  {
+    path: QA_WORKSPACE_PATH,
+    element: <QaWorkspaceRoute />,
   },
 ];
 

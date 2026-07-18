@@ -221,6 +221,56 @@ fn foundation_snapshot_command_validates_before_replying() {
 }
 
 #[test]
+fn workspace_start_snapshot_is_bounded_and_allows_snapshot_catch_up() {
+    let request = SnapshotRequest {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: RequestId::new("request-start").unwrap(),
+        correlation_id: CorrelationId::new("correlation-start").unwrap(),
+        expected_generation: StateGeneration(2),
+    };
+    let payload = WorkspaceStartSnapshot {
+        protocol_version: PROTOCOL_VERSION,
+        generation: StateGeneration(4),
+        authority: "rust-core".into(),
+        recents: vec![WorkspaceRecentSnapshot {
+            workspace_id: WorkspaceId::new("workspace-1").unwrap(),
+            display_name: "C4OS Workspace".into(),
+            last_opened_at: 1_721_312_000,
+            is_missing: false,
+        }],
+    };
+
+    let response = workspace_start_snapshot(request, payload).unwrap();
+    assert_eq!(response.generation, StateGeneration(4));
+    assert_eq!(response.payload.recents.len(), 1);
+
+    let oversized = WorkspaceStartSnapshot {
+        protocol_version: PROTOCOL_VERSION,
+        generation: StateGeneration(4),
+        authority: "rust-core".into(),
+        recents: (0..=MAX_RECENT_WORKSPACES)
+            .map(|index| WorkspaceRecentSnapshot {
+                workspace_id: WorkspaceId::new(format!("workspace-{index}")).unwrap(),
+                display_name: format!("Workspace {index}"),
+                last_opened_at: 1_721_312_000,
+                is_missing: false,
+            })
+            .collect(),
+    };
+    let error = workspace_start_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("request-oversized").unwrap(),
+            correlation_id: CorrelationId::new("correlation-oversized").unwrap(),
+            expected_generation: StateGeneration(4),
+        },
+        oversized,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::InvalidPayload);
+}
+
+#[test]
 fn redaction_markers_never_carry_original_values() {
     let value = SafeDetailValue::Redacted(RedactionMarker::new(
         "provider.api_key",
@@ -270,6 +320,7 @@ fn export_protocol_types(config: &Config) {
     ResponseEnvelope::export_all(config).unwrap();
     EventEnvelope::export_all(config).unwrap();
     ProtocolEnvelope::<FoundationSnapshot>::export_all(config).unwrap();
+    ProtocolEnvelope::<WorkspaceStartSnapshot>::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

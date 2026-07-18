@@ -31,6 +31,14 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 - **Residual risk:** Target API availability and macOS binding interactions remain production integration work despite the passing Proof.
 - **Sources:** https://docs.rs/crate/rusqlite/latest ; https://docs.rs/crate/rusqlite_migration/latest ; https://docs.rs/crate/zip/latest ; https://docs.rs/objc2-web-kit/latest/objc2_web_kit/
 
+### Task 00002 auxiliary lock
+
+- **Exact versions observed from crates.io metadata:** TOML `1.1.3+spec-1.1.0`, SHA-2 `0.11.0`, fs4 `1.1.0`, notify `8.2.0`, tempfile `3.27.0` for tests.
+- **Selected conclusion:** Lock TOML's stable spec-1.1 parser, the current RustCrypto SHA-2 line, maintained pure-Rust fs4 synchronous advisory locking, stable notify 8.2 rather than the 9.0 release candidate, and test-only tempfile. Lock `zip 8.6.0` with only `deflate-flate2-zlib-rs`; do not enable its default crypto and alternate-compression graph.
+- **Rejected alternatives:** Deprecated fs2 `0.4.3`, notify `9.0.0-rc.4`, SHA-2 `0.10.9` when the compatible stable `0.11.0` exists, broad zip defaults, and handwritten TOML or archive parsing.
+- **Verification gate:** Cargo resolution, target tree, RustSec audit, hostile archive/configuration tests, and production integration remain required before Task 00002 passes.
+- **Sources:** https://crates.io/crates/toml/1.1.3+spec-1.1.0 ; https://crates.io/crates/sha2/0.11.0 ; https://crates.io/crates/fs4/1.1.0 ; https://crates.io/crates/notify/8.2.0 ; https://crates.io/crates/tempfile/3.27.0
+
 ## RBL-003 — OpenCode adapter baseline
 
 - **Decision investigated:** Current native runtime and SDK pair for authenticated loopback integration.
@@ -72,7 +80,7 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 ## RBL-007 — Locked-graph advisory disposition
 
 - **Decision investigated:** Whether the first exact npm and Cargo graphs contain known vulnerabilities or unacceptable warnings.
-- **Observed result:** Full `npm audit` reports zero vulnerabilities. `cargo audit` scans 422 locked Rust dependencies and reports zero vulnerabilities plus 17 warnings: 16 unmaintained advisories and one unsound glib advisory.
+- **Observed result:** Full `npm audit` reports zero vulnerabilities. After the Task 00002 persistence/archive dependencies were locked, `cargo audit` scans 460 locked Rust dependencies and reports zero vulnerabilities plus 17 warnings: 16 unmaintained advisories and one unsound glib advisory.
 - **Target analysis:** `cargo tree --target aarch64-apple-darwin -i glib` returns no path; GTK/glib warnings are target-specific and absent from the accepted arm64 macOS build. The unmaintained `unic-*` chain is reachable through Tauri `2.11.5` to tauri-utils `2.9.3` to urlpattern `0.3.0` and has no RustSec vulnerability finding.
 - **Selected conclusion:** Accept the exact local macOS foundation graph with the warnings recorded, retain current Tauri patches, and re-audit on dependency updates. Do not force unsupported transitive replacements.
 - **Rejected alternatives:** Ignoring advisory output, claiming warning-free Rust dependencies, patching registry crates locally without an upstream compatibility reason, or expanding the milestone to Linux GTK support.

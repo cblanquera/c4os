@@ -15,6 +15,8 @@ import type { RedactionReason as GeneratedRedactionReason } from "../generated/R
 import type { RunPhase as GeneratedRunPhase } from "../generated/RunPhase";
 import type { RuntimeHealth as GeneratedRuntimeHealth } from "../generated/RuntimeHealth";
 import type { SnapshotRequest as GeneratedSnapshotRequest } from "../generated/SnapshotRequest";
+import type { WorkspaceRecentSnapshot as GeneratedWorkspaceRecentSnapshot } from "../generated/WorkspaceRecentSnapshot";
+import type { WorkspaceStartSnapshot as GeneratedWorkspaceStartSnapshot } from "../generated/WorkspaceStartSnapshot";
 
 export const PROTOCOL_VERSION = 1 as const;
 export const MAX_IDENTIFIER_BYTES = 160;
@@ -225,6 +227,20 @@ export interface FoundationSnapshot {
   readonly redactions: readonly RedactionMarker[];
 }
 
+export interface WorkspaceRecentSnapshot {
+  readonly workspaceId: WorkspaceId;
+  readonly displayName: string;
+  readonly lastOpenedAt: number;
+  readonly isMissing: boolean;
+}
+
+export interface WorkspaceStartSnapshot {
+  readonly protocolVersion: typeof PROTOCOL_VERSION;
+  readonly generation: StateGeneration;
+  readonly authority: string;
+  readonly recents: readonly WorkspaceRecentSnapshot[];
+}
+
 export interface ProtocolEnvelope<Payload> {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly requestId: RequestId;
@@ -234,6 +250,8 @@ export interface ProtocolEnvelope<Payload> {
 }
 
 export type FoundationSnapshotEnvelope = ProtocolEnvelope<FoundationSnapshot>;
+export type WorkspaceStartSnapshotEnvelope =
+  ProtocolEnvelope<WorkspaceStartSnapshot>;
 
 // Compile-time tripwires keep handwritten discriminants aligned with ts-rs.
 type Assert<Condition extends true> = Condition;
@@ -258,6 +276,20 @@ type SnapshotRequestKeysMatch = Assert<
       : false
     : false
 >;
+type WorkspaceRecentKeysMatch = Assert<
+  keyof WorkspaceRecentSnapshot extends keyof GeneratedWorkspaceRecentSnapshot
+    ? keyof GeneratedWorkspaceRecentSnapshot extends keyof WorkspaceRecentSnapshot
+      ? true
+      : false
+    : false
+>;
+type WorkspaceStartKeysMatch = Assert<
+  keyof WorkspaceStartSnapshot extends keyof GeneratedWorkspaceStartSnapshot
+    ? keyof GeneratedWorkspaceStartSnapshot extends keyof WorkspaceStartSnapshot
+      ? true
+      : false
+    : false
+>;
 type EventDiscriminantsMatch = Assert<
   CoreEvent["type"] extends GeneratedCoreEvent["type"]
     ? GeneratedCoreEvent["type"] extends CoreEvent["type"]
@@ -268,6 +300,8 @@ type EventDiscriminantsMatch = Assert<
 
 export type ProtocolCompatibilityChecks =
   | FoundationKeysMatch
+  | WorkspaceRecentKeysMatch
+  | WorkspaceStartKeysMatch
   | EnvelopeKeysMatch
   | SnapshotRequestKeysMatch
   | EventDiscriminantsMatch;

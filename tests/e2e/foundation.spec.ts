@@ -36,7 +36,32 @@ test("direct QA foundation route is visibly deterministic and fixture-only", asy
   );
 });
 
-test("browser renderer fails closed without native authority", async ({
+test("retired foundation route enters production Workspace Start", async ({
+  page,
+}) => {
+  await page.goto("/#/foundation");
+
+  await expect(
+    page.getByRole("heading", { name: "Workspace Start" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/#\/$/);
+});
+
+test("production Workspace Start fails closed without native authority", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: "Workspace Start" }),
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Workspace Start is unavailable",
+  );
+  await expect(page.getByRole("button")).toHaveCount(0);
+});
+
+test("workspace QA route preserves the three-row start contract", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -46,22 +71,34 @@ test("browser renderer fails closed without native authority", async ({
     }
   });
 
-  await page.goto("/");
+  await page.goto("/#/qa/workspace");
 
   await expect(
-    page.getByRole("heading", { name: "C4OS foundation is running" }),
+    page.getByRole("heading", { name: "What would you like to open?" }),
   ).toBeVisible();
-  await expect(page.getByText("Unavailable · fail closed")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Start a Workspace" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Open options" })).toContainText(
+    "Open a folder",
+  );
+  await expect(page.getByRole("listitem")).toHaveCount(3);
+  await page.screenshot({
+    path: "output/playwright/task-00002-qa-workspace-start.png",
+    fullPage: true,
+  });
 
-  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: /Legacy UI/ }).click();
+  await expect(page.getByRole("status")).toContainText("Recovered Legacy UI");
+  await page.screenshot({
+    path: "output/playwright/task-00002-qa-workspace-recovery.png",
+    fullPage: true,
+  });
 
-  expect(consoleErrors).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(
     await page.evaluate(() => document.documentElement.clientWidth),
   );
+
+  await page.waitForLoadState("networkidle");
+  expect(consoleErrors).toEqual([]);
 });

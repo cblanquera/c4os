@@ -1,10 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
-
+import { invokeNative } from "./native-transport";
 import { createTauriAdapter } from "./tauri-adapter";
 
 const foundationAdapter = createTauriAdapter({
   invoke(command, args) {
-    return invoke(command, args);
+    return invokeNative(command, args);
   },
 });
 

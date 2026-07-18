@@ -5,7 +5,7 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | Task | Status | Agent Acceptance | Coverage focus |
 | --- | --- | --- | --- |
 | [00001 Foundation and dependency lock](00001-foundation-and-dependency-lock.md) | verified | passed | Foundation for all IDs |
-| [00002 Durable core, configuration, and Workspace lifecycle](00002-durable-core-configuration-workspace.md) | open | failed | UX-013, UX-014, SET-002 |
+| [00002 Durable core, configuration, and Workspace lifecycle](00002-durable-core-configuration-workspace.md) | verified | passed | UX-013, UX-014, SET-002 |
 | [00003 Policy, credentials, Action Gateway, and execution environments](00003-policy-credentials-action-gateway.md) | open | failed | UX-010, UX-012, UX-015, CHAT-009, CHAT-010, SET-011 |
 | [00004 Runtime adapters, providers, and capability lifecycle](00004-runtime-provider-capability-lifecycle.md) | open | failed | Provider/runtime support for CHAT and SET |
 | [00005 Native macOS platform and semantic UI foundation](00005-native-macos-semantic-ui.md) | open | failed | UX-003, UI-001 through UI-005, SET-003 |
@@ -25,4 +25,4 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 
 ## Current Blockers
 
-None. Task 00001 is verified and passed; remaining tasks stay open/failed until their production evidence exists.
+None. Task 00002 is verified; Task 00003 is the next implementation task.

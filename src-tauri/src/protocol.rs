@@ -17,6 +17,8 @@ pub const MAX_DIAGNOSTIC_BYTES: usize = 8_192;
 pub const MAX_ATTACHMENTS: usize = 64;
 pub const MAX_SAFE_DETAILS: usize = 32;
 pub const MAX_REDACTION_MARKERS: usize = 256;
+pub const MAX_RECENT_WORKSPACES: usize = 3;
+pub const MAX_DISPLAY_NAME_BYTES: usize = 512;
 
 macro_rules! typed_id {
     ($name:ident) => {
@@ -648,6 +650,26 @@ pub struct FoundationSnapshot {
     pub redactions: Vec<RedactionMarker>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspaceRecentSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub display_name: String,
+    pub last_opened_at: i64,
+    pub is_missing: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspaceStartSnapshot {
+    pub protocol_version: u16,
+    pub generation: StateGeneration,
+    pub authority: String,
+    pub recents: Vec<WorkspaceRecentSnapshot>,
+}
+
 /// Generic response wrapper used by the minimal Task 00001 Tauri command.
 /// Product commands use the non-generic `ResponseEnvelope` so generated
 /// renderer types remain a closed union.
@@ -683,6 +705,52 @@ pub fn foundation_snapshot(
             authority: "rust-core".to_owned(),
             redactions: Vec::new(),
         },
+    })
+}
+
+pub fn workspace_start_snapshot(
+    request: SnapshotRequest,
+    payload: WorkspaceStartSnapshot,
+) -> Result<ProtocolEnvelope<WorkspaceStartSnapshot>, StructuredCoreError> {
+    validate_protocol_version(request.protocol_version)?;
+    request.request_id.validate()?;
+    request.correlation_id.validate()?;
+    validate_protocol_version(payload.protocol_version)?;
+    if request.expected_generation > payload.generation {
+        return Err(generation_error(
+            ProtocolErrorCode::FutureGeneration,
+            request.expected_generation.0,
+            payload.generation.0,
+        ));
+    }
+    if payload.authority != "rust-core" || payload.recents.len() > MAX_RECENT_WORKSPACES {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Workspace Start snapshot is invalid",
+            false,
+        ));
+    }
+    for recent in &payload.recents {
+        recent.workspace_id.validate()?;
+        let name = recent.display_name.trim();
+        if name.is_empty()
+            || name.len() > MAX_DISPLAY_NAME_BYTES
+            || name.chars().any(char::is_control)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Workspace display name is invalid",
+                false,
+            ));
+        }
+    }
+
+    Ok(ProtocolEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request.request_id,
+        correlation_id: request.correlation_id,
+        generation: payload.generation,
+        payload,
     })
 }
 

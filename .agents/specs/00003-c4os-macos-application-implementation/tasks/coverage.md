@@ -16,8 +16,8 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | UX-010 | 00003 | 00002, 00004, 00008 through 00014 | open | Not yet recorded |
 | UX-011 | 00006 | 00007, 00009, 00010, 00015 | open | Not yet recorded |
 | UX-012 | 00003 | 00004, 00007, 00013 | open | Not yet recorded |
-| UX-013 | 00002 | 00003, 00011, 00012, 00014 | open | Not yet recorded |
-| UX-014 | 00002 | 00007, 00011, 00012 | open | Not yet recorded |
+| UX-013 | 00002 | 00003, 00011, 00012, 00014 | open | [Task 00002](00002-durable-core-configuration-workspace.md) persistence/configuration/archive acceptance passed; supporting security and extension lifecycle remain open. |
+| UX-014 | 00002 | 00007, 00011, 00012 | open | [Task 00002](00002-durable-core-configuration-workspace.md) exact inactivation/no-delete acceptance passed; integrated scoped-process and extension behavior remain open. |
 | UX-015 | 00003 | 00004, 00007, 00011, 00012, 00015A | open | Not yet recorded |
 | UI-001 | 00005 | 00006, 00015B | open | Not yet recorded |
 | UI-002 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
@@ -42,7 +42,7 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | ART-006 | 00007 | 00004, 00006, 00008, 00015B | open | Not yet recorded |
 | ART-007 | 00008 | 00003, 00004, 00007, 00015A | open | Not yet recorded |
 | SET-001 | 00013 | 00003, 00004, 00005 | open | Not yet recorded |
-| SET-002 | 00002 | 00005, 00006, 00013 | open | Not yet recorded |
+| SET-002 | 00002 | 00005, 00006, 00013 | open | [Task 00002](00002-durable-core-configuration-workspace.md) Start/recents/reconstruction acceptance passed; native picker, shell, and Settings integration remain open. |
 | SET-003 | 00005 | 00006, 00013, 00015B | open | Not yet recorded |
 | SET-004 | 00013 | 00003, 00004 | open | Not yet recorded |
 | SET-005 | 00013 | 00004, 00006 | open | Not yet recorded |
