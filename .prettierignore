@@ -1,0 +1,11 @@
+.agents/
+.git/
+dist/
+node_modules/
+playwright-report/
+proofs/
+src/generated/
+src-tauri/gen/
+target/
+test-results/
+wireframes/

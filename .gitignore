@@ -1,5 +1,12 @@
 .local/
+.playwright-cli/
 node_modules/
+dist/
+target/
+playwright-report/
+test-results/
+output/playwright/
+src-tauri/gen/
 backend/target/
 backend/gen/
 tests/projects/*/.c4os/

@@ -13,6 +13,14 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 - **Residual risk:** Tauri crates and CLI publish independently; the resolved set must be verified by `cargo check`, native launch, and lockfile inspection before the task passes.
 - **Sources:** https://github.com/tauri-apps/tauri/releases ; https://www.npmjs.com/package/react ; https://www.npmjs.com/package/vite ; https://www.npmjs.com/package/react-router ; https://www.npmjs.com/package/%40reduxjs/toolkit ; https://www.npmjs.com/package/react-aria-components
 
+### Locked auxiliary row
+
+- **Runtime dependencies:** `@tauri-apps/api 2.11.1`, React DOM `19.2.7`, React Redux `9.3.0`.
+- **Build and QA dependencies:** TypeScript `6.0.2`, `@vitejs/plugin-react 6.0.3`, Vitest `4.1.10`, Testing Library React `16.3.2`, Playwright Test `1.61.1`, ESLint `10.7.0`, `typescript-eslint 8.64.0`, Prettier `3.9.5`, jsdom `29.1.1`.
+- **Rust protocol dependencies:** `ts-rs 12.0.1`, Serde `1.0.228`, serde_json `1.0.150`, thiserror `2.0.18`, uuid `1.24.0`, tracing `0.1.44`, tauri-build `2.6.3`.
+- **Compatibility decision:** The registry's TypeScript `7.0.2` was rejected for this lock because `typescript-eslint 8.64.0` declares TypeScript `<6.1.0`; `6.0.2` is the newest compatible stable line. The selected package graph requires Node `>=22.19.0` because that is the higher renderer/Pi floor.
+- **Verification:** Exact direct trees, clean installs, compilation, native bundling/launch, type generation, npm audit, and RustSec audit all completed before Task 00001 passed.
+
 ## RBL-002 — Rust persistence, archive, and WebKit baselines
 
 - **Decision investigated:** Whether Frozen Rust baselines remain current and mutually compatible.
@@ -60,3 +68,13 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 - **Rejected alternatives:** Claiming source-only readiness, using r013 timers/localStorage/DOM snapshots as production logic, and retaining stale Proof assertions that share Chats across Workspaces, delete removed Chats, terminate PTYs on Chat inactivation, keep a right panel, or use raw Wry for arbitrary pages.
 - **Implementation impact:** Every task starts `open` with Agent Acceptance `failed`; each closes only from production evidence. Tasks 00001 and 00015 own tiered commands and a deterministic QA adapter.
 - **Residual risk:** Environment-specific suites require explicit host capabilities and must remain visible rather than being silently excluded from completion evidence.
+
+## RBL-007 — Locked-graph advisory disposition
+
+- **Decision investigated:** Whether the first exact npm and Cargo graphs contain known vulnerabilities or unacceptable warnings.
+- **Observed result:** Full `npm audit` reports zero vulnerabilities. `cargo audit` scans 422 locked Rust dependencies and reports zero vulnerabilities plus 17 warnings: 16 unmaintained advisories and one unsound glib advisory.
+- **Target analysis:** `cargo tree --target aarch64-apple-darwin -i glib` returns no path; GTK/glib warnings are target-specific and absent from the accepted arm64 macOS build. The unmaintained `unic-*` chain is reachable through Tauri `2.11.5` to tauri-utils `2.9.3` to urlpattern `0.3.0` and has no RustSec vulnerability finding.
+- **Selected conclusion:** Accept the exact local macOS foundation graph with the warnings recorded, retain current Tauri patches, and re-audit on dependency updates. Do not force unsupported transitive replacements.
+- **Rejected alternatives:** Ignoring advisory output, claiming warning-free Rust dependencies, patching registry crates locally without an upstream compatibility reason, or expanding the milestone to Linux GTK support.
+- **Implementation impact:** Task 00001 passes; RBL-007 remains a visible maintenance input and does not close later security acceptance.
+- **Residual risk:** Upstream maintenance status can change. Any new vulnerability, reachable unsoundness on the accepted target, or Tauri patch row must reopen the owning dependency task.
