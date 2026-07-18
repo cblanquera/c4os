@@ -7,7 +7,8 @@
 - Last updated: 2026-07-18
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
-- Implementation planning: Ready; no task package exists yet.
+- Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
+- Implementation status: Active; implementation has not yet completed.
 
 ## Work Items
 
@@ -24,7 +25,7 @@
 | User-journey loop | Inherited; no new loop proposed | Existing accepted usability contracts and research journeys cover the current scope; rerun only if scope changes. |
 | Context promotion review | Complete | Accepted reusable product/runtime and technical implementation truth is routed from Context. |
 | Freeze review | Complete | The user accepted the complete contract and passing Proof disposition on 2026-07-18. |
-| Implementation task plan | Ready | Create `tasks/sprint.md` with coverage-to-task mapping before production implementation. |
+| Implementation task plan | Accepted | Execute the accepted task order in `tasks/sprint.md`, maintaining task, coverage, research, verification, and Agent Acceptance records. |
 
 ## Freeze Blockers
 
@@ -42,4 +43,4 @@ Inherited feasibility Proofs are recorded but do not count as production verific
 
 ## Recommended Next Action
 
-Use the Spec Task Implementation Workflow to create `tasks/sprint.md`, map every Feature Coverage ID to implementation and verification tasks, and preserve the complete-contract delivery target.
+Start Task 00001 from the accepted package, lock current compatible dependencies against primary sources, and preserve the complete-contract delivery target.
