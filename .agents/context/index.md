@@ -5,3 +5,4 @@ Read this index before project planning or implementation. Context Files contain
 ## Context Files
 
 - [Runtime and session architecture](runtime-session-architecture.md) — Load when interpreting current wireframe authority or designing and implementing Tauri authority, runtime adapters, model/session capabilities, plugins/marketplaces, browser isolation, skill resolution, credential/runtime-state storage, updates, session binding, configuration activation, retry behavior, approvals, or provenance UI.
+- [Usability and interface contract](usability-and-interface.md) — Load before creating, changing, reviewing, or implementing C4OS screens, navigation, interaction behavior, responsive behavior, accessibility, platform-native presentation, or wireframes.

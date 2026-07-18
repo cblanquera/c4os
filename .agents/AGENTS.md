@@ -13,6 +13,7 @@ This file is the local operating contract for the project root `.agents/` worksp
 - [Spec Task Implementation Workflow](workflows/spec-task-implementation.md): use when planning or implementing tasks from a Frozen spec.
 - [Spec Grill Session Workflow](workflows/spec-grill-session.md): use when pressure-testing, clarifying, or resuming unresolved spec questions.
 - [Spec User Journeys Workflow](workflows/spec-user-journeys.md): use when mapping user journeys, actors, scope boundaries, or implementable journey steps for a spec.
+- [Wireframe-To-KB Sync Workflow](workflows/wireframe-kb-sync.md): use after every new wireframe revision or material wireframe update so accepted usability truth, reconstruction fixtures, and the decision ledger stay synchronized.
 - [Zombie Reference File Repair Workflow](workflows/repair-zombie-reference-files.md): use when Reference Files have no clear inbound owner.
 - [Agent Workspace Rules Reference](references/00001-agent-workspace-rules.md): load for detailed folder, line-cap, reference-link, and resource-link rules.
 
