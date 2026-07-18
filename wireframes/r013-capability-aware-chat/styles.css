@@ -198,7 +198,7 @@ svg {
   color: var(--gray-500);
   display: grid;
   gap: 7px;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   height: 36px;
   padding: 0 9px;
 }
@@ -226,6 +226,122 @@ svg {
 
 .session-search input::placeholder {
   color: var(--gray-500);
+}
+
+.session-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.session-search__clear {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--gray-500);
+  display: grid;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  width: 24px;
+}
+
+.session-search__clear:hover,
+.session-search__clear:focus-visible {
+  background: var(--gray-100);
+  color: var(--gray-800);
+}
+
+.session-search__clear[hidden] {
+  display: none;
+}
+
+.workspace-projects__view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.workspace-projects__view[hidden] {
+  display: none;
+}
+
+.session-search-results {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.session-search-results[hidden] {
+  display: none;
+}
+
+.session-search-results__heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 5px;
+}
+
+.session-search-results__heading strong {
+  color: var(--gray-600);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.session-search-results__heading span {
+  color: var(--gray-500);
+  font-size: 10px;
+}
+
+.session-search-results__list {
+  display: grid;
+  gap: 3px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+  scrollbar-width: thin;
+}
+
+.session-search-result {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--gray-700);
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.session-search-result:hover,
+.session-search-result:focus-visible,
+.session-search-result[aria-current="true"] {
+  background: var(--gray-100);
+}
+
+.session-search-result strong {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-search-result small {
+  color: var(--gray-500);
+  font-size: 10px;
+}
+
+.session-search-results__empty {
+  color: var(--gray-500);
+  font-size: 12px;
+  margin: 24px 8px;
+  text-align: center;
 }
 
 .workspace-projects__heading {
@@ -1521,6 +1637,15 @@ svg {
 
 .option-menu button[aria-checked="true"] {
   font-weight: 650;
+}
+
+.option-menu__create {
+  font-weight: 650;
+}
+
+.option-menu__divider {
+  border-top: 1px solid var(--gray-150);
+  margin: 4px 5px;
 }
 
 .composer-attachments {
@@ -5052,22 +5177,66 @@ body[data-app-view="start"] {
   min-width: 300px;
 }
 
-.option-menu--models > button {
+.model-menu__options > button,
+.model-menu__provider,
+.model-menu__providers > button {
   align-items: center;
   display: flex;
 }
 
-.option-menu--models > button span,
-.option-menu--models > button strong,
-.option-menu--models > button small {
+.model-menu__options > button span,
+.model-menu__options > button strong,
+.model-menu__options > button small,
+.model-menu__providers > button span,
+.model-menu__providers > button strong,
+.model-menu__providers > button small {
   display: block;
 }
 
-.option-menu--models > button small {
+.model-menu__options > button small,
+.model-menu__providers > button small {
   color: var(--gray-500);
   font-size: 9px;
   font-weight: 400;
   margin-top: 2px;
+}
+
+.model-menu__options > button {
+  min-height: 48px;
+}
+
+.option-menu .model-menu__provider {
+  border-bottom: 1px solid var(--gray-150) !important;
+  border-radius: 6px 6px 2px 2px !important;
+  display: grid;
+  font-weight: 650;
+  gap: 6px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  margin-bottom: 5px;
+}
+
+.model-menu__provider svg,
+.model-menu__providers svg {
+  fill: none;
+  height: 16px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 16px;
+}
+
+.model-menu__providers > button {
+  justify-content: space-between;
+  min-height: 42px;
+}
+
+.model-menu__title {
+  border-bottom: 1px solid var(--gray-150);
+  color: var(--gray-800);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px;
 }
 
 .model-menu__filters {

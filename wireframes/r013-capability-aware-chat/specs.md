@@ -4,7 +4,7 @@
 
 - Revision folder: `wireframes/r013-capability-aware-chat/`
 - Revision: `r013-capability-aware-chat`
-- Status: Accepted clickable grayscale revision, approved through Review Round 4 on 2026-07-18 and copied forward from `wireframes/r012-cleanup/` before capability-aware changes.
+- Status: Accepted clickable grayscale revision through Review Round 4, with a chat-session search case study pending Review Round 7 on 2026-07-18; copied forward from `wireframes/r012-cleanup/` before capability-aware changes.
 - Product area: Capability-aware chat composition, model selection, response activity, run provenance, and simplified approvals.
 - Requested scope:
   - Preserve the accepted r012 product surface and static SPA architecture.
@@ -12,6 +12,9 @@
   - Replace the internal 71-scenario Advanced Policies browser with seven user-facing policy groups plus concrete saved exceptions.
   - Explain that `Approve for me` remains bounded by the active sandbox, trusted roots, maximum authority, and managed policy.
   - Add compact model capability chips and capability filters to the composer model picker and Models settings.
+  - Add a provider header above the composer model filters. Activating it replaces the model list with configured provider choices; choosing a provider returns to that provider's filtered model list without changing the active model until a model is selected.
+  - Keep the provider-family label inline to the right of the back chevron and omit provider profile labels from the compact provider chooser.
+  - Add a separator and `+ Create New` action beneath the existing branch choices without changing the current selected-branch behavior.
   - Add a model capability details surface with effective-route evidence, restrictions, and checked time.
   - Keep the attachment picker generally available while marking each draft attachment as ready, convertible, or incompatible for the selected model route.
   - Preflight model switches and sends against the current attachment draft; never silently drop incompatible content.
@@ -26,6 +29,9 @@
   - Verify the copied workflows and representative interactions after the cleanup.
   - Preserve every accepted r010 SPA file, onboarding/start view, workspace interaction, Settings view, and supporting artifact.
   - Populate the main workspace left panel with a Search chat sessions field followed by a Projects section.
+  - While the search input is non-empty, temporarily replace the Projects heading and hierarchy with a flat chat-session results view that shows each session's owning project.
+  - Show an explicit `Clear search` control inside the search field whenever it has a value; clearing restores the unchanged Projects section and returns focus to the search input.
+  - Add `#chat-search` as a deterministic case-study route seeded with a realistic query and multiple matching sessions.
   - Add a Projects `+` action that opens the native OS folder picker and appends the selected folder to the project list.
   - Show nested chat sessions under each project, with a hover-only Remove action for each chat session.
   - Give each project hover-only More and New chat actions; New chat opens an unsaved blank thread without immediately appending a chat item.
@@ -141,6 +147,16 @@
   - The frame persists its session position and size, defaults to 380px by 420px, and has a 320px by 280px minimum.
 - User mode-popover request, 2026-07-15.
   - Defines a mode popover placed to the left of the paperclip attachment icon.
+- User provider-navigation request and supplied interaction pegs, 2026-07-18.
+  - Defines a provider header above the current composer model list and an in-place provider chooser that returns to a provider-scoped model list.
+  - The supplied pegs contribute interaction hierarchy only; labels, geometry, and styling follow the C4OS fixture and current wireframe language.
+- Browser annotations, Review Round 6, 2026-07-18.
+  - Keep the provider label inline to the right of its back chevron.
+  - Remove `Personal` and `Work` secondary labels from the compact provider chooser.
+  - Add a divider and `+ Create New` beneath `codex/artifacts` in the branch menu.
+- User chat-session search case-study request, 2026-07-18.
+  - Search results temporarily replace the Projects section rather than filtering the nested hierarchy in place.
+  - An explicit clear control removes the query and restores Projects.
 - Browser annotations, Round 2, 2026-07-15.
   - Browser artifacts consolidate their type icon, back, forward, refresh, read-only current address, and Expand control into one header bar.
   - File artifacts support inline Edit, Cancel, and Save controls. Edit mode adds line numbers plus a scrollable, vertically resizable editor; returning to read mode restores the default artifact height.
@@ -259,6 +275,13 @@
 - Happy path: Enter a natural-language prompt and receive a normal assistant response.
 - Alternate paths: Copy or reply to either message.
 
+### Search Chat Sessions
+
+- Starting screen link: `./index.html#chat-search`
+- Intended user role or mode: Returning user locating a prior chat.
+- Happy path: Review the seeded `project` query, scan flat matching sessions with their owning projects, activate a result, then clear the query to restore Projects.
+- Alternate paths: Type another query, review a no-results state, or press Escape in the search field to clear it.
+
 ### Open And Revise A File
 
 - Starting screen link: `./index.html#files`
@@ -317,6 +340,14 @@
 - Shared files: `styles.css`, `script.js`.
 
 ## Component Inventory
+
+### Chat Session Search And Results
+
+- Appears: At the top of the left panel in workspace routes; `#chat-search` seeds the review state.
+- Variants and states: Empty query with Projects visible, non-empty query with flat results visible, multiple matches, no matches, active-session result, and clear control visible.
+- Inputs and outputs: Typing builds case-insensitive session-title results with owning-project context and replaces the Projects section. Activating a result opens its original session without clearing the query. Clear empties the query, restores Projects unchanged, and returns focus to the input; Escape also clears and restores Projects.
+- Accessibility: Search landmark, explicit label, named clear button, results count in a polite status, result buttons with session and project context, and keyboard clearing.
+- Files: `index.html`, `styles.css`, `script.js`.
 
 ### Composer Mode Trigger And Popover
 
@@ -414,10 +445,11 @@
 ### Search Chat Sessions
 
 - Trigger: Type in Search chat sessions.
-- Affected elements: Nested chat-session rows and project visibility.
+- Affected elements: Projects heading/hierarchy, flat search-results view, results count, no-results state, and clear control.
 - Before: All projects and sessions are visible.
-- After: Sessions whose titles do not match are hidden; projects without a matching session are hidden.
-- Visible result: The left panel shows only matching chat sessions and their owning projects.
+- After: Projects is hidden without mutation; matching sessions appear as a flat list with owning-project labels. Activating a result opens the original chat while retaining the query.
+- Clear result: Activating the clear control empties the input, hides results, restores Projects with its prior expand/order state, and focuses the input. Escape performs the same state restoration without a focus-return requirement.
+- Visible result: Search remains fixed at the top while the region beneath swaps between Projects and Search results.
 - Responsible module: Workspace-project controller in `script.js`.
 
 ### Add Or Relocate A Project Folder
@@ -703,14 +735,14 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - Valid provider setup routes to the workspace start screen inside the same SPA.
 - Provider-present launch shows Open a folder, Open a workspace, Clone Repository, and exactly three recent workspaces.
 - Every workspace start action routes to the retained r009 main app without replacing the document.
-- The main workspace left panel renders Search chat sessions before Projects.
+- The main workspace left panel renders Search chat sessions before Projects; a non-empty query replaces Projects with flat session results and an explicit clear action restores Projects.
 - Projects `+` opens a native directory chooser and a chosen folder appends to the list.
 - Found and missing project menus expose their required, distinct first action.
 - Project New chat opens a centered unsaved blank thread without appending a nested session.
 - The blank thread asks what the user wants to build in the selected project.
 - Its first valid Chat submission creates and activates a nested session titled from the prompt or first attachment filename; session Remove deletes only that session and activates a valid fallback when needed.
 - Project actions and session Remove appear on hover or keyboard focus.
-- Search filters sessions and hides projects without matches.
+- Search results show matching session titles with their owning projects, include a no-results state, and do not mutate project expansion/order while Projects is hidden.
 - Drag and drop changes project order without losing sessions.
 - Workflow launcher links to all four mode starting points.
 - The compact mode control is immediately left of the paperclip in Chat mode and opens an upward popover.
@@ -940,6 +972,9 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - `index.html#chat-capabilities`
   - Purpose: Show a seeded image draft against a text-only model so the incompatibility flow is immediately reviewable.
   - States: incompatible draft, compatible model resolution, converted attachment, removed attachment, cancelled switch, reasoning-supported model, and reasoning-unsupported model.
+- `index.html#chat-search`
+  - Purpose: Show a seeded session-title query that temporarily replaces Projects with flat results and an explicit clear path.
+  - States: two matching results, active result, result activation with query preserved, clear-to-Projects, Escape clear, and no results.
 - `index.html#settings/models`
   - Purpose: Search and filter enabled models, scan compact capabilities, and open route-specific details.
   - States: all capabilities, Vision, Tools, Reasoning, Audio, empty results, enabled/disabled, and details dialog.
@@ -952,6 +987,7 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 ### Workflow Starting Points
 
 - Capability-aware attachment preflight: `./index.html#chat-capabilities`.
+- Chat-session search results: `./index.html#chat-search`.
 - Model capability discovery: `./index.html#settings/models`.
 - Approval preset selection: `./index.html#settings/configuration`.
 - Category rules and saved exceptions: `./index.html#settings/advanced-policies`.
@@ -961,7 +997,7 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - Preserve the r012 single-document workspace and Settings shells.
 - Add a compact Chat information control to the header without changing the centered thread title; disclose session metadata on demand.
 - Add compatibility feedback inside the composer above the input and controls so unresolved draft content remains visible.
-- Expand the model menu upward from the existing composer control and keep filters inside the menu.
+- Expand the model menu upward from the existing composer control. Keep a provider header above the filters, and replace the menu body in place with provider choices when that header is activated.
 - Use the existing Settings list layout for capability-enriched model rows.
 - Use the existing Settings dialog backdrop for the model capability details dialog.
 - Keep Advanced Policies in the Settings content region; switch between category rules and exceptions without changing routes.
@@ -971,6 +1007,8 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - Chat information popover: runtime/native version, environment, workspace, model, health, and effective context-window usage with used/remaining proportions and token totals.
 - Run details disclosure: provider/model, adapter/native version, environment, and effective capabilities.
 - Model filter chips: All, Vision, Tools, Reasoning, and Audio.
+- Provider navigator: inline back chevron/current provider-family header, provider-list title, configured provider-family rows without profile labels, current-provider state, and in-place return to the provider-scoped model list.
+- Branch menu: existing branch choices followed by a divider and `+ Create New` affordance.
 - Model option row: model label, compact capabilities, and context size.
 - Reasoning control: Off, Low, Medium, and High; hidden when unsupported.
 - Attachment compatibility label: Ready, Needs Vision, Needs Audio, or Converted.
@@ -984,6 +1022,16 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - Model filtering:
   - Trigger: Select a capability chip in the composer menu or capability select in Models settings.
   - Result: Only matching model options or rows remain visible; ordinary text chat is never disabled by an unrelated unknown capability.
+- Provider navigation:
+  - Trigger: Activate the provider header above the composer model filters.
+  - Before: The menu shows models for the provider associated with the active model.
+  - After opening: The same popover shows enabled configured providers and marks the provider associated with the active model.
+  - After choosing: The popover returns to the model view, updates the header, resets the capability filter to All, and shows only models routed through that provider. The active model and dependent session controls do not change until a model is selected.
+  - Closing and reopening the popover restores the model view for the active model's provider.
+- Branch creation affordance:
+  - Trigger: Open the branch menu.
+  - Result: `main` and `codex/artifacts` remain selectable; a divider separates them from `+ Create New`.
+  - Prototype boundary: The new action is present for hierarchy review but does not create or switch a real Git branch in this round.
 - Model switching:
   - Trigger: Select a different composer model.
   - Before: The current draft, attachments, response needs, and selected session controls remain intact.
@@ -1011,6 +1059,7 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 - `index.html`: adapted from r012 with new product UI in the existing SPA.
 - `styles.css`: adapted from r012 with grayscale capability, provenance, compatibility, and policy components.
 - `script.js`: adapted from r012 with in-memory capability profiles, draft preflight, dependent-control recomputation, model filtering/details, and policy-view behavior.
+- Provider/model navigation remains an in-memory wireframe simulation and does not discover providers or routes from a live service.
 - `markdown.js` and `markdown-source.js`: copied unchanged for the existing editor and rendering behavior.
 - Inline Lucide-guided SVGs remain the icon source.
 - No framework, build step, new dependency, or root-relative asset is introduced.
@@ -1024,7 +1073,10 @@ Prototype behavior intentionally omits real file, network, browser, terminal, an
 
 - r012 remains unchanged and available for historical comparison.
 - The capability-review route starts with Kimi K2, a visible image draft, hidden reasoning control, and a no-silent-drop alert.
+- The search case-study route starts with `project`, hides Projects, shows two flat session matches with owning-project labels, and restores Projects through the clear control or Escape.
 - Use compatible model changes to GPT-5, marks the image Ready, reveals Reasoning, and closes the alert.
+- The model popover opens on the active model's provider, its header opens the provider list, and each provider choice returns to a correctly scoped model list without prematurely changing the active model.
+- The provider header keeps its label inline with the back chevron, provider rows expose no secondary profile labels, and the branch menu shows a divider plus `+ Create New` after `codex/artifacts`.
 - Model settings show seven clickable model names; hover affordance, capability filtering, and the details dialog work.
 - The Models toolbar remains one row at 992 px and wider; below 992 px search spans the first row while both filters and the bulk toggle share the second row.
 - Configuration exposes exactly four accepted approval presets and the safety-ceiling copy.

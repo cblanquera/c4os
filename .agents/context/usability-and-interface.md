@@ -31,6 +31,7 @@ The application is one stateful shell. Onboarding, workspace start, workspace mo
 | First-provider onboarding | `#onboarding` | Configure one provider before use |
 | Workspace start | `#start` | Open, clone, or resume a workspace |
 | Chat workspace | `#chat` | Continue ordinary AI conversation |
+| Chat-session search fixture | `#chat-search` | Review flat session results and clear back to Projects |
 | Capability-aware Chat fixture | `#chat-capabilities` | Review incompatible-attachment preflight and model-dependent controls |
 | Files mode | `#files` | Open a file or browse a folder |
 | Browser mode | `#browser` | Open and operate a webpage |

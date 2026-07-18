@@ -263,18 +263,30 @@
           data-workspace-projects
           aria-label="Projects and chat sessions"
         >
-          <label class="session-search"
+          <div class="session-search" role="search"
             ><svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7"></circle>
               <path d="m20 20-4-4"></path></svg
-            ><span class="sr-only">Search chat sessions</span
+            ><label class="sr-only" for="session-search-input">Search chat sessions</label
             ><input
+              id="session-search-input"
               type="search"
               placeholder="Search chat sessions"
               data-session-search
               autocomplete="off"
-          /></label>
-          <header class="workspace-projects__heading">
+            /><button
+              class="session-search__clear"
+              type="button"
+              data-session-search-clear
+              aria-label="Clear chat session search"
+              title="Clear search"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+            </button>
+          </div>
+          <div class="workspace-projects__view" data-projects-view>
+            <header class="workspace-projects__heading">
             <strong>Projects</strong
             ><button
               type="button"
@@ -286,8 +298,8 @@
                 <path d="M12 5v14M5 12h14"></path>
               </svg>
             </button>
-          </header>
-          <input
+            </header>
+            <input
             class="sr-only"
             type="file"
             data-project-folder-input
@@ -295,8 +307,8 @@
             directory
             multiple
             aria-label="Choose project folder"
-          />
-          <div class="workspace-projects__list" data-project-list>
+            />
+            <div class="workspace-projects__list" data-project-list>
             <article
               class="project-item"
               data-project-id="desktop-ui"
@@ -668,7 +680,23 @@
                 </div>
               </div>
             </article>
+            </div>
           </div>
+          <section
+            class="session-search-results"
+            data-session-search-results
+            aria-label="Chat session search results"
+            hidden
+          >
+            <header class="session-search-results__heading">
+              <strong>Search results</strong>
+              <span data-session-search-count aria-live="polite"></span>
+            </header>
+            <div class="session-search-results__list" data-session-search-list></div>
+            <p class="session-search-results__empty" data-session-search-empty hidden>
+              No chat sessions found
+            </p>
+          </section>
           <p
             class="workspace-projects__status"
             data-project-status
@@ -1789,38 +1817,96 @@
                     </svg>
                   </button>
                   <div class="option-menu option-menu--models" data-menu="model" role="menu" hidden>
-                    <div class="model-menu__filters" aria-label="Filter models">
-                      <button type="button" data-model-filter="all" aria-pressed="true">All</button>
-                      <button type="button" data-model-filter="vision" aria-pressed="false">Vision</button>
-                      <button type="button" data-model-filter="tools" aria-pressed="false">Tools</button>
-                      <button type="button" data-model-filter="reasoning" aria-pressed="false">Reasoning</button>
-                      <button type="button" data-model-filter="audio" aria-pressed="false">Audio</button>
+                    <div data-model-list-view>
+                      <button class="model-menu__provider" type="button" role="menuitem" data-model-provider-open>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+                        <span data-model-provider-label>OpenAI</span>
+                      </button>
+                      <div class="model-menu__filters" aria-label="Filter models">
+                        <button type="button" data-model-filter="all" aria-pressed="true">All</button>
+                        <button type="button" data-model-filter="vision" aria-pressed="false">Vision</button>
+                        <button type="button" data-model-filter="tools" aria-pressed="false">Tools</button>
+                        <button type="button" data-model-filter="reasoning" aria-pressed="false">Reasoning</button>
+                        <button type="button" data-model-filter="audio" aria-pressed="false">Audio</button>
+                      </div>
+                      <div class="model-menu__options" data-model-options>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="true"
+                          data-option="GPT-5"
+                          data-model-provider="openai"
+                          data-model-capabilities="vision tools reasoning"
+                        >
+                          <span><strong>GPT-5</strong><small>Vision · Tools · Reasoning · 400K</small></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="false"
+                          data-option="GPT-5 fast"
+                          data-model-provider="openai"
+                          data-model-capabilities="vision tools"
+                        >
+                          <span><strong>GPT-5 fast</strong><small>Vision · Tools · 128K</small></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="false"
+                          data-option="Claude Opus 4.1"
+                          data-model-provider="openrouter"
+                          data-model-capabilities="vision tools reasoning"
+                        >
+                          <span><strong>Claude Opus 4.1</strong><small>Vision · Tools · Reasoning · 200K</small></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="false"
+                          data-option="Kimi K2"
+                          data-model-provider="openrouter"
+                          data-model-capabilities="tools"
+                        >
+                          <span><strong>Kimi K2</strong><small>Text · Tools · 128K</small></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="false"
+                          data-option="Qwen3 Coder"
+                          data-model-provider="huggingface"
+                          data-model-capabilities="tools"
+                        >
+                          <span><strong>Qwen3 Coder</strong><small>Text · Tools · 128K</small></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="false"
+                          data-option="DeepSeek R1"
+                          data-model-provider="huggingface"
+                          data-model-capabilities="reasoning"
+                        >
+                          <span><strong>DeepSeek R1</strong><small>Text · Reasoning · 128K</small></span>
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked="true"
-                      data-option="GPT-5"
-                      data-model-capabilities="vision tools reasoning"
-                    >
-                      <span><strong>GPT-5</strong><small>Vision · Tools · Reasoning · 400K</small></span></button
-                    ><button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked="false"
-                      data-option="GPT-5 fast"
-                      data-model-capabilities="vision tools"
-                    >
-                      <span><strong>GPT-5 fast</strong><small>Vision · Tools · 128K</small></span>
-                    </button><button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked="false"
-                      data-option="Kimi K2"
-                      data-model-capabilities="tools"
-                    >
-                      <span><strong>Kimi K2</strong><small>Text · Tools · 128K</small></span>
-                    </button>
+                    <div class="model-menu__providers" data-model-provider-view hidden>
+                      <div class="model-menu__title">Providers</div>
+                      <button type="button" role="menuitemradio" aria-checked="false" data-model-provider-choice="openrouter">
+                        <strong>OpenRouter</strong>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+                      </button>
+                      <button type="button" role="menuitemradio" aria-checked="true" data-model-provider-choice="openai">
+                        <strong>OpenAI</strong>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+                      </button>
+                      <button type="button" role="menuitemradio" aria-checked="false" data-model-provider-choice="huggingface">
+                        <strong>Hugging Face</strong>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div class="option-control" data-composer-control="reasoning">
@@ -1938,6 +2024,15 @@
                       data-option="codex/artifacts"
                     >
                       codex/artifacts
+                    </button>
+                    <div class="option-menu__divider" role="separator"></div>
+                    <button
+                      class="option-menu__create"
+                      type="button"
+                      role="menuitem"
+                      data-branch-create
+                    >
+                      + Create New
                     </button>
                   </div>
                 </div>

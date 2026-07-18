@@ -20,7 +20,7 @@ Each project row includes a disclosure, project/folder icon, name, hover/focus-o
 - Missing-path More menu: Relocate, Copy path, Rename, Remove.
 - A missing path uses lighter italic project-name styling plus accessible state text; no persistent visible `Missing` badge.
 - Add and Relocate invoke the native directory chooser. Add appends a project; Relocate repairs the existing project.
-- Search filters session titles and hides a project with no matching session.
+- A non-empty session-title search temporarily replaces the Projects heading and hierarchy with a flat result list. Each result shows the session title and owning project; activating it opens the original session without clearing the query. An explicit clear control empties the query, restores Projects with its prior order/expansion state, and returns focus to search; Escape also clears and restores Projects. A no-results state remains inside the replacement region.
 - Session Remove deletes only that chat and activates a valid fallback if necessary.
 - Removing an active project/session or a pending project must never leave detached active state.
 
@@ -71,7 +71,8 @@ Chat and Reply use one toolbar-free source-preserving Markdown editor. Requireme
 
 ## Model And Session Controls
 
-- The model menu filters by All, Vision, Tools, Reasoning, and Audio and shows model capability/context summaries.
+- The model menu opens on the provider associated with the active model. An inline back-chevron/provider-family header above the All, Vision, Tools, Reasoning, and Audio filters opens an in-place configured-provider list; compact provider rows use family names without profile-label subtitles. Choosing a provider returns to that provider's filtered model list without changing the active model until a model is selected. Closing and reopening restores the active model's provider view.
+- Model rows show capability/context summaries, and provider/model navigation remains keyboard reachable with Escape dismissal and focus restoration.
 - Changing model atomically recomputes dependent controls. Reasoning effort offers Off, Low, Medium, and High only when the effective route supports it; unsupported routes hide the control and clear stale effort.
 - The title header retains the centered thread title plus an icon-only Chat information control. Its popover contains runtime, environment, workspace, model, health, and effective context-window usage; adapter details belong to individual run provenance.
 - Each assistant response exposes expandable route and effective-capability details while retaining C4OS as the assistant identity.
@@ -89,6 +90,8 @@ The mode trigger is in the lower toolbar and immediately left of the paperclip i
 | Reply | Markdown editor | Quoted-reference strip; no mode trigger | Send |
 
 Mode persists after ordinary submission. Reply remembers the mode, temporarily switches to Chat semantics, and restores the previous mode after cancel or submit.
+
+The branch menu lists `main` and `codex/artifacts`, followed by a divider and `+ Create New`. The wireframe keeps branch creation non-mutating; production branch creation remains subject to the runtime, repository, and approval boundaries.
 
 ## Quoted Reply
 
@@ -114,4 +117,4 @@ Reply may target a user message, assistant message, Browser, File, Folder, or Te
 
 ## Conversation Acceptance
 
-Verify project search, add/relocate, menus, rename, remove, sorting, pending chat promotion, session fallback, all composer modes, Markdown shortcuts, paste, attachments, drop, message actions, reply routing, scroll-to-latest, repeated panel resizing, overlay dismissal, artifact focus swaps, pane resizing, collapsed-panel recovery, and restoration of the prior composer mode.
+Verify project search replacement/results/clear/no-results, add/relocate, menus, rename, remove, sorting, pending chat promotion, session fallback, all composer modes, Markdown shortcuts, paste, attachments, drop, message actions, reply routing, scroll-to-latest, repeated panel resizing, overlay dismissal, artifact focus swaps, pane resizing, collapsed-panel recovery, and restoration of the prior composer mode.

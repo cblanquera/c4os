@@ -11,7 +11,7 @@ For historical r012 parity, use the literal profile preserved in `00007-launch-a
 An equivalent static review artifact may use different internal organization, but must provide:
 
 - one directly openable application entry
-- one workflow launcher with all fifteen destinations
+- one workflow launcher with all sixteen destinations
 - platform/system theme support
 - styles and behavior requiring no build step for review
 - a source-preserving Markdown editor runtime
@@ -24,18 +24,19 @@ All document links/imports are relative. Product UI contains no review annotatio
 1. No Provider → onboarding
 2. Start Screen → workspace start
 3. Workspace Projects → Chat
-4. Chat
-5. Files
-6. Browser
-7. Terminal
-8. Providers
-9. Model Capabilities → Models
-10. Runtimes
-11. Plugins
-12. Skills
-13. MCP Servers
-14. Configuration
-15. Advanced Policies
+4. Search Chat Sessions → seeded `#chat-search` results
+5. Chat
+6. Files
+7. Browser
+8. Terminal
+9. Providers
+10. Model Capabilities → Models
+11. Runtimes
+12. Plugins
+13. Skills
+14. MCP Servers
+15. Configuration
+16. Advanced Policies
 
 ## Project Fixtures
 
@@ -46,6 +47,8 @@ All document links/imports are relative. Product UI contains no review annotatio
 | legacy-ui | `~/Projects/archive/legacy-ui` | missing, lighter italic | Recover legacy workspace |
 
 The exact active session can vary by workflow route, but the fixture must exercise found/missing, expanded/collapsed, active/inactive, search, menus, sorting, pending chat, promotion, and removal fallback.
+
+The `#chat-search` fixture seeds `project`, replaces Projects with flat matches for `Design workspace projects` and `Establish project knowledge base`, shows each owning project, preserves the query when a result opens, exposes a no-results state for unmatched text, and restores the unchanged Projects hierarchy through the clear control or Escape. The explicit clear control returns focus to search.
 
 ## Provider And Model Fixtures
 
@@ -59,6 +62,8 @@ The exact active session can vary by workflow route, but the fixture must exerci
 Model rows include at least: `anthropic/claude-opus-4.1`, `anthropic/claude-sonnet-4.5`, `moonshotai/kimi-k2`, `openai/gpt-5`, `openai/gpt-5-mini`, `Qwen/Qwen3-Coder`, and `deepseek-ai/DeepSeek-R1`. Fixtures must span providers and enabled/disabled states so filtering and bulk behavior are reviewable.
 
 Capability fixtures span Vision, Tools, Reasoning, Audio absence, and 128K/200K/400K context sizes. `GPT-5` supports Vision, Tools, and Reasoning with a 400K context; `Kimi K2` is Tools-only with 128K in the deterministic fixture. Model details include effective support, restrictions, evidence source, and checked time.
+
+The composer model fixture begins on OpenAI when GPT-5 is active. Its inline back-chevron/OpenAI header opens enabled OpenRouter, OpenAI, and Hugging Face family choices without profile subtitles. Choosing a provider returns to only that provider's model rows without changing GPT-5 until a model is selected; closing and reopening restores the active model's provider. The fixture includes at least two composer-selectable models for each listed provider so the provider-to-model flow and capability filters remain reviewable.
 
 ## Plugin, Skill, And Runtime Fixtures
 
@@ -104,16 +109,18 @@ Every relevant component is checked in default, hover, focus-visible, active/sel
 ### Launch and navigation
 
 - No-provider and configured-provider routes resolve correctly.
-- All fifteen workflow destinations render directly.
+- All sixteen workflow destinations render directly.
 - Settings visit/return preserves workspace state.
 - Platform theme and live light/dark changes affect every route.
 
 ### Workspace
 
-- Project/session CRUD-like prototype actions, path-dependent menus, search, sorting, pending promotion, attachment-title fallback, and safe active fallback work.
+- Project/session CRUD-like prototype actions, path-dependent menus, search replacement/results/activation/clear/no-results, sorting, pending promotion, attachment-title fallback, and safe active fallback work.
 - Panel resize works repeatedly; overlay dismissal and collapsed focus behavior are correct.
 - Transcript hierarchy, Markdown source/render, shortcuts, paste, attachments/drop, actions, reply, and scroll-to-latest work.
 - Composer modes show only their allowed controls and restore correctly after reply/focus.
+- Composer model selection supports provider-list entry, provider-scoped return, capability filtering within the chosen provider, active-model preservation while browsing, model-dependent control recomputation after selection, and Escape/focus restoration.
+- The branch fixture shows `main`, `codex/artifacts`, a divider, and `+ Create New` in that order without performing a real branch mutation.
 
 ### Artifacts
 

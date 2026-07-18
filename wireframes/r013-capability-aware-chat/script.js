@@ -70,18 +70,44 @@
     'GPT-5': {
       capabilities: ['vision', 'tools', 'reasoning'],
       context: '400K',
+      provider: 'openai',
       route: 'OpenAI - Work · OpenCode',
     },
     'GPT-5 fast': {
       capabilities: ['vision', 'tools'],
       context: '128K',
+      provider: 'openai',
       route: 'OpenAI - Work · OpenCode',
+    },
+    'Claude Opus 4.1': {
+      capabilities: ['vision', 'tools', 'reasoning'],
+      context: '200K',
+      provider: 'openrouter',
+      route: 'OpenRouter - Personal · OpenCode',
     },
     'Kimi K2': {
       capabilities: ['tools'],
       context: '128K',
+      provider: 'openrouter',
       route: 'OpenRouter - Personal · OpenCode',
     },
+    'Qwen3 Coder': {
+      capabilities: ['tools'],
+      context: '128K',
+      provider: 'huggingface',
+      route: 'Hugging Face - Personal · OpenCode',
+    },
+    'DeepSeek R1': {
+      capabilities: ['reasoning'],
+      context: '128K',
+      provider: 'huggingface',
+      route: 'Hugging Face - Personal · OpenCode',
+    },
+  };
+  var modelProviders = {
+    huggingface: 'Hugging Face',
+    openai: 'OpenAI',
+    openrouter: 'OpenRouter',
   };
 
   var icons = {
@@ -374,6 +400,9 @@
       item.setAttribute('aria-checked', String(item === option));
     });
     document.querySelector('[data-option-value="model"]').textContent = option.getAttribute('data-option');
+    var provider = option.getAttribute('data-model-provider');
+    var providerLabel = menu.querySelector('[data-model-provider-label]');
+    if (provider && providerLabel) providerLabel.textContent = modelProviders[provider];
     hideCompatibilityAlert();
     syncModelDependentControls();
   }
@@ -3111,6 +3140,76 @@
   var menuTriggers = Array.prototype.slice.call(
     document.querySelectorAll('[data-menu-trigger]'),
   );
+  var composerModelMenu = document.querySelector('[data-menu="model"]');
+  var browsedModelProvider = 'openai';
+
+  function selectedModelProvider() {
+    var selected = modelProfiles[selectedModelName()];
+    return selected?.provider || 'openai';
+  }
+
+  function filterComposerModels() {
+    if (!composerModelMenu) return;
+    var activeFilter = composerModelMenu.querySelector(
+      '[data-model-filter][aria-pressed="true"]',
+    );
+    var capability = activeFilter?.getAttribute('data-model-filter') || 'all';
+    composerModelMenu
+      .querySelectorAll('[data-model-options] [data-option]')
+      .forEach(function (item) {
+        var providerMatch =
+          item.getAttribute('data-model-provider') === browsedModelProvider;
+        var capabilities = (
+          item.getAttribute('data-model-capabilities') || ''
+        ).split(' ');
+        var capabilityMatch =
+          capability === 'all' || capabilities.indexOf(capability) > -1;
+        item.hidden = !providerMatch || !capabilityMatch;
+      });
+  }
+
+  function showModelsForProvider(provider, resetFilter) {
+    if (!composerModelMenu || !modelProviders[provider]) return;
+    browsedModelProvider = provider;
+    composerModelMenu.querySelector('[data-model-list-view]').hidden = false;
+    composerModelMenu.querySelector('[data-model-provider-view]').hidden = true;
+    composerModelMenu.querySelector('[data-model-provider-label]').textContent =
+      modelProviders[provider];
+    if (resetFilter) {
+      composerModelMenu.querySelectorAll('[data-model-filter]').forEach(function (item) {
+        item.setAttribute(
+          'aria-pressed',
+          String(item.getAttribute('data-model-filter') === 'all'),
+        );
+      });
+    }
+    filterComposerModels();
+  }
+
+  function showModelProviders() {
+    if (!composerModelMenu) return;
+    var activeProvider = selectedModelProvider();
+    composerModelMenu.querySelector('[data-model-list-view]').hidden = true;
+    composerModelMenu.querySelector('[data-model-provider-view]').hidden = false;
+    composerModelMenu
+      .querySelectorAll('[data-model-provider-choice]')
+      .forEach(function (item) {
+        item.setAttribute(
+          'aria-checked',
+          String(
+            item.getAttribute('data-model-provider-choice') === activeProvider,
+          ),
+        );
+      });
+    composerModelMenu
+      .querySelector('[data-model-provider-choice][aria-checked="true"]')
+      ?.focus();
+  }
+
+  function resetComposerModelMenu() {
+    showModelsForProvider(selectedModelProvider(), true);
+  }
+
   function closeMenus() {
     menuTriggers.forEach(function (trigger) {
       trigger.setAttribute('aria-expanded', 'false');
@@ -3127,6 +3226,7 @@
       var menu = document.querySelector('[data-menu="' + name + '"]');
       var open = trigger.getAttribute('aria-expanded') !== 'true';
       closeMenus();
+      if (name === 'model' && open) resetComposerModelMenu();
       trigger.setAttribute('aria-expanded', String(open));
       menu.hidden = !open;
     });
@@ -3154,16 +3254,34 @@
       closeMenus();
     });
   });
-  document.querySelector('[data-menu="model"]')?.addEventListener('click', function (event) {
+  composerModelMenu?.addEventListener('click', function (event) {
+    if (event.target.closest('[data-model-provider-open]')) {
+      showModelProviders();
+      return;
+    }
+    var providerChoice = event.target.closest('[data-model-provider-choice]');
+    if (providerChoice) {
+      showModelsForProvider(
+        providerChoice.getAttribute('data-model-provider-choice'),
+        true,
+      );
+      composerModelMenu
+        .querySelector('[data-model-options] [data-option]:not([hidden])')
+        ?.focus();
+      return;
+    }
     var filter = event.target.closest('[data-model-filter]');
     if (!filter) return;
-    var capability = filter.getAttribute('data-model-filter');
     filter.parentElement.querySelectorAll('[data-model-filter]').forEach(function (item) {
       item.setAttribute('aria-pressed', String(item === filter));
     });
-    filter.closest('[data-menu="model"]').querySelectorAll('[data-model-capabilities]').forEach(function (item) {
-      item.hidden = capability !== 'all' && item.getAttribute('data-model-capabilities').split(' ').indexOf(capability) === -1;
-    });
+    filterComposerModels();
+  });
+  composerModelMenu?.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    closeMenus();
+    document.querySelector('[data-menu-trigger="model"]')?.focus();
   });
   document.querySelector('[data-compatibility-alert]')?.addEventListener('click', function (event) {
     var action = event.target.closest('[data-compatibility-action]');
@@ -5115,6 +5233,12 @@
 
   var list = root.querySelector('[data-project-list]');
   var search = root.querySelector('[data-session-search]');
+  var searchClear = root.querySelector('[data-session-search-clear]');
+  var searchResults = root.querySelector('[data-session-search-results]');
+  var searchResultList = root.querySelector('[data-session-search-list]');
+  var searchResultCount = root.querySelector('[data-session-search-count]');
+  var searchEmpty = root.querySelector('[data-session-search-empty]');
+  var projectsView = root.querySelector('[data-projects-view]');
   var addButton = root.querySelector('[data-project-add]');
   var folderInput = root.querySelector('[data-project-folder-input]');
   var status = root.querySelector('[data-project-status]');
@@ -5227,6 +5351,7 @@
     var threadTitle = document.querySelector('.thread-title strong');
     if (threadTitle) threadTitle.textContent = title;
     notify('Opened “' + title + '”');
+    if (search.value.trim()) filterSessions();
   }
 
   /** Shows a stable empty workspace when no saved session remains. */
@@ -5458,24 +5583,72 @@
     notify('Removed “' + title + '”');
   }
 
-  /** Filters projects and sessions using the current search term. */
+  /** Builds the flat search-result view without mutating project hierarchy. */
   function filterSessions() {
     var query = search.value.trim().toLowerCase();
-    list.querySelectorAll('[data-project-id]').forEach(function (project) {
-      var matches = 0;
-      project.querySelectorAll('[data-session-id]').forEach(function (session) {
-        var match =
-          !query ||
-          (session.dataset.sessionTitle || '').toLowerCase().includes(query);
-        session.hidden = !match;
-        if (match) matches += 1;
+    searchClear.hidden = !query;
+    projectsView.hidden = Boolean(query);
+    searchResults.hidden = !query;
+
+    if (!query) {
+      searchResultList.innerHTML = '';
+      searchResultCount.textContent = '';
+      searchEmpty.hidden = true;
+      list.querySelectorAll('[data-project-id]').forEach(function (project) {
+        project.hidden = false;
+        project.querySelectorAll('[data-session-id]').forEach(function (session) {
+          session.hidden = false;
+        });
+        project.querySelector('[data-project-sessions]').hidden =
+          project.dataset.projectExpanded !== 'true';
       });
-      project.hidden = Boolean(query && !matches);
-      var sessions = project.querySelector('[data-project-sessions]');
-      sessions.hidden = query
-        ? !matches
-        : project.dataset.projectExpanded !== 'true';
+      return;
+    }
+
+    var matches = [];
+    list.querySelectorAll('[data-session-id]').forEach(function (session) {
+      var title = session.dataset.sessionTitle || '';
+      if (!title.toLowerCase().includes(query)) return;
+      matches.push({
+        id: session.dataset.sessionId,
+        project: projectName(session.closest('[data-project-id]')),
+        title: title,
+      });
     });
+
+    searchResultList.innerHTML = matches
+      .map(function (match) {
+        var current =
+          activeSession && activeSession.dataset.sessionId === match.id;
+        return (
+          '<button class="session-search-result" type="button" data-search-session-id="' +
+          escapeMarkup(match.id) +
+          '" aria-current="' +
+          String(Boolean(current)) +
+          '" aria-label="Open ' +
+          escapeMarkup(match.title) +
+          ' in ' +
+          escapeMarkup(match.project) +
+          '"><strong>' +
+          escapeMarkup(match.title) +
+          '</strong><small>' +
+          escapeMarkup(match.project) +
+          '</small></button>'
+        );
+      })
+      .join('');
+    searchResultCount.textContent =
+      matches.length + ' result' + (matches.length === 1 ? '' : 's');
+    searchEmpty.hidden = matches.length > 0;
+  }
+
+  /** Clears the search state and restores the unchanged Projects view. */
+  function clearSessionSearch() {
+    search.value = '';
+    filterSessions();
+    window.setTimeout(function () {
+      search.focus();
+    }, 0);
   }
 
   addButton.addEventListener('click', function () {
@@ -5487,6 +5660,24 @@
     addProjectFromSelection(folderInput.files);
   });
   search.addEventListener('input', filterSessions);
+  search.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !search.value) return;
+    event.preventDefault();
+    clearSessionSearch();
+  });
+  searchClear.addEventListener('click', clearSessionSearch);
+  searchResultList.addEventListener('click', function (event) {
+    var result = event.target.closest('[data-search-session-id]');
+    if (!result) return;
+    var id = result.dataset.searchSessionId;
+    var session = Array.prototype.find.call(
+      list.querySelectorAll('[data-session-id]'),
+      function (item) {
+        return item.dataset.sessionId === id;
+      },
+    );
+    if (session) setActiveSession(session);
+  });
   if (composer)
     composer.addEventListener(
       'submit',
@@ -5618,6 +5809,16 @@
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeMenus();
   });
+
+  /** Seeds the deterministic search-results case study on its direct route. */
+  function syncSearchCaseStudy() {
+    if (window.location.hash !== '#chat-search' || search.value.trim()) return;
+    search.value = 'project';
+    filterSessions();
+  }
+
+  window.addEventListener('hashchange', syncSearchCaseStudy);
+  syncSearchCaseStudy();
 })();
 
 //chat metadata disclosure

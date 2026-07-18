@@ -1,5 +1,136 @@
 # R013 Capability-Aware Chat Review Notes
 
+## Review Round 7 — 2026-07-18 — Chat-session search case study
+
+### Changed
+
+- Added `#chat-search` as a deterministic workflow state seeded with the query `project`.
+- Replaced the Projects heading and hierarchy with a flat Search results view whenever the query is non-empty.
+- Added owning-project context to each matching chat-session result.
+- Added an explicit inline clear control that empties the query, restores Projects unchanged, and returns focus to search.
+- Added result activation with the query preserved, Escape clearing, and a no-results state.
+
+### Feedback Applied
+
+- Applied the user's request for searched chat sessions to appear in the left pane instead of filtering the Projects hierarchy in place.
+- Applied the requirement that Projects remain temporarily replaced until the search input is cleared through an explicit `x` control.
+
+### Review Focus
+
+- Whether the flat result rows provide enough context through session title plus owning project.
+- Whether replacing Projects feels clearer than filtering nested projects in place.
+- Whether the inline clear control makes the return path to Projects obvious.
+
+### Simulated Or Deferred Behavior
+
+- Search is an in-memory case-insensitive title match over the seeded wireframe sessions; it does not query a persisted index.
+- Result activation restores the prototype's seeded transcript snapshot and does not load external data.
+
+### Open Questions
+
+- None required for this review round.
+
+### Verification
+
+- Confirmed `#chat-search` seeds `project`, hides Projects, and shows exactly two flat matches: Design workspace projects in AI Desktop UI and Establish project knowledge base in quotable-ai.
+- Confirmed the active session is marked in results and activating the other result updates the original session and center title without clearing the query.
+- Confirmed the inline clear control restores project order `desktop-ui`, `quotable`, `legacy`, preserves expanded states `true`, `true`, `false`, clears the query, hides results, and returns focus to search.
+- Confirmed Escape clears the query and restores Projects; unmatched text shows `0 results` and `No chat sessions found`.
+- Confirmed the left-pane search/results state has no document-level horizontal overflow at the default viewport or 720 × 900.
+- Confirmed the checked route reports no console warnings or errors.
+- Confirmed `script.js` passes Node syntax validation and the scoped wireframe/KB changes pass `git diff --check`.
+
+### Approval Path
+
+- Approval of Review Round 7 accepts the chat-session search replacement, result, and clear behavior and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Further minor feedback remains in r013; a materially different navigation model creates r014.
+
+## Review Round 6 — 2026-07-18 — Annotated provider and branch refinements
+
+### Changed
+
+- Kept the provider-family label inline to the right of the back chevron in the model popover header.
+- Removed `Personal` and `Work` secondary labels from every compact provider row.
+- Added a divider and `+ Create New` beneath `codex/artifacts` in the branch menu.
+
+### Feedback Applied
+
+- Applied all three browser comments captured against the model header, provider chooser, and branch menu.
+- Preserved the existing provider/model navigation and branch selection behavior while making only the annotated hierarchy changes.
+
+### Review Focus
+
+- Whether the inline back-chevron/provider label now reads as one compact navigation row.
+- Whether provider-family-only rows are the right density for this chooser.
+- Whether the divider gives `+ Create New` enough separation from selectable existing branches.
+
+### Simulated Or Deferred Behavior
+
+- `+ Create New` is a visible non-mutating wireframe affordance in this round; it does not create or switch a real Git branch.
+- Provider/model data and selection remain illustrative in-memory wireframe behavior.
+
+### Open Questions
+
+- None introduced by these annotated refinements.
+
+### Verification
+
+- Confirmed the provider header computes as a two-column grid and the OpenAI label is horizontally inline and vertically centered beside the chevron.
+- Confirmed the provider chooser contains exactly OpenRouter, OpenAI, and Hugging Face with zero secondary `small` labels.
+- Confirmed the branch menu order is `main`, `codex/artifacts`, separator, and `+ Create New`, with the separator and action exposed through menu semantics.
+- Confirmed the revised provider and branch menus remain inside the viewport with no document-level horizontal overflow at the default viewport and 720 × 900.
+- Confirmed the checked route reports no console warnings or errors.
+- Confirmed `script.js` passes Node syntax validation and the scoped wireframe/KB changes pass `git diff --check`.
+
+### Approval Path
+
+- Approval of Review Round 6 accepts the annotated provider and branch refinements and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Further minor feedback remains in r013; a materially different flow creates r014.
+
+## Review Round 5 — 2026-07-18 — Provider-to-model navigation
+
+### Changed
+
+- Added a provider header above the capability filters in the composer model popover.
+- Added an in-place Providers view using the configured OpenRouter, OpenAI, and Hugging Face fixture routes.
+- Made each provider choice return to a model list scoped to that provider while preserving the active model until a model is selected.
+- Added provider-aware model fixtures and retained the existing capability filtering, attachment preflight, dependent-control recomputation, and selected-state behavior.
+- Added Escape dismissal with focus restoration to the model trigger.
+
+### Feedback Applied
+
+- Applied the user's request for a header conceptually like the supplied “OpenRouter” peg and a provider-list state conceptually like the supplied provider peg.
+- Treated the supplied screenshots as interaction references only. The initial header uses OpenAI because GPT-5 belongs to the OpenAI fixture, and the layout retains the C4OS wireframe language.
+
+### Review Focus
+
+- Whether the provider header is discoverable as navigation without competing with the model capability filters.
+- Whether replacing the popover body with Providers and returning to a provider-scoped model list feels clear and lightweight.
+- Whether provider-family labels are sufficient here or should expose full provider-profile labels in a later refinement.
+
+### Simulated Or Deferred Behavior
+
+- Provider availability, provider/model membership, capability data, and model changes remain illustrative in-memory wireframe behavior; no live provider discovery or model call occurs.
+- The static grayscale artifact still does not implement the accepted platform-native light/dark contract; this round does not change platform presentation.
+
+### Open Questions
+
+- None required to review this interaction round.
+
+### Verification
+
+- Confirmed the default GPT-5 menu opens on OpenAI and shows only GPT-5 and GPT-5 fast.
+- Confirmed the header opens Providers, marks OpenAI as the active model's provider, and shows OpenRouter, OpenAI, and Hugging Face fixture choices.
+- Confirmed choosing OpenRouter returns to Claude Opus 4.1 and Kimi K2 while GPT-5 remains active until a model is selected.
+- Confirmed selecting Kimi K2 closes the menu, marks Kimi K2 selected, and hides the unsupported Reasoning control.
+- Confirmed closing and reopening restores the model view for the selected model's provider.
+- Confirmed Escape closes the provider chooser, clears `aria-expanded`, and restores focus to the model trigger.
+- Confirmed no document-level horizontal overflow at the default wide viewport or at 720 × 900; the narrow popover remained inside the viewport.
+- Confirmed the checked route reported no console warnings or errors.
+- Confirmed `script.js` passes Node syntax validation and the scoped wireframe changes pass `git diff --check`.
+
+### Approval Path
+
+- Approval of Review Round 5 accepts provider-to-model navigation and returns the complete r013 wireframe phase to an implementation-handoff-ready state. Requested refinements remain in r013 when minor or create r014 if they materially change the flow.
+
 ## Review Round 4 — 2026-07-18 — Context-window provenance
 
 ### Changed
