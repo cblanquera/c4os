@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "C4OS Visual Matrix Proof",
+  "version": "0.1.0",
+  "identifier": "com.cblanquera.c4os.visual-matrix-proof",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "windows": [{
+      "label": "visual-matrix",
+      "title": "C4OS Visual Matrix Proof",
+      "width": 1180,
+      "height": 820,
+      "minWidth": 760,
+      "minHeight": 600,
+      "decorations": true,
+      "theme": null
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["../native-browser-tauri/icons/icon.png"]
+  }
+}

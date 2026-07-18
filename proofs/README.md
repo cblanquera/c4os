@@ -32,6 +32,8 @@ The proof directories are grouped by the C4OS capability they explore:
 - **Terminal:** PTY lifecycle, renderer behavior, and the xterm-to-PTY bridge.
 - **Shell and debugging:** panel layout/restore behavior and redacted Chat
   Debug history.
+- **Platform visual contract:** startup/live theme propagation, source-qualified
+  system inputs, native menu/window behavior, and representative visual matrix.
 
 ## Documentation Contract
 

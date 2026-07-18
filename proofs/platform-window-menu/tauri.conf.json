@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "C4OS Window Menu Proof",
+  "version": "0.1.0",
+  "identifier": "com.cblanquera.c4os.window-menu-proof",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{
+      "label": "window-menu",
+      "title": "C4OS Window Menu Proof",
+      "width": 980,
+      "height": 700,
+      "minWidth": 720,
+      "minHeight": 520,
+      "decorations": true,
+      "theme": null
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["../native-browser-tauri/icons/icon.png"]
+  }
+}

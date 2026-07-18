@@ -12,9 +12,18 @@ Do not ship a manual C4OS-only light/dark setting in the reconstructed r012 scop
 2. Read the host color-scheme preference at launch.
 3. Expose `data-color-scheme="light|dark"` and set CSS `color-scheme` accordingly.
 4. Listen for live system theme changes; update without restart, route change, or loss of application state.
-5. Prefer native theme/window APIs as authority. Use `prefers-color-scheme` as the webview fallback.
-6. Do not flash the wrong theme during startup: resolve platform and scheme before revealing the shell.
+5. On macOS, use a native current-theme snapshot for initial resolution when available, but independently listen to webview `prefers-color-scheme` for live changes. Do not depend exclusively on Tauri `WindowEvent::ThemeChanged`; it did not fire in the accepted macOS Proof.
+6. Do not flash the wrong theme during startup: advertise `light dark`, resolve platform and scheme, and initialize semantic root state before revealing the shell. The accepted macOS feasibility threshold is visual observation of the correct first visible scheme; instrumented first-frame timing remains an implementation QA option, not a blocker for this contract.
 7. Persist no theme override unless a later accepted requirement introduces one.
+
+## Evidence-Qualified Platform Scope
+
+- Native feasibility is accepted for macOS 26.5.1 on arm64 with Tauri 2.11.5 and host WKWebView `AppleWebKit/605.1.15`.
+- Theme propagation passed through live webview media-query delivery with state retention; native live-event delivery failed and has the accepted fallback above.
+- AppKit and webview inputs remain source-qualified. Explicit light/dark semantic fallbacks must meet at least 4.5:1 for normal text pairs tested by the theme contract.
+- Native application menus and standard window decorations are the accepted macOS baseline. `Cmd+,` routes to Settings. Transparent, overlay, moved-traffic-light, and custom-titlebar designs require a separate target-specific Proof.
+- The representative shell, transcript, artifact, editor, terminal, Settings, popover, and dialog matrix passed macOS Light, Dark, and minimum-window review. This is feasibility evidence, not production UI acceptance.
+- Windows and Linux native behavior is not established by the macOS result. It is deferred to a separate spec and must remain unclaimed until exact-target Proofs run.
 
 ## Semantic Tokens
 
@@ -92,3 +101,5 @@ Maintain the density relationships even when native control metrics shift: sideb
 - Verify no hardcoded light surface or dark text remains in either scheme.
 - Verify contrast for primary text, secondary text, borders, focus, selection, disabled controls, status colors, code, and links.
 - Verify platform labels, shortcuts, reveal terminology, and window chrome match the host OS.
+
+For macOS implementation, retain the live webview theme listener even if a later Tauri version appears to deliver a native event; treat the signals independently until new accepted evidence deliberately replaces this fallback contract.

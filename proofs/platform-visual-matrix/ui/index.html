@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="color-scheme" content="light dark">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>document.documentElement.dataset.colorScheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';</script>
+    <link rel="stylesheet" href="styles.css">
+    <title>C4OS Visual Matrix Proof</title>
+  </head>
+  <body>
+    <main data-fixture="shell">
+      <aside class="sidebar">
+        <strong>C4OS</strong>
+        <label class="search"><span>Search projects</span><input aria-label="Search projects" placeholder="Search"></label>
+        <nav><button class="selected">AI Desktop UI</button><button>quotable-ai</button><button class="missing">legacy-ui</button></nav>
+        <div class="session"><span class="status-dot"></span><span>Theme feasibility</span></div>
+      </aside>
+      <section class="workarea">
+        <header class="topbar"><div><p class="eyebrow">P-004 · representative acceptance</p><h1>Visual platform matrix</h1></div><div class="top-actions"><span id="scheme">—</span><button id="run-checks">Run checks</button></div></header>
+        <div class="matrix">
+          <article class="fixture transcript" data-fixture="transcript">
+            <div class="fixture-title"><span>Transcript</span><b>Chat</b></div>
+            <div class="message user">Can C4OS follow the host theme?</div>
+            <div class="message assistant"><strong>Yes, with target-qualified fallbacks.</strong><p>Native and webview signals stay independently observable.</p><pre><code>theme: system<br>fallback: semantic</code></pre></div>
+            <div class="composer"><input aria-label="Message" value="Continue the proof"><button>Send</button></div>
+          </article>
+          <article class="fixture artifact" data-fixture="artifact">
+            <div class="fixture-title"><span>Artifact</span><b>File</b></div>
+            <div class="artifact-head"><strong>theme-contract.md</strong><button>Focus</button></div>
+            <pre class="code"><code><span>01</span> :root {<br><span>02</span>   color-scheme: light dark;<br><span>03</span>   --surface-window: Canvas;<br><span>04</span> }</code></pre>
+            <div class="artifact-foot"><span>UTF-8</span><span>4 lines</span></div>
+          </article>
+          <article class="fixture editor" data-fixture="editor">
+            <div class="fixture-title"><span>Editor</span><b>Dirty</b></div>
+            <div class="tabs"><button class="active">styles.css</button><button>tokens.ts</button></div>
+            <textarea aria-label="Editor content">.surface-raised {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}</textarea>
+            <div class="editor-actions"><span>Unsaved changes</span><button>Save</button></div>
+          </article>
+          <article class="fixture terminal" data-fixture="terminal">
+            <div class="fixture-title"><span>Terminal</span><b>shell-1</b></div>
+            <div class="terminal-body"><p><i>$</i> node --test proof.test.mjs</p><p class="success">✓ 6 checks passed</p><p><i>$</i> <span class="caret"></span></p></div>
+            <div class="terminal-foot"><span>zsh</span><button>Stop</button></div>
+          </article>
+          <article class="fixture settings" data-fixture="settings">
+            <div class="fixture-title"><span>Settings</span><b>Configuration</b></div>
+            <div class="setting"><div><strong>Default Approval Policy</strong><p>Ask before consequential actions.</p></div><select aria-label="Default Approval Policy"><option>Ask for approval</option><option>Approve safe actions</option></select></div>
+            <div class="setting"><div><strong>Restore last workspace</strong><p>Return to the previous project on launch.</p></div><input type="checkbox" role="switch" checked aria-label="Restore last workspace"></div>
+            <button id="open-dialog">Open dialog fixture</button>
+          </article>
+          <article class="fixture interactions">
+            <div class="fixture-title"><span>Overlay states</span><b>Keyboard reachable</b></div>
+            <div class="interaction-row"><button id="popover-trigger" aria-expanded="false">Model options</button><span class="warning">⚠ Needs review</span><span class="error">● Unavailable</span><span class="success">✓ Healthy</span></div>
+            <div id="popover" data-fixture="popover" hidden><strong>Reasoning effort</strong><button>Low</button><button class="selected">Medium</button><button>High</button></div>
+            <div id="runtime-checks" aria-live="polite"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <div id="backdrop" hidden></div>
+    <section id="dialog" data-fixture="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
+      <div><p class="eyebrow">Dialog fixture</p><h2 id="dialog-title">Add provider</h2><p>Focus, contrast, elevation, and dismissal remain visible in both schemes.</p></div>
+      <label>Profile label<input value="OpenAI – Work"></label>
+      <div class="dialog-actions"><button id="cancel-dialog">Cancel</button><button class="primary">Save provider</button></div>
+    </section>
+    <script type="module" src="proof.js"></script>
+  </body>
+</html>

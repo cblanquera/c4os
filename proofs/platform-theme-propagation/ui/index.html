@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="color-scheme" content="light dark">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      document.documentElement.dataset.colorScheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.dataset.platform = navigator.platform.toLowerCase().includes('mac') ? 'macos' : 'unknown';
+      document.documentElement.style.colorScheme = document.documentElement.dataset.colorScheme;
+    </script>
+    <link rel="stylesheet" href="styles.css">
+    <title>C4OS Theme Propagation Proof</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">P-001 · native macOS run</p>
+          <h1>Platform, startup, and live-theme propagation</h1>
+          <p>Native and webview signals are recorded independently. Change the macOS appearance while this window is open.</p>
+        </div>
+        <span id="agreement" class="status">Waiting</span>
+      </header>
+
+      <section class="grid" aria-label="Theme diagnostics">
+        <article><span>Platform</span><strong id="platform">—</strong></article>
+        <article><span>Architecture</span><strong id="architecture">—</strong></article>
+        <article><span>Native theme</span><strong id="native-theme">—</strong></article>
+        <article><span>Webview media</span><strong id="webview-theme">—</strong></article>
+        <article><span>Resolved root</span><strong id="root-theme">—</strong></article>
+        <article><span>Live changes</span><strong id="change-count">0</strong></article>
+      </section>
+
+      <section class="fixture" aria-labelledby="state-title">
+        <div>
+          <p class="eyebrow">State-preservation fixture</p>
+          <h2 id="state-title">State must survive theme changes</h2>
+        </div>
+        <label>Draft note <input id="draft" value="Preserve this text across theme changes"></label>
+        <div class="counter">
+          <button id="decrement" type="button" aria-label="Decrement">−</button>
+          <output id="counter">7</output>
+          <button id="increment" type="button" aria-label="Increment">+</button>
+        </div>
+      </section>
+
+      <section class="timeline" aria-labelledby="timeline-title">
+        <div class="timeline-heading">
+          <h2 id="timeline-title">Signal timeline</h2>
+          <button id="refresh" type="button">Capture now</button>
+        </div>
+        <ol id="events" aria-live="polite"></ol>
+      </section>
+    </main>
+    <script src="proof.js"></script>
+  </body>
+</html>

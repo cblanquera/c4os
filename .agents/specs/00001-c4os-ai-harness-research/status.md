@@ -6,6 +6,7 @@
 - Freeze state: Frozen 2026-07-18 after P-018 acceptance
 - Last updated: 2026-07-18
 - Context promotion: Complete for accepted P-001 through P-018 in `context/runtime-session-architecture.md` where reusable; P-008 records an explicit compatibility non-goal.
+- Classification: Research-only. Post-Freeze clarification accepted 2026-07-18; implementation details require a new spec.
 
 ## Work items
 
@@ -54,3 +55,7 @@ These do not block research Freeze or unrelated features. Each blocks only the a
 ## Evidence state
 
 The approved Proof Loop now provides executable, dated evidence for the locally available macOS boundary. It proves real OpenCode/Pi denial-before-side-effect paths, macOS supervisor/sidecar packaging, local marketplace trust and hook isolation, macOS raw-Wry isolation, and Local/Docker/OpenSSH transport parity. It does not convert target-specific signing, other operating systems, named remote hosts, or public marketplace governance into completed evidence.
+
+## Implementation handoff
+
+Do not create `tasks/` or add production sequencing under this Frozen research package. A new implementation spec must begin from `context/index.md`, inherit the accepted runtime/session architecture, and use this package only for research provenance, deferred gates, and Proof evidence.

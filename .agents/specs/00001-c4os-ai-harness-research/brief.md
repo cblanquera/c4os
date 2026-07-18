@@ -45,6 +45,8 @@ Create an initial research spec for this project: an AI harness desktop built wi
 
 ## Deliverable standard
 
+This deliverable is research-only. It supplies evidence and accepted inputs to Context; it is not an implementation contract, task plan, or production acceptance ledger. Those details belong in a new implementation spec.
+
 The research is complete enough for an initial review when it:
 
 - distinguishes embedded runtimes from external CLI launchers;

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="color-scheme" content="light dark">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css">
+    <title>C4OS Window Menu Proof</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">P-003 · standard-decoration baseline</p>
+        <h1>Native menu and window-chrome behavior</h1>
+        <p>The content does not fake a titlebar. Use the macOS application menu or <kbd>⌘</kbd><kbd>,</kbd> to open Settings.</p>
+      </header>
+
+      <section class="checks">
+        <article><strong>Native decorations</strong><span>Traffic lights and titlebar owned by macOS</span><b>Required baseline</b></article>
+        <article><strong>Native application menu</strong><span>Settings lives in the first application submenu</span><b>Menu event</b></article>
+        <article><strong>Window behavior</strong><span>Drag, resize, minimize, zoom, full screen, focus</span><b>Visual QA</b></article>
+        <article><strong>Theme behavior</strong><span>Native titlebar and content follow the system</span><b>Light + dark</b></article>
+      </section>
+
+      <section class="workspace">
+        <aside><strong>C4OS</strong><nav><button class="selected">Chat</button><button>Files</button><button>Terminal</button></nav></aside>
+        <div class="content"><span class="pill">Standard window</span><h2>No custom drag region</h2><p>This surface intentionally leaves movement, resize, caption controls, and system window behavior to the host.</p><label>Focus fixture <input value="Keyboard focus stays visible"></label></div>
+      </section>
+
+      <section class="event-log"><strong>Last native action</strong><output id="last-action">Waiting for Settings menu or shortcut</output></section>
+    </main>
+
+    <div id="backdrop" hidden></div>
+    <section id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
+      <div><p class="eyebrow">Opened by native application command</p><h2 id="settings-title">Settings</h2><p>This in-document panel proves command routing only; production Settings remains a stateful application surface.</p></div>
+      <label>Restore last workspace <input type="checkbox" role="switch" checked></label>
+      <button id="close-settings">Done</button>
+    </section>
+    <script src="proof.js"></script>
+  </body>
+</html>

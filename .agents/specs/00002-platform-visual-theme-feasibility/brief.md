@@ -10,13 +10,15 @@ C4OS follows the host operating system's visual language and live light/dark pre
 
 ## Scope
 
+- Native feasibility acceptance for macOS 26.5.1 arm64.
 - Tauri 2 platform and initial-theme detection.
 - Live system theme changes without state loss.
 - Startup sequencing that avoids showing the wrong scheme.
 - Semantic-token inputs, system colors, accent, contrast, reduced motion, fonts, controls, and scrollbars.
 - Native application menus, Settings shortcuts, window decorations, titlebar integration, dragging, and platform terminology.
-- macOS, Windows, and Linux behavior, including explicit Linux desktop/webview fallbacks.
-- Target-specific visual and technical acceptance evidence.
+- Source research for macOS, Windows, and Linux behavior, including explicit Linux desktop/webview fallbacks.
+- Target-specific visual and technical acceptance evidence on the available macOS host.
+- Windows and Linux native execution deferred to a separate spec; their research remains supporting input, not accepted native capability.
 
 ## Non-Goals
 
@@ -25,6 +27,7 @@ C4OS follows the host operating system's visual language and live light/dark pre
 - Implementing the production theme system during research setup.
 - Reopening runtime, adapter, policy, or model-capability decisions from Frozen spec `00001`.
 - Treating macOS-only evidence as proof for Windows or Linux.
+- Freezing Windows or Linux native behavior in this spec.
 - Promising pixel-identical controls across different operating systems or Linux desktop environments.
 
 ## Source Material
@@ -38,4 +41,6 @@ C4OS follows the host operating system's visual language and live light/dark pre
 
 ## Deliverable
 
-A source-backed and proof-backed platform matrix that identifies supported native inputs, required fallbacks, startup and event semantics, window/menu choices, acceptance checks, and feature/target gates. Accepted reusable results may then refine the usability Context without weakening its product intent.
+A source-backed and proof-backed macOS contract that identifies supported native inputs, required fallbacks, startup and event semantics, window/menu choices, acceptance checks, and target gates. Windows/Linux findings remain research input for a separate spec. Accepted reusable macOS results refine the usability Context without weakening its product intent.
+
+This deliverable is research-only feasibility evidence, not an implementation contract, task plan, or production acceptance ledger. A new implementation spec must consume the promoted Context rules and may cite this package for provenance.

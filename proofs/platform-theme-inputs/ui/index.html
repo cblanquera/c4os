@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="color-scheme" content="light dark">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css">
+    <title>C4OS Theme Inputs Proof</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><p class="eyebrow">P-002 · source-qualified diagnostics</p><h1>System inputs and semantic fallbacks</h1></div>
+        <button id="refresh">Refresh inputs</button>
+      </header>
+
+      <section class="summary" aria-live="polite">
+        <strong id="summary">Running checks…</strong>
+        <span id="source">—</span>
+      </section>
+
+      <section class="columns">
+        <article>
+          <h2>Native AppKit</h2>
+          <dl id="native-values"></dl>
+        </article>
+        <article>
+          <h2>Webview media</h2>
+          <dl id="media-values"></dl>
+        </article>
+        <article>
+          <h2>Fonts and UA controls</h2>
+          <dl id="web-values"></dl>
+        </article>
+      </section>
+
+      <section class="tokens">
+        <div class="section-heading"><div><p class="eyebrow">Explicit fallback</p><h2>Semantic token output</h2></div><span id="scheme-chip"></span></div>
+        <div id="swatches" class="swatches"></div>
+        <table>
+          <thead><tr><th>Pair</th><th>Ratio</th><th>Required</th><th>Result</th></tr></thead>
+          <tbody id="checks"></tbody>
+        </table>
+      </section>
+    </main>
+    <div id="system-probes" aria-hidden="true"><button>Button</button><input value="Input"><select><option>Option</option></select></div>
+    <script type="module" src="proof.js"></script>
+  </body>
+</html>

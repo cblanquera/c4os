@@ -1,0 +1,12 @@
+[package]
+name = "c4os-platform-theme-propagation-proof"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+tauri = { version = "2.11.2", features = [] }

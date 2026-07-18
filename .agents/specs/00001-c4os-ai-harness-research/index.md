@@ -4,6 +4,8 @@ Spec ID: `00001-c4os-ai-harness-research`
 
 Freeze state: Frozen 2026-07-18 after P-018 acceptance
 
+Classification: Research-only evidence package. Do not add implementation tasks, production sequencing, or implementation acceptance records here; create a new spec for implementation work.
+
 This package records completed research for the Tauri-based C4OS desktop AI harness represented by `wireframes/r012-cleanup/`. It was reopened to research model capabilities and their effect on chat-session experience, then refrozen after P-018 acceptance. The wireframes remain current product intent and a visual contract; research Freeze does not retire them.
 
 Accepted reusable architecture has been promoted to [Runtime and session architecture](../../context/runtime-session-architecture.md). That Context File takes precedence over historical evidence wording in this frozen package.
@@ -27,4 +29,4 @@ Accepted reusable architecture has been promoted to [Runtime and session archite
 
 ## Reading order
 
-Read `brief.md`, then `research.md`. For runtime work, read both adapter files before the runtime capability matrix; read `model-capabilities.md` and `open-source-runtime-capability-patterns.md` before designing model selection, dynamic session controls, attachments, reasoning, tools, or response rendering. Use `journeys.md` to review end-to-end behavior, `decisions.md` for accepted and deferred choices, and `proofs.md` when evaluating implementation risk or planning production acceptance tests.
+Read `brief.md`, then `research.md`. For runtime research, read both adapter files before the runtime capability matrix; read `model-capabilities.md` and `open-source-runtime-capability-patterns.md` before scoping model selection, dynamic session controls, attachments, reasoning, tools, or response rendering in a new implementation spec. Use `journeys.md` for end-to-end research, `decisions.md` for accepted and deferred choices, and `proofs.md` for provenance and implementation-risk inputs. Accepted reusable truth comes from Context, not directly from this package.

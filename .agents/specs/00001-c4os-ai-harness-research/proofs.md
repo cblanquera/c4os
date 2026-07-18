@@ -171,4 +171,4 @@ The user approved the complete loop. Each proof still records a bounded question
 
 ## Recommended order
 
-The initial proof sequence is complete for the locally available macOS boundary. Next, convert the accepted decisions into an implementation plan and carry the proof invariants into production acceptance tests. Platform-specific browser, signing, hook-sandbox, and process-tree checks gate only the affected target/feature; they do not block unrelated implementation or research freeze.
+The initial proof sequence is complete for the locally available macOS boundary. A new implementation spec may convert the promoted Context decisions into production tasks and carry these Proof invariants into its acceptance tests; do not add that plan to this Frozen research package. Platform-specific browser, signing, hook-sandbox, and process-tree checks gate only the affected target/feature; they do not block unrelated implementation or research Freeze.
