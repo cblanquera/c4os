@@ -21,8 +21,8 @@ Each project row includes a disclosure, project/folder icon, name, hover/focus-o
 - A missing path uses lighter italic project-name styling plus accessible state text; no persistent visible `Missing` badge.
 - Add and Relocate invoke the native directory chooser. Add appends a project; Relocate repairs the existing project.
 - A non-empty session-title search temporarily replaces the Projects heading and hierarchy with a flat result list. Each result shows the session title and owning project; activating it opens the original session without clearing the query. An explicit clear control empties the query, restores Projects with its prior order/expansion state, and returns focus to search; Escape also clears and restores Projects. A no-results state remains inside the replacement region.
-- Session Remove deletes only that chat and activates a valid fallback if necessary.
-- Removing an active project/session or a pending project must never leave detached active state.
+- Project and Session Remove mark only the selected product record inactive and activate a valid fallback if necessary. They do not delete user files or C4OS records, purge/export state, or terminate scoped processes.
+- Inactivating an active project/session or a pending project must never leave detached active state.
 
 ## New Chat Lifecycle
 
@@ -91,7 +91,7 @@ The mode trigger is in the lower toolbar and immediately left of the paperclip i
 
 Mode persists after ordinary submission. Reply remembers the mode, temporarily switches to Chat semantics, and restores the previous mode after cancel or submit.
 
-The branch menu lists `main` and `codex/artifacts`, followed by a divider and `+ Create New`. The wireframe keeps branch creation non-mutating; production branch creation remains subject to the runtime, repository, and approval boundaries.
+The Branch control represents the active Project folder's Git repository and applies only to files/folders inside that repository. Show it only when the Project is Git-versioned; hide it for non-Git Projects. The menu may list repository branches plus `+ Create New`. Selection or creation is an explicit brokered Git operation and never forks C4OS conversation or runtime state. Never auto-stash, commit, reset, or discard: allow a Git-safe switch that preserves dirty changes, otherwise block and identify the conflicting paths.
 
 ## Quoted Reply
 

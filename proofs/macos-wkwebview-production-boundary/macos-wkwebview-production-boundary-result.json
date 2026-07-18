@@ -1,0 +1,607 @@
+{
+  "status": "passed",
+  "started_unix_ms": 1784375049615,
+  "finished_unix_ms": 1784375057631,
+  "target": {
+    "os": "macos",
+    "arch": "aarch64",
+    "macos_version": "26.5.1",
+    "tauri": "2.11.2",
+    "objc2_web_kit": "0.3.2",
+    "permission_decision": "Prompt",
+    "page_ipc_handler": false,
+    "custom_profile_path": false
+  },
+  "profile_ids": {
+    "profileA": "4141414141414141933f4b34de404141",
+    "profileB": "4242424242424242903c4837dd434242"
+  },
+  "checks": [
+    {
+      "name": "native child attaches, focuses, and follows host resize",
+      "status": "pass",
+      "evidence": {
+        "errors": [],
+        "resize": {
+          "child": {
+            "height": 760.0,
+            "width": 1040.0
+          },
+          "kind": "native-child-measured",
+          "matches": true,
+          "parent": {
+            "height": 760.0,
+            "width": 1040.0
+          }
+        }
+      }
+    },
+    {
+      "name": "hostile pages receive no host IPC or secret",
+      "status": "pass",
+      "evidence": {
+        "harnessErrors": [],
+        "pageReportCount": 9
+      }
+    },
+    {
+      "name": "controller emits sanitized navigation, popup, download, error, and crash events",
+      "status": "pass",
+      "evidence": {
+        "requiredKinds": [
+          "navigation-allowed",
+          "navigation-blocked",
+          "popup-intercepted",
+          "download-intercepted",
+          "page-loading",
+          "page-loaded",
+          "page-error",
+          "web-content-process-terminated"
+        ]
+      }
+    },
+    {
+      "name": "media uses Prompt and geolocation remains on the WebKit system path",
+      "status": "pass",
+      "evidence": {
+        "geolocationOutcome": {
+          "outcome": "error-1",
+          "phase": "permission-exercise-geolocation-outcome"
+        },
+        "mediaEvent": {
+          "captureType": "camera-and-microphone",
+          "decision": "prompt",
+          "kind": "media-permission"
+        },
+        "mediaOutcome": null
+      }
+    },
+    {
+      "name": "identifier-backed profiles survive recreation and remain isolated",
+      "status": "pass",
+      "evidence": {
+        "profileA": {
+          "c4osBridge": false,
+          "cookie": "proof_cookie=alpha",
+          "geolocationApi": true,
+          "indexedDb": "alpha",
+          "localStorage": "alpha",
+          "mediaApi": true,
+          "phase": "profile-a-read",
+          "secretLeaked": false,
+          "sessionStorage": null,
+          "tauriGlobal": false,
+          "tauriInternals": false,
+          "webkitMessageHandlers": false,
+          "wryIpc": false
+        },
+        "profileB": {
+          "c4osBridge": false,
+          "cookie": "proof_cookie=bravo",
+          "geolocationApi": true,
+          "indexedDb": "bravo",
+          "localStorage": "bravo",
+          "mediaApi": true,
+          "phase": "profile-b-read",
+          "secretLeaked": false,
+          "sessionStorage": null,
+          "tauriGlobal": false,
+          "tauriInternals": false,
+          "webkitMessageHandlers": false,
+          "wryIpc": false
+        }
+      }
+    },
+    {
+      "name": "nonpersistent profile is destroyed with its WebKit view",
+      "status": "pass",
+      "evidence": {
+        "ephemeralRead": {
+          "c4osBridge": false,
+          "cookie": "",
+          "geolocationApi": true,
+          "indexedDb": null,
+          "localStorage": null,
+          "mediaApi": true,
+          "phase": "ephemeral-read",
+          "secretLeaked": false,
+          "sessionStorage": null,
+          "tauriGlobal": false,
+          "tauriInternals": false,
+          "webkitMessageHandlers": false,
+          "wryIpc": false
+        }
+      }
+    },
+    {
+      "name": "scoped clearing removes only the selected persistent profile",
+      "status": "pass",
+      "evidence": {
+        "profileAAfterClear": {
+          "c4osBridge": false,
+          "cookie": "",
+          "geolocationApi": true,
+          "indexedDb": null,
+          "localStorage": null,
+          "mediaApi": true,
+          "phase": "profile-a-after-clear",
+          "secretLeaked": false,
+          "sessionStorage": null,
+          "tauriGlobal": false,
+          "tauriInternals": false,
+          "webkitMessageHandlers": false,
+          "wryIpc": false
+        },
+        "profileBAfterClear": {
+          "c4osBridge": false,
+          "cookie": "proof_cookie=bravo",
+          "geolocationApi": true,
+          "indexedDb": "bravo",
+          "localStorage": "bravo",
+          "mediaApi": true,
+          "phase": "profile-b-after-clear",
+          "secretLeaked": false,
+          "sessionStorage": null,
+          "tauriGlobal": false,
+          "tauriInternals": false,
+          "webkitMessageHandlers": false,
+          "wryIpc": false
+        }
+      }
+    },
+    {
+      "name": "public APIs own profiles and permissions without a page bridge",
+      "status": "pass",
+      "evidence": {
+        "customProfilePath": false,
+        "pageIpcHandler": false,
+        "profileRegistry": "stable identifier mapping only",
+        "rawDataLocation": "WebKit platform-managed application container"
+      }
+    }
+  ],
+  "reports": [
+    {
+      "c4osBridge": false,
+      "cookie": "",
+      "geolocationApi": true,
+      "indexedDb": null,
+      "localStorage": null,
+      "mediaApi": true,
+      "phase": "profile-a-after-clear",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "geolocationRequested": true,
+      "mediaRequested": true,
+      "phase": "permission-exercise-permission-attempt"
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=bravo",
+      "geolocationApi": true,
+      "indexedDb": "bravo",
+      "localStorage": "bravo",
+      "mediaApi": true,
+      "phase": "profile-b-write",
+      "secretLeaked": false,
+      "sessionStorage": "bravo",
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=temporary",
+      "geolocationApi": true,
+      "indexedDb": "temporary",
+      "localStorage": "temporary",
+      "mediaApi": true,
+      "phase": "ephemeral-write",
+      "secretLeaked": false,
+      "sessionStorage": "temporary",
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=alpha",
+      "geolocationApi": true,
+      "indexedDb": "alpha",
+      "localStorage": "alpha",
+      "mediaApi": true,
+      "phase": "profile-a-write",
+      "secretLeaked": false,
+      "sessionStorage": "alpha",
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=bravo",
+      "geolocationApi": true,
+      "indexedDb": "bravo",
+      "localStorage": "bravo",
+      "mediaApi": true,
+      "phase": "profile-b-after-clear",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=bravo",
+      "geolocationApi": true,
+      "indexedDb": "bravo",
+      "localStorage": "bravo",
+      "mediaApi": true,
+      "phase": "profile-b-read",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=alpha",
+      "geolocationApi": true,
+      "indexedDb": "alpha",
+      "localStorage": "alpha",
+      "mediaApi": true,
+      "phase": "profile-a-read",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=alpha",
+      "geolocationApi": true,
+      "indexedDb": null,
+      "localStorage": "alpha",
+      "mediaApi": true,
+      "phase": "permission-exercise",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "outcome": "error-1",
+      "phase": "permission-exercise-geolocation-outcome"
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "",
+      "geolocationApi": true,
+      "indexedDb": null,
+      "localStorage": null,
+      "mediaApi": true,
+      "phase": "ephemeral-read",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    }
+  ],
+  "events": [
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4141414141414141933f4b34de404141",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4242424242424242903c4837dd434242",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4141414141414141933f4b34de404141",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4242424242424242903c4837dd434242",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "ephemeral",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "ephemeral",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4141414141414141933f4b34de404141",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "decision": "cancel",
+      "kind": "popup-intercepted",
+      "url": "http://127.0.0.1:49585/popup"
+    },
+    {
+      "decision": "cancel",
+      "kind": "download-intercepted",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/download"
+    },
+    {
+      "captureType": "camera-and-microphone",
+      "decision": "prompt",
+      "kind": "media-permission"
+    },
+    {
+      "decision": "cancel",
+      "kind": "navigation-blocked",
+      "scheme": "file",
+      "url": "file:///etc/passwd"
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/force-navigation-error"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/force-navigation-error"
+    },
+    {
+      "error": "redacted-navigation-error",
+      "kind": "page-error",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "callbackPathExercised": "deterministic delegate-path invocation",
+      "generationInvalidated": true,
+      "kind": "web-content-process-terminated",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "child": {
+        "height": 760.0,
+        "width": 1040.0
+      },
+      "kind": "native-child-measured",
+      "matches": true,
+      "parent": {
+        "height": 760.0,
+        "width": 1040.0
+      }
+    },
+    {
+      "kind": "data-store-cleared",
+      "label": "profile-a-clear",
+      "status": "success"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 760.0,
+        "width": 1040.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4141414141414141933f4b34de404141",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 760.0,
+        "width": 1040.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4242424242424242903c4837dd434242",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:49585/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:49585/"
+    }
+  ]
+}

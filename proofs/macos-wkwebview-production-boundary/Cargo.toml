@@ -1,0 +1,18 @@
+[package]
+name = "c4os-macos-wkwebview-production-boundary-proof"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = "=2.6.2"
+
+[dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDate", "NSError", "NSGeometry", "NSObject", "NSString", "NSURL", "NSURLRequest", "NSUUID"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKSecurityOrigin", "WKUIDelegate", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWindowFeatures"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tauri = "=2.11.2"

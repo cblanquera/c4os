@@ -9,6 +9,14 @@ Accepted: 2026-07-18
 
 r013 expresses the accepted four-preset approval model and capability-aware model/session experience while preserving the established product surface. Research supplies architectural and behavioral constraints; the accepted wireframe remains the human-reviewable UI contract.
 
+## Workspace and configuration ownership
+
+A Workspace is a portable C4OS zip archive analogous to a VS Code workspace. It stores the ordered Project list, Workspace-level configuration, per-Project configuration, and each Chat Session's configuration, cache, and archive records. A Project is a referenced folder and trusted execution root; the same folder may carry different configuration and Chat history in different Workspaces because those overlays belong to the Workspace, not to the folder globally.
+
+Loading a Workspace reconstructs the main-screen state from its unpacked last-loaded working copy under `~/.c4os`. The `~/.c4os` C4OS Home also owns app-level MCP, skill, and plugin configuration, marketplace configuration, and C4OS `config.toml`. Raw secrets never enter the Workspace archive or ordinary C4OS Home configuration; they remain in the credential vault and appear elsewhere only as references.
+
+The accepted archive save/repack, locking, crash-recovery, extraction-safety, scoped configuration precedence, and cache-retention mechanics are routed through [Implementation Architecture](implementation-architecture.md). They may not weaken the accepted ownership or secret-isolation boundary.
+
 ## Authority boundary
 
 The Tauri/Rust C4OS core owns authoritative workspace, session, turn, run, artifact, approval, credential-reference, and audit records. It also owns native windows and dialogs, secure-storage access, process supervision, updates, and the privileged tool gateway. The renderer submits user intent and receives no ambient authority.
@@ -30,6 +38,14 @@ Marketplaces are plugin catalog sources. Adding a marketplace fetches enough val
 ## Browser boundary
 
 Users may navigate to arbitrary ordinary websites. Every website remains unprivileged relative to C4OS and receives no Tauri internals, C4OS commands, credentials, filesystem authority, or page-accessible native IPC. Browser capabilities remain generally usable: native mediation may add per-origin security and remembered choices only while preserving normal browser behavior, and platform/browser defaults remain available rather than being replaced with a blanket denial. Each supported target must prove its real permission UX and isolation boundary.
+
+Browser Environment sharing partitions every applicable browser storage category: cookies, `sessionStorage`, `localStorage`, and IndexedDB. Web-platform origin and storage semantics still apply; C4OS does not copy values between origins merely because they share a Browser Environment.
+
+`All browsers` uses one persistent C4OS-wide profile until explicit clearing. `Per project` uses a persistent profile keyed by Workspace and Project identity. `Per chat session` uses a persistent profile keyed by Chat identity. `None` creates an ephemeral profile per Browser artifact, destroys it when that artifact closes, and does not restore it after restart. `sessionStorage` retains normal page/tab-session lifetime in every profile.
+
+Persistent Browser profiles survive application restart and remain retained when their owning record is marked inactive. An explicit Clear Browser Data action can target app-wide, Project, Chat, or individual ephemeral scope. C4OS Home owns the protected scope-to-profile registry and lifecycle. On macOS, raw profile contents remain in WebKit's platform-managed application container because public `WKWebsiteDataStore` APIs accept stable profile identifiers rather than a C4OS-selected filesystem path. Portable Workspace archives carry non-secret profile references/settings, never cookies or web-storage values. Website-controlled browser state is also excluded from normal exports, diagnostics, and model context.
+
+The accepted macOS implementation uses a Rust-owned native `WKWebView` child/controller inside Tauri with no page-accessible Tauri, Wry, C4OS, custom-scheme, or script-message IPC. Public WebKit delegates preserve platform permission behavior, including media `Prompt`, unless explicit C4OS policy denies the request. Scoped clearing removes all public data types, releases the cleared `WKWebsiteDataStore` handle, and reopens the same stable identifier. The exact-version Proof passed twice; production integration and human acceptance remain separate gates.
 
 ## Compatibility scope
 
@@ -56,6 +72,8 @@ Application updates require platform and Tauri update signatures plus a pre-migr
 ## Chat binding
 
 Runtime and execution-environment settings are defaults for new chats. A provisional blank chat captures its runtime kind, adapter binding, environment identity, workspace mapping, and capability baseline on its first valid prompt or attachment submission. Later default changes affect only new chats.
+
+First-provider onboarding requires a successful current connection test and at least one usable discovered model. Its success state selects and visibly confirms an explicit recommended usable model, OpenCode as the revisable runtime default, and Local as the initial execution environment. The user may revise those choices before the first valid Chat submission binds them.
 
 Existing chats never migrate implicitly. Adapter and native versions are recorded per run. Initially, moving a conversation to another runtime or environment means duplicating its user-visible context into a new chat; true native-session migration remains deferred until compatibility is proven.
 
@@ -93,6 +111,24 @@ Use compact chips or expandable details rather than changing the response author
 
 The Advanced Policies user model has four presets: `Ask for approval`, `Approve safe actions`, `Approve for me`, and `Custom`. `Approve for me` remains bounded by sandbox, trusted-root, maximum-authority, and managed-policy constraints. The detailed r012 authority identities are an internal scenario corpus, not permanent settings rows.
 
+General natural-language Chat requests to change Project files are distinct from direct user editing and Reply-to-File proposals inside a File artifact. For targets inside the active Project's trusted root, detected version control makes ordinary file writes recoverable and removes any extra change-set approval layer when the effective policy allows them. An explicit `Ask` rule may still prompt. If the Project is not version-controlled, or any target is outside the active Project folder, C4OS requires pre-write approval that identifies the affected paths and proposed changes; sandbox and managed policy may still deny the action.
+
+C4OS reports work activity, validation, and the completed changed-file/diff artifacts, but it does not create a Git branch, commit, reset, or revert merely because an agent edited files. The user owns that Git workflow.
+
+The composer Branch control represents the active Project folder's Git repository, not a C4OS conversation or runtime-session fork. It applies only to files and folders inside that Project repository and is hidden when the active Project is not Git-versioned. Any user-requested Git operation still crosses the Action Gateway. C4OS never auto-stashes, commits, resets, or discards a dirty worktree. It permits a Git-safe branch switch that preserves current changes; otherwise it blocks the operation and identifies the conflicting paths.
+
+Removing a Chat, Project, or Workspace marks its product record inactive and removes it from active surfaces. The Remove action has no other lifecycle effect: it does not delete user files or C4OS records, purge or export data, or terminate scoped processes.
+
+Effectful approvals are serialized within one Run Attempt. Independent runs may queue approvals visibly. Every approval prompt binds to one canonical action, distinguishes pending, expired, denied, and completed state, and expires when the target or relevant version changes.
+
+## Artifact Reply context
+
+Reply captures an immutable, bounded Artifact Context Snapshot plus a stable artifact reference as part of the User Turn. File snapshots prioritize selected text, otherwise the current document within budget, and include path, type, version/hash, and any current unsaved draft marked as unsaved. Folder snapshots include the current path, breadcrumbs, selection, and a bounded non-recursive listing. Browser snapshots include current URL, title, navigation state, selected or visible text, and bounded extracted content; screenshots require an explicit supported need, while cookies, credentials, storage, and unrelated history are excluded. Terminal snapshots include the selected command, working directory, environment identity, process state, exit result, selected output, and a bounded recent tail; raw environment values, passwords, and unrelated shell history are excluded.
+
+The snapshot budget is deterministically derived from the effective model context and prioritizes selection, visible state, recent state, then metadata. Truncation is explicit. A normalized capability summary may describe what is readable, approval-gated, or denied, but no credential or authorization token enters model context. The Reply strip identifies the artifact, and expandable details expose what was supplied and whether it was truncated.
+
+The snapshot remains frozen for run provenance. Any additional inspection uses C4OS-brokered tools. Before an effect, C4OS revalidates the live artifact or resource version; stale state causes a fresh read or visible conflict rather than an action against the old snapshot.
+
 ## Model and session capabilities
 
 C4OS owns a versioned model-capability descriptor instead of adopting an OpenCode, Pi, provider, or ACP schema as its product contract. `OCAdapter` and `PIAdapter` preserve raw evidence and normalize identity and lifecycle, input/output modalities, context/output limits, reasoning, tool calling, structured output, streaming, generation controls, and caching/session requirements.
@@ -111,3 +147,4 @@ ACP is an optional runtime transport or future compatibility surface. It does no
 - [Model-capability acceptance record](../specs/00001-c4os-ai-harness-research/acceptance/2026-07-18-model-capability-acceptance.md)
 - [Research decision and gap ledger](../specs/00001-c4os-ai-harness-research/decisions.md)
 - [Approval policy model and scenario corpus](../specs/00001-c4os-ai-harness-research/approval-policy-model.md)
+- [macOS native-WebKit production-boundary Proof](../../proofs/macos-wkwebview-production-boundary/macos-wkwebview-production-boundary-evidence-2026-07-18.md)

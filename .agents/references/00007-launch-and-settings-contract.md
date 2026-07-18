@@ -18,7 +18,9 @@ Fields:
 - OpenAI Compatible additionally exposes API base URL; Authentication (Bearer token, API key header, None); conditional API key header name; JSON additional headers.
 - None removes the API-key requirement.
 
-Actions: Test Connection and Continue. Validate only visible required fields, URL shape, unique label, and JSON headers. Expose testing, failure, success, and submitted status in a live region. Successful Continue stores the provider through the credential architecture and enters workspace start.
+Actions: Test Connection and Continue. Validate only visible required fields, URL shape, unique label, and JSON headers. Expose testing, failure, success, discovered-model availability, and submitted status in a live region. Continue remains unavailable until the latest connection test succeeds and at least one usable model is available; changing a tested endpoint or authentication field invalidates that success.
+
+The successful-test state selects an explicit recommended usable model and visibly confirms it with OpenCode as the revisable default runtime and Local as the initial execution environment. When multiple usable models exist, the user may change the proposed model before continuing. Continue confirms these defaults, stores the provider through the credential architecture, and enters Workspace Start; the selections remain revisable until the first valid Chat submission binds them.
 
 ## Workspace Start
 
@@ -31,6 +33,8 @@ Show exactly three primary actions:
 - Clone Repository — clone from a Git repository URL.
 
 Then show exactly three recent-workspace rows in the deterministic reconstruction fixture. Selecting any action/row shows brief opening progress and enters Chat without replacing the application document. At narrow width, cards stack, icon aligns with title, title/description stay grouped by a 5px gap, and vertical padding is balanced with no forced excess height.
+
+A saved Workspace is a portable C4OS zip archive containing its ordered Project references, Workspace-level configuration, per-Project configuration, and per-Chat configuration/cache/archive records. Loading it reconstructs the main-screen state from an unpacked working copy under `~/.c4os`. Project folders remain external trusted roots, so the same folder can have different overlays and Chats in different Workspaces.
 
 ## Settings Shell
 
@@ -116,6 +120,10 @@ Environment card:
 - Browser Environment: All browsers, Per project, Per chat session, None.
 - Open `config.toml` externally action.
 
+Browser Environment sharing covers every applicable browser storage category—cookies, `sessionStorage`, `localStorage`, and IndexedDB—while preserving normal web-origin and storage semantics. All browsers uses one persistent app-wide profile; Per project and Per chat session use persistent Workspace+Project- and Chat-keyed profiles; None is per-artifact ephemeral and destroyed on close. `sessionStorage` follows page/tab lifetime. Inactivation retains profiles, while explicit Clear Browser Data targets app-wide, Project, Chat, or ephemeral scope. C4OS Home owns the protected profile registry and lifecycle. On macOS, raw website data stays in WebKit's platform-managed application container; it never enters portable Workspace archives, normal exports, diagnostics, or model context.
+
+The action opens C4OS Home at `~/.c4os/config.toml`, not a Codex configuration file. C4OS Home also owns the unpacked last-loaded Workspace plus app-level MCP, skill, plugin, and marketplace configuration. Workspace-, Project-, and Chat-scoped configuration remains in the Workspace archive. None of these files stores raw credentials.
+
 Do not restore removed Default model or the `Advanced` eyebrow.
 
 ## Advanced Policies
@@ -142,4 +150,4 @@ The r012 fixture contains 71 supplied tool identities. Each row shows identity, 
 
 ## Settings Acceptance
 
-Verify direct entry and Back behavior, state preservation, all navigation destinations, narrow navigation, provider conditional fields and validation, model search/filter/bulk, runtime dirty state, plugin marketplace/install/uninstall/details, skills shared switch/uninstall, both MCP transports and repeaters, current Configuration presets/guardrail copy, current policy groups/exceptions, search, dirty/revert/save, dialog dismissal, and theme changes while any dialog is open. When the task is literal r012 reconstruction, additionally verify all nine historical groups and 71 fixture identities.
+Verify direct entry and Back behavior, state preservation, all navigation destinations, narrow navigation, provider conditional fields and validation, onboarding default confirmation/change, model search/filter/bulk, runtime dirty state, plugin marketplace/install/uninstall/details, skills shared switch/uninstall, both MCP transports and repeaters, current Configuration presets/guardrail copy, current policy groups/exceptions, search, dirty/revert/save, dialog dismissal, and theme changes while any dialog is open. When the task is literal r012 reconstruction, additionally verify all nine historical groups and 71 fixture identities.
