@@ -49,7 +49,7 @@
   place-items: center;
   border-radius: 13px;
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
   font-weight: 780;
   letter-spacing: -0.05em;
 }
@@ -69,9 +69,9 @@
   gap: 4px;
   overflow-x: auto;
   padding: 4px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 13px;
-  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 74%, transparent);
 }
 
 .runtime-qa__navigation button,
@@ -88,16 +88,16 @@
 
 .runtime-qa__navigation button[aria-current="page"],
 .runtime-segmented button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--focus) 13%, var(--surface-card));
+  background: color-mix(in srgb, var(--focus-ring) 13%, var(--surface-raised));
   color: var(--text-primary);
 }
 
 .runtime-panel {
   margin-top: 14px;
   padding: clamp(20px, 4vw, 40px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 22px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
   box-shadow: 0 22px 70px
     color-mix(in srgb, var(--text-primary) 8%, transparent);
   backdrop-filter: blur(22px);
@@ -143,9 +143,9 @@
 .runtime-button {
   min-height: 40px;
   padding: 0 15px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 10px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
   color: var(--text-primary);
   font-weight: 680;
 }
@@ -153,7 +153,7 @@
 .runtime-button--primary {
   border-color: var(--accent);
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
 }
 
 .runtime-button--quiet {
@@ -185,9 +185,9 @@
 .runtime-conflict-grid > article,
 .runtime-attempts > article {
   min-width: 0;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 15px;
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 82%, transparent);
 }
 
 .runtime-card,
@@ -226,7 +226,7 @@
   gap: 7px;
   min-height: 32px;
   padding: 0 9px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 99px;
   background: transparent;
   color: var(--text-secondary);
@@ -242,7 +242,7 @@
 }
 
 .runtime-switch[aria-checked="true"] span {
-  background: var(--focus);
+  background: var(--focus-ring);
 }
 
 .runtime-inline-facts,
@@ -290,7 +290,7 @@
   flex: 0 0 auto;
   min-height: 25px;
   padding: 0 9px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 99px;
   background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
   color: var(--text-secondary);
@@ -300,8 +300,12 @@
 }
 
 .runtime-state[data-state="supported"] {
-  border-color: color-mix(in srgb, var(--focus) 34%, var(--border-subtle));
-  background: color-mix(in srgb, var(--focus) 10%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--focus-ring) 34%,
+    var(--border-separator)
+  );
+  background: color-mix(in srgb, var(--focus-ring) 10%, transparent);
   color: var(--text-primary);
 }
 
@@ -336,7 +340,7 @@
   overflow-x: auto;
   margin-top: 16px;
   padding: 3px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 11px;
 }
 
@@ -344,7 +348,7 @@
   margin: 16px 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--focus) 9%, transparent);
+  background: color-mix(in srgb, var(--focus-ring) 9%, transparent);
   color: var(--text-primary);
   font-size: 0.84rem;
   line-height: 1.45;
@@ -382,7 +386,7 @@
   align-items: center;
   gap: 10px;
   padding: 11px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-separator);
 }
 
 .runtime-choice-list label > span:nth-of-type(1) {
@@ -418,7 +422,7 @@
   gap: 5px;
   min-width: 0;
   padding: 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 12px;
   background: transparent;
   color: var(--text-primary);
@@ -426,8 +430,8 @@
 }
 
 .runtime-route-selector button[aria-pressed="true"] {
-  border-color: var(--focus);
-  background: color-mix(in srgb, var(--focus) 9%, transparent);
+  border-color: var(--focus-ring);
+  background: color-mix(in srgb, var(--focus-ring) 9%, transparent);
 }
 
 .runtime-route-selector span,
@@ -492,8 +496,8 @@
 }
 
 .runtime-card--choice[data-selected="true"] {
-  border-color: var(--focus);
-  background: color-mix(in srgb, var(--focus) 8%, var(--surface-card));
+  border-color: var(--focus-ring);
+  background: color-mix(in srgb, var(--focus-ring) 8%, var(--surface-raised));
 }
 
 .runtime-card__body {
@@ -532,16 +536,16 @@
   gap: 1px;
   overflow: hidden;
   margin-top: 16px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 12px;
-  background: var(--border-subtle);
+  background: var(--border-separator);
 }
 
 .runtime-health-strip div {
   display: grid;
   gap: 4px;
   padding: 13px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
 }
 
 .runtime-health-strip span {
@@ -571,7 +575,7 @@
 .runtime-turn blockquote {
   margin: 12px 0;
   padding-left: 13px;
-  border-left: 3px solid var(--focus);
+  border-left: 3px solid var(--focus-ring);
   color: var(--text-primary);
   line-height: 1.5;
 }

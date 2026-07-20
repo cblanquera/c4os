@@ -1,6 +1,6 @@
 # Task 00005 — Native macOS Platform And Semantic UI Foundation
 
-Status: open
+Status: verified
 
 Coverage: UX-003, UI-001 through UI-005, SET-003; native support for pickers, Browser, File, theme, focus, and acceptance.
 
@@ -26,18 +26,18 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 ## Agent Acceptance
 
-Result: failed — production native/semantic evidence is absent.
+Result: passed — independent read-only review reported P0=0 and P1=0 on 2026-07-21.
 
-Required evidence: native test results; source/diff inspection; production launch screenshots; live appearance switch; menu/shortcut/picker walkthrough; accessibility tree; width/overflow/contrast matrices; limitations and commands.
+Evidence reviewed: native and renderer test results; source/diff inspection; production launch screenshots; live appearance switch; menu/shortcut/picker walkthrough; accessibility tree; width/overflow/contrast matrices; limitations and commands in `output/native/task-00005-acceptance.md`.
 
 ## Implementation Notes
 
-Not started. Static r013 grayscale is structural only; accepted semantic Light/Dark supersedes it.
+Started 2026-07-20 from verified checkpoint `3e06b0b`. Static r013 grayscale is structural only; accepted semantic Light/Dark supersedes it. The first integration target is the smallest production-composed path that resolves the native platform/theme snapshot before reveal, keeps an independent live webview listener, renders a semantic-token QA surface, and reaches native Settings/menu and deterministic picker boundaries without weakening Rust authority.
 
 ## Verification Notes
 
-Not run.
+Automated and native verification completed 2026-07-21; see `output/native/task-00005-acceptance.md`. The complete renderer and Rust regressions are green, the exact debug app rebuild passed, and the native Light/Dark, menu, shortcut, state-retention, picker, focus, dialog, minimum-width, narrow-Settings, overflow, and accessibility matrices passed. Agent Acceptance is pending an independent read-only review.
 
 ## Agent Acceptance Notes
 
-Side quest 00015B independently repeats the applicable rendered/native checks.
+The independent reviewer confirmed fail-closed whole-value runtime publication, opaque picker grants without renderer paths, live-router Settings restoration, native-first/live-webview theme authority, standard macOS semantics, modal focus containment, reduced motion, and responsive internal overflow. Lower-severity observations were the honestly recorded 12.4s/15.8s accessibility availability rather than instrumented first-pixel timing, internally retained runtime initialization errors whose detailed presentation belongs to Task 00014, and the expected supporting integration still owned by Tasks 00006, 00007, 00008, 00013, and 00015B. Side quest 00015B independently repeats the applicable rendered/native checks.

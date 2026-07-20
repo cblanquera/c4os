@@ -11,3 +11,9 @@ codegen-units = 1
 lto = true
 panic = "abort"
 strip = true
+
+# Native acceptance uses debug bundles, but production asset qualification hashes
+# hundreds of megabytes before Tauri can finish setup. Keep SHA-256 production-like
+# so the hidden-window reveal contract is exercised instead of debug-only hashing.
+[profile.dev.package.sha2]
+opt-level = 3

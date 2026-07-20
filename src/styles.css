@@ -1,32 +1,11 @@
 :root {
   color-scheme: light dark;
   font-family:
-    Inter,
-    ui-sans-serif,
-    -apple-system,
-    BlinkMacSystemFont,
-    "SF Pro Text",
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
     sans-serif;
   font-synthesis: none;
-  --surface-canvas: #f4f4f1;
-  --surface-card: rgba(255, 255, 252, 0.86);
-  --text-primary: #171815;
-  --text-secondary: #62645d;
-  --border-subtle: rgba(23, 24, 21, 0.13);
-  --accent: #252722;
-  --focus: #5579d2;
-  background: var(--surface-canvas);
+  background: var(--surface-window);
   color: var(--text-primary);
-}
-
-:root[data-theme="dark"] {
-  --surface-canvas: #151613;
-  --surface-card: rgba(31, 32, 28, 0.9);
-  --text-primary: #f1f2ec;
-  --text-secondary: #a9aba2;
-  --border-subtle: rgba(241, 242, 236, 0.14);
-  --accent: #eef0e8;
-  --focus: #91aff5;
 }
 
 * {
@@ -46,10 +25,10 @@ body {
   background:
     radial-gradient(
       circle at 30% 10%,
-      color-mix(in srgb, var(--focus) 12%, transparent),
+      color-mix(in srgb, var(--focus-ring) 12%, transparent),
       transparent 34rem
     ),
-    var(--surface-canvas);
+    var(--surface-window);
 }
 
 button,
@@ -60,7 +39,7 @@ select {
 }
 
 :focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--focus) 70%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--focus-ring) 70%, transparent);
   outline-offset: 3px;
 }
 
@@ -74,10 +53,10 @@ select {
 .foundation__card {
   width: min(100%, 680px);
   padding: clamp(28px, 6vw, 64px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 28px;
-  background: var(--surface-card);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.1);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-dialog);
   backdrop-filter: blur(24px);
 }
 
@@ -89,7 +68,7 @@ select {
   place-items: center;
   border-radius: 14px;
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
   font-weight: 760;
   letter-spacing: -0.05em;
 }
@@ -125,15 +104,15 @@ select {
   gap: 1px;
   overflow: hidden;
   margin: 0 0 30px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 16px;
-  background: var(--border-subtle);
+  background: var(--border-separator);
 }
 
 .foundation__status div {
   min-width: 0;
   padding: 16px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
 }
 
 .foundation__status dt {
@@ -157,7 +136,7 @@ select {
   border: 0;
   border-radius: 13px;
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
   font-weight: 700;
   opacity: 0.4;
 }
@@ -200,9 +179,9 @@ select {
 .button {
   min-height: 40px;
   padding: 0 16px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 10px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
   color: var(--text-primary);
   font-weight: 680;
 }
@@ -210,7 +189,7 @@ select {
 .button--primary {
   border-color: var(--accent);
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
 }
 
 .button--quiet {
@@ -247,7 +226,7 @@ select {
 
 .policy-qa-shell > nav button[aria-current="page"],
 .policy-settings__tabs button[aria-selected="true"] {
-  background: color-mix(in srgb, var(--focus) 12%, var(--surface-card));
+  background: color-mix(in srgb, var(--focus-ring) 12%, var(--surface-raised));
   color: var(--text-primary);
 }
 
@@ -256,10 +235,10 @@ select {
   width: min(100%, 1120px);
   margin: 0 auto;
   padding: clamp(22px, 4vw, 48px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 24px;
-  background: var(--surface-card);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.08);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-window);
 }
 
 .policy-settings__header,
@@ -310,7 +289,7 @@ select {
   display: flex;
   gap: 4px;
   margin-top: 28px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-separator);
 }
 
 .policy-settings__tabs button {
@@ -331,9 +310,10 @@ select {
 .policy-settings__guardrail {
   margin: 20px 0;
   padding: 16px 18px;
-  border: 1px solid color-mix(in srgb, var(--focus) 28%, var(--border-subtle));
+  border: 1px solid
+    color-mix(in srgb, var(--focus-ring) 28%, var(--border-separator));
   border-radius: 14px;
-  background: color-mix(in srgb, var(--focus) 7%, transparent);
+  background: color-mix(in srgb, var(--focus-ring) 7%, transparent);
 }
 
 .policy-settings__guardrail p {
@@ -347,7 +327,7 @@ select {
   margin: 16px 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--focus) 10%, transparent);
+  background: color-mix(in srgb, var(--focus-ring) 10%, transparent);
   color: var(--text-primary);
   font-size: 0.88rem;
 }
@@ -365,9 +345,9 @@ select {
   width: 100%;
   min-height: 44px;
   padding: 0 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 11px;
-  background: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-raised) 84%, transparent);
   color: var(--text-primary);
 }
 
@@ -375,7 +355,7 @@ select {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 16px;
 }
 
@@ -384,7 +364,7 @@ select {
   align-content: start;
   gap: 3px;
   padding: 10px;
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-separator);
   background: color-mix(in srgb, var(--text-primary) 2.5%, transparent);
 }
 
@@ -403,9 +383,9 @@ select {
 }
 
 .policy-settings__groups button[aria-current="page"] {
-  background: var(--surface-card);
+  background: var(--surface-raised);
   color: var(--text-primary);
-  box-shadow: 0 1px 7px rgba(0, 0, 0, 0.07);
+  box-shadow: var(--shadow-menu);
 }
 
 .policy-settings__groups button span:last-child {
@@ -428,7 +408,7 @@ select {
 .approval-queue__state {
   flex: 0 0 auto;
   padding: 5px 9px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 99px;
   color: var(--text-secondary);
   font-size: 0.73rem;
@@ -437,7 +417,7 @@ select {
 
 .policy-settings__list {
   margin-top: 16px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-separator);
 }
 
 .policy-settings__row {
@@ -446,7 +426,7 @@ select {
   gap: 18px;
   align-items: center;
   padding: 15px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-separator);
 }
 
 .policy-settings__row > span {
@@ -472,9 +452,9 @@ select {
 .policy-settings__row select {
   width: 100%;
   min-height: 38px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 9px;
-  background: var(--surface-card);
+  background: var(--surface-raised);
   color: var(--text-primary);
 }
 
@@ -492,7 +472,7 @@ select {
 
 .policy-settings__exceptions {
   margin-top: 22px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 16px;
 }
 
@@ -506,7 +486,7 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-separator);
 }
 
 .policy-settings__exceptions article p {
@@ -523,22 +503,22 @@ select {
 
 .approval-queue article {
   padding: 18px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-left: 4px solid var(--text-secondary);
   border-radius: 14px;
 }
 
 .approval-queue article[data-approval-state="pending"] {
-  border-left-color: #c37a20;
+  border-left-color: var(--warning);
 }
 
 .approval-queue article[data-approval-state="completed"] {
-  border-left-color: #3d8a59;
+  border-left-color: var(--success);
 }
 
 .approval-queue article[data-approval-state="denied"],
 .approval-queue article[data-approval-state="expired"] {
-  border-left-color: #a94f4f;
+  border-left-color: var(--danger);
 }
 
 .approval-queue article h2 {
@@ -614,7 +594,7 @@ select {
   .policy-settings__groups {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     border-right: 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-separator);
   }
 
   .policy-settings__row {
@@ -642,10 +622,10 @@ select {
   width: min(100% - 40px, 780px);
   margin: 48px auto;
   padding: clamp(28px, 6vw, 56px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 24px;
-  background: var(--surface-card);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-window);
 }
 
 .qa-foundation__eyebrow {
@@ -671,7 +651,7 @@ select {
 .qa-foundation__state {
   margin: 32px 0;
   padding: 24px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-separator);
   border-radius: 16px;
 }
 
@@ -705,7 +685,7 @@ select {
   border: 0;
   border-radius: 12px;
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
   font-weight: 700;
   cursor: pointer;
 }
@@ -764,7 +744,7 @@ select {
   place-items: center;
   border-radius: 14px;
   background: var(--accent);
-  color: var(--surface-canvas);
+  color: var(--surface-window);
   font-weight: 780;
   letter-spacing: -0.05em;
 }
@@ -790,8 +770,8 @@ select {
 
 .workspace-start__action,
 .workspace-start__recent {
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-card);
+  border: 1px solid var(--border-separator);
+  background: var(--surface-raised);
   color: var(--text-primary);
   cursor: pointer;
 }
@@ -808,8 +788,12 @@ select {
 
 .workspace-start__action[data-hovered],
 .workspace-start__recent[data-hovered] {
-  border-color: color-mix(in srgb, var(--focus) 58%, var(--border-subtle));
-  background: color-mix(in srgb, var(--surface-card) 92%, var(--focus));
+  border-color: color-mix(
+    in srgb,
+    var(--focus-ring) 58%,
+    var(--border-separator)
+  );
+  background: color-mix(in srgb, var(--surface-raised) 92%, var(--focus-ring));
 }
 
 .workspace-start__action[data-disabled],
@@ -903,12 +887,12 @@ select {
 .workspace-start__notice--opening,
 .workspace-start__notice--opened,
 .workspace-start__notice--error {
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-card);
+  border: 1px solid var(--border-separator);
+  background: var(--surface-raised);
 }
 
 .workspace-start__notice--error {
-  color: #b74949;
+  color: var(--danger);
 }
 
 @media (max-width: 680px) {

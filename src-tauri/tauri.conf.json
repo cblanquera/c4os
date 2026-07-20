@@ -16,9 +16,10 @@
         "title": "C4OS",
         "width": 1100,
         "height": 760,
-        "minWidth": 720,
+        "minWidth": 560,
         "minHeight": 560,
         "center": true,
+        "visible": false,
         "decorations": true,
         "transparent": false
       }

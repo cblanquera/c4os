@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type NativeCommand =
+  | "platform_snapshot"
+  | "platform_reveal_main"
+  | "platform_pick"
   | "foundation_snapshot"
   | "workspace_start_snapshot"
   | "runtime_core_snapshot"

@@ -1,9 +1,17 @@
 pub mod core;
 pub mod execution;
+pub mod platform;
 pub mod protocol;
 pub mod runtime;
 pub mod security;
 
+use platform::{
+    ColorScheme, INITIAL_REVEAL_FALLBACK_MS, InitialThemeSnapshot, InitialThemeSource,
+    NativePickerRequest, NativePickerSelection, OPEN_SETTINGS_COMMAND_ID,
+    PLATFORM_CONTRACT_VERSION, PickerGrantRegistry, PickerObjectKind, PickerOutcome, PickerPurpose,
+    PlatformCapabilities, PlatformService, PlatformSnapshot, PlatformTarget, SETTINGS_ACCELERATOR,
+    SETTINGS_MENU_ITEM_ID, SETTINGS_ROUTE,
+};
 use protocol::{
     FoundationSnapshot, ProtocolEnvelope, ProtocolError, ProtocolErrorCode, SnapshotRequest,
     StateGeneration, WorkspaceId, WorkspaceRecentSnapshot, WorkspaceStartSnapshot,
@@ -53,12 +61,17 @@ use security::policy::{
     ActionSurface, PolicyConfiguration, RepositoryState,
 };
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::menu::{
+    HELP_SUBMENU_ID, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID,
+};
+use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, FilePath};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -173,15 +186,77 @@ fn install_production_broker_facilities(
 struct AppCoreState {
     database: Arc<core::database::DatabaseActor>,
     _configuration: Mutex<core::services::ManagedAppConfiguration>,
-    _active_workspace: Mutex<Option<core::services::ActiveWorkspace>>,
-    _credentials: CredentialServiceState,
+    _active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    runtime_production: Arc<
-        runtime::production_application::RuntimeProductionApplication<
-            runtime::production::RuntimeProductionBootstrap,
-        >,
-    >,
+    runtime_production: Arc<ManagedProductionRuntime>,
     runtime: Arc<RuntimeApplicationService>,
+    platform: PlatformService,
+    platform_snapshot: PlatformSnapshot,
+    picker_grants: Mutex<PickerGrantRegistry>,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+type ProductionRuntimeApplication = runtime::production_application::RuntimeProductionApplication<
+    runtime::production::RuntimeProductionBootstrap,
+>;
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct ManagedPublication<T> {
+    application: Mutex<Option<Arc<T>>>,
+    initialization_error: Mutex<Option<String>>,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl<T> Default for ManagedPublication<T> {
+    fn default() -> Self {
+        Self {
+            application: Mutex::new(None),
+            initialization_error: Mutex::new(None),
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl<T> ManagedPublication<T> {
+    fn load(&self, correlation_id: protocol::CorrelationId) -> Result<Arc<T>, ProtocolError> {
+        self.application
+            .lock()
+            .ok()
+            .and_then(|application| application.as_ref().cloned())
+            .ok_or_else(|| runtime_production_unavailable(correlation_id))
+    }
+
+    fn publish(&self, application: Arc<T>) {
+        if let Ok(mut current) = self.application.lock() {
+            *current = Some(application);
+        }
+    }
+
+    fn fail(&self, error: String) {
+        if let Ok(mut current) = self.initialization_error.lock() {
+            *current = Some(error);
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+type ManagedProductionRuntime = ManagedPublication<ProductionRuntimeApplication>;
+
+const PLATFORM_SETTINGS_EVENT: &str = "c4os://platform/open-settings";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeSettingsEvent {
+    contract_version: u16,
+    command_id: &'static str,
+    route: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformRevealSnapshot {
+    revealed: bool,
+    fallback: bool,
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -2143,6 +2218,232 @@ impl CredentialServiceState {
     }
 }
 
+fn platform_boundary_error(
+    correlation_id: protocol::CorrelationId,
+    code: ProtocolErrorCode,
+    message: &'static str,
+    retryable: bool,
+) -> ProtocolError {
+    ProtocolError::new(code, message, retryable).with_correlation(correlation_id)
+}
+
+fn invalid_picker_selection(correlation_id: protocol::CorrelationId) -> ProtocolError {
+    platform_boundary_error(
+        correlation_id,
+        ProtocolErrorCode::InvalidPayload,
+        "The native picker selection is invalid",
+        false,
+    )
+}
+
+fn validate_snapshot_request(
+    request: &SnapshotRequest,
+) -> Result<(), protocol::StructuredCoreError> {
+    protocol::snapshot_envelope(request.clone(), StateGeneration::default(), ()).map(|_| ())
+}
+
+fn native_picker_selection(
+    selected: FilePath,
+    purpose: PickerPurpose,
+    correlation_id: protocol::CorrelationId,
+) -> Result<NativePickerSelection, ProtocolError> {
+    let selected = selected
+        .into_path()
+        .map_err(|_| invalid_picker_selection(correlation_id.clone()))?;
+    let object_kind = purpose.policy().object_kind;
+    let normalized = normalize_picker_path(&selected, purpose)
+        .map_err(|_| invalid_picker_selection(correlation_id.clone()))?;
+    NativePickerSelection::new(normalized, object_kind)
+        .map_err(|_| invalid_picker_selection(correlation_id))
+}
+
+fn normalize_picker_path(path: &Path, purpose: PickerPurpose) -> Result<PathBuf, std::io::Error> {
+    if !path.is_absolute() {
+        return Err(std::io::Error::other("picker path must be absolute"));
+    }
+
+    if purpose == PickerPurpose::SaveWorkspaceArchive {
+        let file_name = path
+            .file_name()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| std::io::Error::other("picker target has no file name"))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("picker target has no parent"))?;
+        let parent = std::fs::canonicalize(parent)?;
+        let normalized = parent.join(file_name);
+        if normalized.exists() {
+            let metadata = std::fs::symlink_metadata(&normalized)?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(std::io::Error::other("picker target is not a regular file"));
+            }
+        }
+        return Ok(normalized);
+    }
+
+    let selected_metadata = std::fs::symlink_metadata(path)?;
+    if selected_metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other("picker target is a symbolic link"));
+    }
+    let normalized = std::fs::canonicalize(path)?;
+    let metadata = std::fs::metadata(&normalized)?;
+    match purpose.policy().object_kind {
+        PickerObjectKind::File if metadata.is_file() => Ok(normalized),
+        PickerObjectKind::Folder if metadata.is_dir() => Ok(normalized),
+        _ => Err(std::io::Error::other("picker target kind does not match")),
+    }
+}
+
+#[tauri::command]
+fn platform_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<PlatformSnapshot>, protocol::StructuredCoreError> {
+    protocol::snapshot_envelope(
+        request,
+        StateGeneration::default(),
+        core.platform_snapshot.clone(),
+    )
+}
+
+#[tauri::command]
+fn platform_reveal_main(
+    app: tauri::AppHandle,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<PlatformRevealSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let correlation_id = request.correlation_id.clone();
+    let window = app.get_webview_window("main").ok_or_else(|| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Unavailable,
+            "The main window is unavailable",
+            true,
+        )
+    })?;
+    window.show().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Unavailable,
+            "The main window could not be revealed",
+            true,
+        )
+    })?;
+    window.set_focus().map_err(|_| {
+        platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "The main window could not be focused",
+            true,
+        )
+    })?;
+    protocol::snapshot_envelope(
+        request,
+        StateGeneration::default(),
+        PlatformRevealSnapshot {
+            revealed: true,
+            fallback: false,
+        },
+    )
+}
+
+#[tauri::command]
+async fn platform_pick(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    picker: NativePickerRequest,
+) -> Result<ProtocolEnvelope<PickerOutcome>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if picker.request_id != request.request_id {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::CorrelationMismatch,
+            "The picker request identity did not match its envelope",
+            false,
+        ));
+    }
+    picker
+        .validate()
+        .map_err(|_| invalid_picker_selection(request.correlation_id.clone()))?;
+
+    let dialog = app.dialog().file().set_title(match picker.purpose {
+        PickerPurpose::OpenProjectFolder => "Open Project Folder",
+        PickerPurpose::RelocateProjectFolder => "Relocate Project Folder",
+        PickerPurpose::OpenWorkspaceArchive => "Open C4OS Workspace",
+        PickerPurpose::SaveWorkspaceArchive => "Save C4OS Workspace",
+        PickerPurpose::AttachChatFiles => "Attach Files",
+        PickerPurpose::OpenFile => "Open File",
+    });
+    let selected = match picker.purpose {
+        PickerPurpose::OpenProjectFolder | PickerPurpose::RelocateProjectFolder => {
+            dialog.blocking_pick_folder().map(|path| vec![path])
+        }
+        PickerPurpose::OpenWorkspaceArchive => dialog
+            .add_filter("C4OS Workspace", &["zip"])
+            .blocking_pick_file()
+            .map(|path| vec![path]),
+        PickerPurpose::SaveWorkspaceArchive => dialog
+            .add_filter("C4OS Workspace", &["zip"])
+            .set_file_name("Workspace.c4os.zip")
+            .blocking_save_file()
+            .map(|path| vec![path]),
+        PickerPurpose::AttachChatFiles => dialog.blocking_pick_files(),
+        PickerPurpose::OpenFile => dialog.blocking_pick_file().map(|path| vec![path]),
+    };
+
+    let Some(selected) = selected else {
+        let outcome = core
+            .platform
+            .cancelled_picker(&picker)
+            .map_err(|_| invalid_picker_selection(request.correlation_id.clone()))?;
+        return protocol::snapshot_envelope(request, StateGeneration::default(), outcome);
+    };
+    let selections = selected
+        .into_iter()
+        .map(|path| native_picker_selection(path, picker.purpose, request.correlation_id.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let grant_ids = (0..selections.len())
+        .map(|_| protocol::PickerGrantId::new(format!("picker-grant-{}", Uuid::new_v4())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let issued_at_ms = current_time_ms().map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Internal,
+            "The picker grant clock is unavailable",
+            true,
+        )
+    })?;
+    let snapshots = {
+        let mut registry = core.picker_grants.lock().map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Internal,
+                "The picker grant registry is unavailable",
+                true,
+            )
+        })?;
+        registry
+            .register_batch(&picker, &selections, grant_ids.clone(), issued_at_ms)
+            .map_err(|_| invalid_picker_selection(request.correlation_id.clone()))?
+    };
+    let outcome = match core
+        .platform
+        .selected_picker(&picker, &selections, snapshots)
+    {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            if let Ok(mut registry) = core.picker_grants.lock() {
+                for grant_id in &grant_ids {
+                    let _ = registry.take(grant_id);
+                }
+            }
+            return Err(invalid_picker_selection(request.correlation_id));
+        }
+    };
+    protocol::snapshot_envelope(request, StateGeneration::default(), outcome)
+}
+
 #[tauri::command]
 fn foundation_snapshot(
     request: SnapshotRequest,
@@ -2198,6 +2499,7 @@ fn runtime_core_snapshot(
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     let pending_approvals = core
         .runtime_production
+        .load(request.correlation_id.clone())?
         .pending_approvals()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
         .into_iter()
@@ -2268,6 +2570,7 @@ fn runtime_production_activate(
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
     let activated = core
         .runtime_production
+        .load(correlation_id.clone())?
         .activate_runtime(request.expected_generation.0, &runtime_id, now_ms)
         .map_err(|_| runtime_production_unavailable(correlation_id))?;
     let generation = StateGeneration(activated.coordinator_generation);
@@ -2293,6 +2596,7 @@ fn runtime_production_shutdown(
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
     let coordinator_generation = core
         .runtime_production
+        .load(correlation_id.clone())?
         .shutdown_runtime(request.expected_generation.0, &runtime_id, now_ms)
         .map_err(|_| runtime_production_unavailable(correlation_id))?;
     protocol::snapshot_envelope(
@@ -2324,6 +2628,7 @@ fn runtime_production_pump(
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
     let (coordinator_generation, pumped_events) = core
         .runtime_production
+        .load(request_correlation.clone())?
         .pump_runtime_once_expected(request.expected_generation.0, &runtime_id, now_ms)
         .map_err(|_| runtime_production_unavailable(request_correlation))?;
     protocol::snapshot_envelope(
@@ -2358,6 +2663,7 @@ fn runtime_production_answer_approval(
     );
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
     core.runtime_production
+        .load(request_correlation.clone())?
         .answer_runtime_approval(
             request.expected_generation.0,
             &runtime_id,
@@ -2414,11 +2720,7 @@ fn runtime_production_unavailable(correlation_id: protocol::CorrelationId) -> Pr
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn start_runtime_production_driver(
-    application: &Arc<
-        runtime::production_application::RuntimeProductionApplication<
-            runtime::production::RuntimeProductionBootstrap,
-        >,
-    >,
+    application: &Arc<ProductionRuntimeApplication>,
 ) -> Result<(), std::io::Error> {
     let application = Arc::downgrade(application);
     thread::Builder::new()
@@ -2434,10 +2736,198 @@ fn start_runtime_production_driver(
     Ok(())
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn start_runtime_production_initialization(
+    app: tauri::AppHandle,
+    resource_dir: PathBuf,
+    c4os_home: PathBuf,
+    active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    runtime: Arc<RuntimeApplicationService>,
+    managed: Arc<ManagedProductionRuntime>,
+) -> Result<(), std::io::Error> {
+    thread::Builder::new()
+        .name("c4os-production-runtime-initialization".into())
+        .spawn(move || {
+            let initialize = || -> Result<Arc<ProductionRuntimeApplication>, String> {
+                let vault = CredentialServiceState::initialize(&c4os_home)
+                    .map_err(|error| error.to_string())?
+                    .vault();
+                let bootstrap =
+                    runtime::production::RuntimeProductionBootstrap::new(resource_dir, vault)
+                        .map_err(|error| error.to_string())?;
+                install_production_broker_facilities(&bootstrap, &app)
+                    .map_err(|error| error.to_string())?;
+
+                let workspace_binding = active_workspace
+                    .lock()
+                    .map_err(|_| "active Workspace state is unavailable".to_string())?
+                    .as_ref()
+                    .map(|workspace| {
+                        (
+                            workspace.manifest().workspace_id.to_string(),
+                            Arc::clone(workspace.database_actor()),
+                        )
+                    });
+                let now_ms = current_time_ms().map_err(|error| error.to_string())?;
+                if let Some((workspace_id, database)) = workspace_binding {
+                    let installations = bootstrap
+                        .runtime_installations(&workspace_id, &c4os_home)
+                        .map_err(|error| error.to_string())?;
+                    runtime
+                        .bind_workspace_runtime_installations(
+                            database,
+                            installations.into_iter().collect(),
+                            now_ms,
+                        )
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    runtime
+                        .clear_runtime_installations_without_workspace(now_ms)
+                        .map_err(|error| error.to_string())?;
+                }
+
+                let application = Arc::new(
+                    runtime::production_application::RuntimeProductionApplication::new(
+                        Arc::clone(&runtime),
+                        bootstrap,
+                    ),
+                );
+                start_runtime_production_driver(&application).map_err(|error| error.to_string())?;
+                Ok(application)
+            };
+
+            match initialize() {
+                Ok(application) => managed.publish(application),
+                Err(error) => managed.fail(error),
+            }
+        })?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .menu(|app| {
+            let settings = MenuItemBuilder::with_id(SETTINGS_MENU_ITEM_ID, "Settings…")
+                .accelerator(SETTINGS_ACCELERATOR)
+                .build(app)?;
+            let app_menu = Submenu::with_items(
+                app,
+                app.package_info().name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &settings,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?;
+            let file_menu = Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[&PredefinedMenuItem::close_window(app, None)?],
+            )?;
+            let edit_menu = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?;
+            let view_menu = Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?;
+            let window_menu = Submenu::with_id_and_items(
+                app,
+                WINDOW_SUBMENU_ID,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::close_window(app, None)?,
+                ],
+            )?;
+            let help_menu = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?;
+            Menu::with_items(
+                app,
+                &[
+                    &app_menu,
+                    &file_menu,
+                    &edit_menu,
+                    &view_menu,
+                    &window_menu,
+                    &help_menu,
+                ],
+            )
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() != SETTINGS_MENU_ITEM_ID {
+                return;
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.emit(
+                    PLATFORM_SETTINGS_EVENT,
+                    NativeSettingsEvent {
+                        contract_version: PLATFORM_CONTRACT_VERSION,
+                        command_id: OPEN_SETTINGS_COMMAND_ID,
+                        route: SETTINGS_ROUTE,
+                    },
+                );
+                let _ = window.set_focus();
+            }
+        })
         .setup(|app| {
+            let main_window = app
+                .get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main window is unavailable"))?;
+            let initial_theme = match main_window.theme() {
+                Ok(tauri::Theme::Dark) => InitialThemeSnapshot::new(
+                    ColorScheme::Dark,
+                    InitialThemeSource::MacosAppearance,
+                ),
+                Ok(tauri::Theme::Light) => InitialThemeSnapshot::new(
+                    ColorScheme::Light,
+                    InitialThemeSource::MacosAppearance,
+                ),
+                _ => InitialThemeSnapshot::new(
+                    ColorScheme::Light,
+                    InitialThemeSource::SemanticFallback,
+                ),
+            };
+            let platform = PlatformService::qualify_installed(
+                PlatformTarget::current_build(),
+                PlatformCapabilities {
+                    native_application_menu: true,
+                    native_settings_shortcut: true,
+                    native_file_picker: true,
+                    native_folder_picker: true,
+                    native_workspace_picker: true,
+                    standard_window_decorations: true,
+                },
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let platform_snapshot = platform.initial_snapshot(initial_theme);
             let c4os_home = app.path().home_dir()?.join(".c4os");
             let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
             let (database, _) = core::database::DatabaseActor::start(
@@ -2466,60 +2956,63 @@ pub fn run() {
                     label: "c4os-production".into(),
                 },
             )?;
-            let credentials = CredentialServiceState::initialize(&c4os_home)?;
             let runtime = Arc::new(RuntimeApplicationService::restore(
                 Arc::clone(&database),
                 now_ms,
             )?);
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let runtime_bootstrap = runtime::production::RuntimeProductionBootstrap::new(
-                app.path().resource_dir()?,
-                credentials.vault(),
-            )
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            install_production_broker_facilities(&runtime_bootstrap, app.handle())
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let runtime_resource_dir = app.path().resource_dir()?;
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
             if let Some(workspace) = &active_workspace {
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                let installations = runtime_bootstrap
-                    .runtime_installations(
-                        &workspace.manifest().workspace_id.to_string(),
-                        &c4os_home,
-                    )
-                    .map_err(|error| std::io::Error::other(error.to_string()))?;
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                runtime.bind_workspace_runtime_installations(
-                    Arc::clone(workspace.database_actor()),
-                    installations.into_iter().collect(),
-                    now_ms,
-                )?;
-                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
                 runtime.bind_workspace(Arc::clone(workspace.database_actor()))?;
             } else {
                 runtime.clear_runtime_installations_without_workspace(now_ms)?;
             }
+            let active_workspace = Arc::new(Mutex::new(active_workspace));
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let runtime_production = Arc::new(
-                runtime::production_application::RuntimeProductionApplication::new(
-                    Arc::clone(&runtime),
-                    runtime_bootstrap,
-                ),
-            );
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            start_runtime_production_driver(&runtime_production)?;
+            let runtime_production = Arc::new(ManagedProductionRuntime::default());
             app.manage(AppCoreState {
                 database,
                 _configuration: Mutex::new(configuration),
-                _active_workspace: Mutex::new(active_workspace),
-                _credentials: credentials,
+                _active_workspace: Arc::clone(&active_workspace),
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                runtime_production,
-                runtime,
+                runtime_production: Arc::clone(&runtime_production),
+                runtime: Arc::clone(&runtime),
+                platform,
+                platform_snapshot,
+                picker_grants: Mutex::new(PickerGrantRegistry::default()),
             });
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            start_runtime_production_initialization(
+                app.handle().clone(),
+                runtime_resource_dir,
+                c4os_home,
+                active_workspace,
+                runtime,
+                runtime_production,
+            )?;
+            let fallback_app = app.handle().clone();
+            thread::Builder::new()
+                .name("c4os-initial-reveal-fallback".into())
+                .spawn(move || {
+                    thread::sleep(Duration::from_millis(INITIAL_REVEAL_FALLBACK_MS));
+                    let dispatcher = fallback_app.clone();
+                    let _ = dispatcher.run_on_main_thread(move || {
+                        let Some(window) = fallback_app.get_webview_window("main") else {
+                            return;
+                        };
+                        if !window.is_visible().unwrap_or(false) {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    });
+                })?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            platform_snapshot,
+            platform_reveal_main,
+            platform_pick,
             foundation_snapshot,
             workspace_start_snapshot,
             runtime_core_snapshot,
@@ -2544,6 +3037,24 @@ mod atomic_capability_publication_tests {
     use std::time::Duration;
 
     use tempfile::TempDir;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn managed_publication_fails_closed_until_one_complete_value_is_ready() {
+        let managed = ManagedPublication::<u8>::default();
+        let unavailable = managed
+            .load(protocol::CorrelationId::new("runtime-pending").unwrap())
+            .unwrap_err();
+        assert_eq!(unavailable.code, ProtocolErrorCode::Unavailable);
+
+        managed.publish(Arc::new(7));
+        assert_eq!(
+            *managed
+                .load(protocol::CorrelationId::new("runtime-ready").unwrap())
+                .unwrap(),
+            7
+        );
+    }
 
     #[test]
     fn capability_candidate_cannot_be_observed_under_the_old_coordinator_generation() {

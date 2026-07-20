@@ -8,7 +8,7 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | [00002 Durable core, configuration, and Workspace lifecycle](00002-durable-core-configuration-workspace.md) | verified | passed | UX-013, UX-014, SET-002 |
 | [00003 Policy, credentials, Action Gateway, and execution environments](00003-policy-credentials-action-gateway.md) | verified | passed | UX-010, UX-012, UX-015, CHAT-009, CHAT-010, SET-011 |
 | [00004 Runtime adapters, providers, and capability lifecycle](00004-runtime-provider-capability-lifecycle.md) | verified | passed | Provider/runtime support for CHAT and SET |
-| [00005 Native macOS platform and semantic UI foundation](00005-native-macos-semantic-ui.md) | open | failed | UX-003, UI-001 through UI-005, SET-003 |
+| [00005 Native macOS platform and semantic UI foundation](00005-native-macos-semantic-ui.md) | verified | passed | UX-003, UI-001 through UI-005, SET-003 |
 | [00006 Stateful renderer shell and accessible component system](00006-renderer-shell-component-system.md) | open | failed | UX-001, UX-004, UX-011 |
 | [00007 Workspace, Chat, composer, and conversation](00007-workspace-chat-composer.md) | open | failed | UX-005 through UX-007, CHAT-001 through CHAT-008, ART-006 |
 | [00008 Artifact framework and File/Folder facilities](00008-artifact-file-folder.md) | open | failed | UX-008, ART-001, ART-003, ART-004, ART-007 |
@@ -25,4 +25,4 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 
 ## Current Blockers
 
-None. Tasks 00001 through 00004 passed Agent Acceptance. Task epochs are checkpointed separately; stop before Task 00005 until the user directs the next epoch.
+None. Tasks 00001 through 00005 passed Agent Acceptance. Task 00006 is the next open isolated epoch.

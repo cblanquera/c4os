@@ -6,7 +6,7 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | --- | --- | --- | --- | --- |
 | UX-001 | 00006 | 00001, 00007, 00013 | open | Not yet recorded |
 | UX-002 | 00015 | 00006, 00007, 00013, 00015B | open | Not yet recorded |
-| UX-003 | 00005 | 00006, 00015B | open | Not yet recorded |
+| UX-003 | 00005 | 00006, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) native window/menu, source-qualified initial theme, live Light/Dark switch, state retention, semantic foundation, and native acceptance passed; full shell and final native audit remain open. |
 | UX-004 | 00006 | 00001, 00015 | open | Not yet recorded |
 | UX-005 | 00007 | 00006, 00008, 00013 | open | Not yet recorded |
 | UX-006 | 00007 | 00006, 00008 | open | Not yet recorded |
@@ -19,11 +19,11 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | UX-013 | 00002 | 00003, 00011, 00012, 00014 | open | [Task 00002](00002-durable-core-configuration-workspace.md) persistence/configuration/archive acceptance passed; supporting security and extension lifecycle remain open. |
 | UX-014 | 00002 | 00007, 00011, 00012 | open | [Task 00002](00002-durable-core-configuration-workspace.md) exact inactivation/no-delete acceptance passed; integrated scoped-process and extension behavior remain open. |
 | UX-015 | 00003 | 00004, 00007, 00011, 00012, 00015A | open | [Task 00003](00003-policy-credentials-action-gateway.md) one-use authorization and approval lifecycle passed. [Task 00004](00004-runtime-provider-capability-lifecycle.md) proved OpenCode/Pi allow and deny continuations through the same Rust-owned Action Gateway; extension and final security audit remain open. |
-| UI-001 | 00005 | 00006, 00015B | open | Not yet recorded |
-| UI-002 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
-| UI-003 | 00005 | 00006, 00013, 00015B | open | Not yet recorded |
-| UI-004 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
-| UI-005 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | Not yet recorded |
+| UI-001 | 00005 | 00006, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) initial native snapshot, hidden-window reveal, independent live listener, repeated launch, and no persisted override passed; shell integration and final audit remain open. |
+| UI-002 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) accepted semantic Light/Dark tokens, computed-style/contrast checks, source qualification, and representative foundation surfaces passed; downstream product surfaces remain open. |
+| UI-003 | 00005 | 00006, 00013, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) standard decorations, native menus, `Cmd+,`, focus, scrollbar, keyboard-symbol, and Reveal terminology checks passed; full shell/Settings integration and final audit remain open. |
+| UI-004 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) wide/minimum-width, narrow Settings, internal-scroll, responsive geometry, and no document-overflow foundation passed; downstream layout surfaces remain open. |
+| UI-005 | 00005 | 00006, 00007, 00008, 00013, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) component-state matrix, notices, contained modal, Escape/focus restoration, and reduced-motion foundation passed; downstream component integration remains open. |
 | CHAT-001 | 00007 | 00006 | open | Not yet recorded |
 | CHAT-002 | 00007 | 00002, 00005, 00015 | open | Not yet recorded |
 | CHAT-003 | 00007 | 00002, 00004 | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) provisional promotion and atomic first-submit runtime/route/environment/capability binding passed; production conversation promotion remains with Task 00007. |
@@ -43,7 +43,7 @@ All 50 normative IDs from [Feature coverage](../feature-coverage.md) are mapped 
 | ART-007 | 00008 | 00003, 00004, 00007, 00015A | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) supplies descriptor-rooted exact attachment bytes, capability preflight, and safe runtime delivery; Files UI and final security integration remain open. |
 | SET-001 | 00013 | 00003, 00004, 00005 | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) provider-gated readiness, connectivity invalidation, zero/one/many model discovery, explicit route choice, opaque credentials, and zero-provider fail-closed dispatch passed; onboarding and native shell integration remain open. |
 | SET-002 | 00002 | 00005, 00006, 00013 | open | [Task 00002](00002-durable-core-configuration-workspace.md) Start/recents/reconstruction acceptance passed; native picker, shell, and Settings integration remain open. |
-| SET-003 | 00005 | 00006, 00013, 00015B | open | Not yet recorded |
+| SET-003 | 00005 | 00006, 00013, 00015B | open | [Task 00005](00005-native-macos-semantic-ui.md) native Settings command, `Cmd+,`, direct route, live-router Back restoration, compressed navigation, dialog/notice/focus, and independent scroll foundation passed; complete Settings integration and final audit remain open. |
 | SET-004 | 00013 | 00003, 00004 | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) provider profile identity, conditional native mapping, secret-reference preservation, availability, connectivity, and dependent-route invalidation passed; Settings CRUD dialogs remain open. |
 | SET-005 | 00013 | 00004, 00006 | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) route details, declared/normalized/observed/effective capability evidence, availability, generation, refresh, and responsive QA states passed; Models Settings composition remains open. |
 | SET-006 | 00013 | 00004, 00007 | open | [Task 00004](00004-runtime-provider-capability-lifecycle.md) peer OpenCode/Pi exact pins, dirty draft, save, restart generation, existing-binding stability, and new-Chat default behavior passed; Settings activation remains open. |
