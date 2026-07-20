@@ -11,11 +11,13 @@ use c4os_lib::core::database::{
 use c4os_lib::core::services::{
     ManagedAppConfiguration, WorkspaceServiceOpen, create_workspace_from_completed_clone,
     create_workspace_from_project, load_workspace_start_state, open_workspace_with_database,
-    restore_app_configuration, save_app_configuration, validate_workspace_semantics,
+    restore_active_workspace, restore_app_configuration, save_app_configuration,
+    validate_workspace_semantics,
 };
 use c4os_lib::core::workspace::{
     ArchiveLimits, ArchiveViolation, C4osHomeLayout, WorkspaceError, WorkspaceLayout,
-    WorkspaceLockOwner, WorkspaceSemanticValidationTarget,
+    WorkspaceLockOwner, WorkspaceManifest, WorkspaceSemanticValidationTarget, WriterAccess,
+    acquire_workspace_writer_lock,
 };
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -841,4 +843,200 @@ fn committed_chat_creation_reports_success_when_watcher_refresh_degrades() {
         active.configuration_last_error(),
         Some("Workspace configuration watcher target refresh failed")
     );
+}
+
+#[test]
+fn production_restore_recovers_only_the_active_copy_and_retains_its_authorities() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project).expect("Project");
+    let mut created = create_workspace_from_project(
+        &home,
+        &project,
+        "Primary Project",
+        "Restore Fixture",
+        APP_VERSION,
+        owner("restore-create"),
+        NOW,
+    )
+    .expect("create active Workspace");
+    let workspace_id = created.manifest().workspace_id;
+    let project_id = created.manifest().projects[0].project_id;
+    let manifest_generation = created.manifest().generation;
+    created
+        .create_chat(project_id, Uuid::new_v4(), "Crash-Recovered Chat", NOW + 1)
+        .expect("advance database beyond manifest");
+    let database_generation = created
+        .snapshot(SnapshotQuery::new(20).expect("query"))
+        .expect("advanced Workspace snapshot")
+        .generation;
+    assert!(database_generation > manifest_generation);
+    drop(created);
+
+    let restored = restore_active_workspace(
+        &home,
+        true,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("restore-production"),
+    )
+    .expect("restore active working copy")
+    .expect("active working copy exists");
+    assert_eq!(restored.working_root(), home.active_workspace());
+    assert_eq!(restored.manifest().workspace_id, workspace_id);
+    assert_eq!(restored.manifest().generation, database_generation);
+    assert!(
+        !restored.is_project_trusted(project_id),
+        "portable and durable state must not reconstruct picker trust"
+    );
+
+    assert!(matches!(
+        acquire_workspace_writer_lock(&home.workspace_lock(), owner("restore-lock-contender"))
+            .expect("inspect retained Workspace lock"),
+        WriterAccess::ReadOnly { .. }
+    ));
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        home.active_workspace(),
+        workspace_id.to_string(),
+        home.workspace_recovery_root()
+            .join(workspace_id.to_string()),
+    );
+    assert!(
+        DatabaseActor::start(descriptor.clone()).is_err(),
+        "restored service must retain database writer ownership"
+    );
+
+    drop(restored);
+    let released_lock =
+        acquire_workspace_writer_lock(&home.workspace_lock(), owner("restore-after-drop"))
+            .expect("Workspace lock is released with service");
+    assert!(matches!(released_lock, WriterAccess::Writable(_)));
+    drop(released_lock);
+    let (database, _) =
+        DatabaseActor::start(descriptor).expect("database ownership is released with service");
+    drop(database);
+}
+
+#[test]
+fn production_restore_returns_none_when_disabled_or_no_active_copy_exists() {
+    let temp = TempDir::new().expect("temporary root");
+    let empty_home = C4osHomeLayout::new(temp.path().join("empty-home"));
+    assert!(
+        restore_active_workspace(
+            &empty_home,
+            true,
+            APP_VERSION,
+            ArchiveLimits::default(),
+            owner("restore-missing"),
+        )
+        .expect("missing active copy is not an error")
+        .is_none()
+    );
+    assert!(
+        !empty_home.root().exists(),
+        "a missing restore candidate must not create C4OS state"
+    );
+
+    let home = C4osHomeLayout::new(temp.path().join("disabled-home"));
+    let project = temp.path().join("disabled-project");
+    fs::create_dir_all(&project).expect("Project");
+    let created = create_workspace_from_project(
+        &home,
+        &project,
+        "Primary Project",
+        "Disabled Restore Fixture",
+        APP_VERSION,
+        owner("restore-disabled-create"),
+        NOW,
+    )
+    .expect("create active Workspace");
+    drop(created);
+    assert!(
+        restore_active_workspace(
+            &home,
+            false,
+            APP_VERSION,
+            ArchiveLimits::default(),
+            owner("restore-disabled"),
+        )
+        .expect("disabled restore is not an error")
+        .is_none()
+    );
+    assert!(matches!(
+        acquire_workspace_writer_lock(&home.workspace_lock(), owner("restore-disabled-check"))
+            .expect("disabled restore leaves lock available"),
+        WriterAccess::Writable(_)
+    ));
+}
+
+#[test]
+fn production_restore_fails_closed_on_workspace_lock_contention() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project).expect("Project");
+    let active = create_workspace_from_project(
+        &home,
+        &project,
+        "Primary Project",
+        "Lock Contention Fixture",
+        APP_VERSION,
+        owner("restore-lock-owner"),
+        NOW,
+    )
+    .expect("create locked active Workspace");
+
+    let error = restore_active_workspace(
+        &home,
+        true,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("restore-lock-rejected"),
+    )
+    .err()
+    .expect("lock contention must fail closed");
+    assert!(matches!(error, WorkspaceError::Conflict(_)));
+    drop(active);
+}
+
+#[test]
+fn production_restore_fails_closed_on_manifest_database_identity_mismatch() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project).expect("Project");
+    let active = create_workspace_from_project(
+        &home,
+        &project,
+        "Primary Project",
+        "Identity Mismatch Fixture",
+        APP_VERSION,
+        owner("restore-identity-create"),
+        NOW,
+    )
+    .expect("create active Workspace");
+    let manifest_path = WorkspaceLayout::new(active.working_root()).manifest();
+    drop(active);
+
+    let mut manifest: WorkspaceManifest =
+        toml::from_str(&fs::read_to_string(&manifest_path).expect("read active manifest"))
+            .expect("decode active manifest");
+    manifest.workspace_id = Uuid::new_v4();
+    fs::write(
+        &manifest_path,
+        toml::to_string(&manifest).expect("encode mismatched manifest"),
+    )
+    .expect("write mismatched manifest");
+
+    let error = restore_active_workspace(
+        &home,
+        true,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("restore-identity-rejected"),
+    )
+    .err()
+    .expect("identity mismatch must fail closed");
+    assert!(matches!(error, WorkspaceError::Conflict(_)));
 }

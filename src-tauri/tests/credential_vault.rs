@@ -142,6 +142,76 @@ fn installation_key_vault_persists_only_ciphertext_and_opaque_references() {
 }
 
 #[test]
+fn generated_loopback_secret_stays_opaque_and_is_delivered_only_by_operation_lease() {
+    let directory = TempDir::new().expect("temporary directory");
+    let path = vault_path(&directory);
+    let vault = test_vault(&path, Arc::new(FakeClock::default())).expect("open vault");
+
+    let credential_reference = vault
+        .store_random("runtime.loopback_password", 32)
+        .expect("generate loopback secret");
+    assert!(credential_reference.as_str().starts_with("credential:"));
+    let persisted = fs::read(&path).expect("read encrypted vault");
+
+    let lease = vault
+        .lease_for_operation(
+            &credential_reference,
+            "runtime.loopback-launch",
+            Duration::from_secs(30),
+        )
+        .expect("lease generated secret");
+    let mut operation_pipe = Cursor::new(Vec::new());
+    lease
+        .deliver_to(&mut operation_pipe)
+        .expect("deliver generated secret");
+    let generated_secret = operation_pipe.into_inner();
+    assert_eq!(generated_secret.len(), 32);
+    assert!(generated_secret.iter().any(|byte| *byte != 0));
+    assert!(
+        !persisted
+            .windows(32)
+            .any(|window| window == generated_secret.as_slice())
+    );
+}
+
+#[test]
+fn generated_text_loopback_secret_preserves_entropy_and_native_password_bounds() {
+    let directory = TempDir::new().expect("temporary directory");
+    let path = vault_path(&directory);
+    let vault = test_vault(&path, Arc::new(FakeClock::default())).expect("open vault");
+
+    let credential_reference = vault
+        .store_random_hex("runtime.native_loopback_password", 32)
+        .expect("generate textual loopback secret");
+    let lease = vault
+        .lease_for_operation(
+            &credential_reference,
+            "runtime.native-loopback-launch",
+            Duration::from_secs(30),
+        )
+        .expect("lease generated secret");
+    let mut operation_pipe = Cursor::new(Vec::new());
+    lease
+        .deliver_to(&mut operation_pipe)
+        .expect("deliver generated secret");
+    let generated_secret = operation_pipe.into_inner();
+
+    assert_eq!(generated_secret.len(), 64);
+    assert!(generated_secret.iter().all(u8::is_ascii_hexdigit));
+    assert!(
+        generated_secret
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase())
+    );
+    let persisted = fs::read(&path).expect("read encrypted vault");
+    assert!(
+        !persisted
+            .windows(64)
+            .any(|window| window == generated_secret)
+    );
+}
+
+#[test]
 fn password_vault_rejects_wrong_password_without_mutating_ciphertext() {
     let directory = TempDir::new().expect("temporary directory");
     let path = vault_path(&directory);

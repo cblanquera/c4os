@@ -70,7 +70,7 @@ fn app_database_round_trips_across_actor_restart() {
     {
         let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("open app database");
         assert_eq!(report.previous_version, 0);
-        assert_eq!(report.current_version, 4);
+        assert_eq!(report.current_version, 6);
         assert!(
             report
                 .backup_path
@@ -97,7 +97,7 @@ fn app_database_round_trips_across_actor_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("reopen app database");
-    assert_eq!(report.previous_version, 4);
+    assert_eq!(report.previous_version, 6);
     assert!(report.backup_path.is_none());
     let snapshot = match actor
         .snapshot(SnapshotQuery::new(3).expect("valid bounds"))
@@ -141,7 +141,7 @@ fn app_configuration_lkg_round_trips_across_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("restart app database");
-    assert_eq!(report.previous_version, 4);
+    assert_eq!(report.previous_version, 6);
     assert_eq!(
         actor
             .app_configuration_lkg()
@@ -238,7 +238,7 @@ fn migration_creates_validated_online_backup_and_failure_preserves_source() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 4).expect("deterministic backup path");
+        database::migration_backup_path(&descriptor, 99, 6).expect("deterministic backup path");
     assert!(backup_path.exists());
     let backup = Connection::open(backup_path).expect("open backup");
     assert_eq!(
@@ -293,7 +293,7 @@ fn workspace_migration_recovery_and_writer_lock_stay_outside_portable_root() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 2).expect("Workspace backup path");
+        database::migration_backup_path(&descriptor, 99, 3).expect("Workspace backup path");
     let diagnostic_path = database::migration_diagnostic_path(&descriptor);
     let writer_lock_path = descriptor
         .recovery_dir
@@ -415,7 +415,7 @@ fn pre_promotion_inspector_is_read_only_bounded_and_fails_closed() {
             .including_inactive(),
     )
     .expect("semantic inspection");
-    assert_eq!(inspection.schema_version, 2);
+    assert_eq!(inspection.schema_version, 3);
     assert_eq!(inspection.snapshot.projects.len(), 1);
     assert_eq!(inspection.snapshot.chats.len(), 1);
     assert!(inspection.snapshot.truncated);

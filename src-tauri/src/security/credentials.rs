@@ -425,6 +425,44 @@ impl CredentialVault {
         Ok(credential_reference)
     }
 
+    /// Generates and stores an opaque operation credential without exposing
+    /// the random bytes to application or renderer state. This is used for
+    /// authenticated loopback runtime channels owned by the Rust core.
+    pub fn store_random(
+        &self,
+        kind: impl Into<String>,
+        byte_length: usize,
+    ) -> CredentialVaultResult<CredentialReference> {
+        if !(32..=MAX_SECRET_BYTES).contains(&byte_length) {
+            return Err(CredentialVaultError::InvalidCredential);
+        }
+        let mut secret = Zeroizing::new(vec![0_u8; byte_length]);
+        self.inner.entropy.fill(secret.as_mut_slice())?;
+        self.store(kind, secret.as_slice())
+    }
+
+    /// Generates random bytes and stores their lowercase hexadecimal encoding.
+    /// This preserves the requested entropy while satisfying native boundaries
+    /// that require printable text, without constructing an immutable string.
+    pub fn store_random_hex(
+        &self,
+        kind: impl Into<String>,
+        byte_length: usize,
+    ) -> CredentialVaultResult<CredentialReference> {
+        if !(32..=(MAX_SECRET_BYTES / 2)).contains(&byte_length) {
+            return Err(CredentialVaultError::InvalidCredential);
+        }
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut random = Zeroizing::new(vec![0_u8; byte_length]);
+        self.inner.entropy.fill(random.as_mut_slice())?;
+        let mut encoded = Zeroizing::new(vec![0_u8; byte_length * 2]);
+        for (index, byte) in random.iter().copied().enumerate() {
+            encoded[index * 2] = HEX[usize::from(byte >> 4)];
+            encoded[index * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+        }
+        self.store(kind, encoded.as_slice())
+    }
+
     /// Replaces a credential without changing the opaque product reference.
     /// Existing operation leases are revoked immediately after the durable swap.
     pub fn replace(

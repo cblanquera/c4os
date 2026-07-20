@@ -505,6 +505,12 @@ impl ActiveWorkspace {
         self.configuration.last_error()
     }
 
+    /// Gives crate-owned production composition a shared, read-only handle to
+    /// the exact database actor retained by this active Workspace.
+    pub(crate) fn database_actor(&self) -> &Arc<DatabaseActor> {
+        &self.database
+    }
+
     pub fn snapshot(&self, query: SnapshotQuery) -> Result<WorkspaceSnapshot, DatabaseError> {
         match self.database.snapshot(query)? {
             DatabaseSnapshot::Workspace(snapshot) => Ok(snapshot),
@@ -1610,6 +1616,138 @@ pub fn create_workspace_from_completed_clone(
         lock_owner,
         created_at,
     )
+}
+
+/// Restores the authoritative active working copy for production startup.
+///
+/// Restoration is deliberately limited to `workspace/active`: recent archive
+/// paths are not candidates, and Project trust is never reconstructed from
+/// portable or durable Workspace state. The returned service retains both the
+/// Workspace writer lock and its database writer ownership for its lifetime.
+pub fn restore_active_workspace(
+    home: &C4osHomeLayout,
+    restore_requested: bool,
+    current_app_version: &str,
+    limits: ArchiveLimits,
+    lock_owner: WorkspaceLockOwner,
+) -> WorkspaceResult<Option<ActiveWorkspace>> {
+    if !restore_requested {
+        return Ok(None);
+    }
+
+    let working_root = home.active_workspace();
+    let root_metadata = match fs::symlink_metadata(&working_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace root is not an owned directory".into(),
+        ));
+    }
+
+    let writer_lock = match acquire_workspace_writer_lock(&home.workspace_lock(), lock_owner)? {
+        WriterAccess::Writable(lock) => lock,
+        WriterAccess::ReadOnly { .. } => {
+            return Err(WorkspaceError::Conflict(
+                "another C4OS instance owns the active Workspace".into(),
+            ));
+        }
+    };
+
+    let manifest_path = WorkspaceLayout::new(&working_root).manifest();
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace manifest is not an owned file".into(),
+        ));
+    }
+    let manifest_bound = limits.max_manifest_bytes.min(limits.max_entry_bytes);
+    if manifest_metadata.len() > manifest_bound {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace manifest exceeds its configured bound".into(),
+        ));
+    }
+    let mut manifest_bytes = Vec::new();
+    fs::File::open(&manifest_path)?
+        .take(manifest_bound.saturating_add(1))
+        .read_to_end(&mut manifest_bytes)?;
+    if manifest_bytes.len() as u64 > manifest_bound {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace manifest exceeds its configured bound".into(),
+        ));
+    }
+    let manifest_text = std::str::from_utf8(&manifest_bytes)
+        .map_err(|_| WorkspaceError::Conflict("active Workspace manifest is not UTF-8".into()))?;
+    let manifest: WorkspaceManifest = toml::from_str(manifest_text)?;
+
+    // The archive-source preflight provides the existing structural manifest,
+    // version, path, and bound validation without requiring stale active-copy
+    // digests to match a database that may legitimately be ahead after a
+    // crash. Recovery validation below is the SQLite semantic authority.
+    preflight_workspace_archive_source(&working_root, &manifest, current_app_version, limits)?;
+    let recovered = validate_workspace_semantics(
+        &working_root,
+        &manifest,
+        WorkspaceSemanticValidationTarget::ActiveRecovery,
+    )?;
+    if recovered.workspace_id != manifest.workspace_id {
+        return Err(WorkspaceError::Conflict(
+            "active semantic Workspace identity mismatch".into(),
+        ));
+    }
+
+    let workspace_id = recovered.workspace_id.to_string();
+    let expected_database = WorkspaceLayout::new(&working_root).database();
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        &working_root,
+        &workspace_id,
+        home.workspace_recovery_root().join(&workspace_id),
+    );
+    if descriptor.path != expected_database {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace database root binding is invalid".into(),
+        ));
+    }
+    let (database, _) = DatabaseActor::start(descriptor).map_err(database_conflict)?;
+    if database.descriptor().path != expected_database {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace database actor owns an unexpected root".into(),
+        ));
+    }
+    let (snapshot, _) = database
+        .complete_workspace_snapshot(false)
+        .map_err(database_conflict)?;
+    let canonical = manifest_from_database_snapshot(&recovered, &snapshot)?;
+    if canonical.workspace_id != recovered.workspace_id {
+        return Err(WorkspaceError::Conflict(
+            "active Workspace database identity changed during restoration".into(),
+        ));
+    }
+
+    let database = Arc::new(database);
+    let managed_configuration = ManagedWorkspaceConfiguration::start(
+        Arc::clone(&database),
+        working_root.clone(),
+        canonical.workspace_id,
+    )
+    .map_err(configuration_conflict)?;
+
+    Ok(Some(ActiveWorkspace {
+        workspace: WritableWorkspace {
+            manifest: canonical,
+            working_root,
+            archive_path: PathBuf::new(),
+            recovery_notice: None,
+            writer_lock,
+        },
+        database,
+        configuration: managed_configuration,
+        // Project trust is process-local picker authority and is never
+        // reconstructed from the active working copy.
+        trusted_projects: BTreeSet::new(),
+    }))
 }
 
 /// Production archive-open path. Structural Zip checks are followed by

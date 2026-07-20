@@ -1,0 +1,19 @@
+{
+  "name": "@c4os/pi-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "start": "node ./main.mjs",
+    "test": "node --test ./test/*.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "typebox": "1.1.38"
+  }
+}

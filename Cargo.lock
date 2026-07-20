@@ -250,9 +250,11 @@ name = "c4os"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "chacha20poly1305",
  "fs4",
  "getrandom 0.3.4",
+ "libc",
  "notify",
  "rusqlite",
  "rusqlite_migration",

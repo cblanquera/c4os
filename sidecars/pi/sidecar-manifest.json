@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "adapter": "pi",
+  "adapterVersion": "0.1.0",
+  "nativePackage": "@earendil-works/pi-coding-agent",
+  "nativeVersion": "0.80.10",
+  "transport": "c4os-node-sdk-sidecar",
+  "protocol": "c4os.pi.ndjson.v1",
+  "entrypoint": "main.mjs",
+  "persistence": "c4os-authoritative-in-memory-worker",
+  "tools": "c4os-brokered-only",
+  "extensions": "disabled",
+  "maxLineBytes": 262144
+}

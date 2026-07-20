@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "npm run build:web",
+    "beforeBuildCommand": "npm run sidecars:verify && npm run sidecar:node:record && npm run build:web",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,7 +28,15 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": ["app"]
+    "active": true,
+    "targets": ["app"],
+    "resources": {
+      "../sidecars/opencode-launcher/": "sidecars/opencode-launcher",
+      "../sidecars/opencode-sdk/": "sidecars/opencode-sdk",
+      "../sidecars/opencode-native/": "sidecars/opencode-native",
+      "../sidecars/pi/": "sidecars/pi",
+      "../target/c4os-runtime-assets/node": "sidecars/node",
+      "../target/c4os-runtime-assets/node-runtime.json": "sidecars/node-runtime.json"
+    }
   }
 }

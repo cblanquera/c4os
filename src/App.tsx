@@ -1,14 +1,19 @@
 import { Navigate, RouterProvider, createHashRouter } from "react-router";
 
 import { WorkspaceStartRoute } from "./features/workspace/WorkspaceStartRoute";
+import { RuntimeQaSurface } from "./features/runtime";
 import { QA_FOUNDATION_PATH, QaFoundationRoute } from "./qa/route";
 import { QA_POLICY_PATH, QaPolicyRoute } from "./qa/policy-route";
 import { QA_WORKSPACE_PATH, QaWorkspaceRoute } from "./qa/workspace-route";
 
 const rootElement =
   import.meta.env.VITE_C4OS_QA_FIXTURES === "1" &&
-  import.meta.env.VITE_C4OS_QA_ENTRY === "policy" ? (
-    <QaPolicyRoute />
+  ["policy", "runtime"].includes(import.meta.env.VITE_C4OS_QA_ENTRY ?? "") ? (
+    import.meta.env.VITE_C4OS_QA_ENTRY === "runtime" ? (
+      <RuntimeQaSurface />
+    ) : (
+      <QaPolicyRoute />
+    )
   ) : (
     <WorkspaceStartRoute />
   );
@@ -37,6 +42,10 @@ const routes = [
   {
     path: QA_POLICY_PATH,
     element: <QaPolicyRoute />,
+  },
+  {
+    path: "/qa/runtime",
+    element: <RuntimeQaSurface />,
   },
 ];
 

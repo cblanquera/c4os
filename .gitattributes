@@ -1,0 +1,2 @@
+# Pinned Git patches preserve required context markers on blank lines.
+sidecars/opencode-native/patches/*.patch -whitespace

@@ -4,11 +4,11 @@
 
 - Phase: Frozen implementation contract
 - Freeze state: Frozen 2026-07-18
-- Last updated: 2026-07-18
+- Last updated: 2026-07-20
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; implementation has not yet completed.
+- Implementation status: Active; Tasks 00001 through 00004 are verified with passed Agent Acceptance. Tasks 00005 through 00015C remain open.
 
 ## Work Items
 
@@ -39,8 +39,8 @@ Research from Specs 00001 and 00002 is inherited through Context. All seven narr
 
 ## Proof Status
 
-Inherited feasibility Proofs are recorded but do not count as production verification. The required native-WebKit child/controller, permission-path, and Browser Environment lifecycle Proof passed twice consecutively on the locked macOS baseline. Its scoped-clear constraint is normative for implementation; target, production, release, and human-acceptance verification remain open.
+Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00004 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining target, facility, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
 
 ## Recommended Next Action
 
-Start Task 00001 from the accepted package, lock current compatible dependencies against primary sources, and preserve the complete-contract delivery target.
+Stop after the scoped Task 00004 checkpoint. Begin Task 00005 only after the user directs the next epoch; preserve the complete-contract target and all 50 open coverage IDs.

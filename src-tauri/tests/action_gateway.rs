@@ -26,7 +26,7 @@ fn set<T: Ord>(values: impl IntoIterator<Item = T>) -> BTreeSet<T> {
 fn app_database(temp: &TempDir) -> (DatabaseDescriptor, Arc<DatabaseActor>) {
     let descriptor = DatabaseDescriptor::app(temp.path());
     let (database, report) = DatabaseActor::start(descriptor.clone()).expect("app database");
-    assert_eq!(report.current_version, 4);
+    assert_eq!(report.current_version, 6);
     (descriptor, Arc::new(database))
 }
 

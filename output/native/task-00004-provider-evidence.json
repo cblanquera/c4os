@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "requests": [
+    {
+      "requestNumber": 1,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/chat/completions",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [],
+      "stage": "allow-tool",
+      "flow": "opencode-allow",
+      "observedToolResult": null
+    },
+    {
+      "requestNumber": 2,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/chat/completions",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [
+        {
+          "status": "result",
+          "reasonCode": null
+        }
+      ],
+      "stage": "complete",
+      "flow": "opencode-allow",
+      "observedToolResult": "installed-facility-completed"
+    },
+    {
+      "requestNumber": 3,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/chat/completions",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [],
+      "stage": "deny-tool",
+      "flow": "opencode-deny",
+      "observedToolResult": null
+    },
+    {
+      "requestNumber": 4,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/chat/completions",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [
+        {
+          "status": "denied",
+          "reasonCode": "user-denied"
+        }
+      ],
+      "stage": "complete",
+      "flow": "opencode-deny",
+      "observedToolResult": "user-denied"
+    },
+    {
+      "requestNumber": 5,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/responses",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [],
+      "stage": "allow-tool",
+      "observedToolResult": null
+    },
+    {
+      "requestNumber": 6,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/responses",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [],
+      "stage": "deny-tool",
+      "observedToolResult": "installed-facility-completed"
+    },
+    {
+      "requestNumber": 7,
+      "method": "POST",
+      "tlsEncrypted": true,
+      "tlsProtocol": "TLSv1.3",
+      "path": "/v1/responses",
+      "modelId": "gpt-4o-mini",
+      "credentialSha256": "sha256:33c75d9c101a06012947699ec6670afbc8ff75d4b5bfd430641434531afa7a68",
+      "imageParts": [
+        {
+          "mimeType": "image/png",
+          "sha256": "sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+        }
+      ],
+      "providerToolNames": [
+        "c4os_propose_action",
+        "c4os_read_resource"
+      ],
+      "brokerResults": [],
+      "stage": "complete",
+      "observedToolResult": "user-denied"
+    }
+  ]
+}

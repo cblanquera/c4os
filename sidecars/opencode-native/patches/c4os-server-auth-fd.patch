@@ -1,0 +1,167 @@
+diff --git a/packages/core/src/flag/flag.ts b/packages/core/src/flag/flag.ts
+index a0eb78a..d441fb3 100644
+--- a/packages/core/src/flag/flag.ts
++++ b/packages/core/src/flag/flag.ts
+@@ -1,4 +1,45 @@
+ import { Config } from "effect"
++import { closeSync, readFileSync } from "node:fs"
++
++const C4OS_SERVER_SECRET_FD_ENV = "C4OS_OPENCODE_SERVER_SECRET_FD"
++const C4OS_MIN_SECRET_FD = 64
++const C4OS_MAX_SECRET_FD = 1023
++const C4OS_MIN_SERVER_SECRET_BYTES = 32
++const C4OS_MAX_SERVER_SECRET_BYTES = 64 * 1024
++
++function serverPassword() {
++  const descriptorText = process.env[C4OS_SERVER_SECRET_FD_ENV]
++  if (descriptorText === undefined) return process.env["OPENCODE_SERVER_PASSWORD"]
++  if (process.env["OPENCODE_SERVER_PASSWORD"] !== undefined || !/^[0-9]+$/.test(descriptorText)) {
++    throw new Error("invalid C4OS OpenCode server credential channel")
++  }
++  const descriptor = Number(descriptorText)
++  if (
++    !Number.isSafeInteger(descriptor) ||
++    descriptor < C4OS_MIN_SECRET_FD ||
++    descriptor > C4OS_MAX_SECRET_FD ||
++    String(descriptor) !== descriptorText
++  ) {
++    throw new Error("invalid C4OS OpenCode server credential descriptor")
++  }
++
++  let secret: Buffer<ArrayBufferLike> | undefined
++  try {
++    secret = readFileSync(descriptor)
++    if (
++      secret.length < C4OS_MIN_SERVER_SECRET_BYTES ||
++      secret.length > C4OS_MAX_SERVER_SECRET_BYTES ||
++      secret.some((byte) => byte < 0x20 || byte > 0x7e)
++    ) {
++      throw new Error("invalid C4OS OpenCode server credential")
++    }
++    return secret.toString("utf8")
++  } finally {
++    delete process.env[C4OS_SERVER_SECRET_FD_ENV]
++    secret?.fill(0)
++    closeSync(descriptor)
++  }
++}
+ 
+ export function truthy(key: string) {
+   const value = process.env[key]?.toLowerCase()
+@@ -29,7 +70,7 @@ export const Flag = {
+   OPENCODE_DISABLE_MODELS_FETCH: truthy("OPENCODE_DISABLE_MODELS_FETCH"),
+   OPENCODE_DISABLE_MOUSE: truthy("OPENCODE_DISABLE_MOUSE"),
+   OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],
+-  OPENCODE_SERVER_PASSWORD: process.env["OPENCODE_SERVER_PASSWORD"],
++  OPENCODE_SERVER_PASSWORD: serverPassword(),
+   OPENCODE_SERVER_USERNAME: process.env["OPENCODE_SERVER_USERNAME"],
+   OPENCODE_DISABLE_FFF: fff === undefined ? process.platform === "win32" : truthy("OPENCODE_DISABLE_FFF"),
+ 
+diff --git a/packages/opencode/src/server/auth.ts b/packages/opencode/src/server/auth.ts
+index 9630ddb..196ed0b 100644
+--- a/packages/opencode/src/server/auth.ts
++++ b/packages/opencode/src/server/auth.ts
+@@ -17,7 +17,14 @@ export type DecodedCredentials = {
+ export class Config extends ConfigService.Service<Config>()("@opencode/ServerAuthConfig", {
+   password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
+   username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("opencode")),
+-}) {}
++}) {
++  static override get layer() {
++    return this.configLayer({
++      password: Option.fromUndefinedOr(Flag.OPENCODE_SERVER_PASSWORD),
++      username: Flag.OPENCODE_SERVER_USERNAME ?? "opencode",
++    })
++  }
++}
+ 
+ export type Info = Context.Service.Shape<typeof Config>
+ 
+diff --git a/packages/opencode/src/server/server.ts b/packages/opencode/src/server/server.ts
+index 440b992..dd1ef56 100644
+--- a/packages/opencode/src/server/server.ts
++++ b/packages/opencode/src/server/server.ts
+@@ -5,6 +5,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+ import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
+ import { HttpRouter, HttpServer } from "effect/unstable/http"
+ import { OpenApi } from "effect/unstable/httpapi"
++import { closeSync, writeSync } from "node:fs"
+ import { createServer } from "node:http"
+ import { MDNS } from "./mdns"
+ import { HttpApiApp } from "./routes/instance/httpapi/server"
+@@ -14,6 +15,35 @@ import { PublicApi } from "./routes/instance/httpapi/public"
+ import type { CorsOptions } from "@opencode-ai/server/cors"
+ import { lazy } from "@/util/lazy"
+ 
++const C4OS_READY_FD_ENV = "C4OS_OPENCODE_READY_FD"
++const C4OS_MIN_READY_FD = 64
++const C4OS_MAX_READY_FD = 1023
++const C4OS_READY_SIGNAL = new Uint8Array([0x01])
++
++function signalReady() {
++  const descriptorText = process.env[C4OS_READY_FD_ENV]
++  delete process.env[C4OS_READY_FD_ENV]
++  if (descriptorText === undefined || !/^[0-9]+$/.test(descriptorText)) {
++    throw new Error("missing C4OS OpenCode readiness descriptor")
++  }
++  const descriptor = Number(descriptorText)
++  if (
++    !Number.isSafeInteger(descriptor) ||
++    descriptor < C4OS_MIN_READY_FD ||
++    descriptor > C4OS_MAX_READY_FD ||
++    String(descriptor) !== descriptorText
++  ) {
++    throw new Error("invalid C4OS OpenCode readiness descriptor")
++  }
++  try {
++    if (writeSync(descriptor, C4OS_READY_SIGNAL) !== C4OS_READY_SIGNAL.length) {
++      throw new Error("incomplete C4OS OpenCode readiness signal")
++    }
++  } finally {
++    closeSync(descriptor)
++  }
++}
++
+ // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
+ globalThis.AI_SDK_LOG_WARNINGS = false
+ 
+@@ -83,7 +113,8 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
+ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unknown> = Effect.fn("Server.listen")(
+   function* (opts: ListenOptions) {
+     const state = yield* startWithPortFallback(opts)
+-    const address = yield* tcpAddress(state)
++    const address = yield* tcpAddress(state, opts)
++    signalReady()
+     const listenerUrl = makeURL(opts.hostname, address.port)
+     const unpublishMdns = yield* setupMdns(opts, address.port, state.scope)
+     url = listenerUrl
+@@ -115,10 +146,8 @@ function listenerLayer(opts: ListenOptions, port: number) {
+ }
+ 
+ function startWithPortFallback(opts: ListenOptions) {
+-  if (opts.port !== 0) return startListener(opts, opts.port)
+-  // Match the legacy listener port-resolution behavior: explicit `0` prefers
+-  // 4096 first, then any free port.
+-  return startListener(opts, 4096).pipe(Effect.catch(() => startListener(opts, 0)))
++  if (opts.port === 0) return Effect.die(new Error("C4OS OpenCode requires an explicit listener port"))
++  return startListener(opts, opts.port)
+ }
+ 
+ function startListener(opts: ListenOptions, port: number) {
+@@ -137,9 +166,14 @@ function startListener(opts: ListenOptions, port: number) {
+   )
+ }
+ 
+-function tcpAddress(state: ListenerState) {
++function tcpAddress(state: ListenerState, opts: ListenOptions) {
+   return Effect.gen(function* () {
+-    if (state.server.address._tag === "TcpAddress") return state.server.address
++    if (
++      state.server.address._tag === "TcpAddress" &&
++      state.server.address.hostname === opts.hostname &&
++      state.server.address.port === opts.port
++    )
++      return state.server.address
+     yield* Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
+     return yield* Effect.die(new Error(`Unexpected HttpServer address tag: ${state.server.address._tag}`))
+   })

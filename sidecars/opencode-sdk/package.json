@@ -1,0 +1,17 @@
+{
+  "name": "c4os-opencode-sdk-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "audit": "npm audit --omit=dev"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.3",
+    "@opencode-ai/sdk": "1.18.3"
+  }
+}

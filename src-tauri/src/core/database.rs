@@ -22,12 +22,16 @@ pub const MAX_SECURITY_BATCH_RECORDS: usize = MAX_SECURITY_CURRENT_RECORDS;
 pub const MAX_CONCURRENT_AUXILIARY_CONNECTIONS: usize = 32;
 pub const MAX_TEXT_FIELD_BYTES: usize = 1_048_576;
 pub const MAX_SNAPSHOT_TEXT_BYTES: usize = 4_194_304;
+pub const MAX_RUNTIME_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
+pub const MAX_SESSION_DOCUMENT_BYTES: usize = 64 * 1_024 * 1_024;
+pub const MAX_RUNTIME_STATE_DOCUMENTS: usize = 256;
+pub const MAX_SESSION_RECORDS: usize = 100_000;
 pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
-const APP_SCHEMA_VERSION: usize = 4;
-const WORKSPACE_SCHEMA_VERSION: usize = 2;
+const APP_SCHEMA_VERSION: usize = 6;
+const WORKSPACE_SCHEMA_VERSION: usize = 3;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 struct AuxiliaryConnectionPermit;
@@ -152,6 +156,8 @@ pub enum DatabaseError {
     },
     #[error("invalid database input: {0}")]
     InvalidInput(String),
+    #[error("database compare-and-swap conflict: {0}")]
+    Conflict(String),
     #[error("database validation failed: {0}")]
     Validation(String),
 }
@@ -315,6 +321,28 @@ pub struct SecurityJournalPage {
     pub events: Vec<SecurityJournalEvent>,
     /// Pass this exclusive event identifier to the next page request.
     pub next_before_event_id: Option<i64>,
+}
+
+/// Strict provider/runtime state validated by its owning service before this
+/// canonical JSON document reaches the single-writer actor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeStateDocumentRecord {
+    pub document_kind: String,
+    pub document_id: String,
+    pub generation: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
+/// Complete strict session JSON. The session domain validates every immutable
+/// child record before create or compare-and-swap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceSessionDocumentRecord {
+    pub workspace_id: String,
+    pub session_id: String,
+    pub revision: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -497,6 +525,22 @@ enum WriteCommand {
         records: Vec<SecurityJournalRecord>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    SaveRuntimeStateDocument {
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    CreateSessionDocument {
+        record: WorkspaceSessionDocumentRecord,
+        active_project_id: String,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    CompareAndSwapSessionDocument {
+        record: WorkspaceSessionDocumentRecord,
+        expected_revision: u64,
+        active_project_id: String,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     Inactivate {
         entity: InactiveEntity,
         inactivated_at: i64,
@@ -652,6 +696,31 @@ impl DatabaseActor {
         })
     }
 
+    /// Confirms one exact active Project inside this actor's bound Workspace.
+    /// Runtime authority uses this narrow lookup instead of accepting a
+    /// renderer-supplied Project identifier or a potentially truncated
+    /// Workspace snapshot.
+    pub fn active_project_exists(&self, project_id: &str) -> DatabaseResult<bool> {
+        let workspace_id = self.require_workspace()?;
+        require_nonempty("project_id", project_id)?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM projects
+             WHERE workspace_id = ?1 AND project_id = ?2
+               AND lifecycle_state = 'active'",
+            params![workspace_id, project_id],
+            |row| row.get(0),
+        )?;
+        match count {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(DatabaseError::Validation(
+                "active Project identity is not unique".into(),
+            )),
+        }
+    }
+
     pub fn activate_configuration(
         &self,
         record: ConfigurationSnapshotRecord,
@@ -732,6 +801,75 @@ impl DatabaseActor {
         let connection = open_read_connection(&self.descriptor.path)?;
         connection.execute_batch("BEGIN DEFERRED")?;
         read_recoverable_security_records(&connection)
+    }
+
+    pub fn save_runtime_state_document(
+        &self,
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        self.request(|reply| WriteCommand::SaveRuntimeStateDocument {
+            record,
+            expected_generation,
+            reply,
+        })
+    }
+
+    pub fn runtime_state_document(
+        &self,
+        document_kind: &str,
+        document_id: &str,
+    ) -> DatabaseResult<Option<RuntimeStateDocumentRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_runtime_state_document(&connection, document_kind, document_id)
+    }
+
+    pub fn create_session_document(
+        &self,
+        record: WorkspaceSessionDocumentRecord,
+        active_project_id: String,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.request(|reply| WriteCommand::CreateSessionDocument {
+            record,
+            active_project_id,
+            reply,
+        })
+    }
+
+    pub fn compare_and_swap_session_document(
+        &self,
+        record: WorkspaceSessionDocumentRecord,
+        expected_revision: u64,
+        active_project_id: String,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.request(|reply| WriteCommand::CompareAndSwapSessionDocument {
+            record,
+            expected_revision,
+            active_project_id,
+            reply,
+        })
+    }
+
+    pub fn session_document(
+        &self,
+        session_id: &str,
+    ) -> DatabaseResult<Option<WorkspaceSessionDocumentRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_session_document(&connection, workspace_id, session_id)
+    }
+
+    pub fn session_documents(&self) -> DatabaseResult<Vec<WorkspaceSessionDocumentRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_session_documents(&connection, workspace_id)
     }
 
     pub fn inactivate(&self, entity: InactiveEntity, inactivated_at: i64) -> DatabaseResult<u64> {
@@ -972,6 +1110,43 @@ fn writer_loop(
             WriteCommand::SaveSecurityRecords { records, reply } => {
                 reply_result(reply, write_security_records(&mut connection, records))
             }
+            WriteCommand::SaveRuntimeStateDocument {
+                record,
+                expected_generation,
+                reply,
+            } => reply_result(
+                reply,
+                write_runtime_state_document(&mut connection, record, expected_generation),
+            ),
+            WriteCommand::CreateSessionDocument {
+                record,
+                active_project_id,
+                reply,
+            } => reply_result(
+                reply,
+                write_session_document(
+                    &mut connection,
+                    &descriptor.kind,
+                    record,
+                    &active_project_id,
+                    None,
+                ),
+            ),
+            WriteCommand::CompareAndSwapSessionDocument {
+                record,
+                expected_revision,
+                active_project_id,
+                reply,
+            } => reply_result(
+                reply,
+                write_session_document(
+                    &mut connection,
+                    &descriptor.kind,
+                    record,
+                    &active_project_id,
+                    Some(expected_revision),
+                ),
+            ),
             WriteCommand::Inactivate {
                 entity,
                 inactivated_at,
@@ -1308,6 +1483,52 @@ fn app_migrations() -> Migrations<'static> {
                 ON security_events(run_id, action_id, recorded_at_ms, event_id);",
         )
         .comment("app-owned Action Gateway current state and append-only transition journal"),
+        M::up(
+            "CREATE TABLE runtime_state_documents (
+                document_kind TEXT NOT NULL CHECK (
+                    document_kind IN ('provider-snapshot', 'supervisor-snapshot')
+                ),
+                document_id TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation >= 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+                PRIMARY KEY (document_kind, document_id)
+            );
+            CREATE INDEX runtime_state_documents_updated
+                ON runtime_state_documents(document_kind, updated_at_ms DESC, document_id);",
+        )
+        .comment("app-owned provider and supervised-runtime canonical state"),
+        M::up(
+            "CREATE TABLE runtime_state_documents_v2 (
+                document_kind TEXT NOT NULL CHECK (
+                    document_kind IN (
+                        'provider-snapshot',
+                        'supervisor-snapshot',
+                        'runtime-control-plane'
+                    )
+                ),
+                document_id TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation >= 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+                PRIMARY KEY (document_kind, document_id)
+            );
+            INSERT INTO runtime_state_documents_v2(
+                document_kind, document_id, generation, canonical_document,
+                document_sha256, updated_at_ms
+            )
+            SELECT document_kind, document_id, generation, canonical_document,
+                document_sha256, updated_at_ms
+            FROM runtime_state_documents;
+            DROP INDEX runtime_state_documents_updated;
+            DROP TABLE runtime_state_documents;
+            ALTER TABLE runtime_state_documents_v2 RENAME TO runtime_state_documents;
+            CREATE INDEX runtime_state_documents_updated
+                ON runtime_state_documents(document_kind, updated_at_ms DESC, document_id);",
+        )
+        .comment("atomic runtime supervisor and capability control-plane document"),
     ])
 }
 
@@ -1396,6 +1617,23 @@ fn workspace_migrations() -> Migrations<'static> {
         )
         .foreign_key_check()
         .comment("bounded Workspace query indexes"),
+        M::up(
+            "CREATE TABLE session_records (
+                workspace_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+                PRIMARY KEY (workspace_id, session_id),
+                FOREIGN KEY (workspace_id, session_id)
+                    REFERENCES chats(workspace_id, chat_id)
+            );
+            CREATE INDEX session_records_workspace_updated
+                ON session_records(workspace_id, updated_at_ms DESC, session_id);",
+        )
+        .foreign_key_check()
+        .comment("Workspace-owned immutable-turn and run-attempt session documents"),
     ])
 }
 
@@ -1795,6 +2033,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "app_configuration_lkg",
             "security_records",
             "security_events",
+            "runtime_state_documents",
             "durable_generation",
         ],
         DatabaseKind::Workspace { .. } => &[
@@ -1803,6 +2042,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "chats",
             "configuration_lkg",
             "workspace_diagnostics",
+            "session_records",
             "durable_generation",
         ],
     };
@@ -1823,6 +2063,58 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
     if matches!(kind, DatabaseKind::App) {
         let _ = read_app_configuration_lkg(connection)?;
         validate_security_journal(connection)?;
+        validate_runtime_state_documents(connection)?;
+    } else if let DatabaseKind::Workspace { workspace_id } = kind {
+        validate_session_documents(connection, workspace_id)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_state_documents(connection: &Connection) -> DatabaseResult<()> {
+    let count: i64 =
+        connection.query_row("SELECT COUNT(*) FROM runtime_state_documents", [], |row| {
+            row.get(0)
+        })?;
+    if !(0..=MAX_RUNTIME_STATE_DOCUMENTS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "runtime document count {count} exceeds {MAX_RUNTIME_STATE_DOCUMENTS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT document_kind, document_id FROM runtime_state_documents
+         ORDER BY document_kind, document_id",
+    )?;
+    let identities = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (kind, id) in identities {
+        let _ = read_runtime_state_document(connection, &kind, &id)?;
+    }
+    Ok(())
+}
+
+fn validate_session_documents(connection: &Connection, workspace_id: &str) -> DatabaseResult<()> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM session_records WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_SESSION_RECORDS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "session record count {count} exceeds {MAX_SESSION_RECORDS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT session_id FROM session_records
+         WHERE workspace_id = ?1 ORDER BY session_id",
+    )?;
+    let ids = statement
+        .query_map([workspace_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for id in ids {
+        let _ = read_session_document(connection, workspace_id, &id)?;
     }
     Ok(())
 }
@@ -1947,6 +2239,351 @@ fn read_pragmas(connection: &Connection) -> DatabaseResult<DatabasePragmas> {
         synchronous: connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?,
         busy_timeout_millis: connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,
     })
+}
+
+fn read_runtime_state_document(
+    connection: &Connection,
+    document_kind: &str,
+    document_id: &str,
+) -> DatabaseResult<Option<RuntimeStateDocumentRecord>> {
+    validate_runtime_document_identity(document_kind, document_id)?;
+    let raw = connection
+        .query_row(
+            "SELECT generation, canonical_document, document_sha256, updated_at_ms
+             FROM runtime_state_documents
+             WHERE document_kind = ?1 AND document_id = ?2",
+            params![document_kind, document_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(generation, canonical_document, stored_digest, updated_at_ms)| {
+            validate_text_field(
+                "runtime canonical document",
+                &canonical_document,
+                MAX_RUNTIME_DOCUMENT_BYTES,
+            )?;
+            if stored_digest != canonical_document_digest(&canonical_document) {
+                return Err(DatabaseError::Validation(format!(
+                    "runtime document digest mismatch for {document_kind}/{document_id}"
+                )));
+            }
+            Ok(RuntimeStateDocumentRecord {
+                document_kind: document_kind.into(),
+                document_id: document_id.into(),
+                generation: generation_to_u64(generation)?,
+                canonical_document,
+                updated_at_ms: generation_to_u64(updated_at_ms)?,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn write_runtime_state_document(
+    connection: &mut Connection,
+    record: RuntimeStateDocumentRecord,
+    expected_generation: Option<u64>,
+) -> DatabaseResult<u64> {
+    validate_runtime_document_identity(&record.document_kind, &record.document_id)?;
+    validate_text_field(
+        "runtime canonical document",
+        &record.canonical_document,
+        MAX_RUNTIME_DOCUMENT_BYTES,
+    )?;
+    if record.canonical_document.is_empty() || record.updated_at_ms == 0 {
+        return Err(DatabaseError::InvalidInput(
+            "runtime document and timestamp must be non-empty".into(),
+        ));
+    }
+    let generation = i64::try_from(record.generation).map_err(|_| {
+        DatabaseError::InvalidInput("runtime generation exceeds SQLite range".into())
+    })?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("runtime timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = transaction
+        .query_row(
+            "SELECT generation FROM runtime_state_documents
+             WHERE document_kind = ?1 AND document_id = ?2",
+            params![record.document_kind, record.document_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current, expected_generation) {
+        (None, None) => {}
+        (Some(current), Some(expected)) if current == expected => {
+            if record.generation <= current {
+                return Err(DatabaseError::Conflict(format!(
+                    "runtime document generation {} does not advance {current}",
+                    record.generation
+                )));
+            }
+        }
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "runtime document expected generation {expected:?}, found {actual:?}"
+            )));
+        }
+    }
+    let digest = canonical_document_digest(&record.canonical_document);
+    transaction.execute(
+        "INSERT INTO runtime_state_documents(
+            document_kind, document_id, generation, canonical_document,
+            document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(document_kind, document_id) DO UPDATE SET
+            generation = excluded.generation,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            record.document_kind,
+            record.document_id,
+            generation,
+            record.canonical_document,
+            digest,
+            updated_at_ms
+        ],
+    )?;
+    let durable_generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn read_session_document(
+    connection: &Connection,
+    workspace_id: &str,
+    session_id: &str,
+) -> DatabaseResult<Option<WorkspaceSessionDocumentRecord>> {
+    require_nonempty("session_id", session_id)?;
+    let raw = connection
+        .query_row(
+            "SELECT revision, canonical_document, document_sha256, updated_at_ms
+             FROM session_records WHERE workspace_id = ?1 AND session_id = ?2",
+            params![workspace_id, session_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(revision, canonical_document, stored_digest, updated_at_ms)| {
+            validate_text_field(
+                "session canonical document",
+                &canonical_document,
+                MAX_SESSION_DOCUMENT_BYTES,
+            )?;
+            if stored_digest != canonical_document_digest(&canonical_document) {
+                return Err(DatabaseError::Validation(format!(
+                    "session document digest mismatch for {session_id}"
+                )));
+            }
+            Ok(WorkspaceSessionDocumentRecord {
+                workspace_id: workspace_id.into(),
+                session_id: session_id.into(),
+                revision: generation_to_u64(revision)?,
+                canonical_document,
+                updated_at_ms: generation_to_u64(updated_at_ms)?,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn read_session_documents(
+    connection: &Connection,
+    workspace_id: &str,
+) -> DatabaseResult<Vec<WorkspaceSessionDocumentRecord>> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM session_records WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_SESSION_RECORDS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "session record count {count} exceeds {MAX_SESSION_RECORDS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT session_id FROM session_records
+         WHERE workspace_id = ?1 ORDER BY updated_at_ms, session_id",
+    )?;
+    let ids = statement
+        .query_map([workspace_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .map(|session_id| {
+            read_session_document(connection, workspace_id, &session_id)?.ok_or_else(|| {
+                DatabaseError::Validation(format!(
+                    "session document {session_id} disappeared during snapshot"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn write_session_document(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    record: WorkspaceSessionDocumentRecord,
+    active_project_id: &str,
+    expected_revision: Option<u64>,
+) -> DatabaseResult<u64> {
+    let workspace_id = workspace_id(kind)?;
+    if record.workspace_id != workspace_id {
+        return Err(DatabaseError::InvalidInput(
+            "session document belongs to another Workspace".into(),
+        ));
+    }
+    require_nonempty("session_id", &record.session_id)?;
+    require_nonempty("active_project_id", active_project_id)?;
+    validate_text_field(
+        "session canonical document",
+        &record.canonical_document,
+        MAX_SESSION_DOCUMENT_BYTES,
+    )?;
+    if record.revision == 0 || record.canonical_document.is_empty() || record.updated_at_ms == 0 {
+        return Err(DatabaseError::InvalidInput(
+            "session revision, document, and timestamp must be present".into(),
+        ));
+    }
+    let revision = i64::try_from(record.revision)
+        .map_err(|_| DatabaseError::InvalidInput("session revision exceeds SQLite range".into()))?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("session timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active_binding_exists: i64 = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM workspaces AS workspace
+            JOIN projects AS project
+              ON project.workspace_id = workspace.workspace_id
+            JOIN chats AS chat
+              ON chat.workspace_id = project.workspace_id
+             AND chat.project_id = project.project_id
+            WHERE workspace.workspace_id = ?1
+              AND project.project_id = ?2
+              AND chat.chat_id = ?3
+              AND workspace.lifecycle_state = 'active'
+              AND project.lifecycle_state = 'active'
+              AND chat.lifecycle_state = 'active'
+        )",
+        params![workspace_id, active_project_id, record.session_id],
+        |row| row.get(0),
+    )?;
+    if active_binding_exists != 1 {
+        return Err(DatabaseError::Conflict(
+            "active Workspace, Project, and Chat binding changed before session commit".into(),
+        ));
+    }
+    let current = transaction
+        .query_row(
+            "SELECT revision FROM session_records
+             WHERE workspace_id = ?1 AND session_id = ?2",
+            params![workspace_id, record.session_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current, expected_revision) {
+        (None, None) if record.revision == 1 => {}
+        (Some(current), Some(expected))
+            if current == expected
+                && expected
+                    .checked_add(1)
+                    .is_some_and(|next| record.revision == next) => {}
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "session expected revision {expected:?}, found {actual:?}, replacement {}",
+                record.revision
+            )));
+        }
+    }
+    let digest = canonical_document_digest(&record.canonical_document);
+    let written = match expected_revision {
+        None => transaction.execute(
+            "INSERT INTO session_records(
+                workspace_id, session_id, revision, canonical_document,
+                document_sha256, updated_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                workspace_id,
+                record.session_id,
+                revision,
+                record.canonical_document,
+                digest,
+                updated_at_ms
+            ],
+        )?,
+        Some(expected) => transaction.execute(
+            "UPDATE session_records SET
+                revision = ?1, canonical_document = ?2,
+                document_sha256 = ?3, updated_at_ms = ?4
+             WHERE workspace_id = ?5 AND session_id = ?6 AND revision = ?7",
+            params![
+                revision,
+                record.canonical_document,
+                digest,
+                updated_at_ms,
+                workspace_id,
+                record.session_id,
+                i64::try_from(expected).map_err(|_| DatabaseError::Conflict(
+                    "expected session revision exceeds SQLite range".into()
+                ))?
+            ],
+        )?,
+    };
+    if written != 1 {
+        return Err(DatabaseError::Conflict(
+            "session compare-and-swap lost a concurrent race".into(),
+        ));
+    }
+    let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn validate_runtime_document_identity(
+    document_kind: &str,
+    document_id: &str,
+) -> DatabaseResult<()> {
+    if !matches!(
+        document_kind,
+        "provider-snapshot" | "supervisor-snapshot" | "runtime-control-plane"
+    ) {
+        return Err(DatabaseError::InvalidInput(
+            "runtime document kind is unsupported".into(),
+        ));
+    }
+    require_nonempty("runtime document id", document_id)?;
+    if document_id.len() > 160
+        || !document_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'@'))
+    {
+        return Err(DatabaseError::InvalidInput(
+            "runtime document id is invalid".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn write_installation(

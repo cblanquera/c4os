@@ -1,6 +1,6 @@
 # Bounded Online Research And Blocker Ledger
 
-Scope: implementation dependency/version decisions and concrete blockers only. Access date for current entries: 2026-07-18.
+Scope: implementation dependency/version decisions and concrete blockers only. Access dates for current entries run through 2026-07-20.
 
 ## RBL-001 — Initial renderer and Tauri lock
 
@@ -52,11 +52,11 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 ## RBL-004 — Pi SDK ownership transfer
 
 - **Decision investigated:** The selected Pi SDK package changed maintainers/scope after Freeze.
-- **Exact versions observed:** Deprecated `@mariozechner/pi-coding-agent 0.73.1`; maintained `@earendil-works/pi-coding-agent 0.80.10`; maintained `@earendil-works/pi-agent-core 0.80.7`.
+- **Exact versions observed:** Deprecated `@mariozechner/pi-coding-agent 0.73.1`; maintained `@earendil-works/pi-coding-agent 0.80.10`, `@earendil-works/pi-agent-core 0.80.10`, and `@earendil-works/pi-ai 0.80.10` in the implemented lock graph.
 - **Selected conclusion:** Use the official maintained successor `@earendil-works/pi-coding-agent 0.80.10` through the documented programmatic SDK inside the C4OS-owned Node sidecar. This is a bounded dependency substitution, not a product or authority change.
 - **Rejected alternatives:** Pinning the deprecated Mario-scope package, granting Pi's own extensions ambient authority, using Pi persistence as C4OS authority, or replacing the selected SDK sidecar with its CLI/RPC without need.
 - **Implementation impact:** Task 00004 must define a narrow wrapper, disable/replace native tools with C4OS action requests, and conformance-test event barriers, cancellation, capabilities, and redaction.
-- **Residual risk:** The successor publishes frequently and its core/coding-agent patch numbers are not identical; lock the full dependency graph and test the exact pair.
+- **Residual risk:** The successor publishes frequently; lock the full dependency graph and re-run the exact coding-agent/core/AI compatibility suite before changing any package version.
 - **Sources:** https://www.npmjs.com/package/%40mariozechner/pi-coding-agent ; https://www.npmjs.com/package/%40earendil-works/pi-coding-agent ; https://www.npmjs.com/package/%40earendil-works/pi-agent-core ; https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md
 
 ## RBL-005 — Local toolchain baseline
@@ -97,3 +97,59 @@ Scope: implementation dependency/version decisions and concrete blockers only. A
 - **Implementation impact:** Task 00003 owns the credential vault, Keychain adapter, reauthentication/import state, lease invalidation, redaction/scanning, hostile corruption tests, and restart evidence. Task 00013 may expose only opaque references and safe metadata through Settings.
 - **Residual risk:** CI and non-macOS unit tests cannot prove a live login Keychain interaction. The macOS acceptance tier must exercise the platform adapter in the unlocked user session without printing or persisting secret material; any Keychain access-control prompt or OS behavior change remains visible native evidence rather than being substituted with the deterministic test backend.
 - **Sources:** https://github.com/kornelski/rust-security-framework ; https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305 ; https://github.com/RustCrypto/password-hashes/tree/master/argon2 ; https://docs.rs/getrandom/0.3.4/getrandom/ ; https://docs.rs/zeroize/1.9.0/zeroize/
+
+## RBL-009 — OpenCode native authority boundary
+
+- **Access date:** 2026-07-19.
+- **Decision investigated:** Whether OpenCode's native permission replies can be treated as C4OS authorization and whether a C4OS approval may be returned as native `once`.
+- **Observed upstream contract:** OpenCode `1.18.3` exposes an OpenAPI 3.1 server and generated SDK; its server uses `OPENCODE_SERVER_PASSWORD` for HTTP Basic authentication. Its permission configuration defaults most tools to `allow`, accepts global and tool-specific `allow`/`ask`/`deny`, and its native approval outcomes include `once`, session-scoped `always`, and `reject`.
+- **Selected conclusion:** OpenCode permission state is not C4OS policy authority. Launch the exact native process on authenticated loopback with default `deny`, allowing only the exact C4OS-owned `c4os_propose_action` and `c4os_read_resource` broker tools. Per request, expose only those broker IDs. Route proposal identity through the sealed C4OS Action Gateway, execute effects only in a C4OS worker, and return native `reject` even after a C4OS effect completes so OpenCode itself never receives effect authority. This is a C4OS defense-in-depth inference from the upstream permission and server contracts, not an upstream claim that OpenCode supplies an OS sandbox.
+- **Rejected alternatives:** Wildcard `ask`, native `once` after C4OS approval, native `always`, built-in write/bash execution, renderer-originated permission decisions, relying on permissive defaults, and describing OpenCode permissions as the C4OS security boundary.
+- **Implementation impact:** Task 00004 owns digest-pinned authority configuration, isolated state, authenticated transport, broker-only per-request tools, exact intent binding, fail-closed native replies, and negative tests proving direct native-effect paths are unavailable.
+- **Residual risk:** The two broker tool definitions must remain C4OS-owned and digest verified when materialized for the native runtime. Any upstream permission, custom-tool, or server API change must create a new compatibility row rather than silently widening authority.
+- **Sources:** https://opencode.ai/docs/permissions/ ; https://opencode.ai/docs/server/ ; https://opencode.ai/docs/sdk/ ; local exact `@opencode-ai/sdk 1.18.3` generated OpenAPI types.
+
+## RBL-010 — OpenCode provider credential delivery
+
+- **Access date:** 2026-07-19.
+- **Decision investigated:** How an exact OpenCode `1.18.3` worker can authenticate a selected C4OS provider without moving the raw provider credential into ordinary runtime state, command arguments, inherited environment, logs, renderer data, or native-owned authority.
+- **Queries and primary sources:** OpenCode provider/auth documentation and source; exact local `@opencode-ai/sdk 1.18.3` generated `AuthSetData` types; exact local `@opencode-ai/plugin 1.18.3` `chat.headers` hook types; upstream credential-storage issue and current plugin examples.
+- **Observed upstream contract:** The generated SDK's standard `PUT /auth/{id}` path accepts the raw provider auth value. OpenCode documents that provider credentials are stored in `auth.json`, and its current CLI/source paths also recognize environment/config credentials. The exact plugin contract can inject request headers, but it supplies no C4OS vault or operation-lease boundary by itself.
+- **Selected conclusion:** Do not call the native auth persistence API and do not place provider keys in OpenCode configuration or environment. Extend the already authenticated, descriptor-bound C4OS plugin bridge with a separate bounded credential descriptor. Rust leases the exact provider credential for the active session operation, delivers one correlation/provider/session-bound frame, and the C4OS plugin consumes it once while constructing that request's provider header. The secret channel is distinct from the Action Gateway broker so ordinary broker frames remain secret-rejecting.
+- **Rejected alternatives:** Native `auth.json`, `PUT /auth/{id}`, provider keys in `opencode.json`, `.env`, or inherited environment, renderer delivery, command-line delivery, a long-lived plaintext sidecar cache, weakening the broker's secret scanner, and declaring OpenCode provider authentication unsupported while presenting the runtime as ready.
+- **Implementation impact:** Task 00004 must wire the private descriptor through the exact OpenCode launcher/plugin graph, derive the provider credential reference inside Rust-owned route state, deliver it before the exact dispatch, consume it once in `chat.headers`, and prove with live native tests and state/log/argv/environment scans that the raw value is absent outside the channel and transient worker memory.
+- **Residual risk:** OpenCode's plugin/auth internals can change rapidly. Any upgrade must re-run the exact live credentialed dispatch and secret-absence matrix; the standard upstream auth API remains intentionally unused.
+- **Sources:** https://opencode.ai/docs/providers/ ; https://opencode.ai/docs/cli/ ; https://github.com/anomalyco/opencode/issues/5423 ; https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts ; local exact `@opencode-ai/sdk 1.18.3` and `@opencode-ai/plugin 1.18.3` type surfaces.
+
+## RBL-011 — OpenCode server-secret descriptor build
+
+- **Access date:** 2026-07-19.
+- **Decision investigated:** Whether the stock OpenCode `1.18.3` executable can satisfy the Frozen requirement that the authenticated loopback server secret never enter arguments, the inherited environment, logs, configuration, or persistent runtime state.
+- **Observed upstream contract:** Exact tag `v1.18.3` at commit `127bdb30784d508cc556c71a0f32b508a3061517` reads the server password from `OPENCODE_SERVER_PASSWORD`. Stock bytes therefore cannot meet the stricter C4OS secret-absence contract even though the generated SDK/OpenAPI and native compatibility version remain usable.
+- **Selected conclusion:** Build a distinct `1.18.3+c4os-auth-fd.1` artifact from that exact tag. The bounded patch reads the server secret once from the inherited `C4OS_OPENCODE_SERVER_SECRET_FD`, rejects simultaneous environment password delivery, clears descriptor metadata, closes the descriptor, and preserves stock behavior only outside the C4OS launch. Pin Node `26.3.0` (`sha256:cdf556966c52b321abb07cd565edb5fb2ca61c467f84a434bb28e0d33a3c9580`), Bun `1.3.14` (`sha256:e0c90ec15d33363e6b70713d56bc3b2c7585c17f40a0fe0f8fd9305901d4e233`), patch `sha256:82af7d9b917e6fe31fa524b37840cdd95f86944e9ea0c566eb0e061020bc99c0`, the compressed models.dev snapshot `sha256:bc9565e9e805f3a5496e674dccbce5ed0338dabf0e2d93c6ddbf41d00533216d`, and the resulting arm64 binary `sha256:e117af53becb62e91a8b8ba4e4965aeab3ec77082e31c118420f2b779753bc77` (137,518,946 bytes). Two independent clean dependency reconstructions produced those exact bytes. Runtime provenance records the C4OS flavor separately and never calls it the official npm binary.
+- **Rejected alternatives:** Shipping the raw password in `OPENCODE_SERVER_PASSWORD`, placing it in argv/configuration, weakening the Frozen secret contract, silently substituting unrecorded bytes, or claiming the downstream artifact is the official npm release.
+- **Implementation impact:** `sidecars/opencode-native/c4os-build.json` is the build-input ledger; `build-c4os.mjs --force` is restricted to the build-owned checkout, rejects unexpected untracked source, clears ignored dependency/build state, restores the frozen lockfile under an allowlisted environment with no inherited Sentry/Vite credentials, and compares the rebuilt digest; the production asset factory re-verifies the manifest, patch, model snapshot, complete native tree, executable digest, version, and build flavor before spawn. Exact native tests must scan both server and provider secrets across process and state surfaces.
+- **Residual risk:** OpenCode may change its auth initialization or build inputs in a future release. Every upgrade requires a new compatibility row, patch review, forced reproducibility build, exact-native golden path, and renewed secret scan. The server secret necessarily exists in transient OpenCode worker memory while Basic authentication is active; no other surface is permitted.
+- **Sources:** https://github.com/anomalyco/opencode/blob/v1.18.3/packages/opencode/src/server/auth.ts ; https://github.com/anomalyco/opencode/blob/v1.18.3/packages/opencode/script/build.ts ; https://opencode.ai/docs/server/ ; pinned local downstream patch and build manifest.
+
+## RBL-012 — Published C4OS OpenCode proof reuse boundary
+
+- **Access date:** 2026-07-20.
+- **Decision investigated:** Whether the OpenCode source already published in `cblanquera/c4os` materially helps Task 00004 and can replace any production evidence.
+- **Observed repository state:** Published `main` contains `proofs/opencode-runtime/opencode_runtime_poc.mjs` and its evidence note. The proof used OpenCode `1.17.8` and demonstrated isolated SDK start, session create/resume, typed event observation, abort, and shutdown. Its evidence explicitly did not prove a credentialed model prompt, live approval path, or application-owned persistent state. The local `build/mvp-3` Task 00004 source is not published on the repository's current branch list.
+- **Selected conclusion:** Reuse the published proof only as architectural orientation for the SDK/session/event/abort sequence. The production `1.18.3` composition, private credential paths, C4OS Action Gateway, exact attachment delivery, persistence, capability atomicity, and cleanup must remain locally verified Task 00004 evidence.
+- **Rejected alternatives:** Treating the older proof as production acceptance, downgrading to its `1.17.8` pin, or publishing the local implementation without an explicit user request.
+- **Implementation impact:** No source was copied and no push occurred. The live repository check confirmed that Task 00004's local production path materially supersedes the published proof.
+- **Residual risk:** Published proof wording can become misleading if read without its evidence boundary; future documentation should link the production compatibility row when the implementation is intentionally published.
+- **Sources:** https://github.com/cblanquera/c4os ; https://github.com/cblanquera/c4os/blob/main/proofs/opencode-runtime/opencode_runtime_poc.mjs ; https://github.com/cblanquera/c4os/blob/main/proofs/opencode-runtime/opencode-runtime-evidence-2026-06-20.md
+
+## RBL-013 — Private native TLS verification capability
+
+- **Access date:** 2026-07-20.
+- **Decision investigated:** How to prove the exact authenticated OpenCode/Pi provider paths without persistently altering the user's login or System keychain.
+- **Observed blocker:** macOS rejected the serialized System.keychain trust attempts before a usable administrator interaction completed. Each attempt was followed by exact certificate, keychain search-list, lock, and temporary-file reconciliation; no trust item remained.
+- **Selected conclusion:** Generate an ephemeral private CA and leaf inside a mode-`0700` temporary root, pass the CA only to the ignored native test through a test-only capability, require machine trust to reject the leaf before and after the run, and clean the isolated Cargo/native process group plus temporary material under a wrapper trap. Production provider TLS continues to use normal platform trust.
+- **Rejected alternatives:** Leaving a fingerprint-bound test root in System.keychain, weakening TLS verification, disabling certificate validation, or claiming browser/provider success from an untrusted local endpoint.
+- **Implementation impact:** `tools/run-task-00004-native-golden.zsh` owns the private capability, process isolation, trust pre/postcondition, evidence path, and cleanup invariant. The final post-bundle run passed.
+- **Residual risk:** This proves the app-owned TLS/authentication path under a private test capability, not enterprise proxy/root deployment behavior. Platform trust-store integration remains a deployment concern rather than a Task 00004 runtime authority.
+- **Sources:** project-owned native wrapper, production integration test, and final evidence JSON.

@@ -686,6 +686,30 @@ pub struct ProtocolEnvelope<T> {
 
 pub type StructuredCoreError = ProtocolError;
 
+pub(crate) fn snapshot_envelope<T>(
+    request: SnapshotRequest,
+    generation: StateGeneration,
+    payload: T,
+) -> Result<ProtocolEnvelope<T>, StructuredCoreError> {
+    validate_protocol_version(request.protocol_version)?;
+    request.request_id.validate()?;
+    request.correlation_id.validate()?;
+    if request.expected_generation > generation {
+        return Err(generation_error(
+            ProtocolErrorCode::FutureGeneration,
+            request.expected_generation.0,
+            generation.0,
+        ));
+    }
+    Ok(ProtocolEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request.request_id,
+        correlation_id: request.correlation_id,
+        generation,
+        payload,
+    })
+}
+
 pub fn foundation_snapshot(
     request: SnapshotRequest,
 ) -> Result<ProtocolEnvelope<FoundationSnapshot>, StructuredCoreError> {
