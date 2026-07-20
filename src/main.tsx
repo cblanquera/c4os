@@ -4,6 +4,10 @@ import { Provider } from "react-redux";
 
 import { App } from "./App";
 import { navigateAppRoute } from "./app/router";
+import {
+  createSettingsVisit,
+  readActiveShellFocusTarget,
+} from "./app/settings-visit";
 import { store } from "./app/store";
 import { bootstrapPlatformTheme } from "./features/platform";
 import {
@@ -11,6 +15,8 @@ import {
   readPlatformSnapshot,
   revealMainWindow,
 } from "./platform/platform-service";
+import { shellDraftActions } from "./features/shell/state";
+import { ingestNativeShellProjections } from "./features/shell/native-bootstrap";
 import "./styles.css";
 import "./features/platform/platform-theme.css";
 
@@ -24,6 +30,16 @@ const rendererRoot = root;
 async function start() {
   await bootstrapPlatformTheme({ readNativeSnapshot: readPlatformSnapshot });
   void listenForNativeSettings((route) => {
+    const currentRoute = window.location.hash.slice(1) || "/start";
+    store.dispatch(
+      shellDraftActions.settingsVisited(
+        createSettingsVisit(
+          store.getState(),
+          currentRoute,
+          readActiveShellFocusTarget(),
+        ),
+      ),
+    );
     void navigateAppRoute(route);
   }).catch(() => undefined);
 
@@ -34,6 +50,11 @@ async function start() {
       </Provider>
     </StrictMode>,
   );
+
+  // Snapshot ingestion is independent from first-frame theme authority. Each
+  // available native domain publishes atomically; unavailable domains stay
+  // fail-closed for their later service-integration owners.
+  void ingestNativeShellProjections(store.dispatch);
 
   requestAnimationFrame(() => {
     void revealMainWindow().catch(() => undefined);

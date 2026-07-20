@@ -113,14 +113,14 @@ test.describe("native semantic platform foundation", () => {
     await expect(
       page.getByRole("navigation", { name: "Settings" }),
     ).toContainText("MCP Servers");
-    await expect(page.locator(".settings-foundation__scroll")).toHaveCSS(
+    await expect(page.locator(".shell-settings__scroll")).toHaveCSS(
       "overflow-y",
       "auto",
     );
     await expectNoDocumentOverflow(page);
 
     await page.setViewportSize({ width: 620, height: 680 });
-    await expect(page.locator(".settings-foundation")).toHaveCSS(
+    await expect(page.locator(".shell-settings__body")).toHaveCSS(
       "grid-template-columns",
       "64px 556px",
     );

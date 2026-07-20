@@ -1,5 +1,5 @@
 export { PlatformThemeQaSurface } from "./PlatformThemeQaSurface";
-export { PlatformSettingsFoundation } from "./PlatformSettingsFoundation";
+export { NativePlatformSettingsContent } from "./PlatformSettingsFoundation";
 export {
   APPEARANCE_CHANGE_EVENT,
   DEFAULT_NATIVE_SNAPSHOT_TIMEOUT_MS,

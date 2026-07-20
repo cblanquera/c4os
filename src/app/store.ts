@@ -1,4 +1,10 @@
-import { configureStore, createSlice } from "@reduxjs/toolkit";
+import { combineReducers, configureStore, createSlice } from "@reduxjs/toolkit";
+
+import {
+  createBuildGatedQaPreloadedState,
+  shellStateReducers,
+  type ShellPreloadedState,
+} from "../features/shell/state";
 
 type FoundationState = {
   readonly phase: "foundation";
@@ -10,11 +16,30 @@ const foundationSlice = createSlice({
   reducers: {},
 });
 
-export const store = configureStore({
-  reducer: {
-    foundation: foundationSlice.reducer,
-  },
+const rootReducer = combineReducers({
+  foundation: foundationSlice.reducer,
+  ...shellStateReducers,
 });
+export function createAppStore(
+  shellPreloadedState:
+    ShellPreloadedState | undefined = createBuildGatedQaPreloadedState(),
+) {
+  const preloadedState =
+    shellPreloadedState === undefined
+      ? undefined
+      : {
+          foundation: { phase: "foundation" as const },
+          ...shellPreloadedState,
+        };
 
-export type RootState = ReturnType<typeof store.getState>;
+  return configureStore({
+    reducer: rootReducer,
+    ...(preloadedState === undefined ? {} : { preloadedState }),
+  });
+}
+
+export const store = createAppStore();
+
+export type RootState = ReturnType<typeof rootReducer>;
 export type AppDispatch = typeof store.dispatch;
+export type AppStore = ReturnType<typeof createAppStore>;

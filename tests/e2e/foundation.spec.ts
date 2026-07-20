@@ -44,10 +44,10 @@ test("retired foundation route enters production Workspace Start", async ({
   await expect(
     page.getByRole("heading", { name: "Workspace Start" }),
   ).toBeVisible();
-  await expect(page).toHaveURL(/#\/$/);
+  await expect(page).toHaveURL(/#\/start$/);
 });
 
-test("production Workspace Start fails closed without native authority", async ({
+test("QA Workspace Start uses only the build-gated projection", async ({
   page,
 }) => {
   await page.goto("/");
@@ -55,9 +55,7 @@ test("production Workspace Start fails closed without native authority", async (
   await expect(
     page.getByRole("heading", { name: "Workspace Start" }),
   ).toBeVisible();
-  await expect(page.getByRole("status")).toContainText(
-    "Workspace Start is unavailable",
-  );
+  await expect(page.getByRole("status")).toContainText("Ready");
   await expect(page.getByRole("button")).toHaveCount(0);
 });
 
