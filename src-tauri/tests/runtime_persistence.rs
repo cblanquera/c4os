@@ -4,6 +4,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use c4os_lib::artifact::{
+    CapabilityAccess, CapabilitySummaryEntry, ContextCaptureIdentity, ContextCaptureInput,
+    ContextRedaction, FileArtifactState, FileContextInput, FileLiveVersion, FileResourceReference,
+    capture_artifact_context,
+};
 use c4os_lib::core::database::{
     ChatRecord, DatabaseActor, DatabaseDescriptor, InactiveEntity, LifecycleState,
     ProjectPathState, ProjectRecord, WorkspaceRecord,
@@ -12,6 +17,7 @@ use c4os_lib::runtime::capability::{
     CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityLayer, ModelLifecycle, RouteIdentity,
 };
 use c4os_lib::runtime::capability_evidence::CapabilityEvidenceRegistry;
+use c4os_lib::runtime::opencode_native::sha256_bytes;
 use c4os_lib::runtime::persistence::{
     ProviderStateStore, RuntimeControlPlaneStore, SqliteSessionRepository, SupervisorStateStore,
 };
@@ -19,10 +25,11 @@ use c4os_lib::runtime::provider::{
     PROVIDER_SCHEMA_VERSION, ProviderEndpoint, ProviderKind, ProviderProfile, ProviderService,
 };
 use c4os_lib::runtime::session::{
-    AdapterBinding, CapabilitySnapshot, ConfigurationSnapshot, ExecutionEnvironmentBinding,
-    FirstSubmission, ModelRouteSnapshot, ResourceSnapshot, RuntimeKind as SessionRuntimeKind,
-    SessionBinding, SessionError, SessionLifecycle, SessionRepository, SessionRepositoryError,
-    SessionService, capability_snapshot_from_effective_descriptor,
+    AdapterBinding, AttemptIdentity, CapabilitySnapshot, ConfigurationSnapshot,
+    ExecutionEnvironmentBinding, FirstSubmission, MessageReplyContextSnapshot, ModelRouteSnapshot,
+    ResourceSnapshot, RuntimeKind as SessionRuntimeKind, SessionBinding, SessionError,
+    SessionLifecycle, SessionRepository, SessionRepositoryError, SessionService,
+    TerminalAttemptOutcome, TurnSubmission, capability_snapshot_from_effective_descriptor,
 };
 use c4os_lib::runtime::supervisor::{
     HealthState, OPENCODE_NATIVE_VERSION, RUNTIME_PROTOCOL_VERSION, RuntimeInstallation,
@@ -341,6 +348,61 @@ fn first_submission(binding: SessionBinding) -> FirstSubmission {
     }
 }
 
+fn file_reply_context() -> MessageReplyContextSnapshot {
+    let content = "immutable file context";
+    let live = FileLiveVersion::new_with_target_version(
+        1,
+        format!("sha256:{}", "b".repeat(64)),
+        sha256_bytes(content.as_bytes()),
+        content.len() as u64,
+        NOW,
+    )
+    .unwrap();
+    let file = FileArtifactState::new(
+        FileResourceReference::new("notes.txt", "notes.txt").unwrap(),
+        "notes.txt",
+        "text/plain",
+        content,
+        live.clone(),
+    )
+    .unwrap();
+    let snapshot = capture_artifact_context(
+        ContextCaptureIdentity {
+            snapshot_id: "artifact-context-1".into(),
+            artifact_id: "artifact-1".into(),
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "session-1".into(),
+            provider_type: "file".into(),
+            provider_schema_version: 1,
+            artifact_record_revision: 3,
+            live_resource_version: live.as_resource_version(),
+        },
+        ContextCaptureInput::File(FileContextInput {
+            state: &file,
+            selected_text: None,
+            visible_text: None,
+            recent_text: None,
+            redactions: vec![ContextRedaction::Secrets],
+            capabilities: vec![CapabilitySummaryEntry {
+                capability_id: "artifact.read".into(),
+                access: CapabilityAccess::Readable,
+                reason_code: None,
+            }],
+        }),
+        16 * 1_024,
+        NOW + 1,
+    )
+    .unwrap();
+    MessageReplyContextSnapshot {
+        target_id: "artifact-1".into(),
+        target_kind: "file".into(),
+        source_sha256: sha256_bytes(&serde_json::to_vec(&snapshot).unwrap()),
+        source_excerpt: content.into(),
+        artifact_context: Some(snapshot),
+    }
+}
+
 #[test]
 fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recovery() {
     let temporary = TempDir::new().unwrap();
@@ -351,7 +413,7 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     );
     {
         let (database, report) = DatabaseActor::start(descriptor.clone()).unwrap();
-        assert_eq!(report.current_version, 4);
+        assert_eq!(report.current_version, 5);
         seed_workspace(&database);
         let repository = SqliteSessionRepository::new(Arc::new(database)).unwrap();
         let service = SessionService::new(repository.clone());
@@ -370,7 +432,7 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     }
 
     let (database, report) = DatabaseActor::start(descriptor).unwrap();
-    assert_eq!(report.previous_version, 4);
+    assert_eq!(report.previous_version, 5);
     let repository = SqliteSessionRepository::new(Arc::new(database)).unwrap();
     let service = SessionService::new(repository);
     let restored = service.session("session-1").unwrap();
@@ -381,6 +443,73 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     assert_eq!(recovered.revision, 2);
     assert_eq!(recovered.active_attempt_id, None);
     assert!(recovered.attempts[0].status.is_terminal());
+}
+
+#[test]
+fn immutable_artifact_reply_context_survives_session_restart() {
+    let temporary = TempDir::new().unwrap();
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temporary.path().join("active-artifact-reply"),
+        "workspace-1",
+        temporary.path().join("recovery-artifact-reply"),
+    );
+    {
+        let (database, _) = DatabaseActor::start(descriptor.clone()).unwrap();
+        seed_workspace(&database);
+        let repository = SqliteSessionRepository::new(Arc::new(database)).unwrap();
+        let service = SessionService::new(repository);
+        service.create_provisional("session-1", NOW).unwrap();
+        let bound = service
+            .submit_first(first_submission(session_binding()))
+            .unwrap();
+        service
+            .finish_attempt(
+                "session-1",
+                &AttemptIdentity {
+                    attempt_id: "attempt-1".into(),
+                    correlation_id: "correlation-1".into(),
+                    process_generation: 7,
+                },
+                TerminalAttemptOutcome::Completed,
+                NOW + 2,
+            )
+            .unwrap();
+        service
+            .submit_turn(TurnSubmission {
+                session_id: "session-1".into(),
+                turn_id: "turn-2".into(),
+                attempt_id: "attempt-2".into(),
+                authorization_scope_id: "authority-2".into(),
+                correlation_id: "correlation-2".into(),
+                process_generation: 7,
+                prompt: Some("Update this exact Artifact".into()),
+                attachments: Vec::new(),
+                reply_context: Some(file_reply_context()),
+                context: bound.attempts[0].context.clone(),
+                submitted_at_ms: NOW + 3,
+            })
+            .unwrap();
+    }
+
+    let (database, _) = DatabaseActor::start(descriptor).unwrap();
+    let service = SessionService::new(SqliteSessionRepository::new(Arc::new(database)).unwrap());
+    let restored = service.session("session-1").unwrap();
+    let reply = restored
+        .turn("turn-2")
+        .unwrap()
+        .reply_context
+        .as_ref()
+        .unwrap();
+    let context = reply.artifact_context.as_ref().unwrap();
+    assert_eq!(
+        context.stable_reference,
+        file_reply_context()
+            .artifact_context
+            .unwrap()
+            .stable_reference
+    );
+    assert_eq!(context.artifact_record_revision, 3);
+    assert_eq!(reply.source_excerpt, "immutable file context");
 }
 
 #[test]

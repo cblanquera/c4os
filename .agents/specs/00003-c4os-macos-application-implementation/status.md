@@ -8,7 +8,7 @@
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; Tasks 00001 through 00006 are verified with passed Agent Acceptance. Tasks 00007 through 00015C remain open.
+- Implementation status: Active; Tasks 00001 through 00008 are verified with passed Agent Acceptance. Tasks 00009 through 00015C remain open.
 
 ## Work Items
 
@@ -39,8 +39,8 @@ Research from Specs 00001 and 00002 is inherited through Context. All seven narr
 
 ## Proof Status
 
-Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00006 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining conversation, facility, extension, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
+Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00008 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining Terminal/Browser facilities, extension, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
 
 ## Recommended Next Action
 
-Create the scoped Task 00006 local checkpoint, then begin Task 00007 as the next isolated epoch under the resumed coordinator authorization. Preserve the complete-contract target and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.
+Begin Task 00009 as the next isolated Terminal-facility epoch after the Task 00008 checkpoint. Preserve the complete-contract target and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.

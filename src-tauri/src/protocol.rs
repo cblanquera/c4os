@@ -743,10 +743,57 @@ pub struct ConversationAttachmentPreviewSnapshot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
+pub struct ConversationArtifactContextSegmentSnapshot {
+    pub priority: String,
+    pub source: String,
+    pub text: String,
+    pub original_bytes: u64,
+    pub omitted_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationArtifactCapabilitySnapshot {
+    pub capability_id: String,
+    pub access: String,
+    pub reason_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationArtifactContextSnapshot {
+    pub snapshot_id: String,
+    pub stable_reference: String,
+    pub artifact_id: ArtifactId,
+    pub project_id: ProjectId,
+    pub session_id: SessionId,
+    pub provider_type: String,
+    pub provider_version: u16,
+    pub artifact_record_revision: u64,
+    pub captured_resource_version: ArtifactResourceVersionSnapshot,
+    pub payload_kind: String,
+    pub segments: Vec<ConversationArtifactContextSegmentSnapshot>,
+    pub maximum_bytes: u64,
+    pub used_bytes: u64,
+    pub omitted_bytes: u64,
+    pub omitted_segments: u32,
+    pub truncated: bool,
+    pub unsaved: bool,
+    pub redactions: Vec<String>,
+    pub capabilities: Vec<ConversationArtifactCapabilitySnapshot>,
+    pub captured_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ConversationTurnSnapshot {
     pub turn_id: TurnId,
     pub prompt: Option<String>,
     pub attachments: Vec<ConversationAttachmentSnapshot>,
+    pub artifact_context: Option<ConversationArtifactContextSnapshot>,
     pub submitted_at_ms: u64,
 }
 
@@ -849,6 +896,409 @@ pub struct ConversationSnapshot {
     pub active_conversation: Option<ConversationSessionSnapshot>,
     pub models: Vec<ConversationModelSnapshot>,
     pub branch_control: Option<ConversationBranchControlSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactResourceVersionSnapshot {
+    pub sequence: u64,
+    pub sha256: String,
+    pub observed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactShellStatusSnapshot {
+    pub kind: String,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBreadcrumbSnapshot {
+    pub id: String,
+    pub label: String,
+    pub is_current: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(
+    tag = "phase",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(rename_all = "camelCase")]
+pub enum ArtifactFileStateSnapshot {
+    Read {
+        content: String,
+    },
+    Edit {
+        content: String,
+        draft: String,
+    },
+    Dirty {
+        content: String,
+        draft: String,
+    },
+    Proposed {
+        content: String,
+        proposed_content: String,
+        proposal_diff: Option<String>,
+        proposal_summary: String,
+    },
+    Approval {
+        content: String,
+        proposed_content: String,
+        proposal_diff: Option<String>,
+        approval_summary: String,
+    },
+    Conflict {
+        content: String,
+        draft: String,
+        conflict_message: String,
+        current_version_label: String,
+    },
+    Recovery {
+        content: String,
+        draft: String,
+        recovery_message: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFileSnapshot {
+    pub breadcrumbs: Vec<ArtifactBreadcrumbSnapshot>,
+    pub language_label: Option<String>,
+    pub state: ArtifactFileStateSnapshot,
+    pub version_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFolderEntrySnapshot {
+    pub id: String,
+    pub kind: String,
+    pub metadata: Option<String>,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFolderListingSnapshot {
+    pub phase: String,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFolderSnapshot {
+    pub breadcrumbs: Vec<ArtifactBreadcrumbSnapshot>,
+    pub entries: Vec<ArtifactFolderEntrySnapshot>,
+    pub listing: ArtifactFolderListingSnapshot,
+    pub listing_limit: u32,
+    pub selected_entry_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ArtifactProviderStateSnapshot {
+    File(ArtifactFileSnapshot),
+    Folder(ArtifactFolderSnapshot),
+    Unknown,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactHistorySnapshot {
+    pub record_revision: u64,
+    pub kind: String,
+    pub recorded_at_ms: u64,
+    pub resource_version: ArtifactResourceVersionSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactSnapshot {
+    pub artifact_id: ArtifactId,
+    pub project_id: ProjectId,
+    pub session_id: SessionId,
+    pub provider_type: String,
+    pub provider_version: u16,
+    pub state_schema_version: u16,
+    pub record_revision: u64,
+    pub title: String,
+    pub focus_supported: bool,
+    pub status: ArtifactShellStatusSnapshot,
+    pub pending_approval_id: Option<String>,
+    pub source_label: String,
+    pub resource_version: ArtifactResourceVersionSnapshot,
+    pub history: Vec<ArtifactHistorySnapshot>,
+    pub provider_state: ArtifactProviderStateSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactWorkspaceSnapshot {
+    pub protocol_version: u16,
+    pub generation: StateGeneration,
+    pub authority: String,
+    pub workspace_id: Option<WorkspaceId>,
+    pub active_project_id: Option<ProjectId>,
+    pub active_session_id: Option<SessionId>,
+    pub focused_artifact_id: Option<ArtifactId>,
+    pub artifacts: Vec<ArtifactSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactOpenInput {
+    pub picker_grant_id: PickerGrantId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactMutationInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactReplyInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub selected_text: Option<String>,
+    pub selected_entry_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactContextExpandInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub expected_resource_version: ArtifactResourceVersionSnapshot,
+    pub maximum_bytes: u64,
+    pub selected_text: Option<String>,
+    pub selected_entry_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFileDraftInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub content: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ArtifactFileConflictResolution {
+    ReloadCurrent,
+    KeepDraft,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFileConflictInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub resolution: ArtifactFileConflictResolution,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFolderNavigateInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub project_relative_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactFolderSelectInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub entry_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ArtifactApprovalAnswer {
+    Allow,
+    Deny,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactApprovalInput {
+    pub prompt_id: String,
+    pub answer: ArtifactApprovalAnswer,
+}
+
+impl ArtifactOpenInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.picker_grant_id.validate()
+    }
+}
+
+impl ArtifactMutationInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.artifact_id.validate()?;
+        if self.base_record_revision == 0 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "Artifact base revision must be non-zero",
+                false,
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_artifact_context_selection(
+    selected_text: &Option<String>,
+    selected_entry_id: &Option<String>,
+) -> Result<(), ProtocolError> {
+    if let Some(selected_text) = selected_text
+        && (selected_text.is_empty()
+            || selected_text.len() > MAX_TEXT_BYTES
+            || selected_text.contains('\0'))
+    {
+        return Err(ProtocolError::payload_too_large(
+            "Artifact context selection exceeds its bound",
+        ));
+    }
+    if let Some(selected_entry_id) = selected_entry_id {
+        validate_identifier("Artifact context selected entry", selected_entry_id)?;
+    }
+    Ok(())
+}
+
+impl ArtifactReplyInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        validate_artifact_context_selection(&self.selected_text, &self.selected_entry_id)
+    }
+}
+
+impl ArtifactContextExpandInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        validate_artifact_resource_version(&self.expected_resource_version)?;
+        if self.maximum_bytes == 0 || self.maximum_bytes > 4 * 1_024 * 1_024 {
+            return Err(ProtocolError::payload_too_large(
+                "Artifact context expansion exceeds its bound",
+            ));
+        }
+        validate_artifact_context_selection(&self.selected_text, &self.selected_entry_id)
+    }
+}
+
+impl ArtifactFileDraftInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        if self.content.len() > MAX_TEXT_BYTES || self.content.contains('\0') {
+            return Err(ProtocolError::payload_too_large(
+                "File draft content exceeds its bound",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactFileConflictInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()
+    }
+}
+
+impl ArtifactFolderNavigateInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        validate_project_relative_path(&self.project_relative_path)
+    }
+}
+
+impl ArtifactFolderSelectInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        validate_identifier("Folder entry id", &self.entry_id)
+    }
+}
+
+impl ArtifactApprovalInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_identifier("Artifact approval prompt id", &self.prompt_id)
+    }
+}
+
+fn validate_project_relative_path(path: &str) -> Result<(), ProtocolError> {
+    if path.len() > 4_096
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || path.contains('\\')
+        || path.contains('\0')
+        || (!path.is_empty()
+            && path.split('/').any(|segment| {
+                segment.is_empty()
+                    || matches!(segment, "." | "..")
+                    || segment.chars().any(char::is_control)
+            }))
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Project-relative Artifact path is invalid",
+            false,
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1264,6 +1714,9 @@ pub fn conversation_snapshot(
             for attachment in &turn.attachments {
                 validate_conversation_attachment(attachment)?;
             }
+            if let Some(context) = &turn.artifact_context {
+                validate_conversation_artifact_context(context, &active.session_id)?;
+            }
         }
         for attempt in &active.attempts {
             attempt.attempt_id.validate()?;
@@ -1285,6 +1738,453 @@ pub fn conversation_snapshot(
         generation: payload.generation,
         payload,
     })
+}
+
+pub fn artifact_workspace_snapshot(
+    request: SnapshotRequest,
+    payload: ArtifactWorkspaceSnapshot,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    validate_protocol_version(payload.protocol_version)?;
+    if request.expected_generation > payload.generation {
+        return Err(generation_error(
+            ProtocolErrorCode::FutureGeneration,
+            request.expected_generation.0,
+            payload.generation.0,
+        ));
+    }
+    if payload.authority != "rust-core" || payload.artifacts.len() > 4_096 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact Workspace snapshot is invalid",
+            false,
+        ));
+    }
+    if let Some(workspace_id) = &payload.workspace_id {
+        workspace_id.validate()?;
+    }
+    if let Some(project_id) = &payload.active_project_id {
+        project_id.validate()?;
+    }
+    if let Some(session_id) = &payload.active_session_id {
+        session_id.validate()?;
+    }
+    let mut artifact_ids = BTreeSet::new();
+    for artifact in &payload.artifacts {
+        artifact.artifact_id.validate()?;
+        artifact.project_id.validate()?;
+        artifact.session_id.validate()?;
+        if !artifact_ids.insert(artifact.artifact_id.as_str())
+            || artifact.record_revision == 0
+            || artifact.provider_version == 0
+            || artifact.state_schema_version == 0
+            || artifact.history.len() > 256
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact record identity is invalid",
+                false,
+            ));
+        }
+        if payload.workspace_id.is_none()
+            || payload.active_project_id.as_ref() != Some(&artifact.project_id)
+            || payload.active_session_id.as_ref() != Some(&artifact.session_id)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact ownership is outside the active Workspace scope",
+                false,
+            ));
+        }
+        validate_identifier("artifact provider type", &artifact.provider_type)?;
+        validate_display_text("artifact title", &artifact.title, 512)?;
+        validate_display_text("artifact source", &artifact.source_label, 512)?;
+        validate_artifact_status(&artifact.status)?;
+        if let Some(prompt_id) = &artifact.pending_approval_id {
+            validate_identifier("Artifact approval prompt id", prompt_id)?;
+        }
+        validate_artifact_resource_version(&artifact.resource_version)?;
+        for history in &artifact.history {
+            if history.record_revision == 0 || history.record_revision > artifact.record_revision {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::InvalidPayload,
+                    "Artifact history is invalid",
+                    false,
+                ));
+            }
+            validate_identifier("artifact history kind", &history.kind)?;
+            validate_artifact_resource_version(&history.resource_version)?;
+        }
+        match &artifact.provider_state {
+            ArtifactProviderStateSnapshot::File(file) => {
+                if artifact.provider_type != "file"
+                    || artifact.provider_version != 1
+                    || artifact.state_schema_version != 1
+                    || file.breadcrumbs.len() > 128
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "File artifact provider state is invalid",
+                        false,
+                    ));
+                }
+                validate_artifact_breadcrumbs(&file.breadcrumbs)?;
+                validate_artifact_file_state(&file.state)?;
+                let approval_state =
+                    matches!(&file.state, ArtifactFileStateSnapshot::Approval { .. });
+                if artifact.pending_approval_id.is_some() != approval_state {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "File approval identity is inconsistent",
+                        false,
+                    ));
+                }
+            }
+            ArtifactProviderStateSnapshot::Folder(folder) => {
+                if artifact.provider_type != "folder"
+                    || artifact.provider_version != 1
+                    || artifact.state_schema_version != 1
+                    || folder.breadcrumbs.len() > 128
+                    || folder.entries.len() > 512
+                    || folder.listing_limit == 0
+                    || folder.listing_limit > 512
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Folder artifact provider state is invalid",
+                        false,
+                    ));
+                }
+                if artifact.pending_approval_id.is_some() {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Folder artifacts cannot carry File approval identity",
+                        false,
+                    ));
+                }
+                validate_artifact_breadcrumbs(&folder.breadcrumbs)?;
+                if !matches!(folder.listing.phase.as_str(), "ready" | "loading" | "error") {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Folder listing state is invalid",
+                        false,
+                    ));
+                }
+                if let Some(message) = &folder.listing.message {
+                    validate_display_text("Folder listing status", message, MAX_DIAGNOSTIC_BYTES)?;
+                }
+                for entry in &folder.entries {
+                    validate_identifier("Folder entry id", &entry.id)?;
+                    validate_display_text("Folder entry name", &entry.name, 512)?;
+                    if !matches!(entry.kind.as_str(), "file" | "folder") {
+                        return Err(ProtocolError::new(
+                            ProtocolErrorCode::InvalidPayload,
+                            "Folder entry kind is invalid",
+                            false,
+                        ));
+                    }
+                    if let Some(metadata) = &entry.metadata {
+                        validate_display_text("Folder entry metadata", metadata, 1_024)?;
+                    }
+                }
+            }
+            ArtifactProviderStateSnapshot::Unknown => {
+                let is_supported_known_version =
+                    matches!(artifact.provider_type.as_str(), "file" | "folder")
+                        && artifact.provider_version == 1
+                        && artifact.state_schema_version == 1;
+                if artifact.focus_supported
+                    || artifact.status.kind != "degraded"
+                    || is_supported_known_version
+                    || artifact.pending_approval_id.is_some()
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Unknown artifacts must remain inline-only",
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(focused) = &payload.focused_artifact_id {
+        focused.validate()?;
+        if !payload
+            .artifacts
+            .iter()
+            .any(|artifact| &artifact.artifact_id == focused && artifact.focus_supported)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Focused artifact is unavailable or inline-only",
+                false,
+            ));
+        }
+    }
+    Ok(ProtocolEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request.request_id,
+        correlation_id: request.correlation_id,
+        generation: payload.generation,
+        payload,
+    })
+}
+
+pub fn artifact_context_snapshot(
+    request: SnapshotRequest,
+    payload: ConversationArtifactContextSnapshot,
+    generation: StateGeneration,
+    active_session_id: &SessionId,
+) -> Result<ProtocolEnvelope<ConversationArtifactContextSnapshot>, StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation > generation {
+        return Err(generation_error(
+            ProtocolErrorCode::FutureGeneration,
+            request.expected_generation.0,
+            generation.0,
+        ));
+    }
+    validate_conversation_artifact_context(&payload, active_session_id)?;
+    Ok(ProtocolEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request.request_id,
+        correlation_id: request.correlation_id,
+        generation,
+        payload,
+    })
+}
+
+fn validate_artifact_status(status: &ArtifactShellStatusSnapshot) -> Result<(), ProtocolError> {
+    if !matches!(
+        status.kind.as_str(),
+        "ready" | "loading" | "error" | "degraded" | "recovery"
+    ) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact status is invalid",
+            false,
+        ));
+    }
+    if let Some(message) = &status.message {
+        validate_display_text("Artifact status message", message, MAX_DIAGNOSTIC_BYTES)?;
+    }
+    Ok(())
+}
+
+fn validate_artifact_resource_version(
+    version: &ArtifactResourceVersionSnapshot,
+) -> Result<(), ProtocolError> {
+    let valid_digest = version
+        .sha256
+        .strip_prefix("sha256:")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    if version.sequence == 0 || version.observed_at_ms == 0 || !valid_digest {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact resource version is invalid",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_artifact_breadcrumbs(
+    breadcrumbs: &[ArtifactBreadcrumbSnapshot],
+) -> Result<(), ProtocolError> {
+    if breadcrumbs.is_empty()
+        || breadcrumbs
+            .iter()
+            .filter(|breadcrumb| breadcrumb.is_current)
+            .count()
+            != 1
+        || !breadcrumbs
+            .last()
+            .is_some_and(|breadcrumb| breadcrumb.is_current)
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact breadcrumbs are invalid",
+            false,
+        ));
+    }
+    for breadcrumb in breadcrumbs {
+        if breadcrumb.id.len() > 4_096 || breadcrumb.id.contains('\0') {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact breadcrumb identity is invalid",
+                false,
+            ));
+        }
+        validate_display_text("Artifact breadcrumb", &breadcrumb.label, 512)?;
+    }
+    Ok(())
+}
+
+fn validate_artifact_file_state(state: &ArtifactFileStateSnapshot) -> Result<(), ProtocolError> {
+    let (content, secondary, details): (&str, Option<&str>, Vec<&str>) = match state {
+        ArtifactFileStateSnapshot::Read { content } => (content, None, Vec::new()),
+        ArtifactFileStateSnapshot::Edit { content, draft }
+        | ArtifactFileStateSnapshot::Dirty { content, draft } => (content, Some(draft), Vec::new()),
+        ArtifactFileStateSnapshot::Proposed {
+            content,
+            proposed_content,
+            proposal_diff,
+            proposal_summary,
+        } => (
+            content,
+            Some(proposed_content),
+            std::iter::once(proposal_summary.as_str())
+                .chain(proposal_diff.as_deref())
+                .collect(),
+        ),
+        ArtifactFileStateSnapshot::Approval {
+            content,
+            proposed_content,
+            proposal_diff,
+            approval_summary,
+        } => (
+            content,
+            Some(proposed_content),
+            std::iter::once(approval_summary.as_str())
+                .chain(proposal_diff.as_deref())
+                .collect(),
+        ),
+        ArtifactFileStateSnapshot::Conflict {
+            content,
+            draft,
+            conflict_message,
+            current_version_label,
+        } => (
+            content,
+            Some(draft),
+            vec![conflict_message, current_version_label],
+        ),
+        ArtifactFileStateSnapshot::Recovery {
+            content,
+            draft,
+            recovery_message,
+        } => (content, Some(draft), vec![recovery_message]),
+    };
+    for value in [Some(content), secondary].into_iter().flatten() {
+        if value.len() > MAX_TEXT_BYTES || value.contains('\0') {
+            return Err(ProtocolError::payload_too_large(
+                "File artifact content exceeds its bound",
+            ));
+        }
+    }
+    for value in details {
+        validate_display_text("File artifact status detail", value, MAX_DIAGNOSTIC_BYTES)?;
+    }
+    Ok(())
+}
+
+fn validate_conversation_artifact_context(
+    context: &ConversationArtifactContextSnapshot,
+    active_session_id: &SessionId,
+) -> Result<(), ProtocolError> {
+    validate_identifier("Artifact context snapshot id", &context.snapshot_id)?;
+    validate_artifact_stable_reference(&context.stable_reference)?;
+    context.artifact_id.validate()?;
+    context.project_id.validate()?;
+    context.session_id.validate()?;
+    if &context.session_id != active_session_id
+        || context.provider_version == 0
+        || context.artifact_record_revision == 0
+        || context.captured_at_ms == 0
+        || context.segments.len() > 32
+        || context.redactions.len() > 64
+        || context.capabilities.len() > 128
+        || context.maximum_bytes == 0
+        || context.maximum_bytes > 4 * 1_024 * 1_024
+        || context.used_bytes > context.maximum_bytes
+        || context.truncated != (context.omitted_bytes > 0)
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact Reply context is invalid",
+            false,
+        ));
+    }
+    validate_identifier("Artifact context provider", &context.provider_type)?;
+    validate_identifier("Artifact context payload kind", &context.payload_kind)?;
+    validate_artifact_resource_version(&context.captured_resource_version)?;
+    let used = context
+        .segments
+        .iter()
+        .map(|segment| segment.text.len() as u64)
+        .sum::<u64>();
+    let omitted = context
+        .segments
+        .iter()
+        .map(|segment| segment.omitted_bytes)
+        .sum::<u64>();
+    let omitted_segments = context
+        .segments
+        .iter()
+        .filter(|segment| segment.text.is_empty() && segment.original_bytes > 0)
+        .count() as u32;
+    if used != context.used_bytes
+        || omitted != context.omitted_bytes
+        || omitted_segments != context.omitted_segments
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact Reply context budget is inconsistent",
+            false,
+        ));
+    }
+    for segment in &context.segments {
+        validate_identifier("Artifact context segment source", &segment.source)?;
+        if !matches!(
+            segment.priority.as_str(),
+            "selection" | "visibleOrCurrent" | "recent" | "metadata"
+        ) || segment.text.len() > MAX_TEXT_BYTES
+            || segment.text.contains('\0')
+            || segment.original_bytes != segment.text.len() as u64 + segment.omitted_bytes
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact Reply context segment is invalid",
+                false,
+            ));
+        }
+    }
+    for redaction in &context.redactions {
+        validate_identifier("Artifact context redaction", redaction)?;
+    }
+    for capability in &context.capabilities {
+        validate_identifier("Artifact context capability", &capability.capability_id)?;
+        if !matches!(
+            capability.access.as_str(),
+            "readable" | "approvalRequired" | "denied" | "unknown"
+        ) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact Reply capability summary is invalid",
+                false,
+            ));
+        }
+        if let Some(reason) = &capability.reason_code {
+            validate_identifier("Artifact context capability reason", reason)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_artifact_stable_reference(value: &str) -> Result<(), ProtocolError> {
+    if value.is_empty()
+        || value.len() > 512
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@')
+        })
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidIdentifier,
+            "Artifact context stable reference is invalid",
+            false,
+        ));
+    }
+    Ok(())
 }
 
 fn validate_conversation_attachment(

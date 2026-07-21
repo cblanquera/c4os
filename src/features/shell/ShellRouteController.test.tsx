@@ -19,7 +19,8 @@ import {
   initialShellDraftState,
   shellDraftActions,
 } from "./state";
-import type { ArtifactId, StateGeneration } from "../../platform/protocol";
+import type { SessionId, StateGeneration } from "../../platform/protocol";
+import { artifactWorkspaceForActiveSession } from "./artifact-session";
 import { ShellRouteController } from "./ShellRouteController";
 
 const conversationServiceMocks = vi.hoisted(() => ({
@@ -118,12 +119,14 @@ function conversationSubmitSnapshot(
           turnId: "turn:submitted" as never,
           prompt: "The Reply target active when submit began",
           attachments: [],
+          artifactContext: null,
           submittedAtMs: 1,
         },
         {
           turnId: "turn:newer" as never,
           prompt: "The newer local Reply target",
           attachments: [],
+          artifactContext: null,
           submittedAtMs: 2,
         },
       ],
@@ -264,6 +267,27 @@ describe("ShellRouteController", () => {
     conversationServiceMocks.submitConversation.mockReset();
   });
 
+  it("never projects a cached Artifact Workspace into a different Chat", () => {
+    const cached = {
+      protocolVersion: 1,
+      generation: 7 as StateGeneration,
+      authority: "rust-core",
+      workspaceId: "workspace:cached" as never,
+      activeProjectId: "project:cached" as never,
+      activeSessionId: "session:cached" as never,
+      focusedArtifactId: null,
+      artifacts: [],
+    } satisfies import("../../platform/artifact-service").ArtifactWorkspaceSnapshot;
+
+    expect(
+      artifactWorkspaceForActiveSession(cached, "session:next" as SessionId),
+    ).toBeNull();
+    expect(
+      artifactWorkspaceForActiveSession(cached, "session:cached" as SessionId),
+    ).toBe(cached);
+    expect(artifactWorkspaceForActiveSession(cached, null)).toBeNull();
+  });
+
   it("keeps every accepted route directly addressable in one composed shell", () => {
     for (const definition of APP_ROUTE_DEFINITIONS) {
       const rendered = renderShellAt(definition.path);
@@ -317,8 +341,7 @@ describe("ShellRouteController", () => {
     expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
   });
 
-  it("shows contextual Chat only from explicit artifact-focus draft state", () => {
-    const activityId = "activity:turn:assistant" as ArtifactId;
+  it("keeps synthetic unknown run activity inline-only", () => {
     const store = createAppStore({
       shellAuthority: {
         ...initialShellAuthorityState,
@@ -362,26 +385,9 @@ describe("ShellRouteController", () => {
     );
 
     expect(screen.getByRole("complementary")).toHaveAccessibleName("Projects");
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-    expect(store.getState().shellDrafts.workspace.focusedArtifactId).toBe(
-      activityId,
-    );
-    expect(screen.getByRole("complementary")).toHaveAccessibleName(
-      "Projects and contextual chat",
-    );
-    expect(screen.getByRole("button", { name: "Detach Chat" })).toBeDisabled();
-    expect(screen.getByLabelText("Contextual conversation")).toHaveAttribute(
-      "data-focused-artifact-id",
-      activityId,
-    );
-    expect(
-      screen.getByLabelText("Focused conversation activity"),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Composer mode" }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Restore Chat" }));
-    expect(screen.getByRole("button", { name: "Expand" })).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(store.getState().shellDrafts.workspace.focusedArtifactId).toBeNull();
+    expect(screen.queryByLabelText("Contextual conversation")).toBeNull();
   });
 
   it("renders and clears a Reply target restored in the composer draft", () => {

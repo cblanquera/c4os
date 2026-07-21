@@ -104,6 +104,18 @@ async function installNativeConversationFixture(
           if (command === "conversation_snapshot") {
             return envelope(request, snapshot.generation as number, snapshot);
           }
+          if (command === "artifact_snapshot") {
+            return envelope(request, 0, {
+              protocolVersion: 1,
+              generation: 0,
+              authority: "rust-core",
+              workspaceId: snapshot.workspaceId,
+              activeProjectId: snapshot.activeProjectId,
+              activeSessionId: snapshot.activeSessionId,
+              focusedArtifactId: null,
+              artifacts: [],
+            });
+          }
           if (command === "conversation_attachment_preview") {
             const input = args.input as Record<string, unknown>;
             return envelope(request, snapshot.generation as number, {
@@ -242,6 +254,7 @@ function conversationSnapshot(state: ConversationState) {
               turnId: "turn-qa-1",
               prompt: "Build the **image preview** and keep it safe.",
               attachments: [attachment],
+              artifactContext: null,
               submittedAtMs: 100,
             },
           ],
@@ -385,20 +398,9 @@ test("production Chat renders the normal, preview, model, information, and searc
     fullPage: true,
   });
 
-  await page.getByRole("button", { name: "Expand" }).click();
-  await expect(page.getByLabel("Focused conversation activity")).toContainText(
-    "Checked the safe preview boundary",
-  );
-  await expect(page.getByLabel("Contextual conversation")).toBeVisible();
-  await expect(page.getByRole("feed")).toHaveCount(1);
-  await expect(
-    page.getByRole("button", { name: "Composer mode" }),
-  ).toBeDisabled();
-  await page.screenshot({
-    path: "output/playwright/task-00007-chat-focus.png",
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "Restore Chat" }).click();
+  await expect(page.getByText("Run activity", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand" })).toHaveCount(0);
+  await expect(page.getByLabel("Contextual conversation")).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Conversation", exact: true }),
   ).toBeVisible();

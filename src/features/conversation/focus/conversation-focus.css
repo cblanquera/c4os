@@ -37,6 +37,12 @@
   overflow: auto;
 }
 
+.conversation-focus__center-transcript,
+.conversation-focus__transcript-host {
+  min-width: 0;
+  min-height: 100%;
+}
+
 .conversation-focus__contextual-chat {
   display: grid;
   min-width: 0;

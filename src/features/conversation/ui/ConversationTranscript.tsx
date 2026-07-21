@@ -162,6 +162,9 @@ export function ConversationTranscript({
                   ))}
                 </ul>
               ) : null}
+              {turn.replyContext ? (
+                <ArtifactReplyContextDisclosure context={turn.replyContext} />
+              ) : null}
               <TurnActions
                 markdownSource={turn.markdownSource}
                 onCopy={onCopy}
@@ -184,6 +187,81 @@ export function ConversationTranscript({
       ) : null}
     </section>
   );
+}
+
+interface ArtifactReplyContextDisclosureProps {
+  readonly context: NonNullable<
+    Extract<ConversationTranscriptTurn, { author: "user" }>["replyContext"]
+  >;
+}
+
+/** Exposes the exact immutable Artifact context attached to a submitted turn. */
+function ArtifactReplyContextDisclosure({
+  context,
+}: ArtifactReplyContextDisclosureProps) {
+  return (
+    <details className="conversation-turn__artifact-context">
+      <summary>
+        Reply to {context.providerType} ·{" "}
+        {formatContextBytes(context.suppliedBytes)}
+        {context.truncated ? " · truncated" : ""}
+        {context.unsaved ? " · includes unsaved draft" : ""}
+      </summary>
+      <dl>
+        <div>
+          <dt>Artifact</dt>
+          <dd>{context.artifactId}</dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd>
+            Provider {context.providerVersion} · record {context.recordRevision}
+          </dd>
+        </div>
+        <div>
+          <dt>Context budget</dt>
+          <dd>
+            {formatContextBytes(context.suppliedBytes)} of{" "}
+            {formatContextBytes(context.maximumBytes)}
+            {context.omittedBytes > 0
+              ? ` · ${formatContextBytes(context.omittedBytes)} omitted`
+              : " · complete"}
+          </dd>
+        </div>
+        <div>
+          <dt>Stable reference</dt>
+          <dd className="conversation-turn__artifact-reference">
+            {context.stableReference}
+          </dd>
+        </div>
+      </dl>
+      <div className="conversation-turn__artifact-segments">
+        {context.segments.map((segment, index) => (
+          <section key={`${segment.source}:${index}`}>
+            <h4>{segment.source}</h4>
+            {segment.text.length > 0 ? <pre>{segment.text}</pre> : null}
+            {segment.omittedBytes > 0 ? (
+              <small>{formatContextBytes(segment.omittedBytes)} omitted</small>
+            ) : null}
+          </section>
+        ))}
+      </div>
+      <ul aria-label="Artifact Reply capabilities">
+        {context.capabilities.map((capability) => (
+          <li key={capability.capabilityId}>
+            {capability.capabilityId}: {capability.access}
+            {capability.reasonCode ? ` (${capability.reasonCode})` : ""}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function formatContextBytes(value: number): string {
+  return value < 1_024
+    ? `${value} B`
+    : `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value / 1_024)} KB`;
 }
 
 interface AssistantTurnProps {
@@ -386,6 +464,7 @@ function ArtifactPresentationHook({
   onFocusRequest,
   placement,
 }: ArtifactPresentationHookProps) {
+  const providerContent = artifact.renderContent?.(placement);
   return (
     <section
       className="conversation-artifact-hook"
@@ -394,11 +473,15 @@ function ArtifactPresentationHook({
       data-artifact-placement={placement}
       data-focused={artifact.isFocused}
     >
-      <div>
-        <strong>{artifact.title}</strong>
-        <span>{artifact.summary}</span>
-      </div>
-      {artifact.focusSupported && !artifact.isFocused ? (
+      {providerContent ?? (
+        <div>
+          <strong>{artifact.title}</strong>
+          <span>{artifact.summary}</span>
+        </div>
+      )}
+      {providerContent === undefined &&
+      artifact.focusSupported &&
+      !artifact.isFocused ? (
         <button
           type="button"
           data-artifact-focus-trigger={artifact.id}

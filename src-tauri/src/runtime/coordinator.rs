@@ -524,6 +524,18 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(proposal)
     }
 
+    pub(crate) fn requeue_interrupted_direct_approval(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
+        let proposal = self
+            .action_gateway
+            .requeue_interrupted_approval(facts, action, now_ms)?;
+        self.operation(proposal)
+    }
+
     pub(crate) fn answer_direct_approval(
         &mut self,
         prompt_id: &str,

@@ -44,6 +44,9 @@ export interface TranscriptArtifactPresentation {
   readonly summary: string;
   readonly title: string;
   readonly type: "browser" | "file" | "folder" | "terminal" | "unknown";
+  readonly renderContent?: (
+    placement: ConversationTranscriptPlacement,
+  ) => ReactNode;
 }
 
 interface TranscriptTurnBase {
@@ -60,6 +63,28 @@ export interface UserTranscriptTurn extends TranscriptTurnBase {
     readonly metadata: string;
     readonly referenceNumber: number;
   }[];
+  readonly replyContext?: {
+    readonly artifactId: string;
+    readonly providerType: "file" | "folder" | "browser" | "terminal";
+    readonly providerVersion: number;
+    readonly recordRevision: number;
+    readonly stableReference: string;
+    readonly suppliedBytes: number;
+    readonly maximumBytes: number;
+    readonly omittedBytes: number;
+    readonly truncated: boolean;
+    readonly unsaved: boolean;
+    readonly segments: readonly {
+      readonly source: string;
+      readonly text: string;
+      readonly omittedBytes: number;
+    }[];
+    readonly capabilities: readonly {
+      readonly capabilityId: string;
+      readonly access: string;
+      readonly reasonCode: string | null;
+    }[];
+  };
 }
 
 export interface AssistantTranscriptTurn extends TranscriptTurnBase {
@@ -76,3 +101,4 @@ export type ConversationTranscriptTurn =
   UserTranscriptTurn | AssistantTranscriptTurn;
 
 export type ConversationTranscriptPlacement = "center" | "context-pane";
+import type { ReactNode } from "react";

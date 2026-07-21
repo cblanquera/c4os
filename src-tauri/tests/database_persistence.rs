@@ -1,10 +1,19 @@
 use std::fs;
 
+use c4os_lib::artifact::{
+    ARTIFACT_SCHEMA_VERSION, ArtifactFocusCapability, ArtifactHistoryEntry, ArtifactHistoryKind,
+    ArtifactLifecycle, ArtifactProviderDescriptor, ArtifactRecord, ArtifactSource, ArtifactState,
+    ArtifactWorkspaceUiState, FileArtifactState, FileLiveVersion, FileResourceReference,
+    FolderArtifactState, FolderBreadcrumb, FolderListingVersion, FolderResourceReference,
+    UnknownArtifactState,
+};
 use c4os_lib::core::database::{
     self, AppConfigurationSnapshotRecord, DatabaseActor, DatabaseDescriptor, DatabaseSnapshot,
     InactiveEntity, InstallationRecord, LifecycleState, ProjectPathState, ProjectRecord,
-    RecentWorkspaceRecord, SnapshotQuery, WorkspaceConversationStateRecord, WorkspaceRecord,
+    RecentWorkspaceRecord, SnapshotQuery, WorkspaceArtifactDocumentRecord,
+    WorkspaceArtifactUiStateRecord, WorkspaceConversationStateRecord, WorkspaceRecord,
 };
+use c4os_lib::runtime::opencode_native::sha256_bytes;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -48,6 +57,148 @@ fn chat_record(workspace_id: &str, project_id: &str, chat_id: &str) -> database:
     }
 }
 
+fn file_artifact_document(
+    artifact_id: &str,
+    content: &str,
+    record_revision: u64,
+    updated_at_ms: u64,
+) -> WorkspaceArtifactDocumentRecord {
+    let provider = ArtifactProviderDescriptor::file();
+    let artifact = ArtifactRecord {
+        schema_version: ARTIFACT_SCHEMA_VERSION,
+        artifact_id: artifact_id.into(),
+        workspace_id: "workspace-1".into(),
+        project_id: "project-1".into(),
+        session_id: "chat-1".into(),
+        provider: provider.clone(),
+        source: ArtifactSource::DirectOperation {
+            operation_id: "operation-1".into(),
+        },
+        record_revision,
+        lifecycle: ArtifactLifecycle::Ready,
+        state: ArtifactState::File(Box::new(
+            FileArtifactState::new(
+                FileResourceReference::new("notes.txt", "notes.txt").expect("file resource"),
+                "notes.txt",
+                "text/plain",
+                content,
+                FileLiveVersion::new(
+                    record_revision,
+                    sha256_bytes(content.as_bytes()),
+                    content.len() as u64,
+                    updated_at_ms,
+                )
+                .expect("live version"),
+            )
+            .expect("file state"),
+        )),
+        history: Vec::new(),
+        created_at_ms: NOW as u64,
+        updated_at_ms,
+    };
+    artifact.validate().expect("artifact record");
+    WorkspaceArtifactDocumentRecord {
+        workspace_id: artifact.workspace_id.clone(),
+        project_id: artifact.project_id.clone(),
+        session_id: artifact.session_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        provider_kind: artifact.provider.type_id.clone(),
+        provider_version: artifact.provider.schema_version,
+        state_schema_version: artifact.schema_version,
+        revision: artifact.record_revision,
+        canonical_document: serde_json::to_string(&artifact).expect("serialize artifact"),
+        updated_at_ms: artifact.updated_at_ms,
+    }
+}
+
+fn converted_folder_artifact_document(
+    previous: &WorkspaceArtifactDocumentRecord,
+    updated_at_ms: u64,
+) -> WorkspaceArtifactDocumentRecord {
+    let mut artifact = serde_json::from_str::<ArtifactRecord>(&previous.canonical_document)
+        .expect("previous File artifact");
+    let entries = Vec::new();
+    artifact.provider = ArtifactProviderDescriptor::folder();
+    artifact.state = ArtifactState::Folder(Box::new(
+        FolderArtifactState::new(
+            FolderResourceReference::new("", "Project").expect("folder resource"),
+            vec![FolderBreadcrumb {
+                label: "Project".into(),
+                project_relative_path: String::new(),
+            }],
+            entries.clone(),
+            FolderListingVersion::from_entries(2, &entries, updated_at_ms).expect("folder version"),
+        )
+        .expect("folder state"),
+    ));
+    artifact.record_revision = previous.revision + 1;
+    artifact.updated_at_ms = updated_at_ms;
+    let state_sha256 =
+        sha256_bytes(&serde_json::to_vec(&artifact.state).expect("serialize converted state"));
+    artifact
+        .append_history(ArtifactHistoryEntry {
+            record_revision: artifact.record_revision,
+            resource_version: artifact.resource_version(),
+            state_sha256,
+            kind: ArtifactHistoryKind::Converted,
+            recorded_at_ms: updated_at_ms,
+        })
+        .expect("explicit conversion history");
+    artifact.validate().expect("converted artifact");
+    WorkspaceArtifactDocumentRecord {
+        workspace_id: artifact.workspace_id.clone(),
+        project_id: artifact.project_id.clone(),
+        session_id: artifact.session_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        provider_kind: artifact.provider.type_id.clone(),
+        provider_version: artifact.provider.schema_version,
+        state_schema_version: artifact.schema_version,
+        revision: artifact.record_revision,
+        canonical_document: serde_json::to_string(&artifact).expect("serialize converted artifact"),
+        updated_at_ms,
+    }
+}
+
+fn unsupported_provider_artifact_document(
+    previous: &WorkspaceArtifactDocumentRecord,
+    updated_at_ms: u64,
+) -> WorkspaceArtifactDocumentRecord {
+    let mut artifact = serde_json::from_str::<ArtifactRecord>(&previous.canonical_document)
+        .expect("previous File artifact");
+    let resource_version = artifact.resource_version();
+    artifact.provider = ArtifactProviderDescriptor {
+        schema_version: 2,
+        type_id: "future-provider".into(),
+        label: "Future".into(),
+        accessible_name: "Future artifact".into(),
+        focus: ArtifactFocusCapability::InlineOnly,
+    };
+    artifact.lifecycle = ArtifactLifecycle::UnknownVersion {
+        provider_schema_version: 2,
+    };
+    artifact.state = ArtifactState::Unknown(UnknownArtifactState {
+        provider_schema_version: 2,
+        state_sha256: sha256_bytes(b"future-state"),
+        resource_version,
+    });
+    artifact.record_revision = previous.revision + 1;
+    artifact.updated_at_ms = updated_at_ms;
+    artifact.validate().expect("unsupported provider artifact");
+    WorkspaceArtifactDocumentRecord {
+        workspace_id: artifact.workspace_id.clone(),
+        project_id: artifact.project_id.clone(),
+        session_id: artifact.session_id.clone(),
+        artifact_id: artifact.artifact_id.clone(),
+        provider_kind: artifact.provider.type_id.clone(),
+        provider_version: artifact.provider.schema_version,
+        state_schema_version: artifact.schema_version,
+        revision: artifact.record_revision,
+        canonical_document: serde_json::to_string(&artifact)
+            .expect("serialize unsupported provider artifact"),
+        updated_at_ms,
+    }
+}
+
 fn workspace_snapshot(
     actor: &DatabaseActor,
     include_inactive: bool,
@@ -72,7 +223,7 @@ fn conversation_state_is_workspace_owned_cas_and_survives_restart() {
     );
     {
         let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
-        assert_eq!(report.current_version, 4);
+        assert_eq!(report.current_version, 5);
         actor
             .create_workspace(workspace_record("workspace-1", "Workspace"))
             .expect("seed Workspace");
@@ -115,13 +266,399 @@ fn conversation_state_is_workspace_owned_cas_and_survives_restart() {
             .expect("replacement state");
     }
     let (actor, report) = DatabaseActor::start(descriptor).expect("restart Workspace database");
-    assert_eq!(report.previous_version, 4);
+    assert_eq!(report.previous_version, 5);
     let restored = actor
         .conversation_state()
         .expect("read state")
         .expect("state exists");
     assert_eq!(restored.generation, 2);
     assert!(restored.canonical_document.contains("keep me"));
+}
+
+#[test]
+fn artifact_documents_are_versioned_workspace_owned_and_survive_restart() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    let revision_one = file_artifact_document("artifact-1", "one", 1, NOW as u64);
+    let revision_two = file_artifact_document("artifact-1", "two", 2, NOW as u64 + 1);
+    {
+        let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+        assert_eq!(report.current_version, 5);
+        actor
+            .create_workspace(workspace_record("workspace-1", "Workspace"))
+            .expect("seed Workspace");
+        actor
+            .add_project(project_record("workspace-1", "project-1", 0))
+            .expect("seed Project");
+        actor
+            .add_chat(chat_record("workspace-1", "project-1", "chat-1"))
+            .expect("seed Chat");
+        actor
+            .save_artifact_document(revision_one.clone(), None)
+            .expect("create artifact");
+        let stale = actor
+            .save_artifact_document(revision_two.clone(), None)
+            .expect_err("an update without the exact base revision must fail");
+        assert!(stale.to_string().contains("expected revision"));
+        actor
+            .save_artifact_document(revision_two.clone(), Some(1))
+            .expect("replace artifact at exact revision");
+        let ui_state = ArtifactWorkspaceUiState {
+            schema_version: ARTIFACT_SCHEMA_VERSION,
+            workspace_id: "workspace-1".into(),
+            revision: 1,
+            focused_artifact_id: Some("artifact-1".into()),
+            updated_at_ms: NOW as u64 + 2,
+        };
+        actor
+            .save_artifact_ui_state(
+                WorkspaceArtifactUiStateRecord {
+                    workspace_id: "workspace-1".into(),
+                    revision: 1,
+                    canonical_document: serde_json::to_string(&ui_state)
+                        .expect("serialize artifact UI state"),
+                    updated_at_ms: NOW as u64 + 2,
+                },
+                None,
+            )
+            .expect("persist artifact focus");
+        let stale_focus = actor.save_artifact_ui_state(
+            WorkspaceArtifactUiStateRecord {
+                workspace_id: "workspace-1".into(),
+                revision: 2,
+                canonical_document: serde_json::to_string(&ArtifactWorkspaceUiState {
+                    schema_version: ARTIFACT_SCHEMA_VERSION,
+                    workspace_id: "workspace-1".into(),
+                    revision: 2,
+                    focused_artifact_id: None,
+                    updated_at_ms: NOW as u64 + 3,
+                })
+                .expect("serialize stale focus"),
+                updated_at_ms: NOW as u64 + 3,
+            },
+            None,
+        );
+        assert!(
+            stale_focus
+                .expect_err("focus replacement needs exact revision")
+                .to_string()
+                .contains("expected revision")
+        );
+        assert_eq!(
+            actor
+                .artifact_documents_for_session("chat-1")
+                .expect("session artifacts"),
+            vec![revision_two.clone()]
+        );
+    }
+
+    let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("restart Workspace");
+    assert_eq!(report.previous_version, 5);
+    assert_eq!(
+        actor
+            .artifact_document("artifact-1")
+            .expect("read artifact"),
+        Some(revision_two)
+    );
+    assert!(
+        actor
+            .artifact_ui_state()
+            .expect("read artifact UI state")
+            .expect("artifact UI state exists")
+            .canonical_document
+            .contains("artifact-1")
+    );
+    drop(actor);
+    let connection = Connection::open(&descriptor.path).expect("inspect immutable history");
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM artifact_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("artifact event count"),
+        2
+    );
+}
+
+#[test]
+fn artifact_provider_identity_changes_only_through_explicit_file_folder_conversion() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    let (actor, _) = DatabaseActor::start(descriptor).expect("Workspace database");
+    actor
+        .create_workspace(workspace_record("workspace-1", "Workspace"))
+        .expect("seed Workspace");
+    actor
+        .add_project(project_record("workspace-1", "project-1", 0))
+        .expect("seed Project");
+    actor
+        .add_chat(chat_record("workspace-1", "project-1", "chat-1"))
+        .expect("seed Chat");
+    let file = file_artifact_document("artifact-1", "one", 1, NOW as u64);
+    actor
+        .save_artifact_document(file.clone(), None)
+        .expect("create File artifact");
+
+    let unsupported = unsupported_provider_artifact_document(&file, NOW as u64 + 1);
+    assert!(
+        actor
+            .save_artifact_document(unsupported, Some(1))
+            .expect_err("arbitrary provider mutation must fail")
+            .to_string()
+            .contains("expected revision")
+    );
+
+    let folder = converted_folder_artifact_document(&file, NOW as u64 + 2);
+    actor
+        .save_artifact_document(folder.clone(), Some(1))
+        .expect("explicit File-to-Folder conversion");
+    assert_eq!(
+        actor
+            .artifact_document("artifact-1")
+            .expect("read converted artifact")
+            .expect("converted artifact exists")
+            .provider_kind,
+        "folder"
+    );
+    assert!(folder.canonical_document.contains("converted"));
+}
+
+#[test]
+fn artifact_session_capacity_is_checked_before_current_or_event_state_changes() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    let (actor, _) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+    actor
+        .create_workspace(workspace_record("workspace-1", "Workspace"))
+        .expect("seed Workspace");
+    actor
+        .add_project(project_record("workspace-1", "project-1", 0))
+        .expect("seed Project");
+    actor
+        .add_chat(chat_record("workspace-1", "project-1", "chat-1"))
+        .expect("seed Chat");
+    let connection = Connection::open(&descriptor.path).expect("open capacity fixture");
+    connection
+        .execute_batch(
+            "PRAGMA foreign_keys = ON;
+             WITH RECURSIVE counter(value) AS (
+                SELECT 1 UNION ALL SELECT value + 1 FROM counter WHERE value < 4096
+             )
+             INSERT INTO artifact_records(
+                workspace_id, project_id, session_id, artifact_id, provider_kind,
+                provider_version, state_schema_version, revision, canonical_document,
+                document_sha256, updated_at_ms
+             )
+             SELECT 'workspace-1', 'project-1', 'chat-1', 'fixture-' || value,
+                    'file', 1, 1, 1, '{}',
+                    '0000000000000000000000000000000000000000000000000000000000000000',
+                    1721260800 + value
+             FROM counter;
+             INSERT INTO artifact_events(
+                workspace_id, project_id, session_id, artifact_id, provider_kind,
+                provider_version, state_schema_version, revision, canonical_document,
+                document_sha256, updated_at_ms
+             )
+             SELECT workspace_id, project_id, session_id, artifact_id, provider_kind,
+                    provider_version, state_schema_version, revision, canonical_document,
+                    document_sha256, updated_at_ms
+             FROM artifact_records;",
+        )
+        .expect("fill exact session capacity");
+    drop(connection);
+
+    let error = actor
+        .save_artifact_document(
+            file_artifact_document("artifact-overflow", "one", 1, NOW as u64),
+            None,
+        )
+        .expect_err("capacity must fail before insertion");
+    assert!(error.to_string().contains("session artifact capacity"));
+    let connection = Connection::open(&descriptor.path).expect("inspect capacity state");
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM artifact_records", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("record count"),
+        4096
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM artifact_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("event count"),
+        4096
+    );
+}
+
+#[test]
+fn workspace_v4_upgrades_to_artifact_schema_without_changing_existing_records() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    {
+        let (actor, _) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+        actor
+            .create_workspace(workspace_record("workspace-1", "Workspace"))
+            .expect("seed Workspace");
+        actor
+            .add_project(project_record("workspace-1", "project-1", 0))
+            .expect("seed Project");
+        actor
+            .add_chat(chat_record("workspace-1", "project-1", "chat-1"))
+            .expect("seed Chat");
+    }
+    let connection = Connection::open(&descriptor.path).expect("prepare v4 fixture");
+    connection
+        .execute_batch(
+            "DROP TABLE artifact_workspace_state;
+             DROP TABLE artifact_events;
+             DROP TABLE artifact_records;
+             PRAGMA user_version = 4;",
+        )
+        .expect("downgrade fixture to real pre-artifact schema");
+    drop(connection);
+
+    let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("upgrade v4 Workspace");
+    assert_eq!(report.previous_version, 4);
+    assert_eq!(report.current_version, 5);
+    let snapshot = workspace_snapshot(&actor, false);
+    assert_eq!(snapshot.projects[0].project_id, "project-1");
+    assert_eq!(snapshot.chats[0].chat_id, "chat-1");
+    drop(actor);
+    let connection = Connection::open(&descriptor.path).expect("inspect upgraded schema");
+    for table in [
+        "artifact_records",
+        "artifact_events",
+        "artifact_workspace_state",
+    ] {
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("artifact table"),
+            1
+        );
+    }
+}
+
+#[test]
+fn corrupted_artifact_ui_state_fails_closed_on_restart() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    {
+        let (actor, _) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+        actor
+            .create_workspace(workspace_record("workspace-1", "Workspace"))
+            .expect("seed Workspace");
+        actor
+            .save_artifact_ui_state(
+                WorkspaceArtifactUiStateRecord {
+                    workspace_id: "workspace-1".into(),
+                    revision: 1,
+                    canonical_document: serde_json::to_string(&ArtifactWorkspaceUiState {
+                        schema_version: ARTIFACT_SCHEMA_VERSION,
+                        workspace_id: "workspace-1".into(),
+                        revision: 1,
+                        focused_artifact_id: None,
+                        updated_at_ms: NOW as u64,
+                    })
+                    .expect("serialize UI state"),
+                    updated_at_ms: NOW as u64,
+                },
+                None,
+            )
+            .expect("persist UI state");
+    }
+    let connection = Connection::open(&descriptor.path).expect("corrupt UI state");
+    connection
+        .execute(
+            "UPDATE artifact_workspace_state SET canonical_document = '{}'",
+            [],
+        )
+        .expect("corrupt UI document without digest");
+    drop(connection);
+    let error = match DatabaseActor::start(descriptor.clone()) {
+        Ok(_) => panic!("corrupt Artifact UI state must fail closed"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("artifact UI state digest mismatch")
+    );
+    assert!(database::migration_diagnostic_path(&descriptor).exists());
+}
+
+#[test]
+fn corrupted_artifact_document_fails_closed_on_restart() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    {
+        let (actor, _) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+        actor
+            .create_workspace(workspace_record("workspace-1", "Workspace"))
+            .expect("seed Workspace");
+        actor
+            .add_project(project_record("workspace-1", "project-1", 0))
+            .expect("seed Project");
+        actor
+            .add_chat(chat_record("workspace-1", "project-1", "chat-1"))
+            .expect("seed Chat");
+        actor
+            .save_artifact_document(
+                file_artifact_document("artifact-1", "one", 1, NOW as u64),
+                None,
+            )
+            .expect("create artifact");
+    }
+    let connection = Connection::open(&descriptor.path).expect("open database for corruption");
+    connection
+        .execute(
+            "UPDATE artifact_records SET canonical_document = '{\"corrupt\":true}'",
+            [],
+        )
+        .expect("corrupt artifact without its digest");
+    drop(connection);
+
+    let error = match DatabaseActor::start(descriptor.clone()) {
+        Ok(_) => panic!("corrupt artifact must fail closed"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("artifact document digest mismatch")
+    );
+    assert!(database::migration_diagnostic_path(&descriptor).exists());
 }
 
 #[test]
@@ -355,7 +892,7 @@ fn workspace_migration_recovery_and_writer_lock_stay_outside_portable_root() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 4).expect("Workspace backup path");
+        database::migration_backup_path(&descriptor, 99, 5).expect("Workspace backup path");
     let diagnostic_path = database::migration_diagnostic_path(&descriptor);
     let writer_lock_path = descriptor
         .recovery_dir
@@ -477,7 +1014,7 @@ fn pre_promotion_inspector_is_read_only_bounded_and_fails_closed() {
             .including_inactive(),
     )
     .expect("semantic inspection");
-    assert_eq!(inspection.schema_version, 4);
+    assert_eq!(inspection.schema_version, 5);
     assert_eq!(inspection.snapshot.projects.len(), 1);
     assert_eq!(inspection.snapshot.chats.len(), 1);
     assert!(inspection.snapshot.truncated);

@@ -1,4 +1,5 @@
 pub mod environment;
+pub mod filesystem;
 pub mod git;
 
 pub use environment::{
@@ -8,6 +9,13 @@ pub use environment::{
     ExecutionError, FilesystemObjectIdentity, FilesystemObjectKind, NamedSshExecutionProfile,
     ResolvedTargetIdentity, SshProfileValidation, TrustedProjectRoot, WorkerExecutionReport,
     WorkerInvocation,
+};
+
+pub use filesystem::{
+    ExpectedFileState, FileRead, FileVersion, FileWriteOutcome, FolderEntry, FolderEntryKind,
+    FolderListing, MAX_PROJECT_FILE_BYTES, MAX_PROJECT_FOLDER_ENTRIES,
+    MAX_PROJECT_FOLDER_NAME_BYTES, ProjectFilesystem, ProjectFilesystemError,
+    ProjectFilesystemLimits,
 };
 
 pub use git::{

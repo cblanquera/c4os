@@ -1,0 +1,140 @@
+.artifact-file__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.artifact-file__breadcrumbs {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.artifact-file__breadcrumbs ol {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.artifact-file__breadcrumbs li {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.artifact-file__breadcrumbs li:not(:last-child)::after {
+  margin-inline: 3px;
+  color: var(--text-secondary);
+  content: "/";
+}
+
+.artifact-file__breadcrumbs button[aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.artifact-file__controls {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.artifact-file__body {
+  min-width: max-content;
+  min-height: 100%;
+  background: var(--surface-sunken);
+}
+
+.artifact-file__proposal-diff {
+  max-height: 180px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-block-end: 1px solid var(--border-separator);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-family: var(--font-monospace);
+  font-size: 0.76rem;
+  white-space: pre;
+}
+
+.artifact-file__body > [role="status"],
+.artifact-file__body > [role="alert"] {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 8px 12px;
+  border-block-end: 1px solid var(--border-separator);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.artifact-file__body > [role="alert"] {
+  color: var(--danger);
+}
+
+.artifact-file__read-lines,
+.artifact-file__line-numbers {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.artifact-file__read-lines {
+  padding: 12px 18px 20px 54px;
+  background: var(--surface-raised);
+}
+
+.artifact-file__read-lines li {
+  padding-inline-start: 10px;
+  white-space: pre;
+}
+
+.artifact-file__read-lines li::marker,
+.artifact-file__line-numbers {
+  color: var(--text-secondary);
+}
+
+.artifact-file__editor {
+  display: grid;
+  min-width: 640px;
+  min-height: 100%;
+  grid-template-columns: auto minmax(560px, 1fr);
+  background: var(--surface-raised);
+}
+
+.artifact-file__line-numbers {
+  padding: 12px 10px 20px 34px;
+  border-inline-end: 1px solid var(--border-separator);
+  user-select: none;
+}
+
+.artifact-file__editor textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: 12px 14px 20px;
+  overflow: auto;
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.artifact-file__editor textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}

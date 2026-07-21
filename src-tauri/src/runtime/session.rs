@@ -20,6 +20,7 @@ use crate::runtime::capability::{
 pub const SESSION_SCHEMA_VERSION: u16 = 3;
 pub const MAX_SESSION_IDENTIFIER_BYTES: usize = 160;
 pub const MAX_SESSION_TEXT_BYTES: usize = 1_048_576;
+pub const MAX_REPLY_SOURCE_EXCERPT_BYTES: usize = 256 * 1_024;
 /// Accepted Chat titles occupy at most 48 visible characters. A truncated
 /// title reserves the final character for the ellipsis so the complete value
 /// remains inside that bound.
@@ -201,6 +202,8 @@ pub struct MessageReplyContextSnapshot {
     pub target_kind: String,
     pub source_sha256: String,
     pub source_excerpt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_context: Option<crate::artifact::ArtifactContextSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -890,14 +893,34 @@ impl UserTurnRecord {
 impl MessageReplyContextSnapshot {
     fn validate(&self) -> Result<(), SessionError> {
         validate_identifier("Reply target id", &self.target_id)?;
-        if !matches!(
+        let message_target = matches!(
             self.target_kind.as_str(),
             "user-message" | "assistant-message"
-        ) {
+        );
+        let artifact_target = matches!(
+            self.target_kind.as_str(),
+            "file" | "folder" | "browser" | "terminal"
+        );
+        if (!message_target && !artifact_target)
+            || message_target != self.artifact_context.is_none()
+        {
             return Err(SessionError::InvalidRecord("Reply target kind"));
         }
+        if let Some(context) = &self.artifact_context {
+            context
+                .validate()
+                .map_err(|_| SessionError::InvalidRecord("Artifact Reply context"))?;
+            if context.artifact_id != self.target_id || context.provider_type != self.target_kind {
+                return Err(SessionError::InvalidRecord("Artifact Reply identity"));
+            }
+        }
         validate_sha256(&self.source_sha256)?;
-        validate_bounded_text("Reply source excerpt", &self.source_excerpt, 4_096, false)
+        validate_bounded_text(
+            "Reply source excerpt",
+            &self.source_excerpt,
+            MAX_REPLY_SOURCE_EXCERPT_BYTES,
+            false,
+        )
     }
 }
 

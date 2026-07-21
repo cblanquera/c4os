@@ -1,7 +1,11 @@
 import { invokeNative } from "./native-transport";
+import type { ConversationArtifactCapabilitySnapshot as GeneratedConversationArtifactCapabilitySnapshot } from "../generated/ConversationArtifactCapabilitySnapshot";
+import type { ConversationArtifactContextSegmentSnapshot as GeneratedConversationArtifactContextSegmentSnapshot } from "../generated/ConversationArtifactContextSegmentSnapshot";
+import type { ConversationArtifactContextSnapshot as GeneratedConversationArtifactContextSnapshot } from "../generated/ConversationArtifactContextSnapshot";
 import {
   MAX_IDENTIFIER_BYTES,
   PROTOCOL_VERSION,
+  type ArtifactId,
   type AttachmentId,
   type AttemptId,
   type CorrelationId,
@@ -66,10 +70,44 @@ export interface ConversationSessionSummarySnapshot {
   readonly updatedAtMs: number;
 }
 
+type ConversationArtifactContextSegmentSnapshot = Omit<
+  Readonly<GeneratedConversationArtifactContextSegmentSnapshot>,
+  "priority"
+> & {
+  readonly priority: "selection" | "visibleOrCurrent" | "recent" | "metadata";
+};
+
+type ConversationArtifactCapabilitySnapshot = Omit<
+  Readonly<GeneratedConversationArtifactCapabilitySnapshot>,
+  "access"
+> & {
+  readonly access: "readable" | "approvalRequired" | "denied" | "unknown";
+};
+
+export type ConversationArtifactContextSnapshot = Omit<
+  Readonly<GeneratedConversationArtifactContextSnapshot>,
+  | "artifactId"
+  | "capabilities"
+  | "payloadKind"
+  | "projectId"
+  | "providerType"
+  | "segments"
+  | "sessionId"
+> & {
+  readonly artifactId: ArtifactId;
+  readonly projectId: ProjectId;
+  readonly sessionId: SessionId;
+  readonly providerType: "file" | "folder" | "browser" | "terminal";
+  readonly payloadKind: "file" | "folder" | "browser" | "terminal";
+  readonly segments: readonly ConversationArtifactContextSegmentSnapshot[];
+  readonly capabilities: readonly ConversationArtifactCapabilitySnapshot[];
+};
+
 export interface ConversationTurnSnapshot {
   readonly turnId: TurnId;
   readonly prompt: string | null;
   readonly attachments: readonly ConversationAttachmentSnapshot[];
+  readonly artifactContext: ConversationArtifactContextSnapshot | null;
   readonly submittedAtMs: number;
 }
 
@@ -694,6 +732,10 @@ function parseActiveConversation(raw: unknown): ConversationSessionSnapshot {
         attachments: array(turn.attachments, 64, "attachments").map(
           parseAttachment,
         ),
+        artifactContext:
+          turn.artifactContext === null
+            ? null
+            : parseArtifactContext(turn.artifactContext),
         submittedAtMs: nonnegative(turn.submittedAtMs, "turn timestamp"),
       };
     }),
@@ -702,6 +744,178 @@ function parseActiveConversation(raw: unknown): ConversationSessionSnapshot {
       value.activeAttemptId,
       "attempt ID",
     ) as AttemptId | null,
+  };
+}
+
+export function parseArtifactContext(
+  raw: unknown,
+): ConversationArtifactContextSnapshot {
+  const value = record(raw, "Artifact Reply context");
+  const providerType = oneOf(
+    value.providerType,
+    ["file", "folder", "browser", "terminal"] as const,
+    "Artifact context provider",
+  );
+  const payloadKind = oneOf(
+    value.payloadKind,
+    ["file", "folder", "browser", "terminal"] as const,
+    "Artifact context payload",
+  );
+  if (providerType !== payloadKind) {
+    throw boundary(
+      "invalidPayload",
+      "Artifact context provider and payload changed.",
+    );
+  }
+  const resource = record(
+    value.capturedResourceVersion,
+    "Artifact resource version",
+  );
+  const sha256 = text(resource.sha256, "Artifact resource digest");
+  if (!/^sha256:[a-f0-9]{64}$/.test(sha256)) {
+    throw boundary("invalidPayload", "Artifact resource digest is invalid.");
+  }
+  const segments = array(value.segments, 32, "Artifact context segments").map(
+    (rawSegment) => {
+      const segment = record(rawSegment, "Artifact context segment");
+      const textValue = textAllowEmpty(segment.text, "Artifact context text");
+      const originalBytes = nonnegative(
+        segment.originalBytes,
+        "Artifact context original bytes",
+      );
+      const omittedBytes = nonnegative(
+        segment.omittedBytes,
+        "Artifact context omitted bytes",
+      );
+      if (
+        new TextEncoder().encode(textValue).length + omittedBytes !==
+        originalBytes
+      ) {
+        throw boundary(
+          "invalidPayload",
+          "Artifact context segment budget changed.",
+        );
+      }
+      return {
+        priority: oneOf(
+          segment.priority,
+          ["selection", "visibleOrCurrent", "recent", "metadata"] as const,
+          "Artifact context priority",
+        ),
+        source: identifier(segment.source, "Artifact context source"),
+        text: textValue,
+        originalBytes,
+        omittedBytes,
+      };
+    },
+  );
+  const maximumBytes = positiveInteger(
+    value.maximumBytes,
+    "Artifact context maximum bytes",
+  );
+  const usedBytes = nonnegative(value.usedBytes, "Artifact context used bytes");
+  const omittedBytes = nonnegative(
+    value.omittedBytes,
+    "Artifact context omitted bytes",
+  );
+  const omittedSegments = nonnegative(
+    value.omittedSegments,
+    "Artifact context omitted segments",
+  );
+  const computedUsed = segments.reduce(
+    (total, segment) => total + new TextEncoder().encode(segment.text).length,
+    0,
+  );
+  const computedOmitted = segments.reduce(
+    (total, segment) => total + segment.omittedBytes,
+    0,
+  );
+  const computedOmittedSegments = segments.filter(
+    (segment) => segment.text.length === 0 && segment.originalBytes > 0,
+  ).length;
+  const truncated = booleanValue(value.truncated, "Artifact truncation");
+  if (
+    maximumBytes > 4 * 1_024 * 1_024 ||
+    usedBytes > maximumBytes ||
+    usedBytes !== computedUsed ||
+    omittedBytes !== computedOmitted ||
+    omittedSegments !== computedOmittedSegments ||
+    truncated !== omittedBytes > 0
+  ) {
+    throw boundary("invalidPayload", "Artifact context budget is invalid.");
+  }
+  const stableReference = largeBoundedText(
+    value.stableReference,
+    "Artifact stable reference",
+    512,
+  );
+  if (!/^[A-Za-z0-9_.:@-]+$/.test(stableReference)) {
+    throw boundary(
+      "invalidIdentifier",
+      "Artifact stable reference is invalid.",
+    );
+  }
+  return {
+    snapshotId: identifier(value.snapshotId, "Artifact context snapshot ID"),
+    stableReference,
+    artifactId: identifier(value.artifactId, "Artifact ID") as ArtifactId,
+    projectId: identifier(value.projectId, "Project ID") as ProjectId,
+    sessionId: identifier(value.sessionId, "session ID") as SessionId,
+    providerType,
+    providerVersion: positiveInteger(
+      value.providerVersion,
+      "Artifact provider version",
+    ),
+    artifactRecordRevision: positiveInteger(
+      value.artifactRecordRevision,
+      "Artifact record revision",
+    ),
+    capturedResourceVersion: {
+      sequence: positiveInteger(
+        resource.sequence,
+        "Artifact resource sequence",
+      ),
+      sha256,
+      observedAtMs: positiveInteger(
+        resource.observedAtMs,
+        "Artifact resource timestamp",
+      ),
+    },
+    payloadKind,
+    segments,
+    maximumBytes,
+    usedBytes,
+    omittedBytes,
+    omittedSegments,
+    truncated,
+    unsaved: booleanValue(value.unsaved, "Artifact unsaved state"),
+    redactions: array(value.redactions, 64, "Artifact redactions").map(
+      (redaction) => identifier(redaction, "Artifact redaction"),
+    ),
+    capabilities: array(value.capabilities, 128, "Artifact capabilities").map(
+      (rawCapability) => {
+        const capability = record(rawCapability, "Artifact capability");
+        return {
+          capabilityId: identifier(
+            capability.capabilityId,
+            "Artifact capability ID",
+          ),
+          access: oneOf(
+            capability.access,
+            ["readable", "approvalRequired", "denied", "unknown"] as const,
+            "Artifact capability access",
+          ),
+          reasonCode: nullableIdentifier(
+            capability.reasonCode,
+            "Artifact capability reason",
+          ),
+        };
+      },
+    ),
+    capturedAtMs: positiveInteger(
+      value.capturedAtMs,
+      "Artifact capture timestamp",
+    ),
   };
 }
 
@@ -881,6 +1095,17 @@ function record(value: unknown, label: string): Record<string, unknown> {
     throw boundary("invalidPayload", `${label} is invalid.`);
   }
   return value as Record<string, unknown>;
+}
+
+function oneOf<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values,
+  label: string,
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) {
+    throw boundary("invalidPayload", `${label} is invalid.`);
+  }
+  return value as Values[number];
 }
 
 function text(value: unknown, label: string): string {

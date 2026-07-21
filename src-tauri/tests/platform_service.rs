@@ -167,6 +167,18 @@ fn cancellation_is_correlated_and_contains_no_grant() {
 }
 
 #[test]
+fn artifact_folder_picker_is_single_folder_only() {
+    let request = service().picker_request(
+        request_id("picker-artifact-folder"),
+        PickerPurpose::OpenFolder,
+    );
+
+    assert_eq!(request.selection.object_kind, PickerObjectKind::Folder);
+    assert!(!request.selection.allows_multiple);
+    assert!(request.selection.allowed_extensions.is_empty());
+}
+
+#[test]
 fn selected_result_exposes_only_opaque_correlated_grants() {
     let platform = service();
     let request = platform.picker_request(

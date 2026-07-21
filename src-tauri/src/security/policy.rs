@@ -500,6 +500,7 @@ pub enum DecisionSource {
     Exception(String),
     MaximumAuthority(String),
     ManagedRequirement(String),
+    InterruptedApprovalRecovery,
     UnknownOrIncomplete,
     Sandbox,
     UntrustedWorkspaceTarget,

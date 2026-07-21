@@ -26,7 +26,8 @@ export type PickerPurpose =
   | "openWorkspaceArchive"
   | "saveWorkspaceArchive"
   | "attachChatFiles"
-  | "openFile";
+  | "openFile"
+  | "openFolder";
 export type PickerObjectKind = "file" | "folder";
 
 export interface PlatformSnapshot {
@@ -250,7 +251,9 @@ function createPickerRequest(
   purpose: PickerPurpose,
 ): NativePickerRequest {
   const isFolder =
-    purpose === "openProjectFolder" || purpose === "relocateProjectFolder";
+    purpose === "openProjectFolder" ||
+    purpose === "relocateProjectFolder" ||
+    purpose === "openFolder";
   return {
     contractVersion: PICKER_CONTRACT_VERSION,
     requestId,

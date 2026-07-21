@@ -192,6 +192,9 @@ export function conversationPublications(
             stableReference: attachment.stableReference,
             referenceNumber: attachment.originalReference,
           })),
+          ...(turn.artifactContext === null
+            ? {}
+            : { artifactContext: turn.artifactContext }),
         };
         const attempts = activeConversation.attempts.filter(
           (candidate) => candidate.turnId === turn.turnId,

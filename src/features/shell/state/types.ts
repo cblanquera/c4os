@@ -77,6 +77,32 @@ export type ConversationTurnProjection = {
     readonly stableReference: string;
     readonly referenceNumber: number;
   }[];
+  readonly artifactContext?: {
+    readonly snapshotId: string;
+    readonly stableReference: string;
+    readonly artifactId: string;
+    readonly providerType: "file" | "folder" | "browser" | "terminal";
+    readonly providerVersion: number;
+    readonly artifactRecordRevision: number;
+    readonly segments: readonly {
+      readonly priority:
+        "selection" | "visibleOrCurrent" | "recent" | "metadata";
+      readonly source: string;
+      readonly text: string;
+      readonly originalBytes: number;
+      readonly omittedBytes: number;
+    }[];
+    readonly maximumBytes: number;
+    readonly usedBytes: number;
+    readonly omittedBytes: number;
+    readonly truncated: boolean;
+    readonly unsaved: boolean;
+    readonly capabilities: readonly {
+      readonly capabilityId: string;
+      readonly access: "readable" | "approvalRequired" | "denied" | "unknown";
+      readonly reasonCode: string | null;
+    }[];
+  };
   readonly modelLabel?: string;
   readonly runtimeId?: string;
   readonly runtimeLabel?: string;

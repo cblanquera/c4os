@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
-import { cloneElement, useId } from "react";
+import { cloneElement, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ConversationTranscriptProps } from "../ui";
 import "./conversation-focus.css";
@@ -9,6 +10,7 @@ import "./conversation-focus.css";
 export interface FocusedConversationArtifact {
   readonly content: ReactNode;
   readonly id: string;
+  readonly ownsClose?: boolean;
   readonly title: string;
   readonly type: "browser" | "file" | "folder" | "terminal" | "unknown";
 }
@@ -40,6 +42,14 @@ export function ConversationFocusComposition({
 }: ConversationFocusCompositionProps) {
   const contextualChatTitleId = useId();
   const focusedArtifactTitleId = useId();
+  const centerTranscriptMount = useRef<HTMLDivElement>(null);
+  const contextualTranscriptMount = useRef<HTMLDivElement>(null);
+  const [transcriptHost] = useState(() => {
+    const host = document.createElement("div");
+    host.className = "conversation-focus__transcript-host";
+    return host;
+  });
+  const hasFocusedArtifact = focusedArtifact !== null;
 
   // The transcript element is cloned exactly once so its placement metadata
   // always agrees with the one slot that receives the real conversation tree.
@@ -48,71 +58,111 @@ export function ConversationFocusComposition({
     placement: focusedArtifact === null ? "center" : "context-pane",
   });
 
+  // Keep one stable portal container and move that container between the two
+  // layout-owned mounts. React therefore preserves the original transcript
+  // component tree, DOM nodes, selection, and scroll state across focus.
+  useLayoutEffect(() => {
+    const mount = hasFocusedArtifact
+      ? contextualTranscriptMount.current
+      : centerTranscriptMount.current;
+    if (mount === null) return;
+    mount.appendChild(transcriptHost);
+    return () => {
+      if (transcriptHost.parentNode === mount) {
+        mount.removeChild(transcriptHost);
+      }
+    };
+  }, [hasFocusedArtifact, transcriptHost]);
+
+  const transcriptPortal = createPortal(
+    placedTranscript,
+    transcriptHost,
+    "conversation-transcript",
+  );
+
   // Ordinary Chat owns the center and does not reserve an empty contextual pane.
   if (focusedArtifact === null) {
-    return children({
-      center: (
-        <section
-          aria-label="Conversation center"
-          className="conversation-focus__center"
-          data-conversation-focus-state="chat"
-        >
-          {placedTranscript}
-        </section>
-      ),
-      contextualChat: null,
-    });
+    return (
+      <>
+        {children({
+          center: (
+            <section
+              aria-label="Conversation center"
+              className="conversation-focus__center"
+              data-conversation-focus-state="chat"
+            >
+              <div
+                className="conversation-focus__center-transcript"
+                ref={centerTranscriptMount}
+              />
+            </section>
+          ),
+          contextualChat: null,
+        })}
+        {transcriptPortal}
+      </>
+    );
   }
 
   // Explicit artifact focus replaces center while the same transcript element
   // appears only in the shell's contextual Chat slot.
-  return children({
-    center: (
-      <section
-        aria-labelledby={focusedArtifactTitleId}
-        className="conversation-focus__artifact"
-        data-artifact-id={focusedArtifact.id}
-        data-artifact-type={focusedArtifact.type}
-      >
-        <header className="conversation-focus__artifact-header">
-          <h2 id={focusedArtifactTitleId}>{focusedArtifact.title}</h2>
-          <button
-            type="button"
-            onClick={() => onCloseFocusedArtifact(focusedArtifact.id)}
+  return (
+    <>
+      {children({
+        center: (
+          <section
+            {...(focusedArtifact.ownsClose
+              ? { "aria-label": `Focused ${focusedArtifact.title}` }
+              : { "aria-labelledby": focusedArtifactTitleId })}
+            className="conversation-focus__artifact"
+            data-artifact-id={focusedArtifact.id}
+            data-artifact-type={focusedArtifact.type}
           >
-            Close
-          </button>
-        </header>
-        <div className="conversation-focus__artifact-content">
-          {focusedArtifact.content}
-        </div>
-      </section>
-    ),
-    contextualChat: (
-      <section
-        aria-labelledby={contextualChatTitleId}
-        className="conversation-focus__contextual-chat"
-        data-focused-artifact-id={focusedArtifact.id}
-      >
-        <header className="conversation-focus__contextual-header">
-          <h2 id={contextualChatTitleId}>Chat</h2>
-          <span className="conversation-focus__contextual-actions">
-            <button
-              type="button"
-              disabled
-              title="Detached Chat windows are not available"
-            >
-              Detach Chat
-            </button>
-            <button type="button" onClick={onRestoreChat}>
-              Restore Chat
-            </button>
-          </span>
-        </header>
-        <div className="conversation-focus__contextual-transcript">
-          {placedTranscript}
-        </div>
-      </section>
-    ),
-  });
+            {focusedArtifact.ownsClose ? null : (
+              <header className="conversation-focus__artifact-header">
+                <h2 id={focusedArtifactTitleId}>{focusedArtifact.title}</h2>
+                <button
+                  type="button"
+                  onClick={() => onCloseFocusedArtifact(focusedArtifact.id)}
+                >
+                  Close
+                </button>
+              </header>
+            )}
+            <div className="conversation-focus__artifact-content">
+              {focusedArtifact.content}
+            </div>
+          </section>
+        ),
+        contextualChat: (
+          <section
+            aria-labelledby={contextualChatTitleId}
+            className="conversation-focus__contextual-chat"
+            data-focused-artifact-id={focusedArtifact.id}
+          >
+            <header className="conversation-focus__contextual-header">
+              <h2 id={contextualChatTitleId}>Chat</h2>
+              <span className="conversation-focus__contextual-actions">
+                <button
+                  type="button"
+                  disabled
+                  title="Detached Chat windows are not available"
+                >
+                  Detach Chat
+                </button>
+                <button type="button" onClick={onRestoreChat}>
+                  Restore Chat
+                </button>
+              </span>
+            </header>
+            <div
+              className="conversation-focus__contextual-transcript"
+              ref={contextualTranscriptMount}
+            />
+          </section>
+        ),
+      })}
+      {transcriptPortal}
+    </>
+  );
 }

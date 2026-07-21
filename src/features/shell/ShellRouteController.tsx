@@ -26,6 +26,13 @@ import {
   type FocusedConversationArtifact,
 } from "../conversation/focus";
 import {
+  FileArtifact,
+  FolderArtifact,
+  UnknownArtifact,
+  type ArtifactContext,
+  type FileArtifactState,
+} from "../artifacts";
+import {
   ChatInformationPopover,
   ModelSelector,
   ReasoningEffortControl,
@@ -62,6 +69,28 @@ import {
   updateConversationDraft,
   type ConversationSnapshot,
 } from "../../platform/conversation-service";
+import {
+  answerArtifactApproval,
+  beginFileArtifactEdit,
+  closeArtifactFocus,
+  discardFileArtifactDraft,
+  focusArtifact,
+  navigateFolderArtifact,
+  openFileArtifact,
+  openFolderArtifact,
+  readArtifactWorkspaceSnapshot,
+  rejectFileArtifactProposal,
+  refreshFolderArtifact,
+  replyToArtifact,
+  resolveFileArtifactConflict,
+  saveFileArtifact,
+  selectFolderArtifactEntry,
+  updateFileArtifactDraft,
+  type ArtifactMutationInput,
+  type ArtifactSnapshot as NativeArtifactSnapshot,
+  type ArtifactWorkspaceSnapshot,
+  type ArtifactReplyInput,
+} from "../../platform/artifact-service";
 import { pickNative } from "../../platform/platform-service";
 import type {
   ArtifactId,
@@ -96,6 +125,7 @@ import {
   type ShellRoutePath,
 } from "./ui";
 import { publishConversationSnapshot } from "./native-bootstrap";
+import { artifactWorkspaceForActiveSession } from "./artifact-session";
 
 interface ShellRouteControllerProps {
   readonly route: ShellRoutePath;
@@ -135,6 +165,19 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const [pendingPickerGrantIds, setPendingPickerGrantIds] = useState<
     readonly PickerGrantId[]
   >([]);
+  const [artifactWorkspace, setArtifactWorkspace] =
+    useState<ArtifactWorkspaceSnapshot | null>(null);
+  const activeArtifactWorkspace = artifactWorkspaceForActiveSession(
+    artifactWorkspace,
+    sessions.value.activeSessionId,
+  );
+  const artifactWorkspaceRef = useRef<ArtifactWorkspaceSnapshot | null>(null);
+  const artifactOperationQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const artifactDraftTimers = useRef(new Map<string, number>());
+  const artifactDraftOverridesRef = useRef<Record<string, string>>({});
+  const [artifactDraftOverrides, setArtifactDraftOverrides] = useState<
+    Readonly<Record<string, string>>
+  >({});
   const replyReference = useMemo(
     () =>
       composerDraft.replyTargetId === null
@@ -142,8 +185,13 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
         : replyReferenceFromProjection(
             conversation.value.turns,
             composerDraft.replyTargetId,
+            activeArtifactWorkspace?.artifacts ?? [],
           ),
-    [composerDraft.replyTargetId, conversation.value.turns],
+    [
+      activeArtifactWorkspace?.artifacts,
+      composerDraft.replyTargetId,
+      conversation.value.turns,
+    ],
   );
   const [workExpanded, setWorkExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -191,6 +239,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     useState<string | null>(null);
   const persistedDraftSignature = useRef("");
   const attemptStatuses = useRef(new Map<string, string>());
+  const priorActiveAttemptId = useRef(conversation.value.activeAttemptId);
   const panelOpen = overlayPanel
     ? !uiDraft.panel.collapsed && uiDraft.panel.overlayOpen
     : !uiDraft.panel.collapsed;
@@ -235,65 +284,195 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     [dispatch],
   );
 
-  const syncPendingAttachments = (
-    snapshot: ConversationSnapshot,
-    replyReconciliation:
-      | {
-          readonly expectedReplyTargetId: string | null;
-          readonly force: boolean;
-        }
-      | undefined = undefined,
-  ) => {
-    dispatch(
-      shellDraftActions.composerAttachmentsReconciled({
-        attachments: snapshot.draft.attachments.map((attachment) => ({
-          id: attachment.attachmentId,
-          name: attachment.displayName,
-          byteLength: attachment.byteLength,
-          mediaType: attachment.mediaType,
-          stableReference: attachment.stableReference,
-          referenceNumber: attachment.originalReference,
-          compatibility: "ready",
-        })),
-        nextAttachmentReference: snapshot.draft.nextAttachmentReference,
-      }),
-    );
-    dispatch(shellDraftActions.composerTextChanged(snapshot.draft.prompt));
-    dispatch(shellDraftActions.composerModeChanged(snapshot.draft.mode));
-    if (replyReconciliation?.force) {
-      dispatch(
-        shellDraftActions.composerReplyChanged(snapshot.draft.replyTargetId),
+  const publishArtifactWorkspace = useCallback(
+    (snapshot: ArtifactWorkspaceSnapshot) => {
+      artifactWorkspaceRef.current = snapshot;
+      setArtifactWorkspace(snapshot);
+      const liveIds = new Set(
+        snapshot.artifacts.map(({ artifactId }) => artifactId),
       );
-    } else if (replyReconciliation) {
-      dispatch(
-        shellDraftActions.composerReplyReconciled({
-          expectedReplyTargetId: replyReconciliation.expectedReplyTargetId,
-          authoritativeReplyTargetId: snapshot.draft.replyTargetId,
-        }),
+      setArtifactDraftOverrides((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([artifactId]) =>
+            liveIds.has(artifactId as ArtifactId),
+          ),
+        ),
       );
-    }
-    if (snapshot.draft.providerId && snapshot.draft.modelId) {
-      setSelectedModelKey(
-        conversationModelKey({
-          providerId: snapshot.draft.providerId,
-          modelId: snapshot.draft.modelId,
-        }),
-      );
-    }
-    setSelectedReasoning(snapshot.draft.reasoningMode);
-    persistedDraftSignature.current = conversationDraftSignature({
-      prompt: snapshot.draft.prompt,
-      attachmentIds: snapshot.draft.attachments.map(
-        (attachment) => attachment.attachmentId,
+      if (snapshot.focusedArtifactId === null) {
+        dispatch(shellDraftActions.chatRestored());
+      } else {
+        dispatch(
+          shellDraftActions.artifactFocused({
+            artifactId: snapshot.focusedArtifactId,
+            restoreTarget: snapshot.focusedArtifactId,
+          }),
+        );
+      }
+    },
+    [dispatch],
+  );
+
+  const queueArtifactWorkspaceOperation = useCallback(
+    (
+      operation: () => Promise<ArtifactWorkspaceSnapshot>,
+      options: { readonly rebaseConversation?: boolean } = {},
+    ): Promise<ArtifactWorkspaceSnapshot> => {
+      const queued = artifactOperationQueue.current
+        .catch(() => undefined)
+        .then(operation)
+        .then(async (snapshot) => {
+          const conversationSnapshot = options.rebaseConversation
+            ? await readConversationSnapshot()
+            : null;
+          publishArtifactWorkspace(snapshot);
+          if (conversationSnapshot !== null) {
+            publishConversation(conversationSnapshot);
+          }
+          return snapshot;
+        });
+      artifactOperationQueue.current = queued;
+      queued.catch((error: unknown) => setConversationError(messageFor(error)));
+      return queued;
+    },
+    [publishArtifactWorkspace, publishConversation, setConversationError],
+  );
+
+  const queueArtifactMutation = useCallback(
+    (
+      artifactId: string,
+      operation: (
+        input: ArtifactMutationInput,
+      ) => Promise<ArtifactWorkspaceSnapshot>,
+    ): Promise<ArtifactWorkspaceSnapshot> =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          // Conversation and Artifact commands share the Workspace generation.
+          // Catch up after any intervening Conversation mutation before deriving
+          // the exact record revision for this Artifact mutation.
+          const latest = await readArtifactWorkspaceSnapshot();
+          const artifact = latest.artifacts.find(
+            (candidate) => candidate.artifactId === artifactId,
+          );
+          if (artifact === undefined) {
+            throw new Error("The Artifact is no longer available.");
+          }
+          return operation({
+            artifactId: artifact.artifactId,
+            baseRecordRevision: artifact.recordRevision,
+          });
+        },
+        { rebaseConversation: true },
       ),
-      providerId: snapshot.draft.providerId,
-      modelId: snapshot.draft.modelId,
-      reasoningMode: snapshot.draft.reasoningMode,
-      mode: snapshot.draft.mode,
-      replyTargetId: snapshot.draft.replyTargetId,
-    });
-    setPendingPickerGrantIds([]);
-  };
+    [queueArtifactWorkspaceOperation],
+  );
+
+  useEffect(() => {
+    if (sessions.value.activeSessionId === null) {
+      artifactWorkspaceRef.current = null;
+      dispatch(shellDraftActions.chatRestored());
+      return;
+    }
+    void queueArtifactWorkspaceOperation(readArtifactWorkspaceSnapshot);
+  }, [
+    dispatch,
+    queueArtifactWorkspaceOperation,
+    sessions.value.activeSessionId,
+    workspace.value.activeProjectId,
+  ]);
+
+  useEffect(() => {
+    const prior = priorActiveAttemptId.current;
+    const current = conversation.value.activeAttemptId;
+    priorActiveAttemptId.current = current;
+    if (
+      prior === null ||
+      current !== null ||
+      sessions.value.activeSessionId === null
+    ) {
+      return;
+    }
+    // A terminal File Reply may have produced a Rust-reconciled proposal.
+    // Refresh only after the durable run closes so streaming never replaces
+    // artifact state with partial assistant output.
+    void queueArtifactWorkspaceOperation(readArtifactWorkspaceSnapshot);
+  }, [
+    conversation.value.activeAttemptId,
+    queueArtifactWorkspaceOperation,
+    sessions.value.activeSessionId,
+  ]);
+
+  useEffect(
+    () => () => {
+      for (const timer of artifactDraftTimers.current.values()) {
+        window.clearTimeout(timer);
+      }
+      artifactDraftTimers.current.clear();
+    },
+    [],
+  );
+
+  const syncPendingAttachments = useCallback(
+    (
+      snapshot: ConversationSnapshot,
+      replyReconciliation:
+        | {
+            readonly expectedReplyTargetId: string | null;
+            readonly force: boolean;
+          }
+        | undefined = undefined,
+    ) => {
+      dispatch(
+        shellDraftActions.composerAttachmentsReconciled({
+          attachments: snapshot.draft.attachments.map((attachment) => ({
+            id: attachment.attachmentId,
+            name: attachment.displayName,
+            byteLength: attachment.byteLength,
+            mediaType: attachment.mediaType,
+            stableReference: attachment.stableReference,
+            referenceNumber: attachment.originalReference,
+            compatibility: "ready",
+          })),
+          nextAttachmentReference: snapshot.draft.nextAttachmentReference,
+        }),
+      );
+      dispatch(shellDraftActions.composerTextChanged(snapshot.draft.prompt));
+      dispatch(shellDraftActions.composerModeChanged(snapshot.draft.mode));
+      if (replyReconciliation?.force) {
+        dispatch(
+          shellDraftActions.composerReplyChanged(snapshot.draft.replyTargetId),
+        );
+      } else if (replyReconciliation) {
+        dispatch(
+          shellDraftActions.composerReplyReconciled({
+            expectedReplyTargetId: replyReconciliation.expectedReplyTargetId,
+            authoritativeReplyTargetId: snapshot.draft.replyTargetId,
+          }),
+        );
+      }
+      if (snapshot.draft.providerId && snapshot.draft.modelId) {
+        setSelectedModelKey(
+          conversationModelKey({
+            providerId: snapshot.draft.providerId,
+            modelId: snapshot.draft.modelId,
+          }),
+        );
+      }
+      setSelectedReasoning(snapshot.draft.reasoningMode);
+      persistedDraftSignature.current = conversationDraftSignature({
+        prompt: snapshot.draft.prompt,
+        attachmentIds: snapshot.draft.attachments.map(
+          (attachment) => attachment.attachmentId,
+        ),
+        providerId: snapshot.draft.providerId,
+        modelId: snapshot.draft.modelId,
+        reasoningMode: snapshot.draft.reasoningMode,
+        mode: snapshot.draft.mode,
+        replyTargetId: snapshot.draft.replyTargetId,
+      });
+      setPendingPickerGrantIds([]);
+    },
+    [dispatch],
+  );
 
   const beginChat = async (projectId: string) => {
     setConversationBusy(true);
@@ -584,6 +763,150 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     }
   };
 
+  const browseArtifact = async (kind: "file" | "folder") => {
+    setConversationError(null);
+    try {
+      const outcome = await pickNative(
+        kind === "file" ? "openFile" : "openFolder",
+      );
+      if (outcome.type === "cancelled") return;
+      const grant = outcome.grants.at(0);
+      if (grant === undefined) throw new Error("Artifact selection is empty.");
+      await queueArtifactWorkspaceOperation(
+        async () => {
+          // A native picker can remain open while an unrelated Workspace watcher
+          // advances the enclosing snapshot generation. Rebase the Artifact
+          // adapter after the picker returns and before consuming its one-use
+          // grant; Rust still performs the exact mutation CAS.
+          await readArtifactWorkspaceSnapshot();
+          return kind === "file"
+            ? openFileArtifact(grant.grantId)
+            : openFolderArtifact(grant.grantId);
+        },
+        { rebaseConversation: true },
+      );
+    } catch (error) {
+      setConversationError(messageFor(error));
+    }
+  };
+
+  const clearArtifactDraftOverride = useCallback((artifactId: string) => {
+    const timer = artifactDraftTimers.current.get(artifactId);
+    if (timer !== undefined) window.clearTimeout(timer);
+    artifactDraftTimers.current.delete(artifactId);
+    const next = { ...artifactDraftOverridesRef.current };
+    delete next[artifactId];
+    artifactDraftOverridesRef.current = next;
+    setArtifactDraftOverrides(next);
+  }, []);
+
+  const retainArtifactDraft = useCallback(
+    (artifactId: string, content: string) => {
+      const next = {
+        ...artifactDraftOverridesRef.current,
+        [artifactId]: content,
+      };
+      artifactDraftOverridesRef.current = next;
+      setArtifactDraftOverrides(next);
+      const currentTimer = artifactDraftTimers.current.get(artifactId);
+      if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+      artifactDraftTimers.current.set(
+        artifactId,
+        window.setTimeout(() => {
+          artifactDraftTimers.current.delete(artifactId);
+          void queueArtifactMutation(artifactId, (input) =>
+            updateFileArtifactDraft({ ...input, content }),
+          ).then(() => {
+            if (artifactDraftOverridesRef.current[artifactId] === content) {
+              clearArtifactDraftOverride(artifactId);
+            }
+          });
+        }, 250),
+      );
+    },
+    [clearArtifactDraftOverride, queueArtifactMutation],
+  );
+
+  const saveArtifactDraft = useCallback(
+    async (artifactId: string, fallback: string) => {
+      const content = artifactDraftOverridesRef.current[artifactId] ?? fallback;
+      const timer = artifactDraftTimers.current.get(artifactId);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        artifactDraftTimers.current.delete(artifactId);
+      }
+      const current = artifactWorkspaceRef.current?.artifacts.find(
+        (artifact) => artifact.artifactId === artifactId,
+      );
+      const persistedDraft =
+        current?.providerState.type === "file" &&
+        (current.providerState.value.state.phase === "edit" ||
+          current.providerState.value.state.phase === "dirty")
+          ? current.providerState.value.state.draft
+          : null;
+      if (persistedDraft !== content) {
+        await queueArtifactMutation(artifactId, (input) =>
+          updateFileArtifactDraft({ ...input, content }),
+        );
+      }
+      clearArtifactDraftOverride(artifactId);
+      await queueArtifactMutation(artifactId, saveFileArtifact);
+    },
+    [clearArtifactDraftOverride, queueArtifactMutation],
+  );
+
+  const selectArtifactForReply = useCallback(
+    async (
+      artifactId: string,
+      selection?: Pick<ArtifactReplyInput, "selectedText" | "selectedEntryId">,
+    ) => {
+      await queueArtifactMutation(artifactId, (input) =>
+        replyToArtifact({ ...input, ...selection }),
+      );
+      const snapshot = await readConversationSnapshot();
+      publishConversation(snapshot);
+      syncPendingAttachments(snapshot, {
+        expectedReplyTargetId: composerDraft.replyTargetId,
+        force: true,
+      });
+    },
+    [
+      composerDraft.replyTargetId,
+      publishConversation,
+      queueArtifactMutation,
+      syncPendingAttachments,
+    ],
+  );
+
+  const focusNativeArtifact = useCallback(
+    (artifactId: string) => queueArtifactMutation(artifactId, focusArtifact),
+    [queueArtifactMutation],
+  );
+
+  const closeNativeArtifactFocus = useCallback(
+    () =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          await readArtifactWorkspaceSnapshot();
+          return closeArtifactFocus();
+        },
+        { rebaseConversation: true },
+      ),
+    [queueArtifactWorkspaceOperation],
+  );
+
+  const decideArtifactApproval = useCallback(
+    (promptId: string, answer: "allow" | "deny") =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          await readArtifactWorkspaceSnapshot();
+          return answerArtifactApproval({ promptId, answer });
+        },
+        { rebaseConversation: true },
+      ),
+    [queueArtifactWorkspaceOperation],
+  );
+
   useEffect(() => {
     if (
       sessions.value.activeSessionId === null ||
@@ -851,7 +1174,209 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       .filter((session) => session.projectId === project.id)
       .map((session) => ({ id: session.id as string, title: session.title })),
   }));
-  const transcriptTurns: ConversationTranscriptTurn[] =
+  const renderNativeArtifact = useCallback(
+    (
+      nativeArtifact: NativeArtifactSnapshot,
+      context: ArtifactContext,
+    ): ReactNode => {
+      const common = {
+        onClose: () => void closeNativeArtifactFocus(),
+        onCopy: (_artifactId: string, value: string) =>
+          void navigator.clipboard?.writeText(value),
+        onExpand: (artifactId: string) => void focusNativeArtifact(artifactId),
+      };
+      if (nativeArtifact.providerState.type === "file") {
+        const file = nativeArtifact.providerState.value;
+        let state: FileArtifactState;
+        if (file.state.phase === "approval") {
+          state = {
+            ...file.state,
+            approvalId:
+              nativeArtifact.pendingApprovalId ?? "unavailable-approval",
+          };
+        } else if (
+          (file.state.phase === "edit" || file.state.phase === "dirty") &&
+          artifactDraftOverrides[nativeArtifact.artifactId] !== undefined
+        ) {
+          const draft =
+            artifactDraftOverrides[nativeArtifact.artifactId] ??
+            file.state.draft;
+          state = {
+            phase: draft === file.state.content ? "edit" : "dirty",
+            content: file.state.content,
+            draft,
+          };
+        } else {
+          state = file.state;
+        }
+        return (
+          <FileArtifact
+            context={context}
+            model={{
+              artifactId: nativeArtifact.artifactId,
+              breadcrumbs: file.breadcrumbs,
+              ...(file.languageLabel === null
+                ? {}
+                : { languageLabel: file.languageLabel }),
+              state,
+              status: nativeArtifact.status,
+              title: nativeArtifact.title,
+              ...(file.versionLabel === null
+                ? {}
+                : { versionLabel: file.versionLabel }),
+            }}
+            {...common}
+            onReply={(artifactId, selection) =>
+              void selectArtifactForReply(artifactId, selection)
+            }
+            onAllowApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "allow")
+            }
+            onApproveProposal={() =>
+              void queueArtifactMutation(
+                nativeArtifact.artifactId,
+                saveFileArtifact,
+              )
+            }
+            onBreadcrumbSelect={(_artifactId, breadcrumbId) =>
+              void queueArtifactMutation(nativeArtifact.artifactId, (input) =>
+                navigateFolderArtifact({
+                  ...input,
+                  projectRelativePath: breadcrumbId,
+                }),
+              )
+            }
+            onDenyApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "deny")
+            }
+            onDiscard={(artifactId) => {
+              clearArtifactDraftOverride(artifactId);
+              void queueArtifactMutation(artifactId, discardFileArtifactDraft);
+            }}
+            onDraftChange={retainArtifactDraft}
+            onEdit={(artifactId) =>
+              void queueArtifactMutation(artifactId, beginFileArtifactEdit)
+            }
+            onRecoverDraft={(artifactId) =>
+              void saveArtifactDraft(
+                artifactId,
+                file.state.phase === "recovery"
+                  ? file.state.draft
+                  : file.state.content,
+              )
+            }
+            onRejectProposal={(artifactId) =>
+              void queueArtifactMutation(artifactId, rejectFileArtifactProposal)
+            }
+            onResolveConflict={(artifactId, resolution) => {
+              clearArtifactDraftOverride(artifactId);
+              void queueArtifactMutation(artifactId, (input) =>
+                resolveFileArtifactConflict({
+                  ...input,
+                  resolution:
+                    resolution === "reload-current"
+                      ? "reloadCurrent"
+                      : "keepDraft",
+                }),
+              );
+            }}
+            onSave={(artifactId, content) =>
+              void saveArtifactDraft(artifactId, content)
+            }
+          />
+        );
+      }
+      if (nativeArtifact.providerState.type === "folder") {
+        const folder = nativeArtifact.providerState.value;
+        const listing =
+          folder.listing.phase === "ready"
+            ? ({ phase: "ready" } as const)
+            : ({
+                phase: folder.listing.phase,
+                message:
+                  folder.listing.message ?? "Folder listing is unavailable.",
+              } as const);
+        return (
+          <FolderArtifact
+            context={context}
+            model={{
+              artifactId: nativeArtifact.artifactId,
+              breadcrumbs: folder.breadcrumbs,
+              entries: folder.entries.map((entry) => ({
+                id: entry.id,
+                kind: entry.kind,
+                name: entry.name,
+                ...(entry.metadata === null
+                  ? {}
+                  : { metadata: entry.metadata }),
+              })),
+              listing,
+              listingLimit: folder.listingLimit,
+              ...(folder.selectedEntryId === null
+                ? {}
+                : { selectedEntryId: folder.selectedEntryId }),
+              status: nativeArtifact.status,
+              title: nativeArtifact.title,
+            }}
+            {...common}
+            onReply={(artifactId, selection) =>
+              void selectArtifactForReply(artifactId, selection)
+            }
+            onBreadcrumbSelect={(_artifactId, breadcrumbId) =>
+              void queueArtifactMutation(nativeArtifact.artifactId, (input) =>
+                navigateFolderArtifact({
+                  ...input,
+                  projectRelativePath: breadcrumbId,
+                }),
+              )
+            }
+            onConvertFile={(_artifactId, entryId) =>
+              void queueArtifactMutation(nativeArtifact.artifactId, (input) =>
+                selectFolderArtifactEntry({ ...input, entryId }),
+              )
+            }
+            onNavigateFolder={(_artifactId, entryId) =>
+              void queueArtifactMutation(nativeArtifact.artifactId, (input) =>
+                selectFolderArtifactEntry({ ...input, entryId }),
+              )
+            }
+            onRefresh={(artifactId) =>
+              void queueArtifactMutation(artifactId, refreshFolderArtifact)
+            }
+          />
+        );
+      }
+      return (
+        <UnknownArtifact
+          artifactId={nativeArtifact.artifactId}
+          context="inline"
+          message={
+            nativeArtifact.status.message ??
+            "This artifact provider version is not supported."
+          }
+          onCopy={() =>
+            void navigator.clipboard?.writeText(nativeArtifact.sourceLabel)
+          }
+          requestedType={nativeArtifact.providerType}
+          requestedVersion={nativeArtifact.providerVersion}
+          title={nativeArtifact.title}
+        />
+      );
+    },
+    [
+      artifactDraftOverrides,
+      clearArtifactDraftOverride,
+      closeNativeArtifactFocus,
+      decideArtifactApproval,
+      focusNativeArtifact,
+      queueArtifactMutation,
+      retainArtifactDraft,
+      saveArtifactDraft,
+      selectArtifactForReply,
+    ],
+  );
+
+  const conversationTranscriptTurns: ConversationTranscriptTurn[] =
     conversation.value.turns.map((turn) => {
       if (turn.author === "user") {
         return {
@@ -868,6 +1393,28 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
                   metadata: `${attachmentExtension(attachment.name)} · ${formatByteLength(attachment.byteLength)}`,
                   referenceNumber: attachment.referenceNumber,
                 })),
+              }),
+          ...(turn.artifactContext === undefined
+            ? {}
+            : {
+                replyContext: {
+                  artifactId: turn.artifactContext.artifactId,
+                  providerType: turn.artifactContext.providerType,
+                  providerVersion: turn.artifactContext.providerVersion,
+                  recordRevision: turn.artifactContext.artifactRecordRevision,
+                  stableReference: turn.artifactContext.stableReference,
+                  suppliedBytes: turn.artifactContext.usedBytes,
+                  maximumBytes: turn.artifactContext.maximumBytes,
+                  omittedBytes: turn.artifactContext.omittedBytes,
+                  truncated: turn.artifactContext.truncated,
+                  unsaved: turn.artifactContext.unsaved,
+                  segments: turn.artifactContext.segments.map((segment) => ({
+                    source: segment.source,
+                    text: segment.text,
+                    omittedBytes: segment.omittedBytes,
+                  })),
+                  capabilities: turn.artifactContext.capabilities,
+                },
               }),
         };
       }
@@ -914,9 +1461,9 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
         ...(hasWorkActivity
           ? {
               artifact: {
-                focusSupported: true,
+                focusSupported: false,
                 id: workActivityId,
-                isFocused: uiDraft.focusedArtifactId === workActivityId,
+                isFocused: false,
                 summary: `${turn.activities?.length ?? 0} safe run ${turn.activities?.length === 1 ? "event" : "events"}`,
                 title: "Run activity",
                 type: "unknown" as const,
@@ -925,40 +1472,61 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           : {}),
       };
     });
-  const focusedActivityTurn = conversation.value.turns.find(
-    (turn) =>
-      turn.author === "assistant" &&
-      `activity:${turn.id}` === uiDraft.focusedArtifactId &&
-      (turn.activities?.length ?? 0) > 0,
+  const artifactTranscriptTurns: ConversationTranscriptTurn[] =
+    activeArtifactWorkspace?.artifacts.map((nativeArtifact) => ({
+      id: `artifact-turn:${nativeArtifact.artifactId}`,
+      author: "assistant" as const,
+      markdownSource: "",
+      status: "completed" as const,
+      modelLabel: "C4OS facility",
+      responseVisible: true,
+      work: {
+        kind: "activity" as const,
+        summary: "Direct operation complete",
+        isExpanded: false,
+        progress: [],
+        details: [],
+      },
+      provenance: {
+        runtime: "C4OS core",
+        adapter: "Native facility",
+        environment: "Local Project",
+        capabilitySummary: nativeArtifact.sourceLabel,
+        isExpanded: false,
+      },
+      artifact: {
+        id: nativeArtifact.artifactId,
+        title: nativeArtifact.title,
+        summary: nativeArtifact.sourceLabel,
+        type: nativeArtifact.providerState.type,
+        focusSupported: nativeArtifact.focusSupported,
+        isFocused:
+          activeArtifactWorkspace.focusedArtifactId ===
+          nativeArtifact.artifactId,
+        renderContent: (placement) =>
+          renderNativeArtifact(
+            nativeArtifact,
+            placement === "context-pane" ? "contextual" : "inline",
+          ),
+      },
+    })) ?? [];
+  const transcriptTurns: ConversationTranscriptTurn[] = [
+    ...conversationTranscriptTurns,
+    ...artifactTranscriptTurns,
+  ];
+  const focusedNativeArtifact = activeArtifactWorkspace?.artifacts.find(
+    (artifact) =>
+      artifact.artifactId === activeArtifactWorkspace.focusedArtifactId,
   );
   const focusedConversationArtifact: FocusedConversationArtifact | null =
-    focusedActivityTurn === undefined
+    focusedNativeArtifact === undefined
       ? null
       : {
-          id: `activity:${focusedActivityTurn.id}`,
-          title: "Run activity",
-          type: "unknown",
-          content: (
-            <article
-              aria-label="Focused conversation activity"
-              className="conversation-focus__activity"
-            >
-              <p>
-                Safe activity supplied by the run-bound adapter. Private model
-                reasoning is not displayed.
-              </p>
-              <ol aria-label="Run activity events">
-                {(focusedActivityTurn.activities ?? []).map((activity) => (
-                  <li key={activity.id} data-state={activity.state}>
-                    <strong>{activity.label}</strong>
-                    {activity.detail === undefined ? null : (
-                      <p>{activity.detail}</p>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </article>
-          ),
+          id: focusedNativeArtifact.artifactId,
+          ownsClose: true,
+          title: focusedNativeArtifact.title,
+          type: focusedNativeArtifact.providerState.type,
+          content: renderNativeArtifact(focusedNativeArtifact, "focused"),
         };
   const hasPendingChat = sessions.value.sessions.some(
     (session) =>
@@ -1039,18 +1607,9 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     replyReference === null && composerDraft.mode !== "chat";
   const conversationTranscript = (
     <ConversationTranscript
-      onArtifactFocusRequest={(artifactId) => {
-        dispatch(
-          shellDraftActions.artifactFocused({
-            artifactId: artifactId as ArtifactId,
-            restoreTarget: artifactId,
-          }),
-        );
-        dispatch(shellDraftActions.leftPanelCollapsed(false));
-        if (overlayPanel) {
-          dispatch(shellDraftActions.leftPanelOverlayChanged(true));
-        }
-      }}
+      onArtifactFocusRequest={(artifactId) =>
+        void focusNativeArtifact(artifactId)
+      }
       onCancelAttempt={(attemptId) => void cancelAttempt(attemptId)}
       onCopy={(_turnId, markdown) =>
         void navigator.clipboard?.writeText(markdown)
@@ -1186,6 +1745,8 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           }
           mode={replyReference ? "reply" : composerDraft.mode}
           onAttach={() => void attachFiles()}
+          onBrowse={() => void browseArtifact("file")}
+          onBrowseFolder={() => void browseArtifact("folder")}
           onModeChange={(mode) =>
             dispatch(shellDraftActions.composerModeChanged(mode))
           }
@@ -1377,10 +1938,8 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     route === "/chat" && !hasPendingChat ? (
       <ConversationFocusComposition
         focusedArtifact={focusedConversationArtifact}
-        onCloseFocusedArtifact={() =>
-          dispatch(shellDraftActions.chatRestored())
-        }
-        onRestoreChat={() => dispatch(shellDraftActions.chatRestored())}
+        onCloseFocusedArtifact={() => void closeNativeArtifactFocus()}
+        onRestoreChat={() => void closeNativeArtifactFocus()}
         transcript={conversationTranscript}
       >
         {({ center, contextualChat }) =>
@@ -1697,7 +2256,19 @@ function replyReferenceFromProjection(
     readonly attachments?: readonly { readonly name: string }[];
   }[],
   targetId: string,
+  artifacts: readonly NativeArtifactSnapshot[],
 ): ComposerReplyReference {
+  const artifact = artifacts.find(
+    (candidate) => candidate.artifactId === targetId,
+  );
+  if (artifact !== undefined && artifact.providerState.type !== "unknown") {
+    return {
+      id: targetId,
+      kind: artifact.providerState.type,
+      label: `Reply to ${artifact.providerState.type}`,
+      excerpt: replyExcerpt(artifact.title),
+    };
+  }
   const target = turns.find((turn) => turn.id === targetId);
   if (target?.author === "user") {
     return {

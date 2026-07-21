@@ -11,7 +11,7 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | [00005 Native macOS platform and semantic UI foundation](00005-native-macos-semantic-ui.md) | verified | passed | UX-003, UI-001 through UI-005, SET-003 |
 | [00006 Stateful renderer shell and accessible component system](00006-renderer-shell-component-system.md) | verified | passed | UX-001, UX-004, UX-011 |
 | [00007 Workspace, Chat, composer, and conversation](00007-workspace-chat-composer.md) | verified | passed | UX-005 through UX-007, CHAT-001 through CHAT-008, ART-006 |
-| [00008 Artifact framework and File/Folder facilities](00008-artifact-file-folder.md) | open | failed | UX-008, ART-001, ART-003, ART-004, ART-007 |
+| [00008 Artifact framework and File/Folder facilities](00008-artifact-file-folder.md) | verified | passed | UX-008, ART-001, ART-003, ART-004, ART-007 |
 | [00009 Terminal facility](00009-terminal-facility.md) | open | failed | ART-005 |
 | [00010 Native Browser facility](00010-native-browser-facility.md) | open | failed | ART-002, SET-010 |
 | [00011 Plugin and Skill lifecycle](00011-plugin-skill-lifecycle.md) | open | failed | SET-007, SET-008 |
@@ -25,4 +25,4 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 
 ## Current Blockers
 
-None. Tasks 00001 through 00007 passed Agent Acceptance. Task 00008 is the next isolated epoch after the scoped Task 00007 checkpoint.
+None. Tasks 00001 through 00008 passed Agent Acceptance. Task 00009 is the next isolated epoch after the Task 00008 checkpoint.

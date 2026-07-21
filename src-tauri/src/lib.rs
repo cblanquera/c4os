@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod conversation;
 pub mod core;
 pub mod execution;
@@ -8,6 +9,11 @@ pub mod security;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use execution::environment::TrustedProjectRoot;
+use execution::filesystem::{
+    ExpectedFileState, FileVersion as ProjectFileVersion,
+    FolderEntryKind as ProjectFolderEntryKind, ProjectFilesystem, ProjectFilesystemError,
+    ProjectFilesystemLimits,
+};
 use execution::git::{
     ActiveProjectRepository, BranchControlVisibility, GitBranchMenuSnapshot, GitBranchOperation,
     GitBranchOutcome, GitBranchRequest, GitError, GitOperationAuthorization, ProductionGitRunner,
@@ -21,7 +27,16 @@ use platform::{
     PlatformTarget, SETTINGS_ACCELERATOR, SETTINGS_MENU_ITEM_ID, SETTINGS_ROUTE,
 };
 use protocol::{
-    AttachmentId, AttemptId, ConversationActivitySnapshot, ConversationAttachmentPreviewInput,
+    ArtifactApprovalAnswer, ArtifactApprovalInput, ArtifactBreadcrumbSnapshot,
+    ArtifactContextExpandInput, ArtifactFileConflictInput, ArtifactFileConflictResolution,
+    ArtifactFileDraftInput, ArtifactFileSnapshot, ArtifactFileStateSnapshot,
+    ArtifactFolderEntrySnapshot, ArtifactFolderListingSnapshot, ArtifactFolderNavigateInput,
+    ArtifactFolderSelectInput, ArtifactFolderSnapshot, ArtifactHistorySnapshot,
+    ArtifactMutationInput, ArtifactOpenInput, ArtifactProviderStateSnapshot, ArtifactReplyInput,
+    ArtifactResourceVersionSnapshot, ArtifactShellStatusSnapshot, ArtifactSnapshot,
+    ArtifactWorkspaceSnapshot, AttachmentId, AttemptId, ConversationActivitySnapshot,
+    ConversationArtifactCapabilitySnapshot, ConversationArtifactContextSegmentSnapshot,
+    ConversationArtifactContextSnapshot, ConversationAttachmentPreviewInput,
     ConversationAttachmentPreviewSnapshot, ConversationAttachmentSnapshot,
     ConversationAttemptSnapshot, ConversationBranchApprovalAnswer, ConversationBranchApprovalInput,
     ConversationBranchControlSnapshot, ConversationBranchInput, ConversationBranchOperation,
@@ -69,9 +84,9 @@ use runtime::persistence::{
 };
 use runtime::provider::{ProviderProbe, ProviderProfile, ProviderTestReport};
 use runtime::session::{
-    AttachmentSnapshot, FirstSubmission, MessageReplyContextSnapshot, RetryRequest,
-    RuntimeKind as SessionRuntimeKind, SessionError, SessionRecord, SessionService,
-    TerminalAttemptOutcome, TurnSubmission,
+    AttachmentSnapshot, FirstSubmission, MAX_REPLY_SOURCE_EXCERPT_BYTES,
+    MessageReplyContextSnapshot, RetryRequest, RuntimeKind as SessionRuntimeKind, SessionError,
+    SessionRecord, SessionService, TerminalAttemptOutcome, TurnSubmission,
 };
 use runtime::supervisor::{
     CompatibilityState, HealthState, RuntimeInstallation, RuntimeSupervisor,
@@ -221,7 +236,9 @@ struct AppCoreState {
     _configuration: Mutex<core::services::ManagedAppConfiguration>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation_operation: Mutex<()>,
+    artifact_operation: Mutex<()>,
     conversation: Mutex<ConversationApplicationState>,
+    artifact: Mutex<ArtifactApplicationState>,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     runtime_production: Arc<ManagedProductionRuntime>,
     runtime: Arc<RuntimeApplicationService>,
@@ -244,6 +261,32 @@ struct NativeConversationBranchState {
     pending: BTreeMap<String, PendingConversationBranchOperation>,
     operation_status: Option<String>,
     operation_message: Option<String>,
+}
+
+#[derive(Default)]
+struct ArtifactApplicationState {
+    pending_writes: BTreeMap<String, PendingArtifactWrite>,
+}
+
+#[derive(Clone)]
+struct PendingArtifactWrite {
+    artifact_id: String,
+    record_revision: u64,
+    project_filesystem: ProjectFilesystem,
+    relative_path: PathBuf,
+    expected_file_version: ProjectFileVersion,
+    content: String,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+}
+
+struct ArtifactWritePreparation {
+    project_version: ProjectFileVersion,
+    relative_path: PathBuf,
+    content: String,
+    request_origin: ActionRequestOrigin,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
 }
 
 #[derive(Clone)]
@@ -313,6 +356,18 @@ struct DurableConversationDraft {
     reasoning_mode: Option<String>,
     mode: String,
     reply_target_id: Option<String>,
+    #[serde(default)]
+    artifact_reply_capture: Option<DurableArtifactReplyCapture>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DurableArtifactReplyCapture {
+    artifact_id: String,
+    artifact_record_revision: u64,
+    resource_version: ArtifactResourceVersionSnapshot,
+    selected_text: Option<String>,
+    selected_entry_id: Option<String>,
 }
 
 impl Default for DurableConversationDraft {
@@ -326,6 +381,7 @@ impl Default for DurableConversationDraft {
             reasoning_mode: None,
             mode: String::new(),
             reply_target_id: None,
+            artifact_reply_capture: None,
         }
     }
 }
@@ -603,6 +659,30 @@ fn validate_durable_conversation_document(
                 .reply_target_id
                 .as_deref()
                 .is_none_or(|value| !value.trim().is_empty() && value.len() <= 512)
+            && draft.artifact_reply_capture.as_ref().is_none_or(|capture| {
+                draft.reply_target_id.as_deref() == Some(capture.artifact_id.as_str())
+                    && protocol::ArtifactId::new(capture.artifact_id.clone()).is_ok()
+                    && capture.artifact_record_revision > 0
+                    && capture.resource_version.sequence > 0
+                    && capture.resource_version.observed_at_ms > 0
+                    && capture
+                        .resource_version
+                        .sha256
+                        .strip_prefix("sha256:")
+                        .is_some_and(|hex| {
+                            hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        })
+                    && capture.selected_text.as_ref().is_none_or(|value| {
+                        !value.is_empty()
+                            && value.len() <= protocol::MAX_TEXT_BYTES
+                            && !value.contains('\0')
+                    })
+                    && capture
+                        .selected_entry_id
+                        .as_ref()
+                        .is_none_or(|value| !value.trim().is_empty() && value.len() <= 512)
+                    && !(capture.selected_text.is_some() && capture.selected_entry_id.is_some())
+            })
             && attachment_reference_ledger(
                 &normalized_draft.attachments,
                 normalized_draft.next_attachment_reference,
@@ -846,7 +926,7 @@ pub struct TurnRuntimeDispatchIntent {
 
 enum ConversationSubmissionDispatch {
     First(ConversationFirstDispatchIntent),
-    Turn(ConversationTurnDispatchIntent),
+    Turn(Box<ConversationTurnDispatchIntent>),
 }
 
 /// Narrow retry intent. The immutable session binding and current attempt
@@ -3606,6 +3686,7 @@ async fn platform_pick(
         PickerPurpose::SaveWorkspaceArchive => "Save C4OS Workspace",
         PickerPurpose::AttachChatFiles => "Attach Files",
         PickerPurpose::OpenFile => "Open File",
+        PickerPurpose::OpenFolder => "Open Folder",
     });
     let selected = match picker.purpose {
         PickerPurpose::OpenProjectFolder | PickerPurpose::RelocateProjectFolder => {
@@ -3622,6 +3703,7 @@ async fn platform_pick(
             .map(|path| vec![path]),
         PickerPurpose::AttachChatFiles => dialog.blocking_pick_files(),
         PickerPurpose::OpenFile => dialog.blocking_pick_file().map(|path| vec![path]),
+        PickerPurpose::OpenFolder => dialog.blocking_pick_folder().map(|path| vec![path]),
     };
 
     let Some(selected) = selected else {
@@ -3741,6 +3823,2923 @@ fn require_exact_conversation_generation(
             true,
         ))
     }
+}
+
+#[derive(Clone)]
+struct ActiveArtifactScope {
+    workspace_id: String,
+    project_id: String,
+    session_id: String,
+    project_name: String,
+    project_root: TrustedProjectRoot,
+    filesystem: ProjectFilesystem,
+    database: Arc<core::database::DatabaseActor>,
+}
+
+fn active_artifact_scope(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ActiveArtifactScope, ProtocolError> {
+    let workspace = active_workspace_snapshot(core, correlation_id.clone())?;
+    let workspace_id = workspace
+        .workspace
+        .as_ref()
+        .map(|record| record.workspace_id.clone())
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let conversation = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let project_id = conversation
+        .active_project_id
+        .clone()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let session_id = conversation
+        .active_session_id
+        .clone()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    drop(conversation);
+    let project = workspace
+        .projects
+        .iter()
+        .find(|project| {
+            project.project_id == project_id
+                && project.lifecycle_state == core::database::LifecycleState::Active
+                && project.path_state != core::database::ProjectPathState::Missing
+        })
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let active_chat = workspace.chats.iter().any(|chat| {
+        chat.chat_id == session_id
+            && chat.project_id == project_id
+            && chat.lifecycle_state == core::database::LifecycleState::Active
+    });
+    if !active_chat {
+        return Err(workspace_state_unavailable(correlation_id));
+    }
+    let project_root =
+        TrustedProjectRoot::open(Path::new(&project.current_path)).map_err(|_| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "The active Project root is unavailable",
+                true,
+            )
+        })?;
+    let limits = ProjectFilesystemLimits::new(
+        artifact::file::MAX_FILE_CONTENT_BYTES as u64,
+        artifact::folder::MAX_FOLDER_ENTRIES,
+        execution::filesystem::MAX_PROJECT_FOLDER_NAME_BYTES,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let filesystem =
+        ProjectFilesystem::bind_with_limits(project_root.clone(), limits).map_err(|_| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "The active Project filesystem is unavailable",
+                true,
+            )
+        })?;
+    let database = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .as_ref()
+        .map(|workspace| Arc::clone(workspace.database_actor()))
+        .ok_or_else(|| workspace_state_unavailable(correlation_id))?;
+    Ok(ActiveArtifactScope {
+        workspace_id,
+        project_id,
+        session_id,
+        project_name: project.display_name.clone(),
+        project_root,
+        filesystem,
+        database,
+    })
+}
+
+fn require_exact_artifact_generation(
+    request: &SnapshotRequest,
+    snapshot: &ArtifactWorkspaceSnapshot,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation == snapshot.generation {
+        Ok(())
+    } else {
+        Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::StaleGeneration,
+            "Artifact state changed before the operation",
+            true,
+        ))
+    }
+}
+
+fn project_relative_picker_path(
+    selected: &Path,
+    scope: &ActiveArtifactScope,
+    correlation_id: protocol::CorrelationId,
+) -> Result<PathBuf, ProtocolError> {
+    let relative = selected
+        .strip_prefix(scope.project_root.canonical_root())
+        .map_err(|_| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Forbidden,
+                "Select a target inside the active Project",
+                false,
+            )
+        })?;
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        && !relative.as_os_str().is_empty()
+    {
+        return Err(invalid_picker_selection(correlation_id));
+    }
+    Ok(relative.to_path_buf())
+}
+
+fn take_artifact_picker_grant(
+    core: &AppCoreState,
+    picker_grant_id: &PickerGrantId,
+    purpose: PickerPurpose,
+    object_kind: PickerObjectKind,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<PathBuf, ProtocolError> {
+    let grant = core
+        .picker_grants
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .take(picker_grant_id)
+        .ok_or_else(|| invalid_picker_selection(correlation_id.clone()))?;
+    if grant.purpose() != purpose
+        || grant.object_kind() != object_kind
+        || grant.issued_at_ms() > now_ms
+        || now_ms.saturating_sub(grant.issued_at_ms()) > 10 * 60 * 1_000
+    {
+        return Err(invalid_picker_selection(correlation_id));
+    }
+    Ok(grant.path().to_path_buf())
+}
+
+fn serialize_artifact_record(
+    record: &artifact::ArtifactRecord,
+) -> Result<core::database::WorkspaceArtifactDocumentRecord, ProtocolError> {
+    record.validate().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact record is invalid",
+            false,
+        )
+    })?;
+    let canonical_document = serde_json::to_string(record).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Artifact record could not be serialized",
+            true,
+        )
+    })?;
+    Ok(core::database::WorkspaceArtifactDocumentRecord {
+        workspace_id: record.workspace_id.clone(),
+        project_id: record.project_id.clone(),
+        session_id: record.session_id.clone(),
+        artifact_id: record.artifact_id.clone(),
+        provider_kind: record.provider.type_id.clone(),
+        provider_version: record.provider.schema_version,
+        state_schema_version: record.schema_version,
+        revision: record.record_revision,
+        canonical_document,
+        updated_at_ms: record.updated_at_ms,
+    })
+}
+
+fn deserialize_artifact_record(
+    record: core::database::WorkspaceArtifactDocumentRecord,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::ArtifactRecord, ProtocolError> {
+    let artifact = serde_json::from_str::<artifact::ArtifactRecord>(&record.canonical_document)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    artifact
+        .validate()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    Ok(artifact)
+}
+
+fn load_active_artifact_record(
+    scope: &ActiveArtifactScope,
+    artifact_id: &protocol::ArtifactId,
+    base_revision: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::ArtifactRecord, ProtocolError> {
+    let record = scope
+        .database
+        .artifact_document(artifact_id.as_str())
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .ok_or_else(|| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The Artifact is unavailable",
+                false,
+            )
+        })?;
+    let artifact = deserialize_artifact_record(record, correlation_id.clone())?;
+    if artifact.project_id != scope.project_id
+        || artifact.session_id != scope.session_id
+        || artifact.record_revision != base_revision
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The Artifact changed before the operation",
+            true,
+        ));
+    }
+    Ok(artifact)
+}
+
+fn persist_artifact_record(
+    scope: &ActiveArtifactScope,
+    record: &artifact::ArtifactRecord,
+    expected_revision: Option<u64>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<u64, ProtocolError> {
+    let document = serialize_artifact_record(record)?;
+    scope
+        .database
+        .save_artifact_document(document, expected_revision)
+        .map_err(|error| {
+            platform_boundary_error(
+                correlation_id,
+                if matches!(error, core::database::DatabaseError::Conflict(_)) {
+                    ProtocolErrorCode::Conflict
+                } else {
+                    ProtocolErrorCode::Internal
+                },
+                "The Artifact could not be committed",
+                true,
+            )
+        })
+}
+
+fn advance_artifact_record(
+    record: &mut artifact::ArtifactRecord,
+    kind: artifact::ArtifactHistoryKind,
+    now_ms: u64,
+) -> Result<(), ProtocolError> {
+    record.record_revision = record.record_revision.checked_add(1).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Artifact revision is exhausted",
+            false,
+        )
+    })?;
+    record.updated_at_ms = now_ms;
+    let state_document = serde_json::to_vec(&record.state).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Artifact state could not be hashed",
+            true,
+        )
+    })?;
+    record
+        .append_history(artifact::ArtifactHistoryEntry {
+            record_revision: record.record_revision,
+            resource_version: record.resource_version(),
+            state_sha256: sha256_bytes(&state_document),
+            kind,
+            recorded_at_ms: now_ms,
+        })
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact history transition is invalid",
+                false,
+            )
+        })?;
+    record.validate().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact transition is invalid",
+            false,
+        )
+    })
+}
+
+fn normalized_project_relative_text(
+    path: &Path,
+    correlation_id: protocol::CorrelationId,
+) -> Result<String, ProtocolError> {
+    path.to_str()
+        .map(|value| value.replace(std::path::MAIN_SEPARATOR, "/"))
+        .filter(|value| {
+            value.len() <= artifact::file::MAX_PROJECT_RELATIVE_PATH_BYTES
+                && !value.contains('\0')
+                && !value.contains('\\')
+        })
+        .ok_or_else(|| invalid_picker_selection(correlation_id))
+}
+
+fn artifact_breadcrumbs(
+    project_name: &str,
+    relative_path: &str,
+    include_leaf: bool,
+) -> Vec<artifact::FolderBreadcrumb> {
+    let mut breadcrumbs = vec![artifact::FolderBreadcrumb {
+        label: project_name.into(),
+        project_relative_path: String::new(),
+    }];
+    let components = relative_path.split('/').filter(|part| !part.is_empty());
+    let mut current = String::new();
+    let parts = components.collect::<Vec<_>>();
+    let included = if include_leaf {
+        parts.len()
+    } else {
+        parts.len().saturating_sub(1)
+    };
+    for part in parts.into_iter().take(included) {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(part);
+        breadcrumbs.push(artifact::FolderBreadcrumb {
+            label: part.into(),
+            project_relative_path: current.clone(),
+        });
+    }
+    breadcrumbs
+}
+
+fn protocol_breadcrumbs_for_file(
+    project_name: &str,
+    relative_path: &str,
+) -> Vec<ArtifactBreadcrumbSnapshot> {
+    let mut breadcrumbs = artifact_breadcrumbs(project_name, relative_path, true)
+        .into_iter()
+        .map(|breadcrumb| ArtifactBreadcrumbSnapshot {
+            id: breadcrumb.project_relative_path,
+            label: breadcrumb.label,
+            is_current: false,
+        })
+        .collect::<Vec<_>>();
+    if let Some(last) = breadcrumbs.last_mut() {
+        last.is_current = true;
+    }
+    breadcrumbs
+}
+
+fn protocol_breadcrumbs_for_folder(
+    breadcrumbs: &[artifact::FolderBreadcrumb],
+) -> Vec<ArtifactBreadcrumbSnapshot> {
+    breadcrumbs
+        .iter()
+        .enumerate()
+        .map(|(index, breadcrumb)| ArtifactBreadcrumbSnapshot {
+            id: breadcrumb.project_relative_path.clone(),
+            label: breadcrumb.label.clone(),
+            is_current: index + 1 == breadcrumbs.len(),
+        })
+        .collect()
+}
+
+fn file_media_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "css" => "text/css",
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        "js" | "mjs" | "cjs" => "text/javascript",
+        "json" => "application/json",
+        "md" | "markdown" => "text/markdown",
+        "rs" => "text/rust",
+        "toml" => "application/toml",
+        "ts" | "tsx" => "text/typescript",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        _ => "text/plain",
+    }
+}
+
+fn domain_file_state(
+    scope: &ActiveArtifactScope,
+    relative_path: &Path,
+    sequence: u64,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::FileArtifactState, ProtocolError> {
+    let read = scope.filesystem.read_utf8(relative_path).map_err(|error| {
+        artifact_filesystem_error(error, correlation_id.clone(), "The File could not be read")
+    })?;
+    let relative = normalized_project_relative_text(read.relative_path(), correlation_id.clone())?;
+    let display_name = read
+        .relative_path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| invalid_picker_selection(correlation_id.clone()))?;
+    let live_version = artifact::FileLiveVersion::new_with_target_version(
+        sequence,
+        read.version().target_version(),
+        read.version().content_sha256(),
+        read.version().byte_length(),
+        now_ms,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    artifact::FileArtifactState::new(
+        artifact::FileResourceReference::new(&relative, &relative)
+            .map_err(|_| invalid_picker_selection(correlation_id.clone()))?,
+        display_name,
+        file_media_type(read.relative_path()),
+        read.content(),
+        live_version,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id))
+}
+
+fn domain_folder_state(
+    scope: &ActiveArtifactScope,
+    relative_path: &Path,
+    sequence: u64,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::FolderArtifactState, ProtocolError> {
+    let listing = scope
+        .filesystem
+        .list_folder(relative_path)
+        .map_err(|error| {
+            artifact_filesystem_error(
+                error,
+                correlation_id.clone(),
+                "The Folder could not be listed",
+            )
+        })?;
+    let relative =
+        normalized_project_relative_text(listing.relative_path(), correlation_id.clone())?;
+    let display_path = if relative.is_empty() {
+        scope.project_name.clone()
+    } else {
+        relative.clone()
+    };
+    let mut entries = listing
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let kind = match entry.kind() {
+                ProjectFolderEntryKind::Directory => artifact::FolderEntryKind::Folder,
+                ProjectFolderEntryKind::File => artifact::FolderEntryKind::File,
+                ProjectFolderEntryKind::Symlink | ProjectFolderEntryKind::Other => return None,
+            };
+            let project_relative_path = if relative.is_empty() {
+                entry.name().to_owned()
+            } else {
+                format!("{relative}/{}", entry.name())
+            };
+            let entry_digest = sha256_bytes(project_relative_path.as_bytes());
+            Some(artifact::FolderEntry {
+                entry_id: format!("entry-{}", entry_digest.trim_start_matches("sha256:")),
+                name: entry.name().into(),
+                kind,
+                project_relative_path,
+                display_metadata: entry.byte_length().map(|bytes| format!("{bytes} bytes")),
+                byte_length: entry.byte_length(),
+                modified_at_ms: None,
+                content_sha256: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| {
+        (
+            entry.name.to_ascii_lowercase(),
+            entry.name.clone(),
+            entry.kind,
+        )
+    });
+    let breadcrumbs = artifact_breadcrumbs(&scope.project_name, &relative, true);
+    let listing_version = artifact::FolderListingVersion::from_target_version(
+        sequence,
+        listing.target_version(),
+        &entries,
+        now_ms,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    artifact::FolderArtifactState::new(
+        artifact::folder::FolderResourceReference::new(relative, display_path)
+            .map_err(|_| invalid_picker_selection(correlation_id.clone()))?,
+        breadcrumbs,
+        entries,
+        listing_version,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id))
+}
+
+fn artifact_filesystem_error(
+    error: ProjectFilesystemError,
+    correlation_id: protocol::CorrelationId,
+    message: &'static str,
+) -> ProtocolError {
+    let (code, retryable) = match error {
+        ProjectFilesystemError::Conflict | ProjectFilesystemError::TargetChanged => {
+            (ProtocolErrorCode::Conflict, true)
+        }
+        ProjectFilesystemError::TargetUnavailable => (ProtocolErrorCode::NotFound, false),
+        ProjectFilesystemError::SymlinkRejected
+        | ProjectFilesystemError::InvalidPath
+        | ProjectFilesystemError::NotDirectory
+        | ProjectFilesystemError::NotRegularFile => (ProtocolErrorCode::Forbidden, false),
+        _ => (ProtocolErrorCode::Unavailable, true),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+fn new_artifact_record(
+    scope: &ActiveArtifactScope,
+    provider: artifact::ArtifactProviderDescriptor,
+    state: artifact::ArtifactState,
+    operation_kind: &str,
+    now_ms: u64,
+) -> Result<artifact::ArtifactRecord, ProtocolError> {
+    let mut record = artifact::ArtifactRecord {
+        schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
+        artifact_id: format!("artifact-{}", Uuid::new_v4().as_simple()),
+        workspace_id: scope.workspace_id.clone(),
+        project_id: scope.project_id.clone(),
+        session_id: scope.session_id.clone(),
+        provider,
+        source: artifact::ArtifactSource::DirectOperation {
+            operation_id: format!("{operation_kind}-{}", Uuid::new_v4().as_simple()),
+        },
+        record_revision: 1,
+        lifecycle: artifact::ArtifactLifecycle::Ready,
+        state,
+        history: Vec::new(),
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+    };
+    let state_document = serde_json::to_vec(&record.state).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Artifact creation state could not be hashed",
+            true,
+        )
+    })?;
+    record
+        .append_history(artifact::ArtifactHistoryEntry {
+            record_revision: 1,
+            resource_version: record.resource_version(),
+            state_sha256: sha256_bytes(&state_document),
+            kind: artifact::ArtifactHistoryKind::Created,
+            recorded_at_ms: now_ms,
+        })
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Artifact creation history is invalid",
+                false,
+            )
+        })?;
+    record.validate().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Artifact creation is invalid",
+            false,
+        )
+    })?;
+    Ok(record)
+}
+
+fn artifact_resource_snapshot(
+    version: artifact::ArtifactResourceVersion,
+) -> ArtifactResourceVersionSnapshot {
+    ArtifactResourceVersionSnapshot {
+        sequence: version.sequence,
+        sha256: version.sha256,
+        observed_at_ms: version.observed_at_ms,
+    }
+}
+
+fn artifact_history_kind(kind: artifact::ArtifactHistoryKind) -> &'static str {
+    match kind {
+        artifact::ArtifactHistoryKind::Created => "created",
+        artifact::ArtifactHistoryKind::ResourceRefreshed => "resourceRefreshed",
+        artifact::ArtifactHistoryKind::DraftChanged => "draftChanged",
+        artifact::ArtifactHistoryKind::DraftDiscarded => "draftDiscarded",
+        artifact::ArtifactHistoryKind::ProposalChanged => "proposalChanged",
+        artifact::ArtifactHistoryKind::SaveRequested => "saveRequested",
+        artifact::ArtifactHistoryKind::SaveCompleted => "saveCompleted",
+        artifact::ArtifactHistoryKind::ConflictObserved => "conflictObserved",
+        artifact::ArtifactHistoryKind::RecoveryChanged => "recoveryChanged",
+        artifact::ArtifactHistoryKind::NavigationChanged => "navigationChanged",
+        artifact::ArtifactHistoryKind::Converted => "converted",
+    }
+}
+
+fn artifact_source_label(source: &artifact::ArtifactSource) -> String {
+    match source {
+        artifact::ArtifactSource::DirectOperation { .. } => "Direct operation".into(),
+        artifact::ArtifactSource::RunAttempt { run_id, .. } => format!("Run {run_id}"),
+    }
+}
+
+fn artifact_status(
+    record: &artifact::ArtifactRecord,
+    pending_approval_id: Option<&str>,
+) -> ArtifactShellStatusSnapshot {
+    match &record.lifecycle {
+        artifact::ArtifactLifecycle::Loading { .. } => ArtifactShellStatusSnapshot {
+            kind: "loading".into(),
+            message: Some("Loading artifact…".into()),
+        },
+        artifact::ArtifactLifecycle::Error { message, .. } => ArtifactShellStatusSnapshot {
+            kind: "error".into(),
+            message: Some(message.clone()),
+        },
+        artifact::ArtifactLifecycle::Degraded { message, .. } => ArtifactShellStatusSnapshot {
+            kind: "degraded".into(),
+            message: Some(message.clone()),
+        },
+        artifact::ArtifactLifecycle::UnknownVersion { .. } => ArtifactShellStatusSnapshot {
+            kind: "degraded".into(),
+            message: Some("This artifact version is not supported by this C4OS build.".into()),
+        },
+        artifact::ArtifactLifecycle::Ready => {
+            let recovery = matches!(
+                &record.state,
+                artifact::ArtifactState::File(file) if file.recovery.is_some()
+            );
+            if recovery {
+                ArtifactShellStatusSnapshot {
+                    kind: "recovery".into(),
+                    message: Some(
+                        "The draft was retained after the save could not complete.".into(),
+                    ),
+                }
+            } else if pending_approval_id.is_some() {
+                ArtifactShellStatusSnapshot {
+                    kind: "ready".into(),
+                    message: Some("Approval is required before saving this File.".into()),
+                }
+            } else {
+                ArtifactShellStatusSnapshot {
+                    kind: "ready".into(),
+                    message: None,
+                }
+            }
+        }
+    }
+}
+
+fn file_pending_content(file: &artifact::FileArtifactState) -> String {
+    file.proposal
+        .as_ref()
+        .filter(|proposal| matches!(proposal.status, artifact::FileProposalStatus::Pending))
+        .map(|proposal| proposal.proposed_content.clone())
+        .or_else(|| file.draft.as_ref().map(|draft| draft.content.clone()))
+        .unwrap_or_else(|| file.content.clone())
+}
+
+fn file_protocol_state(
+    file: &artifact::FileArtifactState,
+    pending_approval_id: Option<&str>,
+) -> ArtifactFileStateSnapshot {
+    if let Some(conflict) = &file.conflict {
+        return ArtifactFileStateSnapshot::Conflict {
+            content: file.content.clone(),
+            draft: file_pending_content(file),
+            conflict_message: conflict.message.clone(),
+            current_version_label: format!("Version {}", conflict.observed_live.sequence),
+        };
+    }
+    if let Some(recovery) = &file.recovery {
+        let recovery_message = match recovery {
+            artifact::FileRecoveryState::SaveFailed { message, .. } => message.clone(),
+            artifact::FileRecoveryState::Restored { .. } => {
+                "The live File was restored after an interrupted save.".into()
+            }
+        };
+        return ArtifactFileStateSnapshot::Recovery {
+            content: file.content.clone(),
+            draft: file_pending_content(file),
+            recovery_message,
+        };
+    }
+    if let Some(proposal) = &file.proposal
+        && matches!(proposal.status, artifact::FileProposalStatus::Pending)
+    {
+        if pending_approval_id.is_some() {
+            return ArtifactFileStateSnapshot::Approval {
+                content: file.content.clone(),
+                proposed_content: proposal.proposed_content.clone(),
+                proposal_diff: (!proposal.unified_diff.is_empty())
+                    .then(|| proposal.unified_diff.clone()),
+                approval_summary: "Review and allow this exact File write.".into(),
+            };
+        }
+        return ArtifactFileStateSnapshot::Proposed {
+            content: file.content.clone(),
+            proposed_content: proposal.proposed_content.clone(),
+            proposal_diff: (!proposal.unified_diff.is_empty())
+                .then(|| proposal.unified_diff.clone()),
+            proposal_summary: "Proposed File change".into(),
+        };
+    }
+    if pending_approval_id.is_some()
+        && let Some(draft) = &file.draft
+        && draft.dirty
+    {
+        return ArtifactFileStateSnapshot::Approval {
+            content: file.content.clone(),
+            proposed_content: draft.content.clone(),
+            proposal_diff: None,
+            approval_summary: "Review and allow this exact File write.".into(),
+        };
+    }
+    if let Some(draft) = &file.draft {
+        return if draft.dirty {
+            ArtifactFileStateSnapshot::Dirty {
+                content: file.content.clone(),
+                draft: draft.content.clone(),
+            }
+        } else {
+            ArtifactFileStateSnapshot::Edit {
+                content: file.content.clone(),
+                draft: draft.content.clone(),
+            }
+        };
+    }
+    ArtifactFileStateSnapshot::Read {
+        content: file.content.clone(),
+    }
+}
+
+fn artifact_protocol_snapshot(
+    record: artifact::ArtifactRecord,
+    pending_approval_id: Option<String>,
+    project_name: &str,
+) -> Result<ArtifactSnapshot, ProtocolError> {
+    let resource_version = artifact_resource_snapshot(record.resource_version());
+    let history = record
+        .history
+        .iter()
+        .map(|entry| ArtifactHistorySnapshot {
+            record_revision: entry.record_revision,
+            kind: artifact_history_kind(entry.kind).into(),
+            recorded_at_ms: entry.recorded_at_ms,
+            resource_version: artifact_resource_snapshot(entry.resource_version.clone()),
+        })
+        .collect();
+    let (title, provider_state) = match &record.state {
+        artifact::ArtifactState::File(file) => (
+            file.display_name.clone(),
+            ArtifactProviderStateSnapshot::File(ArtifactFileSnapshot {
+                breadcrumbs: protocol_breadcrumbs_for_file(
+                    project_name,
+                    &file.resource.project_relative_path,
+                ),
+                language_label: Some(file.media_type.clone()),
+                state: file_protocol_state(file, pending_approval_id.as_deref()),
+                version_label: Some(format!("Version {}", file.live_version.sequence)),
+            }),
+        ),
+        artifact::ArtifactState::Folder(folder) => (
+            folder.resource.display_path.clone(),
+            ArtifactProviderStateSnapshot::Folder(ArtifactFolderSnapshot {
+                breadcrumbs: protocol_breadcrumbs_for_folder(&folder.breadcrumbs),
+                entries: folder
+                    .entries
+                    .iter()
+                    .map(|entry| ArtifactFolderEntrySnapshot {
+                        id: entry.entry_id.clone(),
+                        kind: match entry.kind {
+                            artifact::FolderEntryKind::File => "file",
+                            artifact::FolderEntryKind::Folder => "folder",
+                        }
+                        .into(),
+                        metadata: entry.display_metadata.clone(),
+                        name: entry.name.clone(),
+                    })
+                    .collect(),
+                listing: ArtifactFolderListingSnapshot {
+                    phase: match &record.lifecycle {
+                        artifact::ArtifactLifecycle::Ready => "ready",
+                        artifact::ArtifactLifecycle::Loading { .. } => "loading",
+                        artifact::ArtifactLifecycle::Error { .. }
+                        | artifact::ArtifactLifecycle::Degraded { .. } => "error",
+                        artifact::ArtifactLifecycle::UnknownVersion { .. } => "error",
+                    }
+                    .into(),
+                    message: match &record.lifecycle {
+                        artifact::ArtifactLifecycle::Loading { .. } => {
+                            Some("Loading folder…".into())
+                        }
+                        artifact::ArtifactLifecycle::Error { message, .. }
+                        | artifact::ArtifactLifecycle::Degraded { message, .. } => {
+                            Some(message.clone())
+                        }
+                        artifact::ArtifactLifecycle::UnknownVersion { .. } => Some(
+                            "This folder provider version is not supported by this C4OS build."
+                                .into(),
+                        ),
+                        artifact::ArtifactLifecycle::Ready => None,
+                    },
+                },
+                listing_limit: artifact::folder::MAX_FOLDER_ENTRIES as u32,
+                selected_entry_id: folder
+                    .selection
+                    .as_ref()
+                    .map(|selection| selection.entry_id.clone()),
+            }),
+        ),
+        artifact::ArtifactState::Unknown(_) => (
+            record.provider.label.clone(),
+            ArtifactProviderStateSnapshot::Unknown,
+        ),
+    };
+    let focus_supported = record.provider.focus == artifact::ArtifactFocusCapability::Focusable
+        && !matches!(
+            &record.lifecycle,
+            artifact::ArtifactLifecycle::Loading { .. }
+                | artifact::ArtifactLifecycle::UnknownVersion { .. }
+        );
+    Ok(ArtifactSnapshot {
+        artifact_id: protocol::ArtifactId::new(record.artifact_id.clone())?,
+        project_id: ProjectId::new(record.project_id.clone())?,
+        session_id: SessionId::new(record.session_id.clone())?,
+        provider_type: record.provider.type_id.clone(),
+        provider_version: record.provider.schema_version,
+        state_schema_version: record.schema_version,
+        record_revision: record.record_revision,
+        title,
+        focus_supported,
+        status: artifact_status(&record, pending_approval_id.as_deref()),
+        pending_approval_id,
+        source_label: artifact_source_label(&record.source),
+        resource_version,
+        history,
+        provider_state,
+    })
+}
+
+fn build_artifact_workspace_snapshot(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ArtifactWorkspaceSnapshot, ProtocolError> {
+    let workspace = active_workspace_snapshot(core, correlation_id.clone())?;
+    let workspace_id = workspace
+        .workspace
+        .as_ref()
+        .map(|record| record.workspace_id.clone())
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let conversation = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .clone();
+    let active_project_id = conversation.active_project_id.clone();
+    let active_session_id = conversation.active_session_id.clone();
+    let project_name = active_project_id
+        .as_deref()
+        .and_then(|project_id| {
+            workspace
+                .projects
+                .iter()
+                .find(|project| project.project_id == project_id)
+        })
+        .map(|project| project.display_name.as_str())
+        .unwrap_or("Project");
+    let database = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .as_ref()
+        .map(|active| Arc::clone(active.database_actor()))
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let documents = if let Some(session_id) = active_session_id.as_deref() {
+        database
+            .artifact_documents_for_session(session_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+    } else {
+        Vec::new()
+    };
+    let mut records = documents
+        .into_iter()
+        .map(|document| deserialize_artifact_record(document, correlation_id.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    if active_project_id.is_some() && active_session_id.is_some() {
+        let scope = active_artifact_scope(core, correlation_id.clone())?;
+        let now_ms =
+            current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        for record in &mut records {
+            if record.workspace_id == workspace_id
+                && active_project_id.as_deref() == Some(record.project_id.as_str())
+                && active_session_id.as_deref() == Some(record.session_id.as_str())
+            {
+                reconcile_interrupted_file_save_request(
+                    core,
+                    &scope,
+                    record,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+            }
+        }
+    }
+    let pending_by_artifact = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_writes
+        .iter()
+        .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let artifacts = records
+        .into_iter()
+        .filter_map(|record| {
+            (active_project_id.as_deref() == Some(record.project_id.as_str())
+                && active_session_id.as_deref() == Some(record.session_id.as_str()))
+            .then(|| {
+                artifact_protocol_snapshot(
+                    record.clone(),
+                    pending_by_artifact.get(&record.artifact_id).cloned(),
+                    project_name,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let focused_artifact_id = database
+        .artifact_ui_state()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .map(|record| {
+            serde_json::from_str::<artifact::ArtifactWorkspaceUiState>(&record.canonical_document)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))
+        })
+        .transpose()?
+        .and_then(|state| state.focused_artifact_id)
+        .filter(|artifact_id| {
+            artifacts.iter().any(|artifact| {
+                artifact.artifact_id.as_str() == artifact_id && artifact.focus_supported
+            })
+        })
+        .map(protocol::ArtifactId::new)
+        .transpose()?;
+    Ok(ArtifactWorkspaceSnapshot {
+        protocol_version: protocol::PROTOCOL_VERSION,
+        generation: StateGeneration(workspace.generation),
+        authority: "rust-core".into(),
+        workspace_id: Some(WorkspaceId::new(workspace_id)?),
+        active_project_id: active_project_id.map(ProjectId::new).transpose()?,
+        active_session_id: active_session_id.map(SessionId::new).transpose()?,
+        focused_artifact_id,
+        artifacts,
+    })
+}
+
+/// Reconciles completed model output for immutable File Reply turns into the
+/// durable proposal state. The source is the Rust-owned session/event journal;
+/// no renderer payload participates. A stale artifact revision or live target
+/// is ignored, leaving the assistant response visible without creating an
+/// actionable proposal against changed bytes.
+fn reconcile_completed_file_reply_proposals(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    use runtime::session::RunAttemptStatus;
+
+    let scope = active_artifact_scope(core, correlation_id.clone())?;
+    let sessions = core
+        .runtime
+        .durable_sessions()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let Some(session) = sessions
+        .iter()
+        .find(|session| session.session_id == scope.session_id)
+    else {
+        return Ok(());
+    };
+    let mut candidates = Vec::new();
+    for attempt in &session.attempts {
+        let RunAttemptStatus::Completed { completed_at_ms } = attempt.status else {
+            continue;
+        };
+        let Some(turn) = session
+            .turns
+            .iter()
+            .find(|turn| turn.turn_id == attempt.turn_id)
+        else {
+            continue;
+        };
+        let Some(context) = turn
+            .reply_context
+            .as_ref()
+            .and_then(|reply| reply.artifact_context.as_ref())
+            .filter(|context| context.provider_type == "file")
+        else {
+            continue;
+        };
+        let assistant_markdown = project_attempt_snapshot(attempt)?.assistant_markdown;
+        let Some(proposed_content) =
+            artifact::file::file_reply_proposed_content(&assistant_markdown)
+        else {
+            continue;
+        };
+        candidates.push((
+            completed_at_ms,
+            attempt.attempt_id.as_str(),
+            context,
+            proposed_content,
+        ));
+    }
+    candidates.sort_by_key(|(completed_at_ms, ..)| *completed_at_ms);
+
+    for (completed_at_ms, attempt_id, context, proposed_content) in candidates {
+        let Some(document) = scope
+            .database
+            .artifact_document(&context.artifact_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        else {
+            continue;
+        };
+        let mut record = deserialize_artifact_record(document, correlation_id.clone())?;
+        if record.workspace_id != scope.workspace_id
+            || record.project_id != scope.project_id
+            || record.session_id != scope.session_id
+            || record.record_revision != context.artifact_record_revision
+        {
+            continue;
+        }
+        let artifact::ArtifactState::File(file) = &mut record.state else {
+            continue;
+        };
+        if file.live_version.as_resource_version() != context.captured_live_version {
+            continue;
+        }
+        let proposal_digest = sha256_bytes(attempt_id.as_bytes());
+        let proposal_id = format!("file-proposal-{}", &proposal_digest[7..39]);
+        if file
+            .proposal
+            .as_ref()
+            .is_some_and(|proposal| proposal.proposal_id == proposal_id)
+        {
+            continue;
+        }
+        let diff = artifact::file::file_reply_unified_diff(
+            &file.resource.project_relative_path,
+            &file.content,
+            &proposed_content,
+        );
+        if diff.is_empty() {
+            continue;
+        }
+        file.install_proposal(artifact::FileProposal {
+            proposal_id,
+            base_live_version: file.live_version.clone(),
+            proposed_content,
+            unified_diff: diff,
+            status: artifact::FileProposalStatus::Pending,
+            created_at_ms: completed_at_ms,
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let expected_revision = record.record_revision;
+        advance_artifact_record(
+            &mut record,
+            artifact::ArtifactHistoryKind::ProposalChanged,
+            completed_at_ms,
+        )?;
+        persist_artifact_record(
+            &scope,
+            &record,
+            Some(expected_revision),
+            correlation_id.clone(),
+        )?;
+    }
+    Ok(())
+}
+
+fn save_artifact_ui_state(
+    scope: &ActiveArtifactScope,
+    focused: Option<&artifact::ArtifactRecord>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<u64, ProtocolError> {
+    let current = scope
+        .database
+        .artifact_ui_state()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let (mut state, expected_revision) = if let Some(current) = current {
+        let state =
+            serde_json::from_str::<artifact::ArtifactWorkspaceUiState>(&current.canonical_document)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        (state, Some(current.revision))
+    } else {
+        (
+            artifact::ArtifactWorkspaceUiState {
+                schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
+                workspace_id: scope.workspace_id.clone(),
+                revision: 1,
+                focused_artifact_id: focused.map(|record| record.artifact_id.clone()),
+                updated_at_ms: now_ms,
+            },
+            None,
+        )
+    };
+    if expected_revision.is_some() {
+        match focused {
+            Some(record) => state.focus(record, now_ms),
+            None => state.clear_focus(now_ms),
+        }
+        .map_err(|_| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "Artifact focus changed before the operation",
+                true,
+            )
+        })?;
+    } else {
+        state
+            .validate()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if let Some(record) = focused {
+            state.validate_against(record).map_err(|_| {
+                platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::Conflict,
+                    "The Artifact cannot receive focus",
+                    false,
+                )
+            })?;
+        }
+    }
+    let canonical_document = serde_json::to_string(&state)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    scope
+        .database
+        .save_artifact_ui_state(
+            core::database::WorkspaceArtifactUiStateRecord {
+                workspace_id: scope.workspace_id.clone(),
+                revision: state.revision,
+                canonical_document,
+                updated_at_ms: state.updated_at_ms,
+            },
+            expected_revision,
+        )
+        .map_err(|error| {
+            platform_boundary_error(
+                correlation_id,
+                if matches!(error, core::database::DatabaseError::Conflict(_)) {
+                    ProtocolErrorCode::Conflict
+                } else {
+                    ProtocolErrorCode::Internal
+                },
+                "Artifact focus could not be committed",
+                true,
+            )
+        })
+}
+
+fn clear_persisted_artifact_focus(
+    database: &core::database::DatabaseActor,
+    workspace_id: &str,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<Option<u64>, ProtocolError> {
+    let Some(current) = database
+        .artifact_ui_state()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+    else {
+        return Ok(None);
+    };
+    let mut state =
+        serde_json::from_str::<artifact::ArtifactWorkspaceUiState>(&current.canonical_document)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    if state.focused_artifact_id.is_none() {
+        return Ok(None);
+    }
+    state.clear_focus(now_ms).map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Artifact focus changed before Chat navigation",
+            true,
+        )
+    })?;
+    let canonical_document = serde_json::to_string(&state)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    database
+        .save_artifact_ui_state(
+            core::database::WorkspaceArtifactUiStateRecord {
+                workspace_id: workspace_id.into(),
+                revision: state.revision,
+                canonical_document,
+                updated_at_ms: state.updated_at_ms,
+            },
+            Some(current.revision),
+        )
+        .map(Some)
+        .map_err(|_| {
+            platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Artifact focus could not be cleared for Chat navigation",
+                true,
+            )
+        })
+}
+
+#[tauri::command]
+fn artifact_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    reconcile_completed_file_reply_proposals(&core, request.correlation_id.clone())?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_open_file(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactOpenInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let selected = take_artifact_picker_grant(
+        &core,
+        &input.picker_grant_id,
+        PickerPurpose::OpenFile,
+        PickerObjectKind::File,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let relative = project_relative_picker_path(&selected, &scope, request.correlation_id.clone())?;
+    let state = domain_file_state(&scope, &relative, 1, now_ms, request.correlation_id.clone())?;
+    let record = new_artifact_record(
+        &scope,
+        artifact::ArtifactProviderDescriptor::file(),
+        artifact::ArtifactState::File(Box::new(state)),
+        "open-file",
+        now_ms,
+    )?;
+    persist_artifact_record(&scope, &record, None, request.correlation_id.clone())?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_open_folder(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactOpenInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let selected = take_artifact_picker_grant(
+        &core,
+        &input.picker_grant_id,
+        PickerPurpose::OpenFolder,
+        PickerObjectKind::Folder,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let relative = project_relative_picker_path(&selected, &scope, request.correlation_id.clone())?;
+    let state = domain_folder_state(&scope, &relative, 1, now_ms, request.correlation_id.clone())?;
+    let record = new_artifact_record(
+        &scope,
+        artifact::ArtifactProviderDescriptor::folder(),
+        artifact::ArtifactState::Folder(Box::new(state)),
+        "open-folder",
+        now_ms,
+    )?;
+    persist_artifact_record(&scope, &record, None, request.correlation_id.clone())?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+fn require_no_pending_artifact_write(
+    core: &AppCoreState,
+    artifact_id: &protocol::ArtifactId,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let process_pending = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_writes
+        .values()
+        .any(|pending| pending.artifact_id == artifact_id.as_str());
+    let scope = active_artifact_scope(core, correlation_id.clone())?;
+    let durable_pending = scope
+        .database
+        .artifact_document(artifact_id.as_str())
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .map(|document| deserialize_artifact_record(document, correlation_id.clone()))
+        .transpose()?
+        .is_some_and(|record| match record.state {
+            artifact::ArtifactState::File(file) => file.pending_save_requested_at_ms.is_some(),
+            artifact::ArtifactState::Folder(_) | artifact::ArtifactState::Unknown(_) => false,
+        });
+    if process_pending || durable_pending {
+        Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Resolve the pending File write approval before changing this Artifact",
+            false,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn artifact_focus(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    save_artifact_ui_state(
+        &scope,
+        Some(&record),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_close_focus(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    save_artifact_ui_state(&scope, None, now_ms, request.correlation_id.clone())?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_begin_file_edit(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can enter edit mode",
+            false,
+        ));
+    };
+    if file.draft.is_some() {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The File already has a retained draft",
+            false,
+        ));
+    }
+    file.begin_draft(now_ms).map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The File could not enter edit mode",
+            false,
+        )
+    })?;
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::DraftChanged,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_update_file_draft(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactFileDraftInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can retain a draft",
+            false,
+        ));
+    };
+    file.update_draft(input.content, now_ms).map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The File draft changed before this update",
+            true,
+        )
+    })?;
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::DraftChanged,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_discard_file_draft(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can discard a draft",
+            false,
+        ));
+    };
+    if file.draft.is_none() {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The File has no retained draft",
+            false,
+        ));
+    }
+    file.discard_draft();
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::DraftDiscarded,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_reject_file_proposal(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can reject a proposal",
+            false,
+        ));
+    };
+    file.reject_proposal(now_ms).map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The File proposal is no longer pending",
+            true,
+        )
+    })?;
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::ProposalChanged,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_resolve_file_conflict(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactFileConflictInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can resolve a save conflict",
+            false,
+        ));
+    };
+    if file.conflict.is_none() {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The File has no unresolved save conflict",
+            false,
+        ));
+    }
+    let retained_content = file_pending_content(file);
+    let relative_path = PathBuf::from(&file.resource.project_relative_path);
+    let live = scope
+        .filesystem
+        .read_utf8(&relative_path)
+        .map_err(|error| {
+            artifact_filesystem_error(
+                error,
+                request.correlation_id.clone(),
+                "The live File could not be reloaded safely",
+            )
+        })?;
+    let live_version = artifact::FileLiveVersion::new_with_target_version(
+        file.live_version.sequence.saturating_add(1),
+        live.version().target_version(),
+        live.version().content_sha256(),
+        live.version().byte_length(),
+        now_ms,
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    file.restore_live_snapshot(live.content().to_owned(), live_version, now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    match input.resolution {
+        ArtifactFileConflictResolution::ReloadCurrent => file.discard_draft(),
+        ArtifactFileConflictResolution::KeepDraft => {
+            file.begin_draft(now_ms)
+                .and_then(|()| file.update_draft(retained_content, now_ms))
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        }
+    }
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::RecoveryChanged,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_refresh_folder(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let expected_revision = record.record_revision;
+    let artifact::ArtifactState::Folder(folder) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a Folder artifact can refresh its listing",
+            false,
+        ));
+    };
+    let relative = PathBuf::from(&folder.resource.project_relative_path);
+    let sequence = folder.listing_version.sequence.saturating_add(1);
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let refreshed = domain_folder_state(
+        &scope,
+        &relative,
+        sequence,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    record.state = artifact::ArtifactState::Folder(Box::new(refreshed));
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::ResourceRefreshed,
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+fn artifact_folder_navigation_allowed(record: &artifact::ArtifactRecord, target: &str) -> bool {
+    match &record.state {
+        artifact::ArtifactState::Folder(folder) => folder
+            .breadcrumbs
+            .iter()
+            .any(|breadcrumb| breadcrumb.project_relative_path == target),
+        artifact::ArtifactState::File(file) => {
+            let parent = file
+                .resource
+                .project_relative_path
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent);
+            target.is_empty() || target == parent || parent.starts_with(&format!("{target}/"))
+        }
+        artifact::ArtifactState::Unknown(_) => false,
+    }
+}
+
+#[tauri::command]
+fn artifact_navigate_folder(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactFolderNavigateInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    if !artifact_folder_navigation_allowed(&record, &input.project_relative_path) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Forbidden,
+            "The requested Folder is outside this artifact's breadcrumb authority",
+            false,
+        ));
+    }
+    let expected_revision = record.record_revision;
+    let sequence = record.resource_version().sequence.saturating_add(1);
+    let converted = matches!(record.state, artifact::ArtifactState::File(_));
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let state = domain_folder_state(
+        &scope,
+        Path::new(&input.project_relative_path),
+        sequence,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    record.provider = artifact::ArtifactProviderDescriptor::folder();
+    record.state = artifact::ArtifactState::Folder(Box::new(state));
+    advance_artifact_record(
+        &mut record,
+        if converted {
+            artifact::ArtifactHistoryKind::Converted
+        } else {
+            artifact::ArtifactHistoryKind::NavigationChanged
+        },
+        now_ms,
+    )?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_select_folder_entry(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactFolderSelectInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Folder(folder) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a Folder artifact has selectable entries",
+            false,
+        ));
+    };
+    let entry = folder
+        .entries
+        .iter()
+        .find(|entry| entry.entry_id == input.entry_id)
+        .cloned()
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The Folder entry is unavailable",
+                true,
+            )
+        })?;
+    let mut source_folder = folder.clone();
+    source_folder.select(&entry.entry_id).map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The Folder selection changed before the operation",
+            true,
+        )
+    })?;
+    let expected_revision = record.record_revision;
+    let sequence = folder.listing_version.sequence.saturating_add(1);
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (provider, state, history_kind) = match entry.kind {
+        artifact::FolderEntryKind::Folder => (
+            artifact::ArtifactProviderDescriptor::folder(),
+            artifact::ArtifactState::Folder(Box::new(domain_folder_state(
+                &scope,
+                Path::new(&entry.project_relative_path),
+                sequence,
+                now_ms,
+                request.correlation_id.clone(),
+            )?)),
+            artifact::ArtifactHistoryKind::NavigationChanged,
+        ),
+        artifact::FolderEntryKind::File => {
+            let file = domain_file_state(
+                &scope,
+                Path::new(&entry.project_relative_path),
+                sequence,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            source_folder
+                .convert_selected_file(Some(file.live_version.clone()), now_ms)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            (
+                artifact::ArtifactProviderDescriptor::file(),
+                artifact::ArtifactState::File(Box::new(file)),
+                artifact::ArtifactHistoryKind::Converted,
+            )
+        }
+    };
+    record.provider = provider;
+    record.state = state;
+    advance_artifact_record(&mut record, history_kind, now_ms)?;
+    persist_artifact_record(
+        &scope,
+        &record,
+        Some(expected_revision),
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_reply(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactReplyInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _conversation_operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    if matches!(record.state, artifact::ArtifactState::Unknown(_)) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "This artifact version cannot provide Reply context",
+            false,
+        ));
+    }
+    let capture = durable_artifact_reply_capture(
+        &record,
+        input.selected_text,
+        input.selected_entry_id,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let generation = {
+        let mut conversation = core
+            .conversation
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        if !matches!(
+            conversation.pending,
+            conversation::PendingChatState::Inactive
+        ) || conversation.active_session_id.as_deref() != Some(scope.session_id.as_str())
+        {
+            return Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Reply requires the active durable Chat",
+                true,
+            ));
+        }
+        let draft = conversation
+            .drafts
+            .entry(scope.session_id.clone())
+            .or_insert_with(|| DurableConversationDraft {
+                mode: "chat".into(),
+                ..DurableConversationDraft::default()
+            });
+        draft.mode = "chat".into();
+        draft.reply_target_id = Some(record.artifact_id.clone());
+        draft.artifact_reply_capture = Some(capture);
+        conversation
+            .persist(&scope.database, &scope.workspace_id, now_ms)
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+    };
+    core.conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .advance(generation)?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_expand_context(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactContextExpandInput,
+) -> Result<ProtocolEnvelope<ConversationArtifactContextSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    if artifact_resource_snapshot(record.resource_version()) != input.expected_resource_version {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The Artifact changed before context expansion",
+            true,
+        ));
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let context = capture_artifact_record_context(
+        &record,
+        input.selected_text.as_deref(),
+        input.selected_entry_id.as_deref(),
+        input.maximum_bytes as usize,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = project_artifact_context_snapshot(&context)?;
+    let active_session_id = SessionId::new(scope.session_id)?;
+    protocol::artifact_context_snapshot(request, payload, before.generation, &active_session_id)
+}
+
+fn durable_artifact_reply_capture(
+    record: &artifact::ArtifactRecord,
+    selected_text: Option<String>,
+    selected_entry_id: Option<String>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<DurableArtifactReplyCapture, ProtocolError> {
+    match &record.state {
+        artifact::ArtifactState::File(file) => {
+            if selected_entry_id.is_some()
+                || selected_text
+                    .as_deref()
+                    .is_some_and(|selection| !file_pending_content(file).contains(selection))
+            {
+                return Err(platform_boundary_error(
+                    correlation_id,
+                    ProtocolErrorCode::Conflict,
+                    "The selected File context is stale or invalid",
+                    true,
+                ));
+            }
+        }
+        artifact::ArtifactState::Folder(folder) => {
+            if selected_text.is_some()
+                || selected_entry_id.as_deref().is_some_and(|entry_id| {
+                    !folder
+                        .entries
+                        .iter()
+                        .any(|entry| entry.entry_id == entry_id)
+                })
+            {
+                return Err(platform_boundary_error(
+                    correlation_id,
+                    ProtocolErrorCode::Conflict,
+                    "The selected Folder context is stale or invalid",
+                    true,
+                ));
+            }
+        }
+        artifact::ArtifactState::Unknown(_) => {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::InvalidPayload,
+                "This artifact version cannot provide Reply context",
+                false,
+            ));
+        }
+    }
+    Ok(DurableArtifactReplyCapture {
+        artifact_id: record.artifact_id.clone(),
+        artifact_record_revision: record.record_revision,
+        resource_version: artifact_resource_snapshot(record.resource_version()),
+        selected_text,
+        selected_entry_id,
+    })
+}
+
+fn require_current_artifact_reply_capture(
+    record: &artifact::ArtifactRecord,
+    capture: &DurableArtifactReplyCapture,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    if capture.artifact_id != record.artifact_id
+        || capture.artifact_record_revision != record.record_revision
+        || capture.resource_version != artifact_resource_snapshot(record.resource_version())
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The selected Artifact Reply context changed before submission",
+            true,
+        ));
+    }
+    durable_artifact_reply_capture(
+        record,
+        capture.selected_text.clone(),
+        capture.selected_entry_id.clone(),
+        correlation_id,
+    )?;
+    Ok(())
+}
+
+fn file_save_candidate(
+    file: &artifact::FileArtifactState,
+) -> Result<(artifact::FileLiveVersion, String, ActionRequestOrigin), ProtocolError> {
+    if let Some(proposal) = &file.proposal
+        && matches!(proposal.status, artifact::FileProposalStatus::Pending)
+    {
+        return Ok((
+            proposal.base_live_version.clone(),
+            proposal.proposed_content.clone(),
+            ActionRequestOrigin::ArtifactReplyProposal,
+        ));
+    }
+    if let Some(draft) = &file.draft
+        && draft.dirty
+    {
+        return Ok((
+            draft.base_live_version.clone(),
+            draft.content.clone(),
+            ActionRequestOrigin::DirectUserEdit,
+        ));
+    }
+    Err(ProtocolError::new(
+        ProtocolErrorCode::Conflict,
+        "The File has no unsaved change to save",
+        false,
+    ))
+}
+
+fn active_project_repository_state(scope: &ActiveArtifactScope) -> RepositoryState {
+    let mut runner = ProductionGitRunner::default();
+    match inspect_branch_control(
+        scope.project_root.clone(),
+        Path::new(TRUSTED_GIT_PROGRAM),
+        &mut runner,
+    ) {
+        Ok(BranchControlVisibility::Visible(_)) => RepositoryState::VersionControlled,
+        Ok(
+            BranchControlVisibility::HiddenNonRepository
+            | BranchControlVisibility::HiddenRepositoryCrossesProjectBoundary { .. },
+        ) => RepositoryState::NotVersionControlled,
+        Err(_) => RepositoryState::Unknown,
+    }
+}
+
+fn current_artifact_live_authority(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<LiveAuthorityState, ProtocolError> {
+    let runtime_snapshot = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let authority = core
+        .runtime
+        .policy_authority
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    Ok(LiveAuthorityState {
+        process_generation: 1,
+        configuration_version: runtime_snapshot.generation.max(1),
+        policy_version: authority.policy_version,
+        revocation_epoch: authority.revocation_epoch,
+    })
+}
+
+fn prepare_artifact_write(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &artifact::ArtifactRecord,
+    preparation: ArtifactWritePreparation,
+) -> Result<(PendingArtifactWrite, ActionFacts), ProtocolError> {
+    let ArtifactWritePreparation {
+        project_version,
+        relative_path,
+        content,
+        request_origin,
+        now_ms,
+        correlation_id,
+    } = preparation;
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let relative_text = normalized_project_relative_text(&relative_path, correlation_id.clone())?;
+    let canonical_target = scope
+        .project_root
+        .canonical_root()
+        .join(&relative_path)
+        .to_string_lossy()
+        .into_owned();
+    if canonical_target.is_empty() || canonical_target.chars().any(char::is_control) {
+        return Err(workspace_state_unavailable(correlation_id));
+    }
+    let action_id = format!("file-write-{}", Uuid::new_v4().as_simple());
+    let content_sha256 = sha256_bytes(content.as_bytes());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.file".into(),
+        arguments: serde_json::json!({
+            "artifactId": record.artifact_id.clone(),
+            "projectRelativePath": relative_text,
+            "contentSha256": content_sha256,
+            "byteLength": content.len(),
+        }),
+        risk: CanonicalRisk::Medium,
+        requested_authority: BTreeSet::from(["file.write".into()]),
+        canonical_target: canonical_target.clone(),
+        target_version: project_version.target_version(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        run_id: format!("artifact-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The File write could not be bound to an exact action",
+            false,
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: "file.write".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::File,
+        effects: BTreeSet::from([ActionEffect::Modify]),
+        scope: ActionScope::Workspace,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin,
+        repository_state: active_project_repository_state(scope),
+        inside_active_project: true,
+        canonical_target,
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: true,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((
+        PendingArtifactWrite {
+            artifact_id: record.artifact_id.clone(),
+            record_revision: record.record_revision,
+            project_filesystem: scope.filesystem.clone(),
+            relative_path,
+            expected_file_version: project_version,
+            content,
+            action,
+            live,
+        },
+        facts,
+    ))
+}
+
+fn persist_file_save_result(
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    result: artifact::FileSaveResult,
+    history_kind: artifact::ArtifactHistoryKind,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let expected_revision = record.record_revision;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(workspace_state_unavailable(correlation_id));
+    };
+    file.apply_save_result(result).map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The File save result no longer matches its retained draft",
+            true,
+        )
+    })?;
+    advance_artifact_record(record, history_kind, now_ms)?;
+    persist_artifact_record(scope, record, Some(expected_revision), correlation_id)?;
+    Ok(())
+}
+
+fn persist_file_save_requested(
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let expected_revision = record.record_revision;
+    let artifact::ArtifactState::File(file) = &mut record.state else {
+        return Err(workspace_state_unavailable(correlation_id));
+    };
+    file.mark_save_requested(now_ms).map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "The File no longer has an exact save candidate",
+            true,
+        )
+    })?;
+    advance_artifact_record(record, artifact::ArtifactHistoryKind::SaveRequested, now_ms)?;
+    persist_artifact_record(scope, record, Some(expected_revision), correlation_id)?;
+    Ok(())
+}
+
+fn reconcile_interrupted_file_save_request(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let artifact::ArtifactState::File(file) = &record.state else {
+        return Ok(());
+    };
+    if file.pending_save_requested_at_ms.is_none() {
+        return Ok(());
+    }
+    let already_requeued = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_writes
+        .values()
+        .any(|pending| pending.artifact_id == record.artifact_id);
+    if already_requeued {
+        return Ok(());
+    }
+
+    let (expected_live, content, request_origin) = file_save_candidate(file)?;
+    let relative_path = PathBuf::from(&file.resource.project_relative_path);
+    let live = match scope.filesystem.read_utf8(&relative_path) {
+        Ok(live) => live,
+        Err(_) => {
+            return persist_file_save_result(
+                scope,
+                record,
+                artifact::FileSaveResult::Failed {
+                    code: "live-file-unavailable".into(),
+                    message:
+                        "The interrupted File save target is unavailable; the draft was retained."
+                            .into(),
+                    retryable: true,
+                    failed_at_ms: now_ms,
+                },
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                correlation_id,
+            );
+        }
+    };
+    if live.version().target_version() != expected_live.target_version {
+        let observed_live = artifact::FileLiveVersion::new_with_target_version(
+            expected_live.sequence.saturating_add(1),
+            live.version().target_version(),
+            live.version().content_sha256(),
+            live.version().byte_length(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        return persist_file_save_result(
+            scope,
+            record,
+            artifact::FileSaveResult::Conflict {
+                observed_live,
+                message: "The live File changed while approval was interrupted.".into(),
+                observed_at_ms: now_ms,
+            },
+            artifact::ArtifactHistoryKind::ConflictObserved,
+            now_ms,
+            correlation_id,
+        );
+    }
+
+    let (pending, facts) = prepare_artifact_write(
+        core,
+        scope,
+        record,
+        ArtifactWritePreparation {
+            project_version: live.version().clone(),
+            relative_path,
+            content,
+            request_origin,
+            now_ms,
+            correlation_id: correlation_id.clone(),
+        },
+    )?;
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .requeue_interrupted_direct_approval(&facts, pending.action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => persist_file_save_result(
+            scope,
+            record,
+            artifact::FileSaveResult::Failed {
+                code: "policy-denied".into(),
+                message: "Policy denied the interrupted File write; the draft was retained.".into(),
+                retryable: false,
+                failed_at_ms: now_ms,
+            },
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            now_ms,
+            correlation_id,
+        ),
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id))?
+                .pending_writes
+                .insert(prompt.prompt_id, pending);
+            Ok(())
+        }
+        GatewayProposal::Authorized { .. } => Err(workspace_state_unavailable(correlation_id)),
+    }
+}
+
+fn execute_artifact_write(
+    core: &AppCoreState,
+    pending: PendingArtifactWrite,
+    token: AuthorizationToken,
+    approval_prompt_id: Option<&str>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let scope = active_artifact_scope(core, correlation_id.clone())?;
+    let artifact_id = protocol::ArtifactId::new(pending.artifact_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &artifact_id,
+        pending.record_revision,
+        correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::File(file) = &record.state else {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The approved Artifact is no longer a File",
+            true,
+        ));
+    };
+    let (expected_live, content, _) = file_save_candidate(file)?;
+    if content != pending.content
+        || expected_live.target_version != pending.expected_file_version.target_version()
+        || pending.action.target_version != pending.expected_file_version.target_version()
+        || pending.action.workspace_id != scope.workspace_id
+        || pending.action.session_id != scope.session_id
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The approved File write changed before execution",
+            true,
+        ));
+    }
+    let filesystem = pending.project_filesystem.clone();
+    let relative_path = pending.relative_path.clone();
+    let expected_version = pending.expected_file_version.clone();
+    let content_for_effect = pending.content.clone();
+    let canonical_target = pending.action.canonical_target.clone();
+    let completed_at_ms = now_ms.saturating_add(1);
+    let mut write_outcome = None;
+    core.runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator.execute_direct_action(
+                &token,
+                &pending.action,
+                pending.live,
+                approval_prompt_id,
+                now_ms,
+                |_permit| {
+                    let outcome = filesystem.write_utf8(
+                        &relative_path,
+                        &content_for_effect,
+                        &ExpectedFileState::Existing(expected_version),
+                    );
+                    let normalized = match &outcome {
+                        Ok(_) => NormalizedActionResult {
+                            status: NormalizedActionStatus::Succeeded,
+                            result_code: "file-write-succeeded".into(),
+                            exit_code: Some(0),
+                            changed_targets: vec![canonical_target.clone()],
+                            output_sha256: Some(sha256_bytes(content_for_effect.as_bytes())),
+                            completed_at_ms,
+                        },
+                        Err(
+                            ProjectFilesystemError::Conflict
+                            | ProjectFilesystemError::TargetChanged,
+                        ) => NormalizedActionResult {
+                            status: NormalizedActionStatus::Failed,
+                            result_code: "file-write-conflict".into(),
+                            exit_code: Some(1),
+                            changed_targets: Vec::new(),
+                            output_sha256: None,
+                            completed_at_ms,
+                        },
+                        Err(_) => NormalizedActionResult {
+                            status: NormalizedActionStatus::Failed,
+                            result_code: "file-write-failed".into(),
+                            exit_code: None,
+                            changed_targets: Vec::new(),
+                            output_sha256: None,
+                            completed_at_ms,
+                        },
+                    };
+                    write_outcome = Some(outcome);
+                    normalized
+                },
+            )?;
+            Ok(())
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let outcome =
+        write_outcome.ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    match outcome {
+        Ok(outcome) => {
+            let version = artifact::FileLiveVersion::new_with_target_version(
+                expected_live.sequence.saturating_add(1),
+                outcome.version().target_version(),
+                outcome.version().content_sha256(),
+                outcome.version().byte_length(),
+                completed_at_ms,
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            persist_file_save_result(
+                &scope,
+                &mut record,
+                artifact::FileSaveResult::Saved {
+                    content: pending.content,
+                    live_version: version,
+                    saved_at_ms: completed_at_ms,
+                },
+                artifact::ArtifactHistoryKind::SaveCompleted,
+                completed_at_ms,
+                correlation_id,
+            )
+        }
+        Err(ProjectFilesystemError::Conflict | ProjectFilesystemError::TargetChanged) => {
+            match scope.filesystem.read_utf8(&pending.relative_path) {
+                Ok(observed) => {
+                    let observed_live = artifact::FileLiveVersion::new_with_target_version(
+                        expected_live.sequence.saturating_add(1),
+                        observed.version().target_version(),
+                        observed.version().content_sha256(),
+                        observed.version().byte_length(),
+                        completed_at_ms,
+                    )
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                    persist_file_save_result(
+                        &scope,
+                        &mut record,
+                        artifact::FileSaveResult::Conflict {
+                            observed_live,
+                            message: "The live File changed before the atomic save.".into(),
+                            observed_at_ms: completed_at_ms,
+                        },
+                        artifact::ArtifactHistoryKind::ConflictObserved,
+                        completed_at_ms,
+                        correlation_id,
+                    )
+                }
+                Err(_) => persist_file_save_result(
+                    &scope,
+                    &mut record,
+                    artifact::FileSaveResult::Failed {
+                        code: "live-file-unavailable".into(),
+                        message: "The live File became unavailable; the draft was retained.".into(),
+                        retryable: true,
+                        failed_at_ms: completed_at_ms,
+                    },
+                    artifact::ArtifactHistoryKind::RecoveryChanged,
+                    completed_at_ms,
+                    correlation_id,
+                ),
+            }
+        }
+        Err(_) => persist_file_save_result(
+            &scope,
+            &mut record,
+            artifact::FileSaveResult::Failed {
+                code: "atomic-write-failed".into(),
+                message: "The atomic File save failed; the draft was retained.".into(),
+                retryable: true,
+                failed_at_ms: completed_at_ms,
+            },
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            completed_at_ms,
+            correlation_id,
+        ),
+    }
+}
+
+#[tauri::command]
+fn artifact_save_file(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactMutationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_artifact_write(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::File(file) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a File artifact can be saved",
+            false,
+        ));
+    };
+    let (expected_live, content, request_origin) = file_save_candidate(file)?;
+    let relative_path = PathBuf::from(&file.resource.project_relative_path);
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let live = match scope.filesystem.read_utf8(&relative_path) {
+        Ok(live) => live,
+        Err(_) => {
+            persist_file_save_result(
+                &scope,
+                &mut record,
+                artifact::FileSaveResult::Failed {
+                    code: "live-file-unavailable".into(),
+                    message: "The live File is unavailable; the draft was retained.".into(),
+                    retryable: true,
+                    failed_at_ms: now_ms,
+                },
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+            return protocol::artifact_workspace_snapshot(request, payload);
+        }
+    };
+    if live.version().target_version() != expected_live.target_version {
+        let observed_live = artifact::FileLiveVersion::new_with_target_version(
+            expected_live.sequence.saturating_add(1),
+            live.version().target_version(),
+            live.version().content_sha256(),
+            live.version().byte_length(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        persist_file_save_result(
+            &scope,
+            &mut record,
+            artifact::FileSaveResult::Conflict {
+                observed_live,
+                message: "The live File changed before the save request.".into(),
+                observed_at_ms: now_ms,
+            },
+            artifact::ArtifactHistoryKind::ConflictObserved,
+            now_ms,
+            request.correlation_id.clone(),
+        )?;
+        let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+        return protocol::artifact_workspace_snapshot(request, payload);
+    }
+    let (mut pending, facts) = prepare_artifact_write(
+        &core,
+        &scope,
+        &record,
+        ArtifactWritePreparation {
+            project_version: live.version().clone(),
+            relative_path,
+            content,
+            request_origin,
+            now_ms,
+            correlation_id: request.correlation_id.clone(),
+        },
+    )?;
+    persist_file_save_requested(&scope, &mut record, now_ms, request.correlation_id.clone())?;
+    pending.record_revision = record.record_revision;
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, pending.action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            persist_file_save_result(
+                &scope,
+                &mut record,
+                artifact::FileSaveResult::Failed {
+                    code: "policy-denied".into(),
+                    message: "Policy denied the File write; the draft was retained.".into(),
+                    retryable: false,
+                    failed_at_ms: now_ms,
+                },
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .pending_writes
+                .insert(prompt.prompt_id, pending);
+        }
+        GatewayProposal::Authorized { token, .. } => {
+            execute_artifact_write(
+                &core,
+                pending,
+                token,
+                None,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+        }
+    }
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_answer_approval(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactApprovalInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let pending = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .pending_writes
+        .get(&input.prompt_id)
+        .cloned();
+    let pending = pending.ok_or_else(|| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::NotFound,
+            "The File write approval is no longer active",
+            false,
+        )
+    })?;
+    let answer = match input.answer {
+        ArtifactApprovalAnswer::Allow => ApprovalAnswer::Allow,
+        ArtifactApprovalAnswer::Deny => ApprovalAnswer::Deny,
+    };
+    let response = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .answer_direct_approval(&input.prompt_id, answer, now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    match response {
+        ApprovalResponse::Denied { prompt } => {
+            if prompt.action != pending.action {
+                return Err(workspace_state_unavailable(request.correlation_id));
+            }
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .pending_writes
+                .remove(&input.prompt_id);
+            let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+            let artifact_id = protocol::ArtifactId::new(pending.artifact_id.clone())?;
+            let mut record = load_active_artifact_record(
+                &scope,
+                &artifact_id,
+                pending.record_revision,
+                request.correlation_id.clone(),
+            )?;
+            persist_file_save_result(
+                &scope,
+                &mut record,
+                artifact::FileSaveResult::Failed {
+                    code: "approval-denied".into(),
+                    message: "The File write was cancelled; the draft was retained.".into(),
+                    retryable: false,
+                    failed_at_ms: now_ms,
+                },
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+        }
+        ApprovalResponse::Authorized { prompt, token } => {
+            if prompt.action != pending.action {
+                return Err(workspace_state_unavailable(request.correlation_id));
+            }
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .pending_writes
+                .remove(&input.prompt_id);
+            execute_artifact_write(
+                &core,
+                pending,
+                token,
+                Some(&input.prompt_id),
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+        }
+    }
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
 }
 
 #[tauri::command]
@@ -4363,6 +7362,9 @@ fn conversation_update_draft(
             draft.model_id = input.model_id;
             draft.reasoning_mode = input.reasoning_mode;
             draft.mode = input.mode;
+            if draft.reply_target_id != input.reply_target_id {
+                draft.artifact_reply_capture = None;
+            }
             draft.reply_target_id = input.reply_target_id;
             conversation
                 .persist(&database, &workspace_id, now_ms)
@@ -4497,9 +7499,15 @@ fn conversation_submit(
             &conversation.pending,
             conversation::PendingChatState::Inactive
         )
-        .then(|| active_draft.reply_target_id.clone())
+        .then(|| {
+            active_draft
+                .reply_target_id
+                .clone()
+                .map(|target_id| (target_id, active_draft.artifact_reply_capture.clone()))
+        })
         .flatten()
-        .zip(conversation.active_session_id.clone());
+        .zip(conversation.active_session_id.clone())
+        .map(|((target_id, capture), session_id)| (target_id, session_id, capture));
         (current_generation, reply_target)
     };
     let (workspace_id, workspace_root) = core
@@ -4528,13 +7536,25 @@ fn conversation_submit(
         request.correlation_id.clone(),
     )?;
     let reply_context = reply_target
-        .map(|(target_id, session_id)| {
-            message_reply_context(
-                &core.runtime,
+        .map(|(target_id, session_id, capture)| {
+            if let Some(context) = artifact_reply_context(
+                &core,
                 &session_id,
                 &target_id,
+                capture.as_ref(),
+                input.provider_id.as_deref().zip(input.model_id.as_deref()),
+                now_ms,
                 request.correlation_id.clone(),
-            )
+            )? {
+                Ok(context)
+            } else {
+                message_reply_context(
+                    &core.runtime,
+                    &session_id,
+                    &target_id,
+                    request.correlation_id.clone(),
+                )
+            }
         })
         .transpose()?;
 
@@ -4615,7 +7635,7 @@ fn conversation_submit(
                     false,
                 ));
             }
-            ConversationSubmissionDispatch::Turn(ConversationTurnDispatchIntent {
+            ConversationSubmissionDispatch::Turn(Box::new(ConversationTurnDispatchIntent {
                 workspace_id: workspace_id.clone(),
                 project_id,
                 session_id,
@@ -4626,7 +7646,7 @@ fn conversation_submit(
                 reasoning_mode: draft.reasoning_mode.clone(),
                 reply_context,
                 submitted_at_ms: now_ms,
-            })
+            }))
         } else {
             conversation.pending_attachments.retain(|attachment| {
                 retained_attachment_ids.contains(attachment.attachment_id.as_str())
@@ -4717,7 +7737,7 @@ fn conversation_submit(
             }),
         ConversationSubmissionDispatch::Turn(intent) => core
             .runtime
-            .dispatch_conversation_turn(intent)
+            .dispatch_conversation_turn(*intent)
             .map(|dispatch| match dispatch {
                 CoordinatedTurnDispatch::Accepted {
                     coordinator_generation,
@@ -4768,6 +7788,7 @@ fn conversation_submit(
             reasoning_mode: input.reasoning_mode.clone(),
             mode: input.resume_mode.clone(),
             reply_target_id: None,
+            artifact_reply_capture: None,
         };
         if first_submission {
             let completion = conversation::complete_pending_chat(&conversation.pending)
@@ -5219,6 +8240,10 @@ fn conversation_activate_session(
         .conversation_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let workspace_snapshot = active_workspace_snapshot(&core, request.correlation_id.clone())?;
@@ -5277,12 +8302,29 @@ fn conversation_activate_session(
             false,
         ));
     }
+    let selection_changed =
+        conversation.active_session_id.as_deref() != Some(chat.chat_id.as_str());
     conversation.active_project_id = Some(chat.project_id.clone());
     conversation.active_session_id = Some(chat.chat_id.clone());
     let persisted_generation = conversation
         .persist(&database, &workspace_id, now_ms)
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    conversation.advance(current_generation.max(persisted_generation))?;
+    let focus_generation = if selection_changed {
+        clear_persisted_artifact_focus(
+            &database,
+            &workspace_id,
+            now_ms,
+            request.correlation_id.clone(),
+        )?
+        .unwrap_or(0)
+    } else {
+        0
+    };
+    conversation.advance(
+        current_generation
+            .max(persisted_generation)
+            .max(focus_generation),
+    )?;
     drop(conversation);
     let payload = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     protocol::conversation_snapshot(request, payload)
@@ -5297,6 +8339,10 @@ fn conversation_activate_project(
     validate_snapshot_request(&request)?;
     let _operation = core
         .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
@@ -5353,8 +8399,7 @@ fn conversation_activate_project(
             false,
         ));
     }
-    conversation.active_project_id = Some(project_id.as_str().into());
-    conversation.active_session_id = workspace_snapshot
+    let next_session_id = workspace_snapshot
         .chats
         .iter()
         .find(|chat| {
@@ -5362,10 +8407,29 @@ fn conversation_activate_project(
                 && chat.lifecycle_state == core::database::LifecycleState::Active
         })
         .map(|chat| chat.chat_id.clone());
+    let selection_changed = conversation.active_project_id.as_deref() != Some(project_id.as_str())
+        || conversation.active_session_id != next_session_id;
+    conversation.active_project_id = Some(project_id.as_str().into());
+    conversation.active_session_id = next_session_id;
     let persisted_generation = conversation
         .persist(&database, &workspace_id, now_ms)
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    conversation.advance(current_generation.max(persisted_generation))?;
+    let focus_generation = if selection_changed {
+        clear_persisted_artifact_focus(
+            &database,
+            &workspace_id,
+            now_ms,
+            request.correlation_id.clone(),
+        )?
+        .unwrap_or(0)
+    } else {
+        0
+    };
+    conversation.advance(
+        current_generation
+            .max(persisted_generation)
+            .max(focus_generation),
+    )?;
     drop(conversation);
     let payload = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     protocol::conversation_snapshot(request, payload)
@@ -6898,6 +9962,12 @@ fn project_session_snapshot(
                             project_attachment_snapshot(attachment, index + 1)
                         })
                         .collect::<Result<Vec<_>, _>>()?,
+                    artifact_context: turn
+                        .reply_context
+                        .as_ref()
+                        .and_then(|reply| reply.artifact_context.as_ref())
+                        .map(project_artifact_context_snapshot)
+                        .transpose()?,
                     submitted_at_ms: turn.submitted_at_ms,
                 })
             })
@@ -6912,6 +9982,98 @@ fn project_session_snapshot(
             .clone()
             .map(AttemptId::new)
             .transpose()?,
+    })
+}
+
+fn project_artifact_context_snapshot(
+    context: &artifact::ArtifactContextSnapshot,
+) -> Result<ConversationArtifactContextSnapshot, ProtocolError> {
+    context.validate().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Persisted Artifact Reply context is invalid",
+            false,
+        )
+    })?;
+    let (payload_kind, segments) = match &context.payload {
+        artifact::ContextPayload::File { segments, .. } => ("file", segments),
+        artifact::ContextPayload::Folder { segments, .. } => ("folder", segments),
+        artifact::ContextPayload::Browser { segments, .. } => ("browser", segments),
+        artifact::ContextPayload::Terminal { segments, .. } => ("terminal", segments),
+    };
+    Ok(ConversationArtifactContextSnapshot {
+        snapshot_id: context.snapshot_id.clone(),
+        stable_reference: context.stable_reference.clone(),
+        artifact_id: protocol::ArtifactId::new(context.artifact_id.clone())?,
+        project_id: ProjectId::new(context.project_id.clone())?,
+        session_id: SessionId::new(context.session_id.clone())?,
+        provider_type: context.provider_type.clone(),
+        provider_version: context.provider_schema_version,
+        artifact_record_revision: context.artifact_record_revision,
+        captured_resource_version: ArtifactResourceVersionSnapshot {
+            sequence: context.captured_live_version.sequence,
+            sha256: context.captured_live_version.sha256.clone(),
+            observed_at_ms: context.captured_live_version.observed_at_ms,
+        },
+        payload_kind: payload_kind.into(),
+        segments: segments
+            .iter()
+            .map(|segment| ConversationArtifactContextSegmentSnapshot {
+                priority: match segment.priority {
+                    artifact::ContextPriority::Selection => "selection",
+                    artifact::ContextPriority::VisibleOrCurrent => "visibleOrCurrent",
+                    artifact::ContextPriority::Recent => "recent",
+                    artifact::ContextPriority::Metadata => "metadata",
+                }
+                .into(),
+                source: segment.source.clone(),
+                text: segment.text.clone(),
+                original_bytes: segment.original_bytes,
+                omitted_bytes: segment.omitted_bytes,
+            })
+            .collect(),
+        maximum_bytes: context.budget.maximum_bytes,
+        used_bytes: context.budget.used_bytes,
+        omitted_bytes: context.budget.omitted_bytes,
+        omitted_segments: context.budget.omitted_segments,
+        truncated: context.budget.truncated,
+        unsaved: context.unsaved,
+        redactions: context
+            .redactions
+            .iter()
+            .map(|redaction| {
+                match redaction {
+                    artifact::ContextRedaction::Secrets => "secrets",
+                    artifact::ContextRedaction::BrowserCredentials => "browserCredentials",
+                    artifact::ContextRedaction::BrowserStorage => "browserStorage",
+                    artifact::ContextRedaction::BrowserUnrelatedHistory => {
+                        "browserUnrelatedHistory"
+                    }
+                    artifact::ContextRedaction::TerminalRawEnvironment => "terminalRawEnvironment",
+                    artifact::ContextRedaction::TerminalPasswords => "terminalPasswords",
+                    artifact::ContextRedaction::TerminalUnrelatedHistory => {
+                        "terminalUnrelatedHistory"
+                    }
+                }
+                .into()
+            })
+            .collect(),
+        capabilities: context
+            .capabilities
+            .iter()
+            .map(|capability| ConversationArtifactCapabilitySnapshot {
+                capability_id: capability.capability_id.clone(),
+                access: match capability.access {
+                    artifact::CapabilityAccess::Readable => "readable",
+                    artifact::CapabilityAccess::ApprovalRequired => "approvalRequired",
+                    artifact::CapabilityAccess::Denied => "denied",
+                    artifact::CapabilityAccess::Unknown => "unknown",
+                }
+                .into(),
+                reason_code: capability.reason_code.clone(),
+            })
+            .collect(),
+        captured_at_ms: context.captured_at_ms,
     })
 }
 
@@ -7048,6 +10210,247 @@ fn parse_usage_tokens(payload: &str) -> Option<(u64, u64)> {
     Some((input?, output?))
 }
 
+const MIN_ARTIFACT_REPLY_CONTEXT_BUDGET_BYTES: usize = 16 * 1_024;
+
+fn artifact_reply_context_budget(
+    core: &AppCoreState,
+    session_id: &str,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<usize, ProtocolError> {
+    let session = core
+        .runtime
+        .session(session_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let preferred_runtime_id = session.binding().map(|binding| binding.runtime_id.as_str());
+    let effective = core
+        .runtime
+        .effective_conversation_models(preferred_runtime_id, now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let route = provider_id
+        .zip(model_id)
+        .map(|(provider, model)| (provider.to_owned(), model.to_owned()))
+        .or_else(|| {
+            core.runtime.snapshot(now_ms).ok().and_then(|runtime| {
+                runtime
+                    .providers
+                    .providers
+                    .iter()
+                    .filter(|provider| provider.profile.enabled)
+                    .find_map(|provider| {
+                        provider.selected_model_id.as_ref().map(|model_id| {
+                            (provider.profile.provider_id.clone(), model_id.clone())
+                        })
+                    })
+            })
+        });
+    let context_tokens = route
+        .as_ref()
+        .and_then(|route| effective.get(route))
+        .and_then(|descriptor| descriptor.numeric_maximum(NumericCapabilityKey::ContextTokens));
+    let derived = context_tokens
+        .and_then(|tokens| usize::try_from(tokens).ok())
+        .map(|tokens| tokens.saturating_mul(4) / 8)
+        .unwrap_or(MIN_ARTIFACT_REPLY_CONTEXT_BUDGET_BYTES);
+    Ok(derived.clamp(
+        MIN_ARTIFACT_REPLY_CONTEXT_BUDGET_BYTES,
+        MAX_REPLY_SOURCE_EXCERPT_BYTES,
+    ))
+}
+
+fn artifact_context_segments(payload: &artifact::ContextPayload) -> &[artifact::ContextSegment] {
+    match payload {
+        artifact::ContextPayload::File { segments, .. }
+        | artifact::ContextPayload::Folder { segments, .. }
+        | artifact::ContextPayload::Browser { segments, .. }
+        | artifact::ContextPayload::Terminal { segments, .. } => segments,
+    }
+}
+
+fn artifact_reply_context(
+    core: &AppCoreState,
+    session_id: &str,
+    target_id: &str,
+    reply_capture: Option<&DurableArtifactReplyCapture>,
+    route: Option<(&str, &str)>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<Option<MessageReplyContextSnapshot>, ProtocolError> {
+    let (database, workspace_id) = {
+        let active = core
+            .active_workspace
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let active = active
+            .as_ref()
+            .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+        (
+            Arc::clone(active.database_actor()),
+            active.manifest().workspace_id.to_string(),
+        )
+    };
+    let Some(document) = database
+        .artifact_document(target_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+    else {
+        return Ok(None);
+    };
+    let record = deserialize_artifact_record(document, correlation_id.clone())?;
+    let active_project_id = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .active_project_id
+        .clone();
+    if record.workspace_id != workspace_id
+        || record.session_id != session_id
+        || active_project_id.as_deref() != Some(record.project_id.as_str())
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The Artifact Reply target is no longer active",
+            true,
+        ));
+    }
+    if let Some(capture) = reply_capture {
+        require_current_artifact_reply_capture(&record, capture, correlation_id.clone())?;
+    }
+    let budget = artifact_reply_context_budget(
+        core,
+        session_id,
+        route.map(|(provider_id, _)| provider_id),
+        route.map(|(_, model_id)| model_id),
+        now_ms,
+        correlation_id.clone(),
+    )?;
+    let snapshot = capture_artifact_record_context(
+        &record,
+        reply_capture.and_then(|capture| capture.selected_text.as_deref()),
+        reply_capture.and_then(|capture| capture.selected_entry_id.as_deref()),
+        budget,
+        now_ms,
+        correlation_id.clone(),
+    )?;
+    let snapshot_document = serde_json::to_vec(&snapshot)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut source_excerpt = artifact_context_segments(&snapshot.payload)
+        .iter()
+        .filter(|segment| !segment.text.is_empty())
+        .map(|segment| format!("[{}]\n{}", segment.source, segment.text))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if source_excerpt.len() > MAX_REPLY_SOURCE_EXCERPT_BYTES {
+        let mut boundary = MAX_REPLY_SOURCE_EXCERPT_BYTES;
+        while !source_excerpt.is_char_boundary(boundary) {
+            boundary = boundary.saturating_sub(1);
+        }
+        source_excerpt.truncate(boundary);
+    }
+    Ok(Some(MessageReplyContextSnapshot {
+        target_id: record.artifact_id,
+        target_kind: record.provider.type_id,
+        source_sha256: sha256_bytes(&snapshot_document),
+        source_excerpt,
+        artifact_context: Some(snapshot),
+    }))
+}
+
+fn capture_artifact_record_context(
+    record: &artifact::ArtifactRecord,
+    selected_text: Option<&str>,
+    selected_entry_id: Option<&str>,
+    maximum_bytes: usize,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::ArtifactContextSnapshot, ProtocolError> {
+    durable_artifact_reply_capture(
+        record,
+        selected_text.map(str::to_owned),
+        selected_entry_id.map(str::to_owned),
+        correlation_id.clone(),
+    )?;
+    let identity = artifact::ContextCaptureIdentity {
+        snapshot_id: format!("artifact-context-{}", Uuid::new_v4().as_simple()),
+        artifact_id: record.artifact_id.clone(),
+        workspace_id: record.workspace_id.clone(),
+        project_id: record.project_id.clone(),
+        session_id: record.session_id.clone(),
+        provider_type: record.provider.type_id.clone(),
+        provider_schema_version: record.provider.schema_version,
+        artifact_record_revision: record.record_revision,
+        live_resource_version: record.resource_version(),
+    };
+    let readable = || artifact::CapabilitySummaryEntry {
+        capability_id: "artifact.read".into(),
+        access: artifact::CapabilityAccess::Readable,
+        reason_code: None,
+    };
+    let mut selected_folder = None;
+    let input = match &record.state {
+        artifact::ArtifactState::File(file) => {
+            let selected_text = selected_text
+                .map(artifact::SafeContextText::new)
+                .transpose()
+                .map_err(|_| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::InvalidPayload,
+                        "The selected File context is invalid",
+                        false,
+                    )
+                })?;
+            artifact::ContextCaptureInput::File(artifact::FileContextInput {
+                state: file,
+                selected_text,
+                visible_text: None,
+                recent_text: None,
+                redactions: vec![artifact::ContextRedaction::Secrets],
+                capabilities: vec![
+                    readable(),
+                    artifact::CapabilitySummaryEntry {
+                        capability_id: "artifact.write".into(),
+                        access: artifact::CapabilityAccess::ApprovalRequired,
+                        reason_code: Some("live-version-revalidation".into()),
+                    },
+                ],
+            })
+        }
+        artifact::ArtifactState::Folder(folder) => {
+            if let Some(entry_id) = selected_entry_id {
+                let mut folder = folder.as_ref().clone();
+                folder.select(entry_id).map_err(|_| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::Conflict,
+                        "The selected Folder context is stale",
+                        true,
+                    )
+                })?;
+                selected_folder = Some(folder);
+            }
+            artifact::ContextCaptureInput::Folder(artifact::FolderContextInput {
+                state: selected_folder.as_ref().unwrap_or(folder),
+                recent_text: None,
+                redactions: vec![artifact::ContextRedaction::Secrets],
+                capabilities: vec![readable()],
+            })
+        }
+        artifact::ArtifactState::Unknown(_) => {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::InvalidPayload,
+                "This Artifact version cannot be captured for Reply",
+                false,
+            ));
+        }
+    };
+    artifact::capture_artifact_context(identity, input, maximum_bytes, now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id))
+}
+
 fn message_reply_context(
     runtime: &RuntimeApplicationService,
     session_id: &str,
@@ -7101,6 +10504,7 @@ fn message_reply_context(
         target_kind: target_kind.into(),
         source_sha256: sha256_bytes(source.as_bytes()),
         source_excerpt,
+        artifact_context: None,
     })
 }
 
@@ -7713,7 +11117,9 @@ pub fn run() {
                 _configuration: Mutex::new(configuration),
                 active_workspace: Arc::clone(&active_workspace),
                 conversation_operation: Mutex::new(()),
+                artifact_operation: Mutex::new(()),
                 conversation: Mutex::new(conversation),
+                artifact: Mutex::new(ArtifactApplicationState::default()),
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 runtime_production: Arc::clone(&runtime_production),
                 runtime: Arc::clone(&runtime),
@@ -7757,6 +11163,23 @@ pub fn run() {
             foundation_snapshot,
             workspace_start_snapshot,
             conversation_snapshot,
+            artifact_snapshot,
+            artifact_open_file,
+            artifact_open_folder,
+            artifact_focus,
+            artifact_close_focus,
+            artifact_begin_file_edit,
+            artifact_update_file_draft,
+            artifact_discard_file_draft,
+            artifact_reject_file_proposal,
+            artifact_resolve_file_conflict,
+            artifact_save_file,
+            artifact_answer_approval,
+            artifact_refresh_folder,
+            artifact_navigate_folder,
+            artifact_select_folder_entry,
+            artifact_reply,
+            artifact_expand_context,
             conversation_attachment_preview,
             conversation_request_branch,
             conversation_answer_branch_approval,
@@ -7861,5 +11284,114 @@ mod atomic_capability_publication_tests {
         );
         writer.join().unwrap();
         reader.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod artifact_file_projection_tests {
+    use super::*;
+
+    #[test]
+    fn pending_reply_proposal_is_the_exact_approval_candidate_over_a_retained_draft() {
+        let live = artifact::FileLiveVersion::new_with_target_version(
+            1,
+            format!("sha256:{}", "a".repeat(64)),
+            sha256_bytes(b"live"),
+            4,
+            10,
+        )
+        .unwrap();
+        let mut file = artifact::FileArtifactState::new(
+            artifact::FileResourceReference::new("notes.txt", "notes.txt").unwrap(),
+            "notes.txt",
+            "text/plain",
+            "live",
+            live.clone(),
+        )
+        .unwrap();
+        file.begin_draft(11).unwrap();
+        file.update_draft("retained user draft", 12).unwrap();
+        file.install_proposal(artifact::FileProposal {
+            proposal_id: "proposal-reply".into(),
+            base_live_version: live,
+            proposed_content: "agent proposal".into(),
+            unified_diff: "-live\n+agent proposal\n".into(),
+            status: artifact::FileProposalStatus::Pending,
+            created_at_ms: 13,
+        })
+        .unwrap();
+
+        assert_eq!(file_pending_content(&file), "agent proposal");
+        let ArtifactFileStateSnapshot::Approval {
+            proposed_content,
+            proposal_diff,
+            ..
+        } = file_protocol_state(&file, Some("approval-reply"))
+        else {
+            panic!("the pending reply proposal must own approval presentation");
+        };
+        assert_eq!(proposed_content, "agent proposal");
+        assert_eq!(proposal_diff.as_deref(), Some("-live\n+agent proposal\n"));
+    }
+
+    #[test]
+    fn selected_file_reply_context_is_captured_first_and_rejects_stale_authority() {
+        let file = artifact::FileArtifactState::new(
+            artifact::FileResourceReference::new("notes.txt", "notes.txt").unwrap(),
+            "notes.txt",
+            "text/plain",
+            "alpha selected omega",
+            artifact::FileLiveVersion::new_with_target_version(
+                1,
+                format!("sha256:{}", "a".repeat(64)),
+                sha256_bytes(b"alpha selected omega"),
+                20,
+                10,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut record = artifact::ArtifactRecord {
+            schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
+            artifact_id: "artifact-file-selection".into(),
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "session-1".into(),
+            provider: artifact::ArtifactProviderDescriptor::file(),
+            source: artifact::ArtifactSource::DirectOperation {
+                operation_id: "operation-1".into(),
+            },
+            record_revision: 1,
+            lifecycle: artifact::ArtifactLifecycle::Ready,
+            state: artifact::ArtifactState::File(Box::new(file)),
+            history: Vec::new(),
+            created_at_ms: 10,
+            updated_at_ms: 10,
+        };
+        let correlation = protocol::CorrelationId::new("artifact-selection-test").unwrap();
+        let durable = durable_artifact_reply_capture(
+            &record,
+            Some("selected".into()),
+            None,
+            correlation.clone(),
+        )
+        .unwrap();
+        let context = capture_artifact_record_context(
+            &record,
+            durable.selected_text.as_deref(),
+            None,
+            1_024,
+            11,
+            correlation.clone(),
+        )
+        .unwrap();
+        let first = artifact_context_segments(&context.payload).first().unwrap();
+        assert_eq!(first.priority, artifact::ContextPriority::Selection);
+        assert_eq!(first.text, "selected");
+
+        record.record_revision = 2;
+        let stale =
+            require_current_artifact_reply_capture(&record, &durable, correlation).unwrap_err();
+        assert_eq!(stale.code, ProtocolErrorCode::Conflict);
     }
 }

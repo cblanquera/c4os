@@ -22,7 +22,8 @@ use super::authorization::{
     CanonicalAction, GateDecision, LiveAuthorityState,
 };
 use super::policy::{
-    ActionFacts, PolicyConfiguration, PolicyDecision, PolicyResolution, resolve_policy,
+    ActionFacts, DecisionContribution, DecisionSource, PolicyConfiguration, PolicyDecision,
+    PolicyResolution, resolve_policy,
 };
 
 pub const DEFAULT_AUTHORIZATION_TTL_MS: u64 = 60_000;
@@ -763,6 +764,69 @@ impl ActionGateway {
                 self.repository.save_authorization(&record)?;
                 Ok(GatewayProposal::Authorized { token, resolution })
             }
+        }
+    }
+
+    /// Revalidates an interrupted user-approved operation and creates a fresh
+    /// prompt without ever reconstructing the cancelled prompt or silently
+    /// converting it into an authorization. New deny ceilings still win; an
+    /// otherwise-allowing policy is tightened to Ask for this recovery only.
+    pub fn requeue_interrupted_approval(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, ActionGatewayError> {
+        validate_fact_binding(facts, &action)?;
+        validate_no_inline_credentials(&action.arguments)?;
+        let intent_id = format!("{}:intent", action.action_id);
+        self.repository.save_intent(
+            &intent_id,
+            "proposed",
+            &PersistedIntent::proposed(&action, facts)?,
+            &action,
+            now_ms,
+        )?;
+
+        let mut resolution = resolve_policy(facts, &self.policy, now_ms);
+        if resolution.decision == PolicyDecision::Allow {
+            let source = DecisionSource::InterruptedApprovalRecovery;
+            resolution.decision = PolicyDecision::Ask;
+            resolution.controlling_sources = vec![source.clone()];
+            resolution.contributions.push(DecisionContribution {
+                decision: PolicyDecision::Ask,
+                source,
+            });
+        }
+        let decision_id = format!("{}:decision", action.action_id);
+        self.repository.save_decision(
+            &decision_id,
+            policy_state(resolution.decision),
+            &PersistedDecision::new(&action, &resolution, now_ms)?,
+            &action,
+            now_ms,
+        )?;
+
+        match resolution.decision {
+            PolicyDecision::Deny => {
+                let result = NormalizedActionResult::denied("policy-denied", now_ms);
+                self.persist_result(&action, &result)?;
+                Ok(GatewayProposal::Denied { resolution })
+            }
+            PolicyDecision::Ask => {
+                let prompt_id = format!("approval:{}", Uuid::new_v4().as_simple());
+                let prompt = self
+                    .approvals
+                    .enqueue(prompt_id, action, now_ms, self.approval_ttl_ms)
+                    .map_err(ActionGatewayError::Approval)?
+                    .clone();
+                self.repository.save_approval(&prompt)?;
+                Ok(GatewayProposal::PendingApproval {
+                    prompt: Box::new(prompt),
+                    resolution,
+                })
+            }
+            PolicyDecision::Allow => Err(ActionGatewayError::Serialization),
         }
     }
 

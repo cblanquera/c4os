@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -48,6 +49,16 @@ function renderShell(
       {...(routeContent === undefined ? {} : { routeContent })}
     />,
   );
+}
+
+function PortalCenterAction() {
+  const [host] = useState(() => document.createElement("div"));
+  useLayoutEffect(() => {
+    const stage = document.querySelector("main.shell-workspace__stage");
+    stage?.appendChild(host);
+    return () => host.remove();
+  }, [host]);
+  return createPortal(<button type="button">Portal action</button>, host);
 }
 
 describe("ShellView", () => {
@@ -138,6 +149,30 @@ describe("ShellView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Center action" }));
     expect(onPanelOverlayDismiss).toHaveBeenCalledTimes(1);
     expect(centerAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("dismisses an overlay for a portal physically composed into the stage", () => {
+    const onPanelOverlayDismiss = vi.fn();
+    render(
+      <>
+        <ShellView
+          {...createProps({
+            projectPanel: {
+              mode: "overlay",
+              isOpen: true,
+              width: 228,
+            },
+            onPanelOverlayDismiss,
+          })}
+        />
+        <PortalCenterAction />
+      </>,
+    );
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Portal action" }),
+    );
+    expect(onPanelOverlayDismiss).toHaveBeenCalledTimes(1);
   });
 
   it("renders every accepted direct route with its own accessible title", () => {

@@ -1,0 +1,85 @@
+.artifact-folder__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.artifact-folder__breadcrumbs {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.artifact-folder__breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.artifact-folder__breadcrumbs li {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.artifact-folder__breadcrumbs li:not(:last-child)::after {
+  margin-inline: 3px;
+  color: var(--text-secondary);
+  content: "/";
+}
+
+.artifact-folder__breadcrumbs button[aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.artifact-folder__entries {
+  display: grid;
+  min-width: 420px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+
+.artifact-folder__entries li {
+  min-width: 0;
+}
+
+.artifact-folder__entries button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: start;
+}
+
+.artifact-folder__entries li[data-selected="true"] button {
+  background: var(--selection);
+}
+
+.artifact-folder__entries strong,
+.artifact-folder__entries small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-folder__entries small,
+.artifact-folder__entries button > span {
+  color: var(--text-secondary);
+}
+
+.artifact-folder__empty {
+  margin: 0;
+  padding: 28px;
+  color: var(--text-secondary);
+  text-align: center;
+}

@@ -42,6 +42,52 @@ fn run_scope(process_generation: u64) -> RunScope {
     }
 }
 
+fn file_artifact_workspace(state: ArtifactFileStateSnapshot) -> ArtifactWorkspaceSnapshot {
+    let digest = format!("sha256:{}", "a".repeat(64));
+    ArtifactWorkspaceSnapshot {
+        protocol_version: PROTOCOL_VERSION,
+        generation: StateGeneration(1),
+        authority: "rust-core".into(),
+        workspace_id: Some(WorkspaceId::new("workspace-1").unwrap()),
+        active_project_id: Some(ProjectId::new("project-1").unwrap()),
+        active_session_id: Some(SessionId::new("session-1").unwrap()),
+        focused_artifact_id: None,
+        artifacts: vec![ArtifactSnapshot {
+            artifact_id: ArtifactId::new("artifact-1").unwrap(),
+            project_id: ProjectId::new("project-1").unwrap(),
+            session_id: SessionId::new("session-1").unwrap(),
+            provider_type: "file".into(),
+            provider_version: 1,
+            state_schema_version: 1,
+            record_revision: 2,
+            title: "notes.txt".into(),
+            focus_supported: true,
+            status: ArtifactShellStatusSnapshot {
+                kind: "ready".into(),
+                message: None,
+            },
+            pending_approval_id: None,
+            source_label: "Direct operation".into(),
+            resource_version: ArtifactResourceVersionSnapshot {
+                sequence: 1,
+                sha256: digest,
+                observed_at_ms: 10,
+            },
+            history: Vec::new(),
+            provider_state: ArtifactProviderStateSnapshot::File(ArtifactFileSnapshot {
+                breadcrumbs: vec![ArtifactBreadcrumbSnapshot {
+                    id: "notes.txt".into(),
+                    label: "notes.txt".into(),
+                    is_current: true,
+                }],
+                language_label: Some("Plain text".into()),
+                state,
+                version_label: Some("Version 1".into()),
+            }),
+        }],
+    }
+}
+
 #[test]
 fn rejects_unknown_protocol_versions_before_command_handling() {
     let mut envelope = request(7, submit_turn());
@@ -313,6 +359,101 @@ fn wire_json_uses_camel_case_fields_and_discriminants() {
 }
 
 #[test]
+fn artifact_file_states_are_tagged_and_bounded_at_the_protocol_boundary() {
+    let snapshot = file_artifact_workspace(ArtifactFileStateSnapshot::Dirty {
+        content: "one".into(),
+        draft: "two".into(),
+    });
+    let envelope = artifact_workspace_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("artifact-request-1").unwrap(),
+            correlation_id: CorrelationId::new("artifact-correlation-1").unwrap(),
+            expected_generation: StateGeneration(0),
+        },
+        snapshot,
+    )
+    .unwrap();
+    let serialized = serde_json::to_value(envelope).unwrap();
+    assert_eq!(
+        serialized["payload"]["artifacts"][0]["providerState"]["value"]["state"]["phase"],
+        "dirty"
+    );
+
+    let oversized = file_artifact_workspace(ArtifactFileStateSnapshot::Dirty {
+        content: "one".into(),
+        draft: "x".repeat(MAX_TEXT_BYTES + 1),
+    });
+    let error = artifact_workspace_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("artifact-request-2").unwrap(),
+            correlation_id: CorrelationId::new("artifact-correlation-2").unwrap(),
+            expected_generation: StateGeneration(0),
+        },
+        oversized,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::PayloadTooLarge);
+}
+
+#[test]
+fn artifact_unknown_and_approval_states_fail_closed() {
+    let mut unknown = file_artifact_workspace(ArtifactFileStateSnapshot::Read {
+        content: "one".into(),
+    });
+    unknown.artifacts[0].provider_state = ArtifactProviderStateSnapshot::Unknown;
+    unknown.artifacts[0].focus_supported = false;
+    unknown.artifacts[0].status = ArtifactShellStatusSnapshot {
+        kind: "degraded".into(),
+        message: Some("Unsupported".into()),
+    };
+    let error = artifact_workspace_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("artifact-request-unknown").unwrap(),
+            correlation_id: CorrelationId::new("artifact-correlation-unknown").unwrap(),
+            expected_generation: StateGeneration(0),
+        },
+        unknown,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::InvalidPayload);
+
+    let mut approval = file_artifact_workspace(ArtifactFileStateSnapshot::Approval {
+        content: "one".into(),
+        proposed_content: "two".into(),
+        proposal_diff: Some("-one\n+two".into()),
+        approval_summary: "Approve exact write".into(),
+    });
+    approval.artifacts[0].pending_approval_id = None;
+    let error = artifact_workspace_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("artifact-request-approval").unwrap(),
+            correlation_id: CorrelationId::new("artifact-correlation-approval").unwrap(),
+            expected_generation: StateGeneration(0),
+        },
+        approval,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::InvalidPayload);
+}
+
+#[test]
+fn artifact_conflict_resolution_requires_exact_nonzero_revision() {
+    let invalid = ArtifactFileConflictInput {
+        artifact_id: ArtifactId::new("artifact-1").unwrap(),
+        base_record_revision: 0,
+        resolution: ArtifactFileConflictResolution::KeepDraft,
+    };
+    assert_eq!(
+        invalid.validate().unwrap_err().code,
+        ProtocolErrorCode::InvalidGeneration
+    );
+}
+
+#[test]
 fn export_bindings() {
     let output = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/generated");
     let config = Config::default()
@@ -343,6 +484,16 @@ fn export_protocol_types(config: &Config) {
     ConversationRetryInput::export_all(config).unwrap();
     ConversationBranchInput::export_all(config).unwrap();
     ConversationBranchApprovalInput::export_all(config).unwrap();
+    ArtifactWorkspaceSnapshot::export_all(config).unwrap();
+    ArtifactOpenInput::export_all(config).unwrap();
+    ArtifactMutationInput::export_all(config).unwrap();
+    ArtifactReplyInput::export_all(config).unwrap();
+    ArtifactContextExpandInput::export_all(config).unwrap();
+    ArtifactFileDraftInput::export_all(config).unwrap();
+    ArtifactFileConflictInput::export_all(config).unwrap();
+    ArtifactFolderNavigateInput::export_all(config).unwrap();
+    ArtifactFolderSelectInput::export_all(config).unwrap();
+    ArtifactApprovalInput::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

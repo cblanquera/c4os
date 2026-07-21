@@ -14,7 +14,7 @@ use c4os_lib::security::gateway::{
 use c4os_lib::security::policy::{
     ActionEffect, ActionFacts, ActionInitiator, ActionRequestOrigin, ActionReversibility,
     ActionScope, ActionSensitivity, ActionSurface, ApprovalPreset, ClassificationConfidence,
-    PolicyConfiguration, RepositoryState,
+    DecisionSource, PolicyConfiguration, PolicyDecision, RepositoryState,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -411,6 +411,37 @@ fn audit_persists_only_argument_and_target_commitments() {
     assert!(!audit.contains("workspace:/project/README.md"));
     assert!(audit.contains("argumentsSha256"));
     assert!(audit.contains("canonicalTargetSha256"));
+}
+
+#[test]
+fn interrupted_approval_requeue_requires_a_fresh_answer_even_when_policy_allows() {
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temp);
+    let policy = PolicyConfiguration {
+        preset: ApprovalPreset::ApproveForMe,
+        ..PolicyConfiguration::default()
+    };
+    let mut gateway = ActionGateway::new(policy, Arc::clone(&database));
+    let interrupted = action(
+        ActionEffect::Modify,
+        "action-interrupted-requeue",
+        "run-interrupted-requeue",
+    );
+
+    let proposal = gateway
+        .requeue_interrupted_approval(&facts(ActionEffect::Modify), interrupted.clone(), 55)
+        .expect("requeued approval");
+    let (prompt, resolution) = match proposal {
+        GatewayProposal::PendingApproval { prompt, resolution } => (prompt, resolution),
+        other => panic!("expected a fresh approval prompt, found {other:?}"),
+    };
+    assert_eq!(resolution.decision, PolicyDecision::Ask);
+    assert_eq!(
+        resolution.controlling_sources,
+        vec![DecisionSource::InterruptedApprovalRecovery]
+    );
+    assert_eq!(prompt.action, interrupted);
+    assert!(matches!(prompt.state, ApprovalPromptState::Pending));
 }
 
 #[test]

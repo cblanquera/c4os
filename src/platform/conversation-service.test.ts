@@ -185,6 +185,63 @@ describe("Conversation native boundary", () => {
       }),
     ).rejects.toThrow("invalid");
   });
+
+  it("preserves a bounded immutable Artifact Reply context for renderer transparency", async () => {
+    const adapter = createConversationAdapter({
+      async invoke(_command, args) {
+        const request = args.request as Record<string, unknown>;
+        const response = envelope(request, 4);
+        return {
+          ...response,
+          payload: artifactReplyPayload(4 as StateGeneration),
+        };
+      },
+    });
+
+    const context = (await adapter.read()).activeConversation?.turns[0]
+      ?.artifactContext;
+    expect(context).toMatchObject({
+      artifactId: "artifact-1",
+      providerType: "file",
+      usedBytes: 5,
+      omittedBytes: 0,
+      truncated: false,
+      unsaved: true,
+    });
+    expect(context?.segments[0]).toMatchObject({
+      source: "unsaved-draft",
+      text: "hello",
+    });
+  });
+
+  it("rejects Artifact Reply context whose byte ledger was substituted", async () => {
+    const adapter = createConversationAdapter({
+      async invoke(_command, args) {
+        const request = args.request as Record<string, unknown>;
+        const payload = artifactReplyPayload(1 as StateGeneration);
+        const activeConversation = payload.activeConversation!;
+        const context = activeConversation.turns[0]!.artifactContext!;
+        const response = envelope(request, 1);
+        return {
+          ...response,
+          payload: {
+            ...payload,
+            activeConversation: {
+              ...activeConversation,
+              turns: [
+                {
+                  ...activeConversation.turns[0]!,
+                  artifactContext: { ...context, usedBytes: 6 },
+                },
+              ],
+            },
+          },
+        };
+      },
+    });
+
+    await expect(adapter.read()).rejects.toThrow("budget");
+  });
 });
 
 function envelope(request: Record<string, unknown>, generation: number) {
@@ -230,5 +287,77 @@ function snapshot(generation: StateGeneration): ConversationSnapshot {
     activeConversation: null,
     models: [],
     branchControl: null,
+  };
+}
+
+function artifactReplyPayload(
+  generation: StateGeneration,
+): ConversationSnapshot {
+  const base = snapshot(generation);
+  return {
+    ...base,
+    activeSessionId: "session-1" as never,
+    sessions: [
+      {
+        sessionId: "session-1" as never,
+        projectId: "project-1" as never,
+        title: "Chat",
+        updatedAtMs: 20,
+      },
+    ],
+    activeConversation: {
+      sessionId: "session-1" as never,
+      title: "Chat",
+      turns: [
+        {
+          turnId: "turn-1" as never,
+          prompt: "Update this file",
+          attachments: [],
+          artifactContext: {
+            snapshotId: "artifact-context-1",
+            stableReference: `artifact:artifact-1:record:3:resource:2:sha256:${"a".repeat(64)}`,
+            artifactId: "artifact-1" as never,
+            projectId: "project-1" as never,
+            sessionId: "session-1" as never,
+            providerType: "file",
+            providerVersion: 1,
+            artifactRecordRevision: 3,
+            capturedResourceVersion: {
+              sequence: 2,
+              sha256: `sha256:${"a".repeat(64)}`,
+              observedAtMs: 10,
+            },
+            payloadKind: "file",
+            segments: [
+              {
+                priority: "visibleOrCurrent",
+                source: "unsaved-draft",
+                text: "hello",
+                originalBytes: 5,
+                omittedBytes: 0,
+              },
+            ],
+            maximumBytes: 16_384,
+            usedBytes: 5,
+            omittedBytes: 0,
+            omittedSegments: 0,
+            truncated: false,
+            unsaved: true,
+            redactions: ["secrets"],
+            capabilities: [
+              {
+                capabilityId: "artifact.read",
+                access: "readable",
+                reasonCode: null,
+              },
+            ],
+            capturedAtMs: 20,
+          },
+          submittedAtMs: 20,
+        },
+      ],
+      attempts: [],
+      activeAttemptId: null,
+    },
   };
 }

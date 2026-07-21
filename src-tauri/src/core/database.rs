@@ -6,7 +6,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use std::{collections::HashSet, fmt::Write as _};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt::Write as _,
+};
+
+use crate::artifact::{ArtifactHistoryKind, ArtifactRecord, ArtifactWorkspaceUiState};
 
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Params, TransactionBehavior, params};
@@ -24,14 +29,19 @@ pub const MAX_TEXT_FIELD_BYTES: usize = 1_048_576;
 pub const MAX_SNAPSHOT_TEXT_BYTES: usize = 4_194_304;
 pub const MAX_RUNTIME_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
 pub const MAX_SESSION_DOCUMENT_BYTES: usize = 64 * 1_024 * 1_024;
+pub const MAX_ARTIFACT_DOCUMENT_BYTES: usize = 16 * 1_024 * 1_024;
+pub const MAX_ARTIFACT_UI_DOCUMENT_BYTES: usize = 64 * 1_024;
 pub const MAX_RUNTIME_STATE_DOCUMENTS: usize = 256;
 pub const MAX_SESSION_RECORDS: usize = 100_000;
+pub const MAX_ARTIFACT_RECORDS: usize = 100_000;
+pub const MAX_ARTIFACT_RECORDS_PER_SESSION: usize = 4_096;
+pub const MAX_ARTIFACT_EVENTS: usize = 1_000_000;
 pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
 const APP_SCHEMA_VERSION: usize = 6;
-const WORKSPACE_SCHEMA_VERSION: usize = 4;
+const WORKSPACE_SCHEMA_VERSION: usize = 5;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 struct AuxiliaryConnectionPermit;
@@ -355,6 +365,32 @@ pub struct WorkspaceConversationStateRecord {
     pub updated_at_ms: u64,
 }
 
+/// Complete strict artifact JSON. The artifact domain validates provider and
+/// state schemas before this record reaches the Workspace single-writer actor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceArtifactDocumentRecord {
+    pub workspace_id: String,
+    pub project_id: String,
+    pub session_id: String,
+    pub artifact_id: String,
+    pub provider_kind: String,
+    pub provider_version: u16,
+    pub state_schema_version: u16,
+    pub revision: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
+/// Strict scalar Artifact Workspace UI state. The artifact domain validates
+/// the focused identity against a focus-capable record before persistence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceArtifactUiStateRecord {
+    pub workspace_id: String,
+    pub revision: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleState {
     Active,
@@ -548,6 +584,16 @@ enum WriteCommand {
     SaveConversationState {
         record: WorkspaceConversationStateRecord,
         expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    SaveArtifactDocument {
+        record: WorkspaceArtifactDocumentRecord,
+        expected_revision: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    SaveArtifactUiState {
+        record: WorkspaceArtifactUiStateRecord,
+        expected_revision: Option<u64>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
     CreateSessionDocument {
@@ -885,6 +931,59 @@ impl DatabaseActor {
         read_conversation_state(&connection, workspace_id)
     }
 
+    pub fn save_artifact_document(
+        &self,
+        record: WorkspaceArtifactDocumentRecord,
+        expected_revision: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.request(|reply| WriteCommand::SaveArtifactDocument {
+            record,
+            expected_revision,
+            reply,
+        })
+    }
+
+    pub fn artifact_document(
+        &self,
+        artifact_id: &str,
+    ) -> DatabaseResult<Option<WorkspaceArtifactDocumentRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_artifact_document(&connection, workspace_id, artifact_id)
+    }
+
+    pub fn artifact_documents_for_session(
+        &self,
+        session_id: &str,
+    ) -> DatabaseResult<Vec<WorkspaceArtifactDocumentRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_artifact_documents_for_session(&connection, workspace_id, session_id)
+    }
+
+    pub fn save_artifact_ui_state(
+        &self,
+        record: WorkspaceArtifactUiStateRecord,
+        expected_revision: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.request(|reply| WriteCommand::SaveArtifactUiState {
+            record,
+            expected_revision,
+            reply,
+        })
+    }
+
+    pub fn artifact_ui_state(&self) -> DatabaseResult<Option<WorkspaceArtifactUiStateRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_artifact_ui_state(&connection, workspace_id)
+    }
+
     pub fn create_session_document(
         &self,
         record: WorkspaceSessionDocumentRecord,
@@ -1218,6 +1317,32 @@ fn writer_loop(
                     &descriptor.kind,
                     record,
                     expected_generation,
+                ),
+            ),
+            WriteCommand::SaveArtifactDocument {
+                record,
+                expected_revision,
+                reply,
+            } => reply_result(
+                reply,
+                write_artifact_document(
+                    &mut connection,
+                    &descriptor.kind,
+                    record,
+                    expected_revision,
+                ),
+            ),
+            WriteCommand::SaveArtifactUiState {
+                record,
+                expected_revision,
+                reply,
+            } => reply_result(
+                reply,
+                write_artifact_ui_state(
+                    &mut connection,
+                    &descriptor.kind,
+                    record,
+                    expected_revision,
                 ),
             ),
             WriteCommand::CreateSessionDocument {
@@ -1756,6 +1881,61 @@ fn workspace_migrations() -> Migrations<'static> {
         )
         .foreign_key_check()
         .comment("Workspace-owned conversation selection and durable composer drafts"),
+        M::up(
+            "CREATE TABLE artifact_records (
+                workspace_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                provider_version INTEGER NOT NULL CHECK (provider_version > 0),
+                state_schema_version INTEGER NOT NULL CHECK (state_schema_version > 0),
+                revision INTEGER NOT NULL CHECK (revision > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0),
+                PRIMARY KEY (workspace_id, artifact_id),
+                FOREIGN KEY (workspace_id, project_id)
+                    REFERENCES projects(workspace_id, project_id),
+                FOREIGN KEY (workspace_id, session_id)
+                    REFERENCES chats(workspace_id, chat_id)
+            );
+            CREATE TABLE artifact_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                provider_version INTEGER NOT NULL CHECK (provider_version > 0),
+                state_schema_version INTEGER NOT NULL CHECK (state_schema_version > 0),
+                revision INTEGER NOT NULL CHECK (revision > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0),
+                UNIQUE (workspace_id, artifact_id, revision),
+                FOREIGN KEY (workspace_id, project_id)
+                    REFERENCES projects(workspace_id, project_id),
+                FOREIGN KEY (workspace_id, session_id)
+                    REFERENCES chats(workspace_id, chat_id),
+                FOREIGN KEY (workspace_id, artifact_id)
+                    REFERENCES artifact_records(workspace_id, artifact_id)
+            );
+            CREATE TABLE artifact_workspace_state (
+                workspace_id TEXT PRIMARY KEY NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0),
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+            );
+            CREATE INDEX artifact_records_session_updated
+                ON artifact_records(workspace_id, session_id, updated_at_ms, artifact_id);
+            CREATE INDEX artifact_events_artifact_revision
+                ON artifact_events(workspace_id, artifact_id, revision);",
+        )
+        .foreign_key_check()
+        .comment("Workspace-owned versioned Response Artifact records and immutable history"),
     ])
 }
 
@@ -2166,6 +2346,9 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "workspace_diagnostics",
             "session_records",
             "conversation_state",
+            "artifact_records",
+            "artifact_events",
+            "artifact_workspace_state",
             "durable_generation",
         ],
     };
@@ -2190,6 +2373,8 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
     } else if let DatabaseKind::Workspace { workspace_id } = kind {
         validate_session_documents(connection, workspace_id)?;
         let _ = read_conversation_state(connection, workspace_id)?;
+        validate_artifact_documents(connection, workspace_id)?;
+        let _ = read_artifact_ui_state(connection, workspace_id)?;
     }
     Ok(())
 }
@@ -2241,6 +2426,158 @@ fn validate_session_documents(connection: &Connection, workspace_id: &str) -> Da
         let _ = read_session_document(connection, workspace_id, &id)?;
     }
     Ok(())
+}
+
+fn validate_artifact_documents(connection: &Connection, workspace_id: &str) -> DatabaseResult<()> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM artifact_records WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_ARTIFACT_RECORDS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "artifact record count {count} exceeds {MAX_ARTIFACT_RECORDS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT artifact_id FROM artifact_records
+         WHERE workspace_id = ?1 ORDER BY artifact_id",
+    )?;
+    let ids = statement
+        .query_map([workspace_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut current_records = BTreeMap::new();
+    for artifact_id in ids {
+        let record =
+            read_artifact_document(connection, workspace_id, &artifact_id)?.ok_or_else(|| {
+                DatabaseError::Validation("artifact record disappeared during validation".into())
+            })?;
+        current_records.insert(artifact_id, record);
+    }
+
+    let event_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM artifact_events WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_ARTIFACT_EVENTS as i64).contains(&event_count) {
+        return Err(DatabaseError::Validation(format!(
+            "artifact event count {event_count} exceeds {MAX_ARTIFACT_EVENTS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT project_id, session_id, artifact_id, provider_kind,
+                provider_version, state_schema_version, revision,
+                canonical_document, document_sha256, updated_at_ms
+         FROM artifact_events WHERE workspace_id = ?1
+         ORDER BY artifact_id, revision",
+    )?;
+    let events = statement.query_map([workspace_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, i64>(9)?,
+        ))
+    })?;
+    let mut latest_events: BTreeMap<String, WorkspaceArtifactDocumentRecord> = BTreeMap::new();
+    for event in events {
+        let (
+            project_id,
+            session_id,
+            artifact_id,
+            provider_kind,
+            provider_version,
+            state_schema_version,
+            revision,
+            canonical_document,
+            stored_digest,
+            updated_at_ms,
+        ) = event?;
+        if stored_digest != canonical_document_digest(&canonical_document) {
+            return Err(DatabaseError::Validation(format!(
+                "artifact event digest mismatch for {artifact_id}"
+            )));
+        }
+        let record = WorkspaceArtifactDocumentRecord {
+            workspace_id: workspace_id.into(),
+            project_id,
+            session_id,
+            artifact_id,
+            provider_kind,
+            provider_version: u16::try_from(provider_version).map_err(|_| {
+                DatabaseError::Validation("artifact event provider version is invalid".into())
+            })?,
+            state_schema_version: u16::try_from(state_schema_version).map_err(|_| {
+                DatabaseError::Validation("artifact event schema version is invalid".into())
+            })?,
+            revision: generation_to_u64(revision)?,
+            canonical_document,
+            updated_at_ms: generation_to_u64(updated_at_ms)?,
+        };
+        validate_artifact_document_record(&record, workspace_id)?;
+        if let Some(previous) = latest_events.get(&record.artifact_id) {
+            let provider_identity_unchanged = record.provider_kind == previous.provider_kind
+                && record.provider_version == previous.provider_version;
+            let provider_conversion = artifact_provider_conversion_allowed(
+                &previous.canonical_document,
+                &record.canonical_document,
+            )?;
+            if record.revision != previous.revision.saturating_add(1)
+                || record.project_id != previous.project_id
+                || record.session_id != previous.session_id
+                || (!provider_identity_unchanged && !provider_conversion)
+                || record.state_schema_version != previous.state_schema_version
+            {
+                return Err(DatabaseError::Validation(format!(
+                    "artifact event chain is invalid for {}",
+                    record.artifact_id
+                )));
+            }
+        } else if record.revision != 1 {
+            return Err(DatabaseError::Validation(format!(
+                "artifact event chain does not begin at revision 1 for {}",
+                record.artifact_id
+            )));
+        }
+        latest_events.insert(record.artifact_id.clone(), record);
+    }
+    if current_records != latest_events {
+        return Err(DatabaseError::Validation(
+            "artifact current records do not match their latest immutable events".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn artifact_provider_conversion_allowed(
+    previous_document: &str,
+    next_document: &str,
+) -> DatabaseResult<bool> {
+    let previous = serde_json::from_str::<ArtifactRecord>(previous_document).map_err(|_| {
+        DatabaseError::Validation("previous artifact conversion record is invalid".into())
+    })?;
+    let next = serde_json::from_str::<ArtifactRecord>(next_document).map_err(|_| {
+        DatabaseError::Validation("next artifact conversion record is invalid".into())
+    })?;
+    let supported_pair = matches!(
+        (
+            previous.provider.type_id.as_str(),
+            next.provider.type_id.as_str()
+        ),
+        ("file", "folder") | ("folder", "file")
+    ) && previous.provider.schema_version == next.provider.schema_version;
+    let explicit_transition = next.history.last().is_some_and(|entry| {
+        entry.record_revision == next.record_revision
+            && entry.kind == ArtifactHistoryKind::Converted
+    });
+    Ok(supported_pair && explicit_transition)
 }
 
 fn validate_security_journal(connection: &Connection) -> DatabaseResult<()> {
@@ -2607,6 +2944,556 @@ fn write_conversation_state(
             record.canonical_document,
             digest,
             updated_at_ms
+        ],
+    )?;
+    let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn validate_artifact_document_record(
+    record: &WorkspaceArtifactDocumentRecord,
+    workspace_id: &str,
+) -> DatabaseResult<()> {
+    if record.workspace_id != workspace_id {
+        return Err(DatabaseError::InvalidInput(
+            "artifact document Workspace identity is mismatched".into(),
+        ));
+    }
+    for (label, value) in [
+        ("project_id", record.project_id.as_str()),
+        ("session_id", record.session_id.as_str()),
+        ("artifact_id", record.artifact_id.as_str()),
+    ] {
+        require_nonempty(label, value)?;
+        validate_text_field(label, value, 512)?;
+    }
+    if record.provider_version == 0
+        || record.state_schema_version == 0
+        || record.revision == 0
+        || record.updated_at_ms == 0
+    {
+        return Err(DatabaseError::InvalidInput(
+            "artifact provider, schema, revision, and timestamp must be valid".into(),
+        ));
+    }
+    validate_text_field(
+        "artifact canonical document",
+        &record.canonical_document,
+        MAX_ARTIFACT_DOCUMENT_BYTES,
+    )?;
+    if record.canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "artifact canonical document must be present".into(),
+        ));
+    }
+    let artifact =
+        serde_json::from_str::<ArtifactRecord>(&record.canonical_document).map_err(|_| {
+            DatabaseError::Validation(
+                "artifact canonical document is not a supported record".into(),
+            )
+        })?;
+    artifact
+        .validate()
+        .map_err(|_| DatabaseError::Validation("artifact canonical document is invalid".into()))?;
+    if artifact.workspace_id != record.workspace_id
+        || artifact.project_id != record.project_id
+        || artifact.session_id != record.session_id
+        || artifact.artifact_id != record.artifact_id
+        || artifact.provider.type_id != record.provider_kind
+        || artifact.provider.schema_version != record.provider_version
+        || artifact.schema_version != record.state_schema_version
+        || artifact.record_revision != record.revision
+        || artifact.updated_at_ms != record.updated_at_ms
+    {
+        return Err(DatabaseError::Validation(
+            "artifact canonical document disagrees with its persistence envelope".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_artifact_document(
+    connection: &Connection,
+    workspace_id: &str,
+    artifact_id: &str,
+) -> DatabaseResult<Option<WorkspaceArtifactDocumentRecord>> {
+    require_nonempty("artifact_id", artifact_id)?;
+    validate_text_field("artifact_id", artifact_id, 512)?;
+    let raw = connection
+        .query_row(
+            "SELECT project_id, session_id, provider_kind, provider_version,
+                state_schema_version, revision, canonical_document,
+                document_sha256, updated_at_ms
+             FROM artifact_records
+             WHERE workspace_id = ?1 AND artifact_id = ?2",
+            params![workspace_id, artifact_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, i64>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(
+            project_id,
+            session_id,
+            provider_kind,
+            provider_version,
+            state_schema_version,
+            revision,
+            canonical_document,
+            stored_digest,
+            updated_at_ms,
+        )| {
+            validate_text_field(
+                "artifact canonical document",
+                &canonical_document,
+                MAX_ARTIFACT_DOCUMENT_BYTES,
+            )?;
+            if stored_digest != canonical_document_digest(&canonical_document) {
+                return Err(DatabaseError::Validation(format!(
+                    "artifact document digest mismatch for {artifact_id}"
+                )));
+            }
+            let record = WorkspaceArtifactDocumentRecord {
+                workspace_id: workspace_id.into(),
+                project_id,
+                session_id,
+                artifact_id: artifact_id.into(),
+                provider_kind,
+                provider_version: u16::try_from(provider_version).map_err(|_| {
+                    DatabaseError::Validation("artifact provider version is invalid".into())
+                })?,
+                state_schema_version: u16::try_from(state_schema_version).map_err(|_| {
+                    DatabaseError::Validation("artifact state schema version is invalid".into())
+                })?,
+                revision: generation_to_u64(revision)?,
+                canonical_document,
+                updated_at_ms: generation_to_u64(updated_at_ms)?,
+            };
+            validate_artifact_document_record(&record, workspace_id)?;
+            Ok(record)
+        },
+    )
+    .transpose()
+}
+
+fn read_artifact_documents_for_session(
+    connection: &Connection,
+    workspace_id: &str,
+    session_id: &str,
+) -> DatabaseResult<Vec<WorkspaceArtifactDocumentRecord>> {
+    require_nonempty("session_id", session_id)?;
+    validate_text_field("session_id", session_id, 512)?;
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM artifact_records
+         WHERE workspace_id = ?1 AND session_id = ?2",
+        params![workspace_id, session_id],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_ARTIFACT_RECORDS_PER_SESSION as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "session artifact record count {count} exceeds {MAX_ARTIFACT_RECORDS_PER_SESSION}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT artifact_id FROM artifact_records
+         WHERE workspace_id = ?1 AND session_id = ?2
+         ORDER BY updated_at_ms, artifact_id",
+    )?;
+    let ids = statement
+        .query_map(params![workspace_id, session_id], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .map(|artifact_id| {
+            read_artifact_document(connection, workspace_id, &artifact_id)?.ok_or_else(|| {
+                DatabaseError::Validation(format!(
+                    "artifact document {artifact_id} disappeared during snapshot"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn write_artifact_document(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    record: WorkspaceArtifactDocumentRecord,
+    expected_revision: Option<u64>,
+) -> DatabaseResult<u64> {
+    let workspace_id = workspace_id(kind)?;
+    validate_artifact_document_record(&record, workspace_id)?;
+    let provider_version = i64::from(record.provider_version);
+    let state_schema_version = i64::from(record.state_schema_version);
+    let revision = i64::try_from(record.revision).map_err(|_| {
+        DatabaseError::InvalidInput("artifact revision exceeds SQLite range".into())
+    })?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("artifact timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active_owner: i64 = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM workspaces AS workspace
+            JOIN projects AS project ON project.workspace_id = workspace.workspace_id
+            JOIN chats AS chat ON chat.workspace_id = workspace.workspace_id
+            WHERE workspace.workspace_id = ?1
+              AND project.project_id = ?2
+              AND chat.chat_id = ?3
+              AND chat.project_id = project.project_id
+              AND workspace.lifecycle_state = 'active'
+              AND project.lifecycle_state = 'active'
+              AND chat.lifecycle_state = 'active'
+        )",
+        params![workspace_id, record.project_id, record.session_id],
+        |row| row.get(0),
+    )?;
+    if active_owner != 1 {
+        return Err(DatabaseError::Conflict(
+            "active artifact Workspace, Project, or Chat owner changed".into(),
+        ));
+    }
+    let current = transaction
+        .query_row(
+            "SELECT project_id, session_id, provider_kind, provider_version,
+                state_schema_version, revision, canonical_document
+             FROM artifact_records
+             WHERE workspace_id = ?1 AND artifact_id = ?2",
+            params![workspace_id, record.artifact_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    let event_count: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM artifact_events WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if event_count < 0 || event_count as usize >= MAX_ARTIFACT_EVENTS {
+        return Err(DatabaseError::Conflict(
+            "artifact event capacity is exhausted".into(),
+        ));
+    }
+    if current.is_none() {
+        let record_count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM artifact_records WHERE workspace_id = ?1",
+            [workspace_id],
+            |row| row.get(0),
+        )?;
+        let session_count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM artifact_records
+             WHERE workspace_id = ?1 AND session_id = ?2",
+            params![workspace_id, record.session_id],
+            |row| row.get(0),
+        )?;
+        if record_count < 0 || record_count as usize >= MAX_ARTIFACT_RECORDS {
+            return Err(DatabaseError::Conflict(
+                "artifact record capacity is exhausted".into(),
+            ));
+        }
+        if session_count < 0 || session_count as usize >= MAX_ARTIFACT_RECORDS_PER_SESSION {
+            return Err(DatabaseError::Conflict(
+                "session artifact capacity is exhausted".into(),
+            ));
+        }
+    }
+    let provider_conversion = current
+        .as_ref()
+        .map(|(_, _, _, _, _, _, current_document)| {
+            artifact_provider_conversion_allowed(current_document, &record.canonical_document)
+        })
+        .transpose()?
+        .unwrap_or(false);
+    match (&current, expected_revision) {
+        (None, None) if record.revision == 1 => {}
+        (
+            Some((
+                project_id,
+                session_id,
+                provider_kind,
+                stored_provider_version,
+                stored_schema,
+                current_revision,
+                _,
+            )),
+            Some(expected),
+        ) if generation_to_u64(*current_revision)? == expected
+            && record.revision == expected.saturating_add(1)
+            && project_id == &record.project_id
+            && session_id == &record.session_id
+            && ((provider_kind == &record.provider_kind
+                && *stored_provider_version == provider_version)
+                || provider_conversion)
+            && *stored_schema == state_schema_version => {}
+        (actual, expected) => {
+            let actual_revision = actual
+                .as_ref()
+                .map(|(_, _, _, _, _, revision, _)| generation_to_u64(*revision))
+                .transpose()?;
+            return Err(DatabaseError::Conflict(format!(
+                "artifact document expected revision {expected:?}, found {actual_revision:?}"
+            )));
+        }
+    }
+    let digest = canonical_document_digest(&record.canonical_document);
+    transaction.execute(
+        "INSERT INTO artifact_records(
+            workspace_id, project_id, session_id, artifact_id, provider_kind,
+            provider_version, state_schema_version, revision,
+            canonical_document, document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(workspace_id, artifact_id) DO UPDATE SET
+            provider_kind = excluded.provider_kind,
+            provider_version = excluded.provider_version,
+            state_schema_version = excluded.state_schema_version,
+            revision = excluded.revision,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            workspace_id,
+            record.project_id,
+            record.session_id,
+            record.artifact_id,
+            record.provider_kind,
+            provider_version,
+            state_schema_version,
+            revision,
+            record.canonical_document,
+            digest,
+            updated_at_ms,
+        ],
+    )?;
+    transaction.execute(
+        "INSERT INTO artifact_events(
+            workspace_id, project_id, session_id, artifact_id, provider_kind,
+            provider_version, state_schema_version, revision,
+            canonical_document, document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            workspace_id,
+            record.project_id,
+            record.session_id,
+            record.artifact_id,
+            record.provider_kind,
+            provider_version,
+            state_schema_version,
+            revision,
+            record.canonical_document,
+            digest,
+            updated_at_ms,
+        ],
+    )?;
+    let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn validate_artifact_ui_state_record(
+    record: &WorkspaceArtifactUiStateRecord,
+    workspace_id: &str,
+) -> DatabaseResult<()> {
+    if record.workspace_id != workspace_id {
+        return Err(DatabaseError::InvalidInput(
+            "artifact UI state Workspace identity is mismatched".into(),
+        ));
+    }
+    if record.revision == 0 || record.updated_at_ms == 0 || record.canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "artifact UI state revision, timestamp, and document must be present".into(),
+        ));
+    }
+    validate_text_field(
+        "artifact UI canonical document",
+        &record.canonical_document,
+        MAX_ARTIFACT_UI_DOCUMENT_BYTES,
+    )?;
+    let state = serde_json::from_str::<ArtifactWorkspaceUiState>(&record.canonical_document)
+        .map_err(|_| {
+            DatabaseError::Validation(
+                "artifact UI canonical document is not a supported record".into(),
+            )
+        })?;
+    state
+        .validate()
+        .map_err(|_| DatabaseError::Validation("artifact UI state is invalid".into()))?;
+    if state.workspace_id != record.workspace_id
+        || state.revision != record.revision
+        || state.updated_at_ms != record.updated_at_ms
+    {
+        return Err(DatabaseError::Validation(
+            "artifact UI document disagrees with its persistence envelope".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_artifact_ui_state(
+    connection: &Connection,
+    workspace_id: &str,
+) -> DatabaseResult<Option<WorkspaceArtifactUiStateRecord>> {
+    let raw = connection
+        .query_row(
+            "SELECT revision, canonical_document, document_sha256, updated_at_ms
+             FROM artifact_workspace_state WHERE workspace_id = ?1",
+            [workspace_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(revision, canonical_document, stored_digest, updated_at_ms)| {
+            if stored_digest != canonical_document_digest(&canonical_document) {
+                return Err(DatabaseError::Validation(
+                    "artifact UI state digest mismatch".into(),
+                ));
+            }
+            let record = WorkspaceArtifactUiStateRecord {
+                workspace_id: workspace_id.into(),
+                revision: generation_to_u64(revision)?,
+                canonical_document,
+                updated_at_ms: generation_to_u64(updated_at_ms)?,
+            };
+            validate_artifact_ui_state_record(&record, workspace_id)?;
+            let state =
+                serde_json::from_str::<ArtifactWorkspaceUiState>(&record.canonical_document)
+                    .map_err(|_| {
+                        DatabaseError::Validation("artifact UI state is invalid".into())
+                    })?;
+            if let Some(artifact_id) = &state.focused_artifact_id {
+                let artifact_record = read_artifact_document(
+                    connection,
+                    workspace_id,
+                    artifact_id,
+                )?
+                .ok_or_else(|| {
+                    DatabaseError::Validation("focused artifact UI identity is unavailable".into())
+                })?;
+                let artifact =
+                    serde_json::from_str::<ArtifactRecord>(&artifact_record.canonical_document)
+                        .map_err(|_| {
+                            DatabaseError::Validation("focused artifact is invalid".into())
+                        })?;
+                state.validate_against(&artifact).map_err(|_| {
+                    DatabaseError::Validation(
+                        "focused artifact UI identity is not focus-capable".into(),
+                    )
+                })?;
+            }
+            Ok(record)
+        },
+    )
+    .transpose()
+}
+
+fn write_artifact_ui_state(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    record: WorkspaceArtifactUiStateRecord,
+    expected_revision: Option<u64>,
+) -> DatabaseResult<u64> {
+    let workspace_id = workspace_id(kind)?;
+    validate_artifact_ui_state_record(&record, workspace_id)?;
+    let revision = i64::try_from(record.revision).map_err(|_| {
+        DatabaseError::InvalidInput("artifact UI state revision exceeds SQLite range".into())
+    })?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("artifact UI state timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active_workspace: i64 = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM workspaces
+            WHERE workspace_id = ?1 AND lifecycle_state = 'active'
+        )",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if active_workspace != 1 {
+        return Err(DatabaseError::Conflict(
+            "active artifact Workspace changed".into(),
+        ));
+    }
+    let ui_state = serde_json::from_str::<ArtifactWorkspaceUiState>(&record.canonical_document)
+        .map_err(|_| DatabaseError::Validation("artifact UI state is invalid".into()))?;
+    if let Some(artifact_id) = &ui_state.focused_artifact_id {
+        let canonical_artifact = transaction
+            .query_row(
+                "SELECT canonical_document FROM artifact_records
+                 WHERE workspace_id = ?1 AND artifact_id = ?2",
+                params![workspace_id, artifact_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| DatabaseError::Conflict("focused artifact is unavailable".into()))?;
+        let artifact = serde_json::from_str::<ArtifactRecord>(&canonical_artifact)
+            .map_err(|_| DatabaseError::Validation("focused artifact is invalid".into()))?;
+        ui_state
+            .validate_against(&artifact)
+            .map_err(|_| DatabaseError::Conflict("artifact cannot receive focus".into()))?;
+    }
+    let current = transaction
+        .query_row(
+            "SELECT revision FROM artifact_workspace_state WHERE workspace_id = ?1",
+            [workspace_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current, expected_revision) {
+        (None, None) if record.revision == 1 => {}
+        (Some(current), Some(expected))
+            if current == expected && record.revision == expected.saturating_add(1) => {}
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "artifact UI state expected revision {expected:?}, found {actual:?}"
+            )));
+        }
+    }
+    let digest = canonical_document_digest(&record.canonical_document);
+    transaction.execute(
+        "INSERT INTO artifact_workspace_state(
+            workspace_id, revision, canonical_document, document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+            revision = excluded.revision,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            workspace_id,
+            revision,
+            record.canonical_document,
+            digest,
+            updated_at_ms,
         ],
     )?;
     let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;

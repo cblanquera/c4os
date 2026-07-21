@@ -342,16 +342,19 @@ pub enum PickerPurpose {
     SaveWorkspaceArchive,
     AttachChatFiles,
     OpenFile,
+    OpenFolder,
 }
 
 impl PickerPurpose {
     pub fn policy(self) -> PickerSelectionPolicy {
         match self {
-            Self::OpenProjectFolder | Self::RelocateProjectFolder => PickerSelectionPolicy {
-                object_kind: PickerObjectKind::Folder,
-                allows_multiple: false,
-                allowed_extensions: Vec::new(),
-            },
+            Self::OpenProjectFolder | Self::RelocateProjectFolder | Self::OpenFolder => {
+                PickerSelectionPolicy {
+                    object_kind: PickerObjectKind::Folder,
+                    allows_multiple: false,
+                    allowed_extensions: Vec::new(),
+                }
+            }
             Self::OpenWorkspaceArchive | Self::SaveWorkspaceArchive => PickerSelectionPolicy {
                 object_kind: PickerObjectKind::File,
                 allows_multiple: false,

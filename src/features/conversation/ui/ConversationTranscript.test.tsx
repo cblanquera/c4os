@@ -115,6 +115,60 @@ describe("ConversationTranscript", () => {
     );
   });
 
+  it("discloses the supplied and truncated immutable Artifact Reply context", () => {
+    const props = createProps();
+    render(
+      <ConversationTranscript
+        {...props}
+        turns={[
+          {
+            id: "turn-reply",
+            author: "user",
+            markdownSource: "Update this file.",
+            status: "completed",
+            replyContext: {
+              artifactId: "artifact-1",
+              providerType: "file",
+              providerVersion: 1,
+              recordRevision: 3,
+              stableReference:
+                "artifact:artifact-1:record:3:resource:2:sha256:abc",
+              suppliedBytes: 12_000,
+              maximumBytes: 16_384,
+              omittedBytes: 400,
+              truncated: true,
+              unsaved: true,
+              segments: [
+                {
+                  source: "unsaved-draft",
+                  text: "retained draft",
+                  omittedBytes: 400,
+                },
+              ],
+              capabilities: [
+                {
+                  capabilityId: "artifact.write",
+                  access: "approvalRequired",
+                  reasonCode: "live-version-revalidation",
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    const disclosure = screen.getByText(/Reply to file/).closest("details");
+    expect(disclosure).not.toBeNull();
+    fireEvent.click(within(disclosure!).getByText(/Reply to file/));
+    expect(disclosure).toHaveTextContent("includes unsaved draft");
+    expect(disclosure).toHaveTextContent("400 B omitted");
+    expect(disclosure).toHaveTextContent("retained draft");
+    expect(disclosure).toHaveTextContent(
+      "artifact.write: approvalRequired (live-version-revalidation)",
+    );
+  });
+
   it("publishes controlled work, provenance, link, and artifact-focus intents", () => {
     const props = createProps();
     render(<ConversationTranscript {...props} />);

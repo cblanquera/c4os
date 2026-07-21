@@ -1472,10 +1472,22 @@ pub fn coordinate_turn_dispatch<R: SessionRepository>(
         &options.attachment_resolution,
     )?;
     if let Some(reply) = &request.submission.reply_context {
+        let file_proposal_contract = reply
+            .artifact_context
+            .as_ref()
+            .filter(|context| context.provider_type == "file")
+            .map(|_| {
+                format!(
+                    "\nIf the user requests a change to this File, emit the complete proposed UTF-8 file exactly once as JSON between {begin} and {end}: {begin}{{\"content\":\"...\"}}{end}. Do not use that envelope for an explanation-only answer. The envelope proposes a change; it does not save the File.",
+                    begin = crate::artifact::file::FILE_REPLY_PROPOSAL_BEGIN,
+                    end = crate::artifact::file::FILE_REPLY_PROPOSAL_END,
+                )
+            })
+            .unwrap_or_default();
         let composed = format!(
             "Reply to the immutable {kind} reference {target} ({digest}).\n\
              <reply-context>\n{excerpt}\n</reply-context>\n\
-             <user-message>\n{input}\n</user-message>",
+             <user-message>\n{input}\n</user-message>{file_proposal_contract}",
             kind = reply.target_kind,
             target = reply.target_id,
             digest = reply.source_sha256,

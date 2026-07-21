@@ -107,6 +107,27 @@ describe("ConversationFocusComposition", () => {
     expect(screen.getAllByText("Keep this real transcript.")).toHaveLength(1);
   });
 
+  it("preserves the original transcript DOM node across focus transitions", () => {
+    const { rerender } = render(<TestComposition focusedArtifact={null} />);
+    const originalFeed = screen.getByRole("feed");
+    const originalTranscript = screen.getByLabelText("Conversation");
+
+    rerender(<TestComposition focusedArtifact={FOCUSED_ARTIFACT} />);
+    expect(screen.getByRole("feed")).toBe(originalFeed);
+    expect(screen.getByLabelText("Contextual conversation")).toBe(
+      originalTranscript,
+    );
+    expect(originalTranscript).toHaveAttribute(
+      "data-placement",
+      "context-pane",
+    );
+
+    rerender(<TestComposition focusedArtifact={null} />);
+    expect(screen.getByRole("feed")).toBe(originalFeed);
+    expect(screen.getByLabelText("Conversation")).toBe(originalTranscript);
+    expect(originalTranscript).toHaveAttribute("data-placement", "center");
+  });
+
   it("routes direct Close and contextual Restore without enabling Detach", () => {
     const onCloseFocusedArtifact = vi.fn();
     const onRestoreChat = vi.fn();

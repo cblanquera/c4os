@@ -1,4 +1,10 @@
-import type { CSSProperties, ChangeEvent, ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 
 import {
   Button,
@@ -62,6 +68,7 @@ export function WorkspaceLayout({
   const hasContextualChat =
     contextualChatContent !== undefined && contextualChatContent !== null;
   const exposesContextualChat = showContextualChat || hasContextualChat;
+  const stageRef = useRef<HTMLElement>(null);
   const minimumWidth = projectPanel.minimumWidth ?? 180;
   const maximumWidth = Math.max(minimumWidth, projectPanel.maximumWidth ?? 640);
 
@@ -80,12 +87,21 @@ export function WorkspaceLayout({
     onComposerModeChange(event.currentTarget.value as ShellComposerMode);
   };
 
-  /** Dismisses only an open overlay while preserving the intended main action. */
-  const handleStagePointerDown = () => {
-    if (projectPanel.mode === "overlay" && projectPanel.isOpen) {
-      onPanelOverlayDismiss();
-    }
-  };
+  // Use the actual stage DOM boundary so pointer events originating in the
+  // stable conversation portal still dismiss an open overlay. React portal
+  // events follow the component tree and otherwise skip this DOM ancestor.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (stage === null) return;
+    const handleStagePointerDown = () => {
+      if (projectPanel.mode === "overlay" && projectPanel.isOpen) {
+        onPanelOverlayDismiss();
+      }
+    };
+    stage.addEventListener("pointerdown", handleStagePointerDown);
+    return () =>
+      stage.removeEventListener("pointerdown", handleStagePointerDown);
+  }, [onPanelOverlayDismiss, projectPanel.isOpen, projectPanel.mode]);
 
   const title = workspaceTitle ?? getShellRouteCopy(route).title;
   const panelStyle = {
@@ -189,10 +205,7 @@ export function WorkspaceLayout({
         ) : null}
 
         <div className="shell-workspace__center">
-          <main
-            className="shell-workspace__stage"
-            onPointerDown={handleStagePointerDown}
-          >
+          <main className="shell-workspace__stage" ref={stageRef}>
             <RouteSurface
               compact={route === "/chat" && children !== undefined}
               route={route}

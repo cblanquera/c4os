@@ -170,6 +170,34 @@ describe("PlatformService renderer boundary", () => {
     ).rejects.toMatchObject({ code: "invalidPayload" });
   });
 
+  it("requests one opaque folder grant for Files Browse", async () => {
+    const invoke = vi.fn(() =>
+      Promise.resolve(
+        envelope({
+          type: "cancelled",
+          contractVersion: PICKER_CONTRACT_VERSION,
+          requestId,
+        }),
+      ),
+    );
+
+    await adapter({ invoke }).pick("openFolder");
+
+    expect(invoke).toHaveBeenCalledWith(
+      "platform_pick",
+      expect.objectContaining({
+        picker: expect.objectContaining({
+          purpose: "openFolder",
+          selection: {
+            objectKind: "folder",
+            allowsMultiple: false,
+            allowedExtensions: [],
+          },
+        }),
+      }),
+    );
+  });
+
   it("validates the typed native Settings event", () => {
     expect(
       parseSettingsEvent({

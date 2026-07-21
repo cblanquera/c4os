@@ -45,6 +45,7 @@ export interface ComposerProps {
   readonly mode: ComposerPresentationMode;
   readonly onAttach?: () => void;
   readonly onBrowse?: () => void;
+  readonly onBrowseFolder?: () => void;
   readonly onConflictAction?: (action: ComposerConflictAction) => void;
   readonly onModeChange: (mode: ComposerMode) => void;
   readonly onRemoveAttachment: (attachmentId: string) => void;
@@ -92,6 +93,7 @@ export function Composer({
   mode,
   onAttach,
   onBrowse,
+  onBrowseFolder,
   onConflictAction,
   onModeChange,
   onRemoveAttachment,
@@ -315,7 +317,12 @@ export function Composer({
           ) : null}
           {mode === "files" && onBrowse ? (
             <button onClick={onBrowse} type="button">
-              Browse
+              Browse File
+            </button>
+          ) : null}
+          {mode === "files" && onBrowseFolder ? (
+            <button onClick={onBrowseFolder} type="button">
+              Browse Folder
             </button>
           ) : null}
           <ComposerControls controls={controls} mode={mode} />
