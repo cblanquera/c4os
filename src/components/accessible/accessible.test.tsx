@@ -101,7 +101,7 @@ describe("accessible controls", () => {
         screen.queryByRole("menu", { name: "Project actions" }),
       ).toBeNull(),
     );
-    expect(menuTrigger).toHaveFocus();
+    await waitFor(() => expect(menuTrigger).toHaveFocus());
 
     const popoverTrigger = screen.getByRole("button", {
       name: "Open chat information",

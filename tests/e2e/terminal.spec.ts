@@ -696,7 +696,7 @@ test("production Terminal composes approval, focused stdin, output acknowledgeme
   focused = page.getByRole("region", { name: "Focused read answer" });
   await expect(focused).toContainText("Waiting for approval");
   await focused.getByRole("button", { name: "Allow" }).click();
-  await expect(focused).toContainText("Waiting for input");
+  await expect(focused).toContainText("Running · input available");
   await focused.getByRole("textbox", { name: "Process input" }).fill("alpha");
   await focused.getByRole("button", { name: "Send input" }).click();
   await expect(focused).toContainText(

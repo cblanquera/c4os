@@ -966,6 +966,16 @@ impl DatabaseActor {
         read_artifact_documents_for_session(&connection, workspace_id, session_id)
     }
 
+    pub fn artifact_session_ids_for_provider(
+        &self,
+        provider_kind: &str,
+    ) -> DatabaseResult<Vec<String>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_artifact_session_ids_for_provider(&connection, workspace_id, provider_kind)
+    }
+
     pub fn save_artifact_ui_state(
         &self,
         record: WorkspaceArtifactUiStateRecord,
@@ -3173,6 +3183,41 @@ fn read_artifact_documents_for_session(
             })
         })
         .collect()
+}
+
+fn read_artifact_session_ids_for_provider(
+    connection: &Connection,
+    workspace_id: &str,
+    provider_kind: &str,
+) -> DatabaseResult<Vec<String>> {
+    require_nonempty("provider_kind", provider_kind)?;
+    validate_text_field("provider_kind", provider_kind, 256)?;
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(DISTINCT session_id) FROM artifact_records
+         WHERE workspace_id = ?1 AND provider_kind = ?2",
+        params![workspace_id, provider_kind],
+        |row| row.get(0),
+    )?;
+    if !(0..=MAX_SESSION_RECORDS as i64).contains(&count) {
+        return Err(DatabaseError::Validation(format!(
+            "artifact provider session count {count} exceeds {MAX_SESSION_RECORDS}"
+        )));
+    }
+    let mut statement = connection.prepare(
+        "SELECT DISTINCT session_id FROM artifact_records
+         WHERE workspace_id = ?1 AND provider_kind = ?2
+         ORDER BY session_id",
+    )?;
+    let session_ids = statement
+        .query_map(params![workspace_id, provider_kind], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for session_id in &session_ids {
+        require_nonempty("session_id", session_id)?;
+        validate_text_field("session_id", session_id, 512)?;
+    }
+    Ok(session_ids)
 }
 
 fn write_artifact_document(

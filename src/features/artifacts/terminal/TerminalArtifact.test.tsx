@@ -446,7 +446,7 @@ describe("TerminalArtifact", () => {
       />,
     );
 
-    expect(screen.getAllByText("Waiting for input")).toHaveLength(2);
+    expect(screen.getAllByText("Running · input available")).toHaveLength(2);
     expect(
       screen.getByRole("group", { name: "Approval for npm test" }),
     ).toBeVisible();

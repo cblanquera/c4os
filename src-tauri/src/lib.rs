@@ -245,10 +245,11 @@ struct AppCoreState {
     _configuration: Mutex<core::services::ManagedAppConfiguration>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation_operation: Mutex<()>,
-    artifact_operation: Mutex<()>,
+    artifact_operation: Arc<Mutex<()>>,
     conversation: Mutex<ConversationApplicationState>,
-    artifact: Mutex<ArtifactApplicationState>,
-    terminal: Mutex<TerminalSupervisor>,
+    artifact: Arc<Mutex<ArtifactApplicationState>>,
+    terminal: Arc<Mutex<TerminalSupervisor>>,
+    _terminal_reconciliation: TerminalReconciliationDriver,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     runtime_production: Arc<ManagedProductionRuntime>,
     runtime: Arc<RuntimeApplicationService>,
@@ -281,6 +282,72 @@ struct ArtifactApplicationState {
     terminal_ack_cursors: BTreeMap<String, u64>,
     terminal_output_lines: BTreeMap<String, Vec<u8>>,
     terminal_redacted_output_lines: BTreeSet<String>,
+    terminal_sensitive_output_lines: BTreeSet<String>,
+    terminal_cleanup_sessions: BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct TerminalOutputRedactionCheckpoint {
+    pending: Option<Vec<u8>>,
+    oversized: bool,
+    sensitive: bool,
+}
+
+struct TerminalReconciliationDriver {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    join: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for TerminalReconciliationDriver {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+trait TerminalReconciliationResources {
+    fn artifact_state(&self) -> &Mutex<ArtifactApplicationState>;
+    fn terminal_supervisor(&self) -> &Mutex<TerminalSupervisor>;
+    fn runtime_service(&self) -> &RuntimeApplicationService;
+}
+
+impl TerminalReconciliationResources for AppCoreState {
+    fn artifact_state(&self) -> &Mutex<ArtifactApplicationState> {
+        &self.artifact
+    }
+
+    fn terminal_supervisor(&self) -> &Mutex<TerminalSupervisor> {
+        &self.terminal
+    }
+
+    fn runtime_service(&self) -> &RuntimeApplicationService {
+        &self.runtime
+    }
+}
+
+#[derive(Clone)]
+struct BackgroundTerminalReconciliation {
+    artifact: Arc<Mutex<ArtifactApplicationState>>,
+    terminal: Arc<Mutex<TerminalSupervisor>>,
+    runtime: Arc<RuntimeApplicationService>,
+}
+
+impl TerminalReconciliationResources for BackgroundTerminalReconciliation {
+    fn artifact_state(&self) -> &Mutex<ArtifactApplicationState> {
+        &self.artifact
+    }
+
+    fn terminal_supervisor(&self) -> &Mutex<TerminalSupervisor> {
+        &self.terminal
+    }
+
+    fn runtime_service(&self) -> &RuntimeApplicationService {
+        &self.runtime
+    }
 }
 
 #[derive(Clone)]
@@ -4117,9 +4184,17 @@ fn persist_artifact_record(
     expected_revision: Option<u64>,
     correlation_id: protocol::CorrelationId,
 ) -> Result<u64, ProtocolError> {
+    persist_artifact_record_to_database(&scope.database, record, expected_revision, correlation_id)
+}
+
+fn persist_artifact_record_to_database(
+    database: &core::database::DatabaseActor,
+    record: &artifact::ArtifactRecord,
+    expected_revision: Option<u64>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<u64, ProtocolError> {
     let document = serialize_artifact_record(record)?;
-    scope
-        .database
+    database
         .save_artifact_document(document, expected_revision)
         .map_err(|error| {
             platform_boundary_error(
@@ -5442,6 +5517,8 @@ fn redact_terminal_output_line(line: &[u8]) -> Vec<u8> {
     }
     let ending = if line.ends_with(b"\r\n") {
         b"\r\n".as_slice()
+    } else if line.ends_with(b"\r") {
+        b"\r".as_slice()
     } else if line.ends_with(b"\n") {
         b"\n".as_slice()
     } else {
@@ -5458,6 +5535,115 @@ fn oversized_terminal_output_line(ending: &[u8]) -> Vec<u8> {
     redacted
 }
 
+const TERMINAL_SENSITIVE_OUTPUT_TRIGGERS: &[&[u8]] = &[
+    b"password",
+    b"passwd",
+    b"token",
+    b"secret",
+    b"api_key",
+    b"api-key",
+    b"apikey",
+    b"api_token",
+    b"api-token",
+    b"access_key",
+    b"access-key",
+    b"secret_access_key",
+    b"secret-access-key",
+    b"access_token",
+    b"access-token",
+    b"authorization",
+    b"private key-----",
+];
+
+fn terminal_output_record_boundary(byte: u8) -> bool {
+    matches!(byte, b'\r' | b'\n')
+}
+
+fn earliest_terminal_sensitive_hold(bytes: &[u8]) -> Option<usize> {
+    TERMINAL_SENSITIVE_OUTPUT_TRIGGERS
+        .iter()
+        .filter_map(|trigger| {
+            bytes
+                .windows(trigger.len())
+                .enumerate()
+                .find_map(|(position, window)| {
+                    if !window
+                        .iter()
+                        .zip(trigger.iter())
+                        .all(|(actual, expected)| actual.to_ascii_lowercase() == *expected)
+                    {
+                        return None;
+                    }
+                    if *trigger == b"private key-----" {
+                        return Some(position);
+                    }
+                    bytes
+                        .get(position + trigger.len())
+                        .is_none_or(|byte| matches!(byte, b':' | b'='))
+                        .then_some(position)
+                })
+        })
+        .min()
+}
+
+fn terminal_sensitive_trigger_suffix(bytes: &[u8]) -> usize {
+    let maximum = TERMINAL_SENSITIVE_OUTPUT_TRIGGERS
+        .iter()
+        .map(|trigger| trigger.len())
+        .max()
+        .unwrap_or(0)
+        .min(bytes.len());
+    (1..=maximum)
+        .rev()
+        .find(|length| {
+            let suffix = &bytes[bytes.len() - length..];
+            TERMINAL_SENSITIVE_OUTPUT_TRIGGERS.iter().any(|trigger| {
+                suffix.len() < trigger.len()
+                    && suffix
+                        .iter()
+                        .zip(trigger.iter())
+                        .all(|(actual, expected)| actual.to_ascii_lowercase() == *expected)
+            })
+        })
+        .unwrap_or(0)
+}
+
+fn terminal_output_redaction_checkpoint(
+    state: &ArtifactApplicationState,
+    command_id: &str,
+) -> TerminalOutputRedactionCheckpoint {
+    TerminalOutputRedactionCheckpoint {
+        pending: state.terminal_output_lines.get(command_id).cloned(),
+        oversized: state.terminal_redacted_output_lines.contains(command_id),
+        sensitive: state.terminal_sensitive_output_lines.contains(command_id),
+    }
+}
+
+fn restore_terminal_output_redaction(
+    state: &mut ArtifactApplicationState,
+    command_id: &str,
+    checkpoint: TerminalOutputRedactionCheckpoint,
+) {
+    state.terminal_output_lines.remove(command_id);
+    state.terminal_redacted_output_lines.remove(command_id);
+    state.terminal_sensitive_output_lines.remove(command_id);
+    if let Some(pending) = checkpoint.pending {
+        state
+            .terminal_output_lines
+            .insert(command_id.to_owned(), pending);
+    }
+    if checkpoint.oversized {
+        state
+            .terminal_redacted_output_lines
+            .insert(command_id.to_owned());
+    }
+    if checkpoint.sensitive {
+        state
+            .terminal_sensitive_output_lines
+            .insert(command_id.to_owned());
+    }
+}
+
 fn retain_redacted_terminal_output(
     state: &mut ArtifactApplicationState,
     command_id: &str,
@@ -5469,27 +5655,67 @@ fn retain_redacted_terminal_output(
         .remove(command_id)
         .unwrap_or_default();
     let mut oversized = state.terminal_redacted_output_lines.remove(command_id);
+    let mut sensitive = state.terminal_sensitive_output_lines.remove(command_id);
     let mut redacted = Vec::with_capacity(bytes.len());
-    for byte in bytes {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let boundary = bytes[offset..]
+            .iter()
+            .position(|byte| terminal_output_record_boundary(*byte));
+        let end = boundary.map_or(bytes.len(), |position| offset + position + 1);
+        let segment = &bytes[offset..end];
+        let record_ended = segment
+            .last()
+            .is_some_and(|byte| terminal_output_record_boundary(*byte));
+        offset = end;
         if oversized {
-            if *byte == b'\n' {
-                redacted.extend(oversized_terminal_output_line(b"\n"));
+            if record_ended {
+                redacted.extend(oversized_terminal_output_line(
+                    &segment[segment.len() - 1..],
+                ));
                 oversized = false;
             }
             continue;
         }
-        pending.push(*byte);
-        if *byte == b'\n' {
+        if sensitive {
+            if record_ended {
+                redacted.push(segment[segment.len() - 1]);
+                sensitive = false;
+            }
+            continue;
+        }
+        pending.extend_from_slice(segment);
+        if record_ended {
             redacted.extend(redact_terminal_output_line(&pending));
             pending.clear();
+        } else if terminal_line_contains_secret_material(&pending) {
+            if let Some(position) = earliest_terminal_sensitive_hold(&pending) {
+                redacted.extend_from_slice(&pending[..position]);
+            }
+            redacted.extend_from_slice(b"[sensitive Terminal output redacted]");
+            pending.clear();
+            sensitive = true;
         } else if pending.len() > artifact::MAX_TERMINAL_OUTPUT_BYTES {
             pending.clear();
             oversized = true;
+        } else if let Some(position) = earliest_terminal_sensitive_hold(&pending) {
+            if position > 0 {
+                redacted.extend(pending.drain(..position));
+            }
+        } else {
+            let retained = terminal_sensitive_trigger_suffix(&pending);
+            let released = pending.len() - retained;
+            if released > 0 {
+                redacted.extend(pending.drain(..released));
+            }
         }
     }
     if flush {
         if oversized {
             redacted.extend(oversized_terminal_output_line(b""));
+        } else if sensitive {
+            // The redaction marker was emitted as soon as the sensitive record
+            // became classifiable. There are no retained secret bytes to add.
         } else if !pending.is_empty() {
             redacted.extend(redact_terminal_output_line(&pending));
         }
@@ -5502,6 +5728,11 @@ fn retain_redacted_terminal_output(
         if oversized {
             state
                 .terminal_redacted_output_lines
+                .insert(command_id.to_owned());
+        }
+        if sensitive {
+            state
+                .terminal_sensitive_output_lines
                 .insert(command_id.to_owned());
         }
     }
@@ -5522,14 +5753,14 @@ fn persist_terminal_event_transition(
 }
 
 fn cancel_stale_terminal_controls(
-    core: &AppCoreState,
+    artifact: &Mutex<ArtifactApplicationState>,
+    runtime: &RuntimeApplicationService,
     artifact_id: &str,
     now_ms: u64,
     correlation_id: protocol::CorrelationId,
 ) -> Result<(), ProtocolError> {
     let pending = {
-        let state = core
-            .artifact
+        let state = artifact
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
         state
@@ -5543,8 +5774,7 @@ fn cancel_stale_terminal_controls(
             .collect::<Vec<_>>()
     };
     for (prompt_id, run_id) in &pending {
-        let cancelled = core
-            .runtime
+        let cancelled = runtime
             .coordinator()
             .and_then(|mut coordinator| {
                 coordinator
@@ -5561,17 +5791,22 @@ fn cancel_stale_terminal_controls(
                 true,
             ));
         }
-        core.artifact
+        artifact
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
             .pending_terminal_actions
             .remove(prompt_id);
     }
+    artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?
+        .terminal_cleanup_sessions
+        .remove(artifact_id);
     Ok(())
 }
 
 fn reconcile_active_terminal_records(
-    core: &AppCoreState,
+    core: &impl TerminalReconciliationResources,
     scope: &ActiveArtifactScope,
     records: &mut [artifact::ArtifactRecord],
     correlation_id: protocol::CorrelationId,
@@ -5588,7 +5823,7 @@ fn reconcile_active_terminal_records(
     };
     let key = terminal_key(scope)?;
     let mut supervised = core
-        .terminal
+        .terminal_supervisor()
         .lock()
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
         .live_session(&key);
@@ -5604,7 +5839,7 @@ fn reconcile_active_terminal_records(
             latest.1.process.environment_generation,
         )
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-        core.terminal
+        core.terminal_supervisor()
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
             .reconcile_restart(TerminalRestartRecord {
@@ -5629,7 +5864,7 @@ fn reconcile_active_terminal_records(
             })
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
         supervised = core
-            .terminal
+            .terminal_supervisor()
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
             .live_session(&key);
@@ -5645,7 +5880,7 @@ fn reconcile_active_terminal_records(
         binding.process_generation,
     );
     let cursor = core
-        .artifact
+        .artifact_state()
         .lock()
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
         .terminal_event_cursors
@@ -5653,12 +5888,12 @@ fn reconcile_active_terminal_records(
         .copied()
         .unwrap_or(0);
     let events = match core
-        .terminal
+        .terminal_supervisor()
         .lock()
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
         .drain_events(TerminalDrainRequest {
-            key,
-            terminal_session_id: binding.terminal_session_id,
+            key: key.clone(),
+            terminal_session_id: binding.terminal_session_id.clone(),
             process_generation: binding.process_generation,
             after_chunk_sequence: cursor,
             maximum_events: MAX_TERMINAL_DRAIN_EVENTS,
@@ -5689,6 +5924,7 @@ fn reconcile_active_terminal_records(
                 | TerminalEventKind::RecoveredInterrupted { .. }
                 | TerminalEventKind::Failed { .. }
         );
+        let mut event_is_durable = !matches!(&event.kind, TerminalEventKind::Output { .. });
         match event.kind {
             TerminalEventKind::Started {
                 process_id,
@@ -5725,27 +5961,52 @@ fn reconcile_active_terminal_records(
                 bytes,
                 dropped_bytes_before,
             } => {
-                let redacted = {
+                let (redacted, redaction_checkpoint) = {
                     let mut state = core
-                        .artifact
+                        .artifact_state()
                         .lock()
                         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-                    retain_redacted_terminal_output(&mut state, &event.command_id, &bytes, false)
+                    let checkpoint =
+                        terminal_output_redaction_checkpoint(&state, &event.command_id);
+                    (
+                        retain_redacted_terminal_output(
+                            &mut state,
+                            &event.command_id,
+                            &bytes,
+                            false,
+                        ),
+                        checkpoint,
+                    )
                 };
                 if !redacted.is_empty() || dropped_bytes_before > 0 {
-                    let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
-                        unreachable!()
-                    };
-                    terminal
-                        .append_output_with_dropped(&redacted, dropped_bytes_before, now_ms)
-                        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-                    persist_terminal_event_transition(
-                        scope,
-                        record,
-                        artifact::ArtifactHistoryKind::OutputAppended,
-                        now_ms,
-                        correlation_id.clone(),
-                    )?;
+                    let transition = (|| -> Result<(), ProtocolError> {
+                        let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                            unreachable!()
+                        };
+                        terminal
+                            .append_output_with_dropped(&redacted, dropped_bytes_before, now_ms)
+                            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                        persist_terminal_event_transition(
+                            scope,
+                            record,
+                            artifact::ArtifactHistoryKind::OutputAppended,
+                            now_ms,
+                            correlation_id.clone(),
+                        )
+                    })();
+                    if let Err(error) = transition {
+                        let mut state = core
+                            .artifact_state()
+                            .lock()
+                            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                        restore_terminal_output_redaction(
+                            &mut state,
+                            &event.command_id,
+                            redaction_checkpoint,
+                        );
+                        return Err(error);
+                    }
+                    event_is_durable = true;
                 }
             }
             TerminalEventKind::Completed {
@@ -5753,7 +6014,7 @@ fn reconcile_active_terminal_records(
                 working_directory,
             } => {
                 flush_terminal_output(
-                    core,
+                    core.artifact_state(),
                     scope,
                     record,
                     &event.command_id,
@@ -5779,7 +6040,7 @@ fn reconcile_active_terminal_records(
                 shell_replaced,
             } => {
                 flush_terminal_output(
-                    core,
+                    core.artifact_state(),
                     scope,
                     record,
                     &event.command_id,
@@ -5789,6 +6050,8 @@ fn reconcile_active_terminal_records(
                 let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
                     unreachable!()
                 };
+                append_terminal_interrupt_marker(terminal, now_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
                 terminal.working_directory_display =
                     working_directory.to_string_lossy().into_owned();
                 terminal
@@ -5831,7 +6094,7 @@ fn reconcile_active_terminal_records(
                 shell_replaced: _,
             } => {
                 flush_terminal_output(
-                    core,
+                    core.artifact_state(),
                     scope,
                     record,
                     &event.command_id,
@@ -5854,26 +6117,320 @@ fn reconcile_active_terminal_records(
             }
         }
         let mut state = core
-            .artifact
+            .artifact_state()
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
         state
             .terminal_event_cursors
             .insert(cursor_key.clone(), event.chunk_sequence);
-        state
-            .terminal_ack_cursors
-            .insert(record.artifact_id.clone(), event.chunk_sequence);
-        drop(state);
+        if event_is_durable {
+            state
+                .terminal_ack_cursors
+                .insert(record.artifact_id.clone(), event.chunk_sequence);
+        }
         if command_became_terminal {
+            state
+                .terminal_cleanup_sessions
+                .insert(record.artifact_id.clone(), scope.session_id.clone());
+        }
+        drop(state);
+        if event_is_durable {
+            core.terminal_supervisor()
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                .acknowledge_output(TerminalAcknowledgeRequest {
+                    key: key.clone(),
+                    terminal_session_id: binding.terminal_session_id.clone(),
+                    process_generation: binding.process_generation,
+                    through_chunk_sequence: event.chunk_sequence,
+                })
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        }
+    }
+    let cleanup_artifact_ids = core
+        .artifact_state()
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .terminal_cleanup_sessions
+        .iter()
+        .filter(|(_, session_id)| *session_id == &scope.session_id)
+        .map(|(artifact_id, _)| artifact_id.clone())
+        .collect::<Vec<_>>();
+    for artifact_id in cleanup_artifact_ids {
+        let now_ms =
+            current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        cancel_stale_terminal_controls(
+            core.artifact_state(),
+            core.runtime_service(),
+            &artifact_id,
+            now_ms,
+            correlation_id.clone(),
+        )?;
+    }
+    Ok(())
+}
+
+fn recover_unsupervised_terminal_records(
+    database: &core::database::DatabaseActor,
+    records: &mut [artifact::ArtifactRecord],
+    correlation_id: protocol::CorrelationId,
+) -> Result<bool, ProtocolError> {
+    let mut recovered = false;
+    for record in records {
+        let now_ms = current_time_ms()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .max(record.updated_at_ms);
+        let Some(expected_revision) = transition_unsupervised_terminal_record(record, now_ms)?
+        else {
+            continue;
+        };
+        persist_artifact_record_to_database(
+            database,
+            record,
+            Some(expected_revision),
+            correlation_id.clone(),
+        )?;
+        recovered = true;
+    }
+    Ok(recovered)
+}
+
+fn transition_unsupervised_terminal_record(
+    record: &mut artifact::ArtifactRecord,
+    now_ms: u64,
+) -> Result<Option<u64>, ProtocolError> {
+    let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+        return Ok(None);
+    };
+    if !matches!(
+        &terminal.status,
+        artifact::TerminalCommandStatus::Running { .. }
+    ) {
+        return Ok(None);
+    }
+    terminal
+        .recover(
+            "process-restart",
+            "The previous Terminal process was not trusted after restart.",
+            now_ms,
+        )
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::Internal,
+                "Terminal recovery failed",
+                true,
+            )
+        })?;
+    let expected_revision = record.record_revision;
+    advance_artifact_record(
+        record,
+        artifact::ArtifactHistoryKind::RecoveryChanged,
+        now_ms,
+    )?;
+    Ok(Some(expected_revision))
+}
+
+fn pump_supervised_terminal_sessions_once(
+    active_workspace: &Mutex<Option<core::services::ActiveWorkspace>>,
+    artifact_operation: &Mutex<()>,
+    resources: &BackgroundTerminalReconciliation,
+    include_restart_recovery: bool,
+) -> Result<usize, ProtocolError> {
+    let correlation_id = protocol::CorrelationId::new("terminal-reconciliation-driver")
+        .expect("the production Terminal reconciliation correlation id is valid");
+    let _operation = artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let (workspace_id, database, snapshot) = {
+        let active = active_workspace
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let Some(active) = active.as_ref() else {
+            return Ok(0);
+        };
+        let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .including_inactive();
+        (
+            active.manifest().workspace_id.to_string(),
+            Arc::clone(active.database_actor()),
+            active
+                .snapshot(query)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+        )
+    };
+    let supervisor_snapshots = resources
+        .terminal_supervisor()
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .session_snapshots();
+    let supervised_session_ids = supervisor_snapshots
+        .iter()
+        .filter(|session| session.key.workspace_id == workspace_id)
+        .map(|session| session.key.chat_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut session_ids = supervisor_snapshots
+        .into_iter()
+        .filter(|session| {
+            session.key.workspace_id == workspace_id
+                && (session.active_command.is_some() || session.pending_event_count > 0)
+        })
+        .map(|session| session.key.chat_id)
+        .collect::<BTreeSet<_>>();
+    session_ids.extend(
+        resources
+            .artifact_state()
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .terminal_cleanup_sessions
+            .values()
+            .cloned(),
+    );
+    if include_restart_recovery {
+        session_ids.extend(
+            database
+                .artifact_session_ids_for_provider("terminal")
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+        );
+    }
+
+    let limits = ProjectFilesystemLimits::new(
+        artifact::file::MAX_FILE_CONTENT_BYTES as u64,
+        artifact::folder::MAX_FOLDER_ENTRIES,
+        execution::filesystem::MAX_PROJECT_FOLDER_NAME_BYTES,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut reconciled = 0;
+    for session_id in session_ids {
+        let documents = database
+            .artifact_documents_for_session(&session_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let mut records = documents
+            .into_iter()
+            .map(|document| deserialize_artifact_record(document, correlation_id.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !records
+            .iter()
+            .any(|record| matches!(&record.state, artifact::ArtifactState::Terminal(_)))
+        {
+            continue;
+        }
+        let cleanup_artifact_ids = resources
+            .artifact_state()
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .terminal_cleanup_sessions
+            .iter()
+            .filter(|(_, cleanup_session_id)| *cleanup_session_id == &session_id)
+            .map(|(artifact_id, _)| artifact_id.clone())
+            .collect::<Vec<_>>();
+        for artifact_id in cleanup_artifact_ids {
+            let now_ms = current_time_ms()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
             cancel_stale_terminal_controls(
-                core,
-                &record.artifact_id,
+                resources.artifact_state(),
+                resources.runtime_service(),
+                &artifact_id,
                 now_ms,
                 correlation_id.clone(),
             )?;
         }
+        if include_restart_recovery && !supervised_session_ids.contains(&session_id) {
+            recover_unsupervised_terminal_records(&database, &mut records, correlation_id.clone())?;
+            reconciled += 1;
+            continue;
+        }
+        let Some(chat) = snapshot
+            .chats
+            .iter()
+            .find(|chat| chat.chat_id == session_id)
+        else {
+            continue;
+        };
+        let Some(project) = snapshot.projects.iter().find(|project| {
+            project.project_id == chat.project_id
+                && project.path_state != core::database::ProjectPathState::Missing
+        }) else {
+            continue;
+        };
+        let Ok(project_root) = TrustedProjectRoot::open(Path::new(&project.current_path)) else {
+            continue;
+        };
+        let Ok(filesystem) = ProjectFilesystem::bind_with_limits(project_root.clone(), limits)
+        else {
+            continue;
+        };
+        let scope = ActiveArtifactScope {
+            workspace_id: workspace_id.clone(),
+            project_id: project.project_id.clone(),
+            session_id: session_id.clone(),
+            project_name: project.display_name.clone(),
+            project_root,
+            filesystem,
+            database: Arc::clone(&database),
+        };
+        reconcile_active_terminal_records(resources, &scope, &mut records, correlation_id.clone())?;
+        reconciled += 1;
     }
-    Ok(())
+    Ok(reconciled)
+}
+
+fn start_terminal_reconciliation_driver(
+    active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    artifact_operation: Arc<Mutex<()>>,
+    artifact: Arc<Mutex<ArtifactApplicationState>>,
+    terminal: Arc<Mutex<TerminalSupervisor>>,
+    runtime: Arc<RuntimeApplicationService>,
+) -> Result<TerminalReconciliationDriver, std::io::Error> {
+    let resources = BackgroundTerminalReconciliation {
+        artifact,
+        terminal,
+        runtime,
+    };
+    let (stop, stop_rx) = std::sync::mpsc::channel();
+    let join = thread::Builder::new()
+        .name("c4os-terminal-reconciliation-driver".into())
+        .spawn(move || {
+            let mut recovered_workspace_id = None;
+            loop {
+                let workspace_id = active_workspace.lock().ok().and_then(|active| {
+                    active
+                        .as_ref()
+                        .map(|workspace| workspace.manifest().workspace_id.to_string())
+                });
+                let include_restart_recovery = workspace_id != recovered_workspace_id;
+                if pump_supervised_terminal_sessions_once(
+                    &active_workspace,
+                    &artifact_operation,
+                    &resources,
+                    include_restart_recovery,
+                )
+                .is_ok()
+                    && include_restart_recovery
+                {
+                    recovered_workspace_id = workspace_id;
+                }
+                match stop_rx.recv_timeout(Duration::from_millis(25)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        })?;
+    Ok(TerminalReconciliationDriver {
+        stop: Some(stop),
+        join: Some(join),
+    })
+}
+
+fn append_terminal_interrupt_marker(
+    terminal: &mut artifact::TerminalArtifactState,
+    observed_at_ms: u64,
+) -> Result<(), artifact::TerminalStateError> {
+    let retained = terminal.output.retained_bytes()?;
+    if retained.ends_with(b"^C\r\n") || retained.ends_with(b"^C\n") {
+        return Ok(());
+    }
+    terminal.append_output(b"^C\r\n", observed_at_ms)
 }
 
 fn terminal_event_drain_binding(
@@ -6104,19 +6661,22 @@ fn terminal_run_can_be_requeued(
 }
 
 fn flush_terminal_output(
-    core: &AppCoreState,
+    artifact: &Mutex<ArtifactApplicationState>,
     scope: &ActiveArtifactScope,
     record: &mut artifact::ArtifactRecord,
     command_id: &str,
     now_ms: u64,
     correlation_id: protocol::CorrelationId,
 ) -> Result<(), ProtocolError> {
-    let redacted = {
-        let mut state = core
-            .artifact
+    let (redacted, redaction_checkpoint) = {
+        let mut state = artifact
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-        retain_redacted_terminal_output(&mut state, command_id, &[], true)
+        let checkpoint = terminal_output_redaction_checkpoint(&state, command_id);
+        (
+            retain_redacted_terminal_output(&mut state, command_id, &[], true),
+            checkpoint,
+        )
     };
     if redacted.is_empty() {
         return Ok(());
@@ -6124,16 +6684,26 @@ fn flush_terminal_output(
     let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
         return Err(workspace_state_unavailable(correlation_id));
     };
-    terminal
+    let transition = terminal
         .append_output(&redacted, now_ms)
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-    persist_terminal_event_transition(
-        scope,
-        record,
-        artifact::ArtifactHistoryKind::OutputAppended,
-        now_ms,
-        correlation_id,
-    )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))
+        .and_then(|()| {
+            persist_terminal_event_transition(
+                scope,
+                record,
+                artifact::ArtifactHistoryKind::OutputAppended,
+                now_ms,
+                correlation_id.clone(),
+            )
+        });
+    if let Err(error) = transition {
+        let mut state = artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        restore_terminal_output_redaction(&mut state, command_id, redaction_checkpoint);
+        return Err(error);
+    }
+    Ok(())
 }
 
 struct TerminalCommandPlan {
@@ -7133,8 +7703,14 @@ fn artifact_terminal_ack_output(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
         .terminal_ack_cursors
         .get(&record.artifact_id)
-        .copied()
-        .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))?;
+        .copied();
+    let Some(through_chunk_sequence) = through_chunk_sequence else {
+        if terminal_output_requires_ack_cursor(terminal) {
+            return Err(workspace_state_unavailable(request.correlation_id.clone()));
+        }
+        let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+        return protocol::artifact_workspace_snapshot(request, payload);
+    };
     core.terminal
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
@@ -7147,6 +7723,13 @@ fn artifact_terminal_ack_output(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
     protocol::artifact_workspace_snapshot(request, payload)
+}
+
+fn terminal_output_requires_ack_cursor(terminal: &artifact::TerminalArtifactState) -> bool {
+    terminal.output.sequence != 1
+        || terminal.output.retained_bytes != 0
+        || terminal.output.dropped_bytes != 0
+        || !terminal.output.retained_base64.is_empty()
 }
 
 #[tauri::command]
@@ -9014,6 +9597,10 @@ fn conversation_request_branch(
         .conversation_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let before = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     require_exact_conversation_generation(
         &request,
@@ -10397,10 +10984,6 @@ fn conversation_activate_session(
         .conversation_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let _artifact_operation = core
-        .artifact_operation
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let workspace_snapshot = active_workspace_snapshot(&core, request.correlation_id.clone())?;
@@ -11138,6 +11721,10 @@ fn conversation_inactivate_session(
     validate_snapshot_request(&request)?;
     let _operation = core
         .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
@@ -13330,6 +13917,16 @@ pub fn run() {
                 ConversationApplicationState::default()
             };
             let active_workspace = Arc::new(Mutex::new(active_workspace));
+            let artifact_operation = Arc::new(Mutex::new(()));
+            let artifact = Arc::new(Mutex::new(ArtifactApplicationState::default()));
+            let terminal = Arc::new(Mutex::new(TerminalSupervisor::new()));
+            let terminal_reconciliation = start_terminal_reconciliation_driver(
+                Arc::clone(&active_workspace),
+                Arc::clone(&artifact_operation),
+                Arc::clone(&artifact),
+                Arc::clone(&terminal),
+                Arc::clone(&runtime),
+            )?;
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             let runtime_production = Arc::new(ManagedProductionRuntime::default());
             app.manage(AppCoreState {
@@ -13337,10 +13934,11 @@ pub fn run() {
                 _configuration: Mutex::new(configuration),
                 active_workspace: Arc::clone(&active_workspace),
                 conversation_operation: Mutex::new(()),
-                artifact_operation: Mutex::new(()),
+                artifact_operation,
                 conversation: Mutex::new(conversation),
-                artifact: Mutex::new(ArtifactApplicationState::default()),
-                terminal: Mutex::new(TerminalSupervisor::new()),
+                artifact,
+                terminal,
+                _terminal_reconciliation: terminal_reconciliation,
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 runtime_production: Arc::clone(&runtime_production),
                 runtime: Arc::clone(&runtime),
@@ -13772,6 +14370,27 @@ mod artifact_terminal_projection_tests {
     }
 
     #[test]
+    fn unsupervised_restart_recovery_requires_no_project_root() {
+        let mut record = terminal_record(running_terminal(b"partial"));
+        let expected_revision = transition_unsupervised_terminal_record(&mut record, 20).unwrap();
+        assert_eq!(expected_revision, Some(1));
+        assert_eq!(record.record_revision, 2);
+        assert_eq!(record.updated_at_ms, 20);
+        let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+            unreachable!()
+        };
+        assert!(matches!(
+            &terminal.status,
+            artifact::TerminalCommandStatus::Recovery { code, .. }
+                if code == "process-restart"
+        ));
+        assert_eq!(
+            record.history.last().map(|event| &event.kind),
+            Some(&artifact::ArtifactHistoryKind::RecoveryChanged)
+        );
+    }
+
+    #[test]
     fn queued_restart_command_drains_the_retained_supervisor_generation() {
         let mut terminal = queued_terminal();
         terminal.identity.command_sequence = 3;
@@ -13822,29 +14441,170 @@ mod artifact_terminal_projection_tests {
     #[test]
     fn durable_output_redacts_complete_secret_lines_across_chunk_boundaries() {
         let mut state = ArtifactApplicationState::default();
-        assert!(
-            retain_redacted_terminal_output(
-                &mut state,
-                "terminal-command-test",
-                b"AWS_SECRET_ACCESS_",
-                false,
-            )
-            .is_empty()
+        let mut durable = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-test",
+            b"AWS_SECRET_ACCESS_",
+            false,
         );
-        let output = retain_redacted_terminal_output(
+        assert_eq!(durable, b"AWS_");
+        durable.extend(retain_redacted_terminal_output(
             &mut state,
             "terminal-command-test",
             b"KEY=plaintext\nvisible\n",
             false,
+        ));
+        assert_eq!(
+            durable,
+            b"AWS_[sensitive Terminal output redacted]\nvisible\n"
         );
-        assert_eq!(output, b"[sensitive Terminal output redacted]\nvisible\n");
-        assert!(!String::from_utf8_lossy(&output).contains("plaintext"));
+        assert!(!String::from_utf8_lossy(&durable).contains("plaintext"));
     }
 
     #[test]
-    fn unterminated_output_lines_are_memory_bounded_and_fully_redacted() {
+    fn durable_output_streams_safe_prefix_before_newline() {
         let mut state = ArtifactApplicationState::default();
-        let oversized = vec![b'x'; artifact::MAX_TERMINAL_OUTPUT_BYTES + 1];
+        let first = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-streaming",
+            b"tick",
+            false,
+        );
+        assert_eq!(first, b"tick");
+        assert!(state.terminal_output_lines.is_empty());
+
+        let final_bytes =
+            retain_redacted_terminal_output(&mut state, "terminal-command-streaming", b"", true);
+        assert!(final_bytes.is_empty());
+    }
+
+    #[test]
+    fn benign_trigger_like_output_streams_after_finite_lookahead() {
+        let mut state = ArtifactApplicationState::default();
+        let mut output = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-benign-triggers",
+            b"tokenized passwordless authorizationless",
+            false,
+        );
+        assert_eq!(output, b"tokenized passwordless authorizationles");
+        output.extend(retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-benign-triggers",
+            b"",
+            true,
+        ));
+        assert_eq!(output, b"tokenized passwordless authorizationless");
+        assert!(state.terminal_output_lines.is_empty());
+    }
+
+    #[test]
+    fn split_secret_trigger_and_value_never_enter_durable_output() {
+        let mut state = ArtifactApplicationState::default();
+        let mut durable = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-split-secret",
+            b"ordinary API_TO",
+            false,
+        );
+        durable.extend(retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-split-secret",
+            b"KEN=super-",
+            false,
+        ));
+        durable.extend(retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-split-secret",
+            b"secret\n",
+            false,
+        ));
+        assert_eq!(durable, b"ordinary [sensitive Terminal output redacted]\n");
+        assert!(!String::from_utf8_lossy(&durable).contains("super-"));
+        assert!(!String::from_utf8_lossy(&durable).contains("secret\n"));
+    }
+
+    #[test]
+    fn failed_secret_transition_restores_redactor_state_before_retry() {
+        let mut state = ArtifactApplicationState::default();
+        assert!(
+            retain_redacted_terminal_output(
+                &mut state,
+                "terminal-command-secret-retry",
+                b"TOK",
+                false,
+            )
+            .is_empty()
+        );
+        let checkpoint =
+            terminal_output_redaction_checkpoint(&state, "terminal-command-secret-retry");
+        let first_attempt = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-secret-retry",
+            b"EN=plaintext\n",
+            false,
+        );
+        assert_eq!(first_attempt, b"[sensitive Terminal output redacted]\n");
+
+        restore_terminal_output_redaction(&mut state, "terminal-command-secret-retry", checkpoint);
+        let retry = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-secret-retry",
+            b"EN=plaintext\n",
+            false,
+        );
+        assert_eq!(retry, b"[sensitive Terminal output redacted]\n");
+        assert!(!String::from_utf8_lossy(&retry).contains("plaintext"));
+    }
+
+    #[test]
+    fn carriage_return_progress_streams_as_record_boundaries() {
+        let mut state = ArtifactApplicationState::default();
+        let first = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-progress",
+            b"step 1\r",
+            false,
+        );
+        let second = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-progress",
+            b"step 2\r",
+            false,
+        );
+        assert_eq!(first, b"step 1\r");
+        assert_eq!(second, b"step 2\r");
+
+        let cr =
+            retain_redacted_terminal_output(&mut state, "terminal-command-crlf", b"line\r", false);
+        let lf = retain_redacted_terminal_output(&mut state, "terminal-command-crlf", b"\n", false);
+        assert_eq!([cr, lf].concat(), b"line\r\n");
+    }
+
+    #[test]
+    fn carriage_return_secret_record_preserves_only_marker_and_boundary() {
+        let mut state = ArtifactApplicationState::default();
+        let mut durable = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-secret-progress",
+            b"TOK",
+            false,
+        );
+        durable.extend(retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-secret-progress",
+            b"EN=hunter2\r",
+            false,
+        ));
+        assert_eq!(durable, b"[sensitive Terminal output redacted]\r");
+        assert!(!String::from_utf8_lossy(&durable).contains("hunter2"));
+    }
+
+    #[test]
+    fn suspicious_unterminated_output_is_memory_bounded_and_fully_redacted() {
+        let mut state = ArtifactApplicationState::default();
+        let mut oversized = b"TOKEN=".to_vec();
+        oversized.extend(vec![b' '; artifact::MAX_TERMINAL_OUTPUT_BYTES + 1]);
         assert!(
             retain_redacted_terminal_output(
                 &mut state,
@@ -13922,5 +14682,41 @@ mod artifact_terminal_projection_tests {
                 .iter()
                 .all(|segment| !segment.text.contains("unlabelled-secret-value"))
         );
+    }
+
+    #[test]
+    fn only_pristine_empty_terminal_output_can_skip_a_native_ack_cursor() {
+        let pristine = queued_terminal();
+        assert!(!terminal_output_requires_ack_cursor(&pristine));
+
+        let mut sequenced = pristine.clone();
+        sequenced.output.sequence = 2;
+        assert!(terminal_output_requires_ack_cursor(&sequenced));
+
+        let mut dropped = pristine.clone();
+        dropped.output.dropped_bytes = 1;
+        assert!(terminal_output_requires_ack_cursor(&dropped));
+
+        let with_output = running_terminal(b"visible output");
+        assert!(terminal_output_requires_ack_cursor(&with_output));
+    }
+
+    #[test]
+    fn durable_interrupt_marker_is_appended_exactly_once() {
+        let mut terminal = running_terminal(b"visible output\n");
+        let before = terminal.output.sequence;
+
+        append_terminal_interrupt_marker(&mut terminal, 13).unwrap();
+        assert_eq!(terminal.output.sequence, before + 1);
+        assert!(
+            terminal
+                .output
+                .retained_bytes()
+                .unwrap()
+                .ends_with(b"^C\r\n")
+        );
+
+        append_terminal_interrupt_marker(&mut terminal, 14).unwrap();
+        assert_eq!(terminal.output.sequence, before + 1);
     }
 }

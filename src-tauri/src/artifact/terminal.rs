@@ -93,9 +93,8 @@ impl TerminalOutputBuffer {
     /// Raw bytes remain authoritative for xterm replay; this projection is not
     /// written back into the terminal stream.
     pub fn safe_text(&self) -> Result<String, TerminalStateError> {
-        Ok(strip_terminal_controls(&String::from_utf8_lossy(
-            &self.retained_bytes()?,
-        )))
+        let safe = strip_terminal_controls(&String::from_utf8_lossy(&self.retained_bytes()?));
+        Ok(bounded_utf8_tail(safe, MAX_TERMINAL_OUTPUT_BYTES))
     }
 
     pub fn is_safe_for_automatic_context(&self) -> Result<bool, TerminalStateError> {
@@ -816,6 +815,18 @@ fn strip_terminal_controls(value: &str) -> String {
     safe
 }
 
+fn bounded_utf8_tail(mut value: String, maximum_bytes: usize) -> String {
+    if value.len() <= maximum_bytes {
+        return value;
+    }
+    let mut start = value.len() - maximum_bytes;
+    while !value.is_char_boundary(start) {
+        start += 1;
+    }
+    value.drain(..start);
+    value
+}
+
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum TerminalStateError {
     #[error("terminal command identity is invalid")]
@@ -951,6 +962,28 @@ mod tests {
             .append_output(b"plain\x1b[31mred\x1b[0m\x1b]52;c;secret\x07\n", 12)
             .unwrap();
         assert_eq!(state.output.safe_text().unwrap(), "plainred\n");
+    }
+
+    #[test]
+    fn safe_text_independently_bounds_invalid_utf8_expansion() {
+        let mut state = queued();
+        state.mark_running(42, Some(43), false, 11).unwrap();
+        state
+            .append_output(&vec![0xff; MAX_TERMINAL_OUTPUT_BYTES], 12)
+            .unwrap();
+
+        let safe = state.output.safe_text().unwrap();
+        assert!(safe.len() <= MAX_TERMINAL_OUTPUT_BYTES);
+        assert!(safe.is_char_boundary(0));
+        assert!(safe.chars().all(|character| !character.is_control()));
+    }
+
+    #[test]
+    fn safe_text_tail_bound_never_splits_utf8() {
+        let value = format!("{}tail", "é".repeat(MAX_TERMINAL_OUTPUT_BYTES));
+        let bounded = bounded_utf8_tail(value, MAX_TERMINAL_OUTPUT_BYTES);
+        assert!(bounded.len() <= MAX_TERMINAL_OUTPUT_BYTES);
+        assert!(bounded.ends_with("tail"));
     }
 
     #[test]

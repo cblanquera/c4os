@@ -373,6 +373,46 @@ describe("TerminalViewport", () => {
     expect(onOutputWritten).toHaveBeenNthCalledWith(2, 2);
   });
 
+  it("does not acknowledge pristine empty output before a native cursor exists", () => {
+    harness.autoCompleteWrites = false;
+    const onOutputWritten = vi.fn();
+    const { rerender } = render(
+      <TerminalViewport
+        accessibleLabel="Terminal output"
+        columns={80}
+        droppedBytes={0}
+        onOutputWritten={onOutputWritten}
+        outputBase64=""
+        outputSequence={1}
+        reducedMotion={false}
+        retainedBytes={0}
+        rows={24}
+        snapshotKey="command:queued"
+      />,
+    );
+    const terminal = harness.terminals[0];
+    expect(terminal?.pendingWriteCallbacks).toHaveLength(0);
+    expect(onOutputWritten).not.toHaveBeenCalled();
+
+    rerender(
+      <TerminalViewport
+        accessibleLabel="Terminal output"
+        columns={80}
+        droppedBytes={7}
+        onOutputWritten={onOutputWritten}
+        outputBase64=""
+        outputSequence={2}
+        reducedMotion={false}
+        retainedBytes={0}
+        rows={24}
+        snapshotKey="command:queued"
+      />,
+    );
+    expect(terminal?.pendingWriteCallbacks).toHaveLength(1);
+    act(() => terminal?.pendingWriteCallbacks.shift()?.());
+    expect(onOutputWritten).toHaveBeenCalledWith(2);
+  });
+
   it("cleans every xterm resource through React Strict Mode remounts", () => {
     const { unmount } = render(
       <StrictMode>

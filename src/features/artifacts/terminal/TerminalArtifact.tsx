@@ -381,7 +381,7 @@ function terminalPhaseLabel(model: TerminalArtifactModel): string {
     queued: "Queued",
     approvalWaiting: "Waiting for approval",
     running: "Running",
-    stdinReady: "Waiting for input",
+    stdinReady: "Running · input available",
     stopping: "Stopping…",
     completed:
       model.exitCode === null

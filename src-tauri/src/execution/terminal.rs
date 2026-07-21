@@ -400,6 +400,24 @@ impl TerminalSupervisor {
         self.sessions.len()
     }
 
+    pub fn session_snapshots(&self) -> Vec<TerminalLiveSessionSnapshot> {
+        let mut snapshots = self
+            .sessions
+            .iter()
+            .map(|(key, slot)| match slot {
+                TerminalSlot::Live(live) => snapshot_live(key, live),
+                TerminalSlot::Dormant(dormant) => snapshot_dormant(key, dormant),
+            })
+            .collect::<Vec<_>>();
+        snapshots.sort_by(|left, right| {
+            left.key
+                .workspace_id
+                .cmp(&right.key.workspace_id)
+                .then_with(|| left.key.chat_id.cmp(&right.key.chat_id))
+        });
+        snapshots
+    }
+
     /// Lazily spawns or reuses the one shell bound to the request Chat. The
     /// method name is an authority boundary: callers must hold a consumed
     /// gateway permit before entering it.
@@ -1112,7 +1130,7 @@ impl SentinelParser {
         let mut parsed = Vec::new();
         loop {
             let Some(position) = find_subslice(&self.buffer, &self.prefix) else {
-                let retained = self.prefix.len().saturating_sub(1).min(self.buffer.len());
+                let retained = terminal_sentinel_prefix_suffix(&self.buffer, &self.prefix);
                 let emitted = self.buffer.len().saturating_sub(retained);
                 if emitted > 0 {
                     let bytes = self.buffer.drain(..emitted).collect::<Vec<_>>();
@@ -1194,6 +1212,14 @@ impl SentinelParser {
         }
         Ok(parsed)
     }
+}
+
+fn terminal_sentinel_prefix_suffix(bytes: &[u8], prefix: &[u8]) -> usize {
+    let maximum = prefix.len().saturating_sub(1).min(bytes.len());
+    (1..=maximum)
+        .rev()
+        .find(|length| bytes.ends_with(&prefix[..*length]))
+        .unwrap_or(0)
 }
 
 fn spawn_live_session(
@@ -1321,7 +1347,7 @@ fn write_command(
     // complete wrapper before `eval` transfers the foreground PTY to a child.
     // `eval` runs in this shell, so successful `cd` changes remain persistent.
     let wrapper = format!(
-        "stty -echo || exit 126; printf '\\036C4OS:{token}:START:{}\\037'; eval {quoted_command}; {status_variable}=$?; {cwd_variable}=$(/bin/pwd -P); printf '\\036C4OS:{token}:END:{}:%s:' \"${status_variable}\"; printf '%s' \"${cwd_variable}\" | /usr/bin/base64 | /usr/bin/tr -d '\\n'; printf '\\037'\n",
+        "stty -echo || exit 126; printf '\\036C4OS:{token}:START:{}\\037'; trap ':' INT; eval {quoted_command}; {status_variable}=$?; trap - INT; {cwd_variable}=$(/bin/pwd -P); printf '\\036C4OS:{token}:END:{}:%s:' \"${status_variable}\"; printf '%s' \"${cwd_variable}\" | /usr/bin/base64 | /usr/bin/tr -d '\\n'; printf '\\037'\n",
         identity.command_sequence, identity.command_sequence
     );
     live.writer

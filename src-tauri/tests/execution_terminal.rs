@@ -333,6 +333,14 @@ fn chats_are_isolated_and_resize_and_raw_stdin_target_only_the_active_command() 
         .expect("Chat B");
     assert_eq!(supervisor.live_session_count(), 2);
     assert_ne!(snapshot_a.process_id, snapshot_b.process_id);
+    assert_eq!(
+        supervisor
+            .session_snapshots()
+            .into_iter()
+            .map(|snapshot| snapshot.key.chat_id)
+            .collect::<Vec<_>>(),
+        vec!["chat-a", "chat-b"]
+    );
 
     assert!(matches!(
         supervisor.submit_stdin_authorized(TerminalStdinRequest {
@@ -415,6 +423,58 @@ fn chats_are_isolated_and_resize_and_raw_stdin_target_only_the_active_command() 
         }),
         Err(TerminalError::StaleGeneration)
     ));
+}
+
+#[test]
+fn short_partial_output_is_available_before_command_completion() {
+    let project = TempDir::new().expect("Project");
+    let root = TrustedProjectRoot::open(project.path()).expect("trusted root");
+    let terminal_key = key("chat-partial-output");
+    let mut supervisor = TerminalSupervisor::new();
+    supervisor
+        .execute_authorized(execute_request(
+            &root,
+            &terminal_key,
+            "terminal-partial-output",
+            "partial-output",
+            1,
+            1,
+            "printf tick; /bin/sleep 3; printf done",
+        ))
+        .expect("execute streaming command");
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut cursor = 0;
+    let mut observed = Vec::new();
+    while Instant::now() < deadline {
+        pump_events(
+            &mut supervisor,
+            &terminal_key,
+            "terminal-partial-output",
+            1,
+            &mut cursor,
+            &mut observed,
+        );
+        if output_bytes(&observed, "partial-output") == b"tick" {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(output_bytes(&observed, "partial-output"), b"tick");
+    assert!(
+        !observed
+            .iter()
+            .any(|event| is_terminal_event_for(event, "partial-output"))
+    );
+
+    let completed = collect_until_terminal(
+        &mut supervisor,
+        &terminal_key,
+        "terminal-partial-output",
+        1,
+        "partial-output",
+    );
+    assert_eq!(output_bytes(&completed, "partial-output"), b"done");
 }
 
 #[test]
@@ -519,11 +579,34 @@ fn stop_interrupts_the_live_foreground_group_and_normalizes_exit_to_130() {
     assert!(disposition.foreground_process_group_id > 0);
     let events = collect_until_terminal(&mut supervisor, &key, "terminal-stop", 1, "long-command");
     assert!(
-        events
-            .iter()
-            .any(|event| matches!(event.kind, TerminalEventKind::Interrupted130 { .. }))
+        events.iter().any(|event| matches!(
+            event.kind,
+            TerminalEventKind::Interrupted130 {
+                shell_replaced: false,
+                ..
+            }
+        )),
+        "ordinary Stop must preserve the persistent shell: {events:?}"
     );
     wait_for_process_exit(descendant_pid);
+
+    supervisor
+        .execute_authorized(execute_request(
+            &root,
+            &key,
+            "terminal-stop",
+            "after-stop",
+            2,
+            1,
+            "printf resumed",
+        ))
+        .expect("same shell remains reusable after Stop");
+    let resumed = collect_until_terminal(&mut supervisor, &key, "terminal-stop", 1, "after-stop");
+    assert_eq!(output_bytes(&resumed, "after-stop"), b"resumed");
+    assert!(resumed.iter().any(|event| matches!(
+        event.kind,
+        TerminalEventKind::Completed { exit_code: 0, .. }
+    )));
 }
 
 #[test]

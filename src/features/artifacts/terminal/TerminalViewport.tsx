@@ -165,6 +165,15 @@ export function TerminalViewport({
     };
     if (sameOutput(prior, next)) return;
 
+    // A queued command begins with a durable empty snapshot but no native
+    // output event (and therefore no backpressure cursor) exists yet. Clear a
+    // prior command's xterm state without manufacturing an acknowledgement.
+    if (isPristineEmptyOutput(next)) {
+      terminal.reset();
+      writtenOutputRef.current = next;
+      return;
+    }
+
     const wasAtBottom =
       terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
     const acknowledgeWrittenOutput = () => {
@@ -227,6 +236,15 @@ function sameOutput(prior: WrittenOutput | null, next: WrittenOutput): boolean {
     prior.retainedBytes === next.retainedBytes &&
     prior.snapshotKey === next.snapshotKey &&
     bytesEqual(prior.bytes, next.bytes)
+  );
+}
+
+function isPristineEmptyOutput(output: WrittenOutput): boolean {
+  return (
+    output.outputSequence === 1 &&
+    output.bytes.length === 0 &&
+    output.retainedBytes === 0 &&
+    output.droppedBytes === 0
   );
 }
 
