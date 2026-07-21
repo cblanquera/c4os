@@ -88,6 +88,72 @@ fn file_artifact_workspace(state: ArtifactFileStateSnapshot) -> ArtifactWorkspac
     }
 }
 
+fn terminal_artifact_workspace(phase: &str) -> ArtifactWorkspaceSnapshot {
+    let digest = format!("sha256:{}", "b".repeat(64));
+    let running = matches!(phase, "running" | "stdinReady" | "stopping");
+    let prompt_ready = phase == "completed";
+    let approval_waiting = phase == "approvalWaiting";
+    ArtifactWorkspaceSnapshot {
+        protocol_version: PROTOCOL_VERSION,
+        generation: StateGeneration(2),
+        authority: "rust-core".into(),
+        workspace_id: Some(WorkspaceId::new("workspace-1").unwrap()),
+        active_project_id: Some(ProjectId::new("project-1").unwrap()),
+        active_session_id: Some(SessionId::new("session-1").unwrap()),
+        focused_artifact_id: None,
+        artifacts: vec![ArtifactSnapshot {
+            artifact_id: ArtifactId::new("artifact-terminal-1").unwrap(),
+            project_id: ProjectId::new("project-1").unwrap(),
+            session_id: SessionId::new("session-1").unwrap(),
+            provider_type: "terminal".into(),
+            provider_version: 1,
+            state_schema_version: 1,
+            record_revision: 2,
+            title: "$ printf hello".into(),
+            focus_supported: true,
+            status: ArtifactShellStatusSnapshot {
+                kind: "ready".into(),
+                message: approval_waiting.then(|| "Approval required".into()),
+            },
+            pending_approval_id: approval_waiting.then(|| "prompt-terminal-1".into()),
+            source_label: "Direct operation".into(),
+            resource_version: ArtifactResourceVersionSnapshot {
+                sequence: 2,
+                sha256: digest.clone(),
+                observed_at_ms: 20,
+            },
+            history: Vec::new(),
+            provider_state: ArtifactProviderStateSnapshot::Terminal(ArtifactTerminalSnapshot {
+                terminal_session_id: "terminal-session-1".into(),
+                command_id: "command-1".into(),
+                command_sequence: 1,
+                command: "printf hello".into(),
+                working_directory_display: "/project".into(),
+                shell_path: "/bin/zsh".into(),
+                environment_id: "local-project".into(),
+                environment_generation: 1,
+                process_generation: 1,
+                shell_process_id: (running || prompt_ready).then_some(42),
+                foreground_process_group_id: running.then_some(43),
+                columns: 100,
+                rows: 30,
+                output_base64: "aGVsbG8=".into(),
+                output_text: "hello".into(),
+                output_sequence: 2,
+                retained_bytes: 5,
+                dropped_bytes: 0,
+                phase: phase.into(),
+                exit_code: prompt_ready.then_some(0),
+                status_message: None,
+                stdin_ready: phase == "stdinReady",
+                stop_available: matches!(phase, "running" | "stdinReady"),
+                prompt_ready,
+                shell_replaced: false,
+            }),
+        }],
+    }
+}
+
 #[test]
 fn rejects_unknown_protocol_versions_before_command_handling() {
     let mut envelope = request(7, submit_turn());
@@ -454,6 +520,95 @@ fn artifact_conflict_resolution_requires_exact_nonzero_revision() {
 }
 
 #[test]
+fn terminal_snapshot_requires_consistent_process_and_approval_state() {
+    for phase in [
+        "approvalWaiting",
+        "running",
+        "stdinReady",
+        "stopping",
+        "completed",
+    ] {
+        artifact_workspace_snapshot(
+            SnapshotRequest {
+                protocol_version: PROTOCOL_VERSION,
+                request_id: RequestId::new(format!("request-{phase}")).unwrap(),
+                correlation_id: CorrelationId::new(format!("correlation-{phase}")).unwrap(),
+                expected_generation: StateGeneration(1),
+            },
+            terminal_artifact_workspace(phase),
+        )
+        .unwrap();
+    }
+
+    let mut pending_live_control = terminal_artifact_workspace("stdinReady");
+    pending_live_control.artifacts[0].pending_approval_id = Some("prompt-terminal-control".into());
+    pending_live_control.artifacts[0].status.message =
+        Some("Approval required for Terminal input".into());
+    let ArtifactProviderStateSnapshot::Terminal(terminal) =
+        &mut pending_live_control.artifacts[0].provider_state
+    else {
+        unreachable!();
+    };
+    terminal.stop_available = false;
+    artifact_workspace_snapshot(
+        SnapshotRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: RequestId::new("request-pending-live-terminal").unwrap(),
+            correlation_id: CorrelationId::new("correlation-pending-live-terminal").unwrap(),
+            expected_generation: StateGeneration(1),
+        },
+        pending_live_control,
+    )
+    .unwrap();
+
+    let mut invalid = terminal_artifact_workspace("running");
+    let ArtifactProviderStateSnapshot::Terminal(terminal) =
+        &mut invalid.artifacts[0].provider_state
+    else {
+        unreachable!();
+    };
+    terminal.shell_process_id = None;
+    assert_eq!(
+        artifact_workspace_snapshot(
+            SnapshotRequest {
+                protocol_version: PROTOCOL_VERSION,
+                request_id: RequestId::new("request-invalid-terminal").unwrap(),
+                correlation_id: CorrelationId::new("correlation-invalid-terminal").unwrap(),
+                expected_generation: StateGeneration(1),
+            },
+            invalid,
+        )
+        .unwrap_err()
+        .code,
+        ProtocolErrorCode::InvalidPayload
+    );
+}
+
+#[test]
+fn terminal_operation_inputs_bind_process_generation_and_reject_controls() {
+    let invalid_command = ArtifactTerminalRunInput {
+        command: "echo\u{1b}[Dhidden".into(),
+        columns: 100,
+        rows: 30,
+    };
+    assert_eq!(
+        invalid_command.validate().unwrap_err().code,
+        ProtocolErrorCode::InvalidPayload
+    );
+
+    let stale_stdin = ArtifactTerminalStdinInput {
+        artifact_id: ArtifactId::new("artifact-terminal-1").unwrap(),
+        base_record_revision: 2,
+        process_generation: 0,
+        text: "answer".into(),
+    };
+    assert_eq!(
+        stale_stdin.validate().unwrap_err().code,
+        ProtocolErrorCode::InvalidGeneration
+    );
+}
+
+#[test]
 fn export_bindings() {
     let output = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/generated");
     let config = Config::default()
@@ -494,6 +649,11 @@ fn export_protocol_types(config: &Config) {
     ArtifactFolderNavigateInput::export_all(config).unwrap();
     ArtifactFolderSelectInput::export_all(config).unwrap();
     ArtifactApprovalInput::export_all(config).unwrap();
+    ArtifactTerminalRunInput::export_all(config).unwrap();
+    ArtifactTerminalStdinInput::export_all(config).unwrap();
+    ArtifactTerminalResizeInput::export_all(config).unwrap();
+    ArtifactTerminalOutputAckInput::export_all(config).unwrap();
+    ArtifactTerminalOperationInput::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

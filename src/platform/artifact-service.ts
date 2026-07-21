@@ -34,6 +34,12 @@ import type { ArtifactReplyInput as GeneratedArtifactReplyInput } from "../gener
 import type { ArtifactResourceVersionSnapshot as GeneratedArtifactResourceVersionSnapshot } from "../generated/ArtifactResourceVersionSnapshot";
 import type { ArtifactShellStatusSnapshot as GeneratedArtifactShellStatusSnapshot } from "../generated/ArtifactShellStatusSnapshot";
 import type { ArtifactSnapshot as GeneratedArtifactSnapshot } from "../generated/ArtifactSnapshot";
+import type { ArtifactTerminalOperationInput as GeneratedArtifactTerminalOperationInput } from "../generated/ArtifactTerminalOperationInput";
+import type { ArtifactTerminalOutputAckInput as GeneratedArtifactTerminalOutputAckInput } from "../generated/ArtifactTerminalOutputAckInput";
+import type { ArtifactTerminalResizeInput as GeneratedArtifactTerminalResizeInput } from "../generated/ArtifactTerminalResizeInput";
+import type { ArtifactTerminalRunInput as GeneratedArtifactTerminalRunInput } from "../generated/ArtifactTerminalRunInput";
+import type { ArtifactTerminalSnapshot as GeneratedArtifactTerminalSnapshot } from "../generated/ArtifactTerminalSnapshot";
+import type { ArtifactTerminalStdinInput as GeneratedArtifactTerminalStdinInput } from "../generated/ArtifactTerminalStdinInput";
 import type { ArtifactWorkspaceSnapshot as GeneratedArtifactWorkspaceSnapshot } from "../generated/ArtifactWorkspaceSnapshot";
 
 export type ArtifactShellStatus = Omit<
@@ -120,6 +126,25 @@ export type ArtifactFolderSnapshot = Omit<
   };
 };
 
+export const TERMINAL_PHASES = [
+  "queued",
+  "approvalWaiting",
+  "running",
+  "stdinReady",
+  "stopping",
+  "completed",
+  "interrupted",
+  "failed",
+  "recovery",
+] as const;
+
+export type ArtifactTerminalPhase = (typeof TERMINAL_PHASES)[number];
+
+export type ArtifactTerminalSnapshot = Omit<
+  Readonly<GeneratedArtifactTerminalSnapshot>,
+  "phase"
+> & { readonly phase: ArtifactTerminalPhase };
+
 export type ArtifactProviderStateSnapshot =
   | (Omit<
       Extract<
@@ -135,6 +160,13 @@ export type ArtifactProviderStateSnapshot =
       >,
       "value"
     > & { readonly value: ArtifactFolderSnapshot })
+  | (Omit<
+      Extract<
+        GeneratedArtifactProviderStateSnapshot,
+        { readonly type: "terminal" }
+      >,
+      "value"
+    > & { readonly value: ArtifactTerminalSnapshot })
   | Readonly<
       Extract<
         GeneratedArtifactProviderStateSnapshot,
@@ -233,8 +265,32 @@ export type ArtifactFolderSelectInput = Omit<
 
 export type ArtifactApprovalInput = Readonly<GeneratedArtifactApprovalInput>;
 
+export type ArtifactTerminalRunInput =
+  Readonly<GeneratedArtifactTerminalRunInput>;
+export type ArtifactTerminalStdinInput = Omit<
+  Readonly<GeneratedArtifactTerminalStdinInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+export type ArtifactTerminalResizeInput = Omit<
+  Readonly<GeneratedArtifactTerminalResizeInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+export type ArtifactTerminalOperationInput = Omit<
+  Readonly<GeneratedArtifactTerminalOperationInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+export type ArtifactTerminalOutputAckInput = Omit<
+  Readonly<GeneratedArtifactTerminalOutputAckInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+
 export type ArtifactCommand =
   | "artifact_snapshot"
+  | "artifact_run_terminal"
+  | "artifact_terminal_stdin"
+  | "artifact_terminal_resize"
+  | "artifact_terminal_stop"
+  | "artifact_terminal_ack_output"
   | "artifact_open_file"
   | "artifact_open_folder"
   | "artifact_focus"
@@ -262,6 +318,21 @@ export interface ArtifactTransport {
 export interface ArtifactAdapter {
   readonly currentGeneration: StateGeneration;
   read(): Promise<ArtifactWorkspaceSnapshot>;
+  runTerminal(
+    input: ArtifactTerminalRunInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  submitTerminalStdin(
+    input: ArtifactTerminalStdinInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  resizeTerminal(
+    input: ArtifactTerminalResizeInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  stopTerminal(
+    input: ArtifactTerminalOperationInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  acknowledgeTerminalOutput(
+    input: ArtifactTerminalOutputAckInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
   openFile(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot>;
   openFolder(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot>;
   focus(input: ArtifactMutationInput): Promise<ArtifactWorkspaceSnapshot>;
@@ -307,6 +378,36 @@ class NativeArtifactAdapter implements ArtifactAdapter {
 
   read(): Promise<ArtifactWorkspaceSnapshot> {
     return this.invoke("artifact_snapshot", {});
+  }
+
+  runTerminal(
+    input: ArtifactTerminalRunInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_run_terminal", { input });
+  }
+
+  submitTerminalStdin(
+    input: ArtifactTerminalStdinInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_terminal_stdin", { input });
+  }
+
+  resizeTerminal(
+    input: ArtifactTerminalResizeInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_terminal_resize", { input });
+  }
+
+  stopTerminal(
+    input: ArtifactTerminalOperationInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_terminal_stop", { input });
+  }
+
+  acknowledgeTerminalOutput(
+    input: ArtifactTerminalOutputAckInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_terminal_ack_output", { input });
   }
 
   openFile(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot> {
@@ -493,6 +594,18 @@ const nativeAdapter = createArtifactAdapter({
 });
 
 export const readArtifactWorkspaceSnapshot = () => nativeAdapter.read();
+export const runTerminalArtifact = (input: ArtifactTerminalRunInput) =>
+  nativeAdapter.runTerminal(input);
+export const submitTerminalArtifactStdin = (
+  input: ArtifactTerminalStdinInput,
+) => nativeAdapter.submitTerminalStdin(input);
+export const resizeTerminalArtifact = (input: ArtifactTerminalResizeInput) =>
+  nativeAdapter.resizeTerminal(input);
+export const stopTerminalArtifact = (input: ArtifactTerminalOperationInput) =>
+  nativeAdapter.stopTerminal(input);
+export const acknowledgeTerminalArtifactOutput = (
+  input: ArtifactTerminalOutputAckInput,
+) => nativeAdapter.acknowledgeTerminalOutput(input);
 export const openFileArtifact = (pickerGrantId: PickerGrantId) =>
   nativeAdapter.openFile(pickerGrantId);
 export const openFolderArtifact = (pickerGrantId: PickerGrantId) =>
@@ -586,9 +699,12 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
   if (
     (providerState.type === "file" && providerType !== "file") ||
     (providerState.type === "folder" && providerType !== "folder") ||
+    (providerState.type === "terminal" && providerType !== "terminal") ||
     (providerState.type === "file" &&
       (providerVersion !== 1 || stateSchemaVersion !== 1)) ||
     (providerState.type === "folder" &&
+      (providerVersion !== 1 || stateSchemaVersion !== 1)) ||
+    (providerState.type === "terminal" &&
       (providerVersion !== 1 || stateSchemaVersion !== 1))
   ) {
     throw boundary(
@@ -603,7 +719,9 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
     "Artifact approval prompt ID",
   );
   const supportedKnownVersion =
-    (providerType === "file" || providerType === "folder") &&
+    (providerType === "file" ||
+      providerType === "folder" ||
+      providerType === "terminal") &&
     providerVersion === 1 &&
     stateSchemaVersion === 1;
   if (
@@ -612,13 +730,33 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
   ) {
     throw boundary("invalidPayload", "Unknown artifacts must fail closed.");
   }
-  const approvalState =
-    providerState.type === "file" &&
-    providerState.value.state.phase === "approval";
-  if ((pendingApprovalId !== null) !== approvalState) {
+  const approvalStateIsConsistent =
+    providerState.type === "file"
+      ? (pendingApprovalId !== null) ===
+        (providerState.value.state.phase === "approval")
+      : providerState.type === "terminal"
+        ? providerState.value.phase === "approvalWaiting"
+          ? pendingApprovalId !== null
+          : providerState.value.phase === "queued"
+            ? pendingApprovalId === null
+            : true
+        : pendingApprovalId === null;
+  if (!approvalStateIsConsistent) {
     throw boundary(
       "invalidPayload",
       "Artifact approval state is inconsistent.",
+    );
+  }
+  if (
+    providerState.type === "terminal" &&
+    providerState.value.stopAvailable !==
+      (pendingApprovalId === null &&
+        (providerState.value.phase === "running" ||
+          providerState.value.phase === "stdinReady"))
+  ) {
+    throw boundary(
+      "invalidPayload",
+      "Terminal Stop authority is inconsistent.",
     );
   }
   return {
@@ -786,6 +924,163 @@ function parseProviderState(raw: unknown): ArtifactProviderStateSnapshot {
       },
     };
   }
+  if (type === "terminal") {
+    const terminal = record(value.value, "Terminal provider state");
+    const phase = terminal.phase;
+    if (
+      typeof phase !== "string" ||
+      !TERMINAL_PHASES.includes(phase as ArtifactTerminalPhase)
+    ) {
+      throw boundary("invalidPayload", "Terminal phase is invalid.");
+    }
+    const outputBase64 = base64Value(terminal.outputBase64, "Terminal output");
+    const retainedBytes = nonnegative(
+      terminal.retainedBytes,
+      "Terminal retained bytes",
+    );
+    if (
+      retainedBytes > 256 * 1_024 ||
+      decodedBase64Length(outputBase64) !== retainedBytes
+    ) {
+      throw boundary("invalidPayload", "Terminal output length is invalid.");
+    }
+    const outputText = textAllowEmpty(
+      terminal.outputText,
+      "Terminal semantic output",
+      256 * 1_024,
+    );
+    if (
+      Array.from(outputText).some((character) => {
+        const code = character.charCodeAt(0);
+        return (
+          (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+          code === 0x7f
+        );
+      })
+    ) {
+      throw boundary("invalidPayload", "Terminal semantic output is unsafe.");
+    }
+    const shellProcessId = nullablePositive(
+      terminal.shellProcessId,
+      "Terminal shell process",
+    );
+    const foregroundProcessGroupId = nullablePositive(
+      terminal.foregroundProcessGroupId,
+      "Terminal foreground process group",
+    );
+    const exitCode = nullableInteger(terminal.exitCode, "Terminal exit code");
+    const statusMessage = nullableText(
+      terminal.statusMessage,
+      "Terminal status",
+    );
+    const stdinReady = booleanValue(
+      terminal.stdinReady,
+      "Terminal stdin readiness",
+    );
+    const stopAvailable = booleanValue(
+      terminal.stopAvailable,
+      "Terminal Stop availability",
+    );
+    const promptReady = booleanValue(
+      terminal.promptReady,
+      "Terminal prompt readiness",
+    );
+    const shellReplaced = booleanValue(
+      terminal.shellReplaced,
+      "Terminal shell replacement",
+    );
+    const livePhase =
+      phase === "running" || phase === "stdinReady" || phase === "stopping";
+    const promptPhase =
+      phase === "completed" || (phase === "interrupted" && !shellReplaced);
+    const deadPhase =
+      phase === "failed" ||
+      phase === "recovery" ||
+      (phase === "interrupted" && shellReplaced);
+    if (
+      stdinReady !== (phase === "stdinReady") ||
+      (stopAvailable && phase !== "running" && phase !== "stdinReady") ||
+      (exitCode !== null) !==
+        (phase === "completed" || phase === "interrupted") ||
+      (phase === "interrupted" && exitCode !== 130) ||
+      (livePhase &&
+        (shellProcessId === null || foregroundProcessGroupId === null)) ||
+      ((phase === "queued" || phase === "approvalWaiting") &&
+        (shellProcessId !== null || foregroundProcessGroupId !== null)) ||
+      (promptPhase &&
+        (shellProcessId === null || foregroundProcessGroupId !== null)) ||
+      (deadPhase &&
+        (shellProcessId !== null || foregroundProcessGroupId !== null)) ||
+      promptReady !== promptPhase ||
+      (shellReplaced && phase !== "interrupted" && phase !== "recovery") ||
+      ((phase === "failed" ||
+        phase === "recovery" ||
+        phase === "interrupted") &&
+        statusMessage === null)
+    ) {
+      throw boundary("invalidPayload", "Terminal lifecycle is inconsistent.");
+    }
+    const columns = positive(terminal.columns, "Terminal columns");
+    const rows = positive(terminal.rows, "Terminal rows");
+    if (columns < 20 || columns > 500 || rows < 4 || rows > 300) {
+      throw boundary("invalidPayload", "Terminal dimensions are invalid.");
+    }
+    return {
+      type,
+      value: {
+        terminalSessionId: identifier(
+          terminal.terminalSessionId,
+          "Terminal session ID",
+        ),
+        commandId: identifier(terminal.commandId, "Terminal command ID"),
+        commandSequence: positive(
+          terminal.commandSequence,
+          "Terminal command sequence",
+        ),
+        command: text(terminal.command, "Terminal command", 16 * 1_024),
+        workingDirectoryDisplay: text(
+          terminal.workingDirectoryDisplay,
+          "Terminal working directory",
+          4_096,
+        ),
+        shellPath: text(terminal.shellPath, "Terminal shell path", 4_096),
+        environmentId: identifier(
+          terminal.environmentId,
+          "Terminal environment ID",
+        ),
+        environmentGeneration: positive(
+          terminal.environmentGeneration,
+          "Terminal environment generation",
+        ),
+        processGeneration: positive(
+          terminal.processGeneration,
+          "Terminal process generation",
+        ),
+        shellProcessId,
+        foregroundProcessGroupId,
+        columns,
+        rows,
+        outputBase64,
+        outputText,
+        outputSequence: positive(
+          terminal.outputSequence,
+          "Terminal output sequence",
+        ),
+        retainedBytes,
+        droppedBytes: nonnegative(
+          terminal.droppedBytes,
+          "Terminal dropped bytes",
+        ),
+        phase: phase as ArtifactTerminalPhase,
+        exitCode,
+        statusMessage,
+        stdinReady,
+        stopAvailable,
+        promptReady,
+        shellReplaced,
+      },
+    };
+  }
   throw boundary("invalidPayload", "Artifact provider state is unknown.");
 }
 
@@ -925,6 +1220,37 @@ function nonnegative(value: unknown, label: string): number {
     throw boundary("invalidPayload", `${label} is invalid.`);
   }
   return value as number;
+}
+
+function nullablePositive(value: unknown, label: string): number | null {
+  return value === null || value === undefined ? null : positive(value, label);
+}
+
+function nullableInteger(value: unknown, label: string): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isSafeInteger(value)) {
+    throw boundary("invalidPayload", `${label} is invalid.`);
+  }
+  return value as number;
+}
+
+function base64Value(value: unknown, label: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length > 4 * Math.ceil((256 * 1_024) / 3) ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      value,
+    )
+  ) {
+    throw boundary("invalidPayload", `${label} encoding is invalid.`);
+  }
+  return value;
+}
+
+function decodedBase64Length(value: string): number {
+  if (value.length === 0) return 0;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
 }
 
 function booleanValue(value: unknown, label: string): boolean {

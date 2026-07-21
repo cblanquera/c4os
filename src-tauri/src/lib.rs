@@ -19,6 +19,13 @@ use execution::git::{
     GitBranchOutcome, GitBranchRequest, GitError, GitOperationAuthorization, ProductionGitRunner,
     execute_branch_operation, inspect_branch_control, snapshot_branch_menu,
 };
+use execution::terminal::{
+    MAX_TERMINAL_DRAIN_BYTES, MAX_TERMINAL_DRAIN_EVENTS, TerminalAcknowledgeRequest,
+    TerminalCommandIdentity as SupervisedTerminalCommandIdentity, TerminalCompletedSessionRecord,
+    TerminalDimensions as PtyDimensions, TerminalDrainRequest, TerminalEventKind,
+    TerminalExecuteRequest, TerminalResizeRequest, TerminalRestartRecord, TerminalSessionKey,
+    TerminalStdinRequest, TerminalStopRequest, TerminalSupervisor,
+};
 use platform::{
     ColorScheme, INITIAL_REVEAL_FALLBACK_MS, InitialThemeSnapshot, InitialThemeSource,
     NativePickerRequest, NativePickerSelection, OPEN_SETTINGS_COMMAND_ID,
@@ -34,6 +41,8 @@ use protocol::{
     ArtifactFolderSelectInput, ArtifactFolderSnapshot, ArtifactHistorySnapshot,
     ArtifactMutationInput, ArtifactOpenInput, ArtifactProviderStateSnapshot, ArtifactReplyInput,
     ArtifactResourceVersionSnapshot, ArtifactShellStatusSnapshot, ArtifactSnapshot,
+    ArtifactTerminalOperationInput, ArtifactTerminalOutputAckInput, ArtifactTerminalResizeInput,
+    ArtifactTerminalRunInput, ArtifactTerminalSnapshot, ArtifactTerminalStdinInput,
     ArtifactWorkspaceSnapshot, AttachmentId, AttemptId, ConversationActivitySnapshot,
     ConversationArtifactCapabilitySnapshot, ConversationArtifactContextSegmentSnapshot,
     ConversationArtifactContextSnapshot, ConversationAttachmentPreviewInput,
@@ -239,6 +248,7 @@ struct AppCoreState {
     artifact_operation: Mutex<()>,
     conversation: Mutex<ConversationApplicationState>,
     artifact: Mutex<ArtifactApplicationState>,
+    terminal: Mutex<TerminalSupervisor>,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     runtime_production: Arc<ManagedProductionRuntime>,
     runtime: Arc<RuntimeApplicationService>,
@@ -266,6 +276,48 @@ struct NativeConversationBranchState {
 #[derive(Default)]
 struct ArtifactApplicationState {
     pending_writes: BTreeMap<String, PendingArtifactWrite>,
+    pending_terminal_actions: BTreeMap<String, PendingArtifactTerminalAction>,
+    terminal_event_cursors: BTreeMap<(String, String, u64), u64>,
+    terminal_ack_cursors: BTreeMap<String, u64>,
+    terminal_output_lines: BTreeMap<String, Vec<u8>>,
+    terminal_redacted_output_lines: BTreeSet<String>,
+}
+
+#[derive(Clone)]
+struct PendingArtifactTerminalAction {
+    artifact_id: String,
+    record_revision: u64,
+    scope: ActiveArtifactScope,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+    payload: PendingArtifactTerminalPayload,
+}
+
+#[derive(Clone)]
+enum PendingArtifactTerminalPayload {
+    Run {
+        terminal_session_id: String,
+        command_id: String,
+        command_sequence: u64,
+        command: String,
+        shell_path: String,
+        environment: execution::environment::ExecutionEnvironmentIdentity,
+        process_generation: u64,
+        columns: u16,
+        rows: u16,
+    },
+    Stdin {
+        process_generation: u64,
+        text: String,
+    },
+    Resize {
+        process_generation: u64,
+        columns: u16,
+        rows: u16,
+    },
+    Stop {
+        process_generation: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -4387,12 +4439,17 @@ fn new_artifact_record(
             true,
         )
     })?;
+    let initial_history_kind = if matches!(&record.state, artifact::ArtifactState::Terminal(_)) {
+        artifact::ArtifactHistoryKind::CommandQueued
+    } else {
+        artifact::ArtifactHistoryKind::Created
+    };
     record
         .append_history(artifact::ArtifactHistoryEntry {
             record_revision: 1,
             resource_version: record.resource_version(),
             state_sha256: sha256_bytes(&state_document),
-            kind: artifact::ArtifactHistoryKind::Created,
+            kind: initial_history_kind,
             recorded_at_ms: now_ms,
         })
         .map_err(|_| {
@@ -4435,6 +4492,15 @@ fn artifact_history_kind(kind: artifact::ArtifactHistoryKind) -> &'static str {
         artifact::ArtifactHistoryKind::RecoveryChanged => "recoveryChanged",
         artifact::ArtifactHistoryKind::NavigationChanged => "navigationChanged",
         artifact::ArtifactHistoryKind::Converted => "converted",
+        artifact::ArtifactHistoryKind::CommandQueued => "commandQueued",
+        artifact::ArtifactHistoryKind::CommandStarted => "commandStarted",
+        artifact::ArtifactHistoryKind::OutputAppended => "outputAppended",
+        artifact::ArtifactHistoryKind::InputSubmitted => "inputSubmitted",
+        artifact::ArtifactHistoryKind::TerminalResized => "terminalResized",
+        artifact::ArtifactHistoryKind::StopRequested => "stopRequested",
+        artifact::ArtifactHistoryKind::CommandCompleted => "commandCompleted",
+        artifact::ArtifactHistoryKind::CommandInterrupted => "commandInterrupted",
+        artifact::ArtifactHistoryKind::CommandFailed => "commandFailed",
     }
 }
 
@@ -4470,18 +4536,49 @@ fn artifact_status(
             let recovery = matches!(
                 &record.state,
                 artifact::ArtifactState::File(file) if file.recovery.is_some()
+            ) || matches!(
+                &record.state,
+                artifact::ArtifactState::Terminal(terminal)
+                    if matches!(&terminal.status, artifact::TerminalCommandStatus::Recovery { .. })
             );
+            let terminal_failure = match &record.state {
+                artifact::ArtifactState::Terminal(terminal) => {
+                    if let artifact::TerminalCommandStatus::Failed { message, .. } =
+                        &terminal.status
+                    {
+                        Some(message.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
             if recovery {
                 ArtifactShellStatusSnapshot {
                     kind: "recovery".into(),
-                    message: Some(
-                        "The draft was retained after the save could not complete.".into(),
-                    ),
+                    message: Some(match &record.state {
+                        artifact::ArtifactState::Terminal(_) => {
+                            "The Terminal command was retained after its live process could not be recovered."
+                                .into()
+                        }
+                        _ => "The draft was retained after the save could not complete.".into(),
+                    }),
+                }
+            } else if let Some(message) = terminal_failure {
+                ArtifactShellStatusSnapshot {
+                    kind: "error".into(),
+                    message: Some(message),
                 }
             } else if pending_approval_id.is_some() {
                 ArtifactShellStatusSnapshot {
                     kind: "ready".into(),
-                    message: Some("Approval is required before saving this File.".into()),
+                    message: Some(match &record.state {
+                        artifact::ArtifactState::Terminal(_) => {
+                            "Approval is required before this Terminal operation can continue."
+                                .into()
+                        }
+                        _ => "Approval is required before saving this File.".into(),
+                    }),
                 }
             } else {
                 ArtifactShellStatusSnapshot {
@@ -4654,6 +4751,90 @@ fn artifact_protocol_snapshot(
                     .map(|selection| selection.entry_id.clone()),
             }),
         ),
+        artifact::ArtifactState::Terminal(terminal) => {
+            let (status_message, shell_replaced) = match &terminal.status {
+                artifact::TerminalCommandStatus::Failed { message, .. }
+                | artifact::TerminalCommandStatus::Recovery { message, .. } => (
+                    Some(message.clone()),
+                    matches!(
+                        &terminal.status,
+                        artifact::TerminalCommandStatus::Recovery { .. }
+                    ),
+                ),
+                artifact::TerminalCommandStatus::Interrupted { shell_replaced, .. } => {
+                    (Some("The command was interrupted.".into()), *shell_replaced)
+                }
+                _ => (None, false),
+            };
+            let mut phase = terminal.status.phase().to_owned();
+            if pending_approval_id.is_some()
+                && matches!(
+                    &terminal.status,
+                    artifact::TerminalCommandStatus::Queued { .. }
+                )
+            {
+                phase = "approvalWaiting".into();
+            }
+            let running = matches!(
+                &terminal.status,
+                artifact::TerminalCommandStatus::Running {
+                    stop_requested_at_ms: None,
+                    ..
+                }
+            );
+            let stdin_ready = matches!(
+                &terminal.status,
+                artifact::TerminalCommandStatus::Running {
+                    stdin_ready: true,
+                    stop_requested_at_ms: None,
+                    ..
+                }
+            );
+            let prompt_ready = matches!(
+                &terminal.status,
+                artifact::TerminalCommandStatus::Completed { .. }
+                    | artifact::TerminalCommandStatus::Interrupted {
+                        shell_replaced: false,
+                        ..
+                    }
+            ) && terminal.process.shell_process_id.is_some();
+            (
+                format!("$ {}", terminal.command),
+                ArtifactProviderStateSnapshot::Terminal(ArtifactTerminalSnapshot {
+                    terminal_session_id: terminal.identity.terminal_session_id.clone(),
+                    command_id: terminal.identity.command_id.clone(),
+                    command_sequence: terminal.identity.command_sequence,
+                    command: terminal.command.clone(),
+                    working_directory_display: terminal.working_directory_display.clone(),
+                    shell_path: terminal.process.shell_path.clone(),
+                    environment_id: terminal.process.environment_id.clone(),
+                    environment_generation: terminal.process.environment_generation,
+                    process_generation: terminal.process.process_generation,
+                    shell_process_id: terminal.process.shell_process_id,
+                    foreground_process_group_id: terminal.process.foreground_process_group_id,
+                    columns: terminal.dimensions.columns,
+                    rows: terminal.dimensions.rows,
+                    output_base64: terminal.output.retained_base64.clone(),
+                    output_text: terminal.output.safe_text().map_err(|_| {
+                        ProtocolError::new(
+                            ProtocolErrorCode::InvalidPayload,
+                            "Terminal semantic output is unavailable",
+                            false,
+                        )
+                    })?,
+                    output_sequence: terminal.output.sequence,
+                    retained_bytes: terminal.output.retained_bytes,
+                    dropped_bytes: terminal.output.dropped_bytes,
+                    phase,
+                    exit_code: terminal.status.exit_code(),
+                    status_message,
+                    stdin_ready,
+                    stop_available: running && pending_approval_id.is_none(),
+                    prompt_ready,
+                    shell_replaced,
+                }),
+            )
+        }
         artifact::ArtifactState::Unknown(_) => (
             record.provider.label.clone(),
             ArtifactProviderStateSnapshot::Unknown,
@@ -4733,11 +4914,19 @@ fn build_artifact_workspace_snapshot(
         let scope = active_artifact_scope(core, correlation_id.clone())?;
         let now_ms =
             current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        reconcile_active_terminal_records(core, &scope, &mut records, correlation_id.clone())?;
         for record in &mut records {
             if record.workspace_id == workspace_id
                 && active_project_id.as_deref() == Some(record.project_id.as_str())
                 && active_session_id.as_deref() == Some(record.session_id.as_str())
             {
+                reconcile_interrupted_terminal_approval(
+                    core,
+                    &scope,
+                    record,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
                 reconcile_interrupted_file_save_request(
                     core,
                     &scope,
@@ -4748,14 +4937,23 @@ fn build_artifact_workspace_snapshot(
             }
         }
     }
-    let pending_by_artifact = core
-        .artifact
-        .lock()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
-        .pending_writes
-        .iter()
-        .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let pending_by_artifact = {
+        let state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        state
+            .pending_writes
+            .iter()
+            .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone()))
+            .chain(
+                state
+                    .pending_terminal_actions
+                    .iter()
+                    .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone())),
+            )
+            .collect::<BTreeMap<_, _>>()
+    };
     let artifacts = records
         .into_iter()
         .filter_map(|record| {
@@ -5065,6 +5263,1892 @@ fn artifact_snapshot(
     protocol::artifact_workspace_snapshot(request, payload)
 }
 
+fn terminal_key(scope: &ActiveArtifactScope) -> Result<TerminalSessionKey, ProtocolError> {
+    TerminalSessionKey::new(scope.workspace_id.clone(), scope.session_id.clone()).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "The Terminal session identity is invalid",
+            false,
+        )
+    })
+}
+
+fn load_scoped_artifact_record(
+    scope: &ActiveArtifactScope,
+    artifact_id: &str,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::ArtifactRecord, ProtocolError> {
+    let document = scope
+        .database
+        .artifact_document(artifact_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .ok_or_else(|| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The Terminal artifact is unavailable",
+                false,
+            )
+        })?;
+    let record = deserialize_artifact_record(document, correlation_id.clone())?;
+    if record.workspace_id != scope.workspace_id
+        || record.project_id != scope.project_id
+        || record.session_id != scope.session_id
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The Terminal artifact owner changed",
+            true,
+        ));
+    }
+    Ok(record)
+}
+
+fn terminal_command_contains_secret_material(command: &str) -> bool {
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    for (index, token) in tokens.iter().enumerate() {
+        let normalized = token
+            .trim_matches(|character: char| matches!(character, '\'' | '"' | ',' | ';'))
+            .to_ascii_lowercase();
+        if normalized.starts_with("authorization:") {
+            let following = tokens
+                .iter()
+                .skip(index + 1)
+                .take(2)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !normalized.contains('$') && !following.contains('$') {
+                return true;
+            }
+        }
+        if normalized.contains("begin-private-key") || normalized.contains("begin-rsa-private-key")
+        {
+            return true;
+        }
+        if let Some((name, value)) = normalized.split_once('=') {
+            let name = name.trim_start_matches('-').replace('-', "_");
+            if terminal_secret_name(&name) && !value.is_empty() && !value.starts_with('$') {
+                return true;
+            }
+        }
+        let option = normalized.trim_start_matches('-').replace('-', "_");
+        if matches!(
+            option.as_str(),
+            "password" | "passwd" | "token" | "secret" | "api_key" | "access_token"
+        ) && tokens.get(index + 1).is_some_and(|value| {
+            !value.is_empty() && !value.starts_with('$') && !value.starts_with('-')
+        }) {
+            return true;
+        }
+        if let Some((_, authority)) = normalized.split_once("://")
+            && authority
+                .split('@')
+                .next()
+                .is_some_and(|userinfo| userinfo.contains(':'))
+            && authority.contains('@')
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn terminal_secret_name(name: &str) -> bool {
+    let normalized = name.trim().trim_start_matches('-').replace('-', "_");
+    normalized == "passwd"
+        || normalized == "authorization"
+        || normalized.contains("password")
+        || normalized.contains("secret")
+        || normalized.contains("token")
+        || normalized.contains("api_key")
+        || normalized.contains("apikey")
+        || normalized.contains("access_key")
+}
+
+fn terminal_command_references_secret_environment(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        let mut start = index + 1;
+        let braced = bytes.get(start) == Some(&b'{');
+        if braced {
+            start += 1;
+        }
+        let mut end = start;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            end += 1;
+        }
+        if end > start
+            && (!braced || bytes.get(end) == Some(&b'}'))
+            && terminal_secret_name(&command[start..end].to_ascii_lowercase())
+        {
+            return true;
+        }
+        index = end.max(index + 1);
+    }
+    false
+}
+
+fn terminal_line_contains_secret_material(line: &[u8]) -> bool {
+    let lower = String::from_utf8_lossy(line).to_ascii_lowercase();
+    if lower.contains("private key-----") || lower.contains("authorization: bearer ") {
+        return true;
+    }
+    if let Some((name, value)) = lower.split_once('=').or_else(|| lower.split_once(':'))
+        && terminal_secret_name(name.split_whitespace().last().unwrap_or(name))
+        && !value.trim().is_empty()
+    {
+        return true;
+    }
+    [
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "api_key",
+        "api-key",
+        "apikey",
+        "access_token",
+        "access-token",
+        "authorization",
+    ]
+    .iter()
+    .any(|marker| {
+        lower.find(marker).is_some_and(|position| {
+            let suffix = &lower[position + marker.len()..];
+            let Some(separator) = suffix.chars().next() else {
+                return false;
+            };
+            if !matches!(separator, ':' | '=') {
+                return false;
+            }
+            !suffix[separator.len_utf8()..].trim().is_empty()
+        })
+    })
+}
+
+fn redact_terminal_output_line(line: &[u8]) -> Vec<u8> {
+    if !terminal_line_contains_secret_material(line) {
+        return line.to_vec();
+    }
+    let ending = if line.ends_with(b"\r\n") {
+        b"\r\n".as_slice()
+    } else if line.ends_with(b"\n") {
+        b"\n".as_slice()
+    } else {
+        b"".as_slice()
+    };
+    let mut redacted = b"[sensitive Terminal output redacted]".to_vec();
+    redacted.extend_from_slice(ending);
+    redacted
+}
+
+fn oversized_terminal_output_line(ending: &[u8]) -> Vec<u8> {
+    let mut redacted = b"[oversized Terminal output line redacted]".to_vec();
+    redacted.extend_from_slice(ending);
+    redacted
+}
+
+fn retain_redacted_terminal_output(
+    state: &mut ArtifactApplicationState,
+    command_id: &str,
+    bytes: &[u8],
+    flush: bool,
+) -> Vec<u8> {
+    let mut pending = state
+        .terminal_output_lines
+        .remove(command_id)
+        .unwrap_or_default();
+    let mut oversized = state.terminal_redacted_output_lines.remove(command_id);
+    let mut redacted = Vec::with_capacity(bytes.len());
+    for byte in bytes {
+        if oversized {
+            if *byte == b'\n' {
+                redacted.extend(oversized_terminal_output_line(b"\n"));
+                oversized = false;
+            }
+            continue;
+        }
+        pending.push(*byte);
+        if *byte == b'\n' {
+            redacted.extend(redact_terminal_output_line(&pending));
+            pending.clear();
+        } else if pending.len() > artifact::MAX_TERMINAL_OUTPUT_BYTES {
+            pending.clear();
+            oversized = true;
+        }
+    }
+    if flush {
+        if oversized {
+            redacted.extend(oversized_terminal_output_line(b""));
+        } else if !pending.is_empty() {
+            redacted.extend(redact_terminal_output_line(&pending));
+        }
+    } else {
+        if !pending.is_empty() {
+            state
+                .terminal_output_lines
+                .insert(command_id.to_owned(), pending);
+        }
+        if oversized {
+            state
+                .terminal_redacted_output_lines
+                .insert(command_id.to_owned());
+        }
+    }
+    redacted
+}
+
+fn persist_terminal_event_transition(
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    kind: artifact::ArtifactHistoryKind,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let expected_revision = record.record_revision;
+    advance_artifact_record(record, kind, now_ms)?;
+    persist_artifact_record(scope, record, Some(expected_revision), correlation_id)?;
+    Ok(())
+}
+
+fn cancel_stale_terminal_controls(
+    core: &AppCoreState,
+    artifact_id: &str,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let pending = {
+        let state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        state
+            .pending_terminal_actions
+            .iter()
+            .filter(|(_, pending)| {
+                pending.artifact_id == artifact_id
+                    && !matches!(&pending.payload, PendingArtifactTerminalPayload::Run { .. })
+            })
+            .map(|(prompt_id, pending)| (prompt_id.clone(), pending.action.run_id.clone()))
+            .collect::<Vec<_>>()
+    };
+    for (prompt_id, run_id) in &pending {
+        let cancelled = core
+            .runtime
+            .coordinator()
+            .and_then(|mut coordinator| {
+                coordinator
+                    .cancel_direct_action_run(run_id, now_ms)
+                    .map(|operation| operation.value)
+                    .map_err(Into::into)
+            })
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if cancelled == 0 {
+            return Err(platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "The stale Terminal operation could not be cancelled",
+                true,
+            ));
+        }
+        core.artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .pending_terminal_actions
+            .remove(prompt_id);
+    }
+    Ok(())
+}
+
+fn reconcile_active_terminal_records(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    records: &mut [artifact::ArtifactRecord],
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let Some(latest) = records
+        .iter()
+        .filter_map(|record| match &record.state {
+            artifact::ArtifactState::Terminal(terminal) => Some((record, terminal)),
+            _ => None,
+        })
+        .max_by_key(|(_, terminal)| terminal.identity.command_sequence)
+    else {
+        return Ok(());
+    };
+    let key = terminal_key(scope)?;
+    let mut supervised = core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .live_session(&key);
+    if supervised.is_none()
+        && matches!(
+            &latest.1.status,
+            artifact::TerminalCommandStatus::Running { .. }
+        )
+    {
+        let environment = execution::environment::ExecutionEnvironmentIdentity::new(
+            execution::environment::ExecutionEnvironmentKind::Local,
+            latest.1.process.environment_id.clone(),
+            latest.1.process.environment_generation,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        core.terminal
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .reconcile_restart(TerminalRestartRecord {
+                key: key.clone(),
+                command: SupervisedTerminalCommandIdentity::new(
+                    latest.1.identity.terminal_session_id.clone(),
+                    latest.1.identity.command_id.clone(),
+                    latest.1.identity.command_sequence,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                process_generation: latest.1.process.process_generation,
+                environment,
+                dimensions: PtyDimensions::new(
+                    latest.1.dimensions.columns,
+                    latest.1.dimensions.rows,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                trusted_project_root: scope.project_root.clone(),
+                shell_path: PathBuf::from(&latest.1.process.shell_path),
+                working_directory: PathBuf::from(&latest.1.working_directory_display),
+                persisted_process_id: latest.1.process.shell_process_id,
+            })
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        supervised = core
+            .terminal
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .live_session(&key);
+    }
+    let Some(supervised) = supervised else {
+        return Ok(());
+    };
+    let binding = terminal_event_drain_binding(latest.1, &supervised)
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let cursor_key = (
+        scope.workspace_id.clone(),
+        scope.session_id.clone(),
+        binding.process_generation,
+    );
+    let cursor = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .terminal_event_cursors
+        .get(&cursor_key)
+        .copied()
+        .unwrap_or(0);
+    let events = match core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .drain_events(TerminalDrainRequest {
+            key,
+            terminal_session_id: binding.terminal_session_id,
+            process_generation: binding.process_generation,
+            after_chunk_sequence: cursor,
+            maximum_events: MAX_TERMINAL_DRAIN_EVENTS,
+            maximum_bytes: MAX_TERMINAL_DRAIN_BYTES,
+        }) {
+        Ok(events) => events,
+        Err(execution::terminal::TerminalError::SessionNotFound) => return Ok(()),
+        Err(_) => return Err(workspace_state_unavailable(correlation_id)),
+    };
+    for event in events {
+        let Some(record) = records.iter_mut().find(|record| {
+            matches!(
+                &record.state,
+                artifact::ArtifactState::Terminal(terminal)
+                    if terminal.identity.command_id == event.command_id
+                        && terminal.identity.command_sequence == event.command_sequence
+            )
+        }) else {
+            return Err(workspace_state_unavailable(correlation_id.clone()));
+        };
+        let now_ms = current_time_ms()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .max(record.updated_at_ms);
+        let command_became_terminal = matches!(
+            &event.kind,
+            TerminalEventKind::Completed { .. }
+                | TerminalEventKind::Interrupted130 { .. }
+                | TerminalEventKind::RecoveredInterrupted { .. }
+                | TerminalEventKind::Failed { .. }
+        );
+        match event.kind {
+            TerminalEventKind::Started {
+                process_id,
+                foreground_process_group_id,
+                working_directory,
+            } => {
+                let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                    unreachable!()
+                };
+                if matches!(
+                    &terminal.status,
+                    artifact::TerminalCommandStatus::Queued { .. }
+                ) {
+                    terminal.working_directory_display =
+                        working_directory.to_string_lossy().into_owned();
+                    terminal
+                        .mark_running(
+                            process_id,
+                            u32::try_from(foreground_process_group_id).ok(),
+                            true,
+                            now_ms,
+                        )
+                        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                    persist_terminal_event_transition(
+                        scope,
+                        record,
+                        artifact::ArtifactHistoryKind::CommandStarted,
+                        now_ms,
+                        correlation_id.clone(),
+                    )?;
+                }
+            }
+            TerminalEventKind::Output {
+                bytes,
+                dropped_bytes_before,
+            } => {
+                let redacted = {
+                    let mut state = core
+                        .artifact
+                        .lock()
+                        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                    retain_redacted_terminal_output(&mut state, &event.command_id, &bytes, false)
+                };
+                if !redacted.is_empty() || dropped_bytes_before > 0 {
+                    let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                        unreachable!()
+                    };
+                    terminal
+                        .append_output_with_dropped(&redacted, dropped_bytes_before, now_ms)
+                        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                    persist_terminal_event_transition(
+                        scope,
+                        record,
+                        artifact::ArtifactHistoryKind::OutputAppended,
+                        now_ms,
+                        correlation_id.clone(),
+                    )?;
+                }
+            }
+            TerminalEventKind::Completed {
+                exit_code,
+                working_directory,
+            } => {
+                flush_terminal_output(
+                    core,
+                    scope,
+                    record,
+                    &event.command_id,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+                let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                    unreachable!()
+                };
+                terminal
+                    .complete(exit_code, working_directory.to_string_lossy(), now_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                persist_terminal_event_transition(
+                    scope,
+                    record,
+                    artifact::ArtifactHistoryKind::CommandCompleted,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+            }
+            TerminalEventKind::Interrupted130 {
+                working_directory,
+                shell_replaced,
+            } => {
+                flush_terminal_output(
+                    core,
+                    scope,
+                    record,
+                    &event.command_id,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+                let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                    unreachable!()
+                };
+                terminal.working_directory_display =
+                    working_directory.to_string_lossy().into_owned();
+                terminal
+                    .interrupt(shell_replaced, now_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                persist_terminal_event_transition(
+                    scope,
+                    record,
+                    artifact::ArtifactHistoryKind::CommandInterrupted,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+            }
+            TerminalEventKind::RecoveredInterrupted {
+                working_directory, ..
+            } => {
+                let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                    unreachable!()
+                };
+                terminal.working_directory_display =
+                    working_directory.to_string_lossy().into_owned();
+                terminal
+                    .recover(
+                        "process-restart",
+                        "The previous Terminal process was not trusted after restart.",
+                        now_ms,
+                    )
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                persist_terminal_event_transition(
+                    scope,
+                    record,
+                    artifact::ArtifactHistoryKind::RecoveryChanged,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+            }
+            TerminalEventKind::Failed {
+                code,
+                message,
+                shell_replaced: _,
+            } => {
+                flush_terminal_output(
+                    core,
+                    scope,
+                    record,
+                    &event.command_id,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+                let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                    unreachable!()
+                };
+                terminal
+                    .fail(code, message, true, now_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                persist_terminal_event_transition(
+                    scope,
+                    record,
+                    artifact::ArtifactHistoryKind::CommandFailed,
+                    now_ms,
+                    correlation_id.clone(),
+                )?;
+            }
+        }
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        state
+            .terminal_event_cursors
+            .insert(cursor_key.clone(), event.chunk_sequence);
+        state
+            .terminal_ack_cursors
+            .insert(record.artifact_id.clone(), event.chunk_sequence);
+        drop(state);
+        if command_became_terminal {
+            cancel_stale_terminal_controls(
+                core,
+                &record.artifact_id,
+                now_ms,
+                correlation_id.clone(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn terminal_event_drain_binding(
+    latest: &artifact::TerminalArtifactState,
+    supervised: &execution::terminal::TerminalLiveSessionSnapshot,
+) -> Option<execution::terminal::TerminalLiveSessionSnapshot> {
+    if supervised.terminal_session_id != latest.identity.terminal_session_id {
+        return None;
+    }
+    let generation_matches = if matches!(
+        supervised.lifecycle,
+        execution::terminal::TerminalLifecycle::Live
+    ) {
+        supervised.process_generation == latest.process.process_generation
+    } else {
+        supervised.process_generation == latest.process.process_generation
+            || (matches!(
+                &latest.status,
+                artifact::TerminalCommandStatus::Queued { .. }
+            ) && supervised
+                .process_generation
+                .checked_add(1)
+                .is_some_and(|generation| generation == latest.process.process_generation)
+                && supervised.next_command_sequence == latest.identity.command_sequence)
+    };
+    generation_matches.then(|| supervised.clone())
+}
+
+fn reconcile_interrupted_terminal_approval(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+        return Ok(());
+    };
+    if !matches!(
+        &terminal.status,
+        artifact::TerminalCommandStatus::Queued { .. }
+    ) {
+        return Ok(());
+    }
+    let already_requeued = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_terminal_actions
+        .values()
+        .any(|pending| pending.artifact_id == record.artifact_id);
+    if already_requeued {
+        return Ok(());
+    }
+    let key = terminal_key(scope)?;
+    let supervised = core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .live_session(&key);
+    if let Some(live) = supervised.as_ref() {
+        if terminal_run_was_dispatched(terminal, live) {
+            return Ok(());
+        }
+        if !terminal_run_can_be_requeued(terminal, live) {
+            let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                unreachable!()
+            };
+            terminal
+                .recover(
+                    "approval-restart",
+                    "Terminal approval lost its exact shell binding. Review the command and run it again; C4OS did not repeat it.",
+                    now_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            return persist_terminal_event_transition(
+                scope,
+                record,
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                correlation_id,
+            );
+        }
+    } else {
+        let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+            unreachable!()
+        };
+        terminal
+            .recover(
+                "approval-restart",
+                "Terminal approval was interrupted by restart. Review the command and run it again; C4OS did not repeat it.",
+                now_ms,
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        return persist_terminal_event_transition(
+            scope,
+            record,
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            now_ms,
+            correlation_id,
+        );
+    }
+    if terminal_command_contains_secret_material(&terminal.command) {
+        return Err(workspace_state_unavailable(correlation_id));
+    }
+    let environment = execution::environment::ExecutionEnvironmentIdentity::new(
+        execution::environment::ExecutionEnvironmentKind::Local,
+        terminal.process.environment_id.clone(),
+        terminal.process.environment_generation,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let command_sha256 = sha256_bytes(terminal.command.as_bytes());
+    let (pending, facts) = prepare_terminal_action(
+        core,
+        scope,
+        record,
+        PendingArtifactTerminalPayload::Run {
+            terminal_session_id: terminal.identity.terminal_session_id.clone(),
+            command_id: terminal.identity.command_id.clone(),
+            command_sequence: terminal.identity.command_sequence,
+            command: terminal.command.clone(),
+            shell_path: terminal.process.shell_path.clone(),
+            environment,
+            process_generation: terminal.process.process_generation,
+            columns: terminal.dimensions.columns,
+            rows: terminal.dimensions.rows,
+        },
+        "terminal.execute",
+        "terminal.execute",
+        ActionEffect::Execute,
+        CanonicalRisk::Medium,
+        ClassificationConfidence::Ambiguous,
+        serde_json::json!({
+            "artifactId": record.artifact_id,
+            "terminalSessionId": terminal.identity.terminal_session_id,
+            "commandId": terminal.identity.command_id,
+            "commandSequence": terminal.identity.command_sequence,
+            "commandSha256": command_sha256,
+            "commandByteLength": terminal.command.len(),
+            "columns": terminal.dimensions.columns,
+            "rows": terminal.dimensions.rows,
+            "terminalProcessGeneration": terminal.process.process_generation,
+        }),
+        now_ms,
+        correlation_id.clone(),
+    )?;
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .requeue_interrupted_direct_approval(&facts, pending.action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                unreachable!()
+            };
+            terminal
+                .fail(
+                    "policy-denied",
+                    "Policy denied the interrupted Terminal command.",
+                    false,
+                    now_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            persist_terminal_event_transition(
+                scope,
+                record,
+                artifact::ArtifactHistoryKind::RecoveryChanged,
+                now_ms,
+                correlation_id,
+            )
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id))?
+                .pending_terminal_actions
+                .insert(prompt.prompt_id, pending);
+            Ok(())
+        }
+        GatewayProposal::Authorized { .. } => Err(workspace_state_unavailable(correlation_id)),
+    }
+}
+
+fn terminal_run_was_dispatched(
+    terminal: &artifact::TerminalArtifactState,
+    live: &execution::terminal::TerminalLiveSessionSnapshot,
+) -> bool {
+    if !matches!(live.lifecycle, execution::terminal::TerminalLifecycle::Live)
+        || live.terminal_session_id != terminal.identity.terminal_session_id
+        || live.process_generation != terminal.process.process_generation
+    {
+        return false;
+    }
+    let exact_active_command = live.active_command.as_ref().is_some_and(|command| {
+        command.terminal_session_id == terminal.identity.terminal_session_id
+            && command.command_id == terminal.identity.command_id
+            && command.command_sequence == terminal.identity.command_sequence
+    });
+    exact_active_command
+        || (live.active_command.is_none()
+            && live.next_command_sequence > terminal.identity.command_sequence
+            && live.pending_event_count > 0)
+}
+
+fn terminal_run_can_be_requeued(
+    terminal: &artifact::TerminalArtifactState,
+    live: &execution::terminal::TerminalLiveSessionSnapshot,
+) -> bool {
+    if live.terminal_session_id != terminal.identity.terminal_session_id
+        || live.active_command.is_some()
+        || live.next_command_sequence != terminal.identity.command_sequence
+    {
+        return false;
+    }
+    if matches!(live.lifecycle, execution::terminal::TerminalLifecycle::Live) {
+        live.process_generation == terminal.process.process_generation
+    } else {
+        live.process_generation
+            .checked_add(1)
+            .is_some_and(|generation| generation == terminal.process.process_generation)
+    }
+}
+
+fn flush_terminal_output(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &mut artifact::ArtifactRecord,
+    command_id: &str,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let redacted = {
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        retain_redacted_terminal_output(&mut state, command_id, &[], true)
+    };
+    if redacted.is_empty() {
+        return Ok(());
+    }
+    let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+        return Err(workspace_state_unavailable(correlation_id));
+    };
+    terminal
+        .append_output(&redacted, now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    persist_terminal_event_transition(
+        scope,
+        record,
+        artifact::ArtifactHistoryKind::OutputAppended,
+        now_ms,
+        correlation_id,
+    )
+}
+
+struct TerminalCommandPlan {
+    terminal_session_id: String,
+    command_id: String,
+    command_sequence: u64,
+    process_generation: u64,
+    shell_path: String,
+    working_directory: PathBuf,
+    environment: execution::environment::ExecutionEnvironmentIdentity,
+}
+
+fn plan_terminal_command(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    correlation_id: protocol::CorrelationId,
+) -> Result<TerminalCommandPlan, ProtocolError> {
+    let documents = scope
+        .database
+        .artifact_documents_for_session(&scope.session_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut terminals = documents
+        .into_iter()
+        .map(|document| deserialize_artifact_record(document, correlation_id.clone()))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|record| match record.state {
+            artifact::ArtifactState::Terminal(terminal) => Some(terminal),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    terminals.sort_by_key(|terminal| terminal.identity.command_sequence);
+    let key = terminal_key(scope)?;
+    let supervised = core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .live_session(&key);
+    if let Some(supervised) = supervised {
+        if supervised.active_command.is_some() {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Finish or Stop the active Terminal command before running another",
+                false,
+            ));
+        }
+        return Ok(TerminalCommandPlan {
+            terminal_session_id: supervised.terminal_session_id,
+            command_id: format!("terminal-command-{}", Uuid::new_v4().as_simple()),
+            command_sequence: supervised.next_command_sequence,
+            process_generation: if matches!(
+                supervised.lifecycle,
+                execution::terminal::TerminalLifecycle::Live
+            ) {
+                supervised.process_generation
+            } else {
+                supervised
+                    .process_generation
+                    .checked_add(1)
+                    .ok_or_else(|| {
+                        ProtocolError::new(
+                            ProtocolErrorCode::InvalidGeneration,
+                            "The Terminal process generation is exhausted",
+                            false,
+                        )
+                    })?
+            },
+            shell_path: supervised.shell_path.to_string_lossy().into_owned(),
+            working_directory: supervised.working_directory,
+            environment: supervised.environment,
+        });
+    }
+    let Some(previous) = terminals.last() else {
+        return Ok(TerminalCommandPlan {
+            terminal_session_id: format!("terminal-session-{}", Uuid::new_v4().as_simple()),
+            command_id: format!("terminal-command-{}", Uuid::new_v4().as_simple()),
+            command_sequence: 1,
+            process_generation: 1,
+            shell_path: "/bin/zsh".into(),
+            working_directory: scope.project_root.canonical_root().to_path_buf(),
+            environment: execution::environment::ExecutionEnvironmentIdentity::new(
+                execution::environment::ExecutionEnvironmentKind::Local,
+                "desktop",
+                1,
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id))?,
+        });
+    };
+    if !previous.status.is_terminal() {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The previous Terminal command must be recovered before running another",
+            true,
+        ));
+    }
+    let environment = execution::environment::ExecutionEnvironmentIdentity::new(
+        execution::environment::ExecutionEnvironmentKind::Local,
+        previous.process.environment_id.clone(),
+        previous.process.environment_generation,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let previous_identity = SupervisedTerminalCommandIdentity::new(
+        previous.identity.terminal_session_id.clone(),
+        previous.identity.command_id.clone(),
+        previous.identity.command_sequence,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let restored = core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .restore_completed_session(TerminalCompletedSessionRecord {
+            key: key.clone(),
+            command: previous_identity,
+            process_generation: previous.process.process_generation,
+            environment: environment.clone(),
+            dimensions: PtyDimensions::new(previous.dimensions.columns, previous.dimensions.rows)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+            trusted_project_root: scope.project_root.clone(),
+            shell_path: PathBuf::from(&previous.process.shell_path),
+            working_directory: PathBuf::from(&previous.working_directory_display),
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    Ok(TerminalCommandPlan {
+        terminal_session_id: restored.terminal_session_id,
+        command_id: format!("terminal-command-{}", Uuid::new_v4().as_simple()),
+        command_sequence: restored.next_command_sequence,
+        process_generation: restored.process_generation.checked_add(1).ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "The Terminal process generation is exhausted",
+                false,
+            )
+        })?,
+        shell_path: restored.shell_path.to_string_lossy().into_owned(),
+        working_directory: restored.working_directory,
+        environment,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_terminal_action(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &artifact::ArtifactRecord,
+    payload: PendingArtifactTerminalPayload,
+    action_kind: &str,
+    authority: &str,
+    effect: ActionEffect,
+    risk: CanonicalRisk,
+    confidence: ClassificationConfidence,
+    arguments: serde_json::Value,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(PendingArtifactTerminalAction, ActionFacts), ProtocolError> {
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let terminal_process_generation = match &payload {
+        PendingArtifactTerminalPayload::Run {
+            process_generation, ..
+        }
+        | PendingArtifactTerminalPayload::Stdin {
+            process_generation, ..
+        }
+        | PendingArtifactTerminalPayload::Resize {
+            process_generation, ..
+        }
+        | PendingArtifactTerminalPayload::Stop {
+            process_generation, ..
+        } => *process_generation,
+    };
+    let action_id = format!("terminal-action-{}", Uuid::new_v4().as_simple());
+    let canonical_target = scope
+        .project_root
+        .canonical_root()
+        .to_string_lossy()
+        .into_owned();
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.terminal".into(),
+        arguments,
+        risk,
+        requested_authority: BTreeSet::from([authority.into()]),
+        canonical_target: canonical_target.clone(),
+        target_version: format!(
+            "terminal-{}-process-{}",
+            scope.session_id, terminal_process_generation
+        ),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        run_id: format!("terminal-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The Terminal operation could not be bound to an exact action",
+            false,
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: action_kind.into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Terminal,
+        effects: BTreeSet::from([effect]),
+        scope: ActionScope::Workspace,
+        initiator: ActionInitiator::User,
+        sensitivity: if confidence == ClassificationConfidence::Known {
+            ActionSensitivity::Ordinary
+        } else {
+            ActionSensitivity::Unknown
+        },
+        reversibility: if confidence == ClassificationConfidence::Known {
+            ActionReversibility::Reversible
+        } else {
+            ActionReversibility::Unknown
+        },
+        confidence,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: active_project_repository_state(scope),
+        inside_active_project: true,
+        canonical_target,
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: true,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((
+        PendingArtifactTerminalAction {
+            artifact_id: record.artifact_id.clone(),
+            record_revision: record.record_revision,
+            scope: scope.clone(),
+            action,
+            live,
+            payload,
+        },
+        facts,
+    ))
+}
+
+fn persist_terminal_failure(
+    pending: &PendingArtifactTerminalAction,
+    code: &str,
+    message: &str,
+    retryable: bool,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let mut record =
+        load_scoped_artifact_record(&pending.scope, &pending.artifact_id, correlation_id.clone())?;
+    let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+        return Err(workspace_state_unavailable(correlation_id));
+    };
+    if terminal.status.is_terminal() {
+        return Ok(());
+    }
+    let transition_at_ms = now_ms.max(record.updated_at_ms);
+    terminal
+        .fail(code, message, retryable, transition_at_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    persist_terminal_event_transition(
+        &pending.scope,
+        &mut record,
+        artifact::ArtifactHistoryKind::CommandFailed,
+        transition_at_ms,
+        correlation_id,
+    )
+}
+
+fn execute_terminal_action(
+    core: &AppCoreState,
+    pending: PendingArtifactTerminalAction,
+    token: AuthorizationToken,
+    approval_prompt_id: Option<&str>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let record =
+        load_scoped_artifact_record(&pending.scope, &pending.artifact_id, correlation_id.clone())?;
+    if record.record_revision < pending.record_revision {
+        return Err(workspace_state_unavailable(correlation_id));
+    }
+    let artifact::ArtifactState::Terminal(terminal_state) = &record.state else {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The approved Artifact is no longer a Terminal command",
+            true,
+        ));
+    };
+    let key = terminal_key(&pending.scope)?;
+    let terminal_session_id = terminal_state.identity.terminal_session_id.clone();
+    let command_id = terminal_state.identity.command_id.clone();
+    let command_sequence = terminal_state.identity.command_sequence;
+    let mut effect_result: Option<Result<(), String>> = None;
+    let canonical_target = pending.action.canonical_target.clone();
+    let completed_at_ms = now_ms.saturating_add(1);
+    core.runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator.execute_direct_action(
+                &token,
+                &pending.action,
+                pending.live,
+                approval_prompt_id,
+                now_ms,
+                |_permit| {
+                    let result = (|| {
+                        let mut supervisor = core
+                            .terminal
+                            .lock()
+                            .map_err(|_| "Terminal supervisor unavailable".to_owned())?;
+                        match &pending.payload {
+                            PendingArtifactTerminalPayload::Run {
+                                terminal_session_id: expected_session_id,
+                                command_id: expected_command_id,
+                                command_sequence: expected_command_sequence,
+                                command,
+                                shell_path,
+                                environment,
+                                process_generation,
+                                columns,
+                                rows,
+                            } => {
+                                if expected_session_id != &terminal_session_id
+                                    || expected_command_id != &command_id
+                                    || expected_command_sequence != &command_sequence
+                                    || command != &terminal_state.command
+                                {
+                                    return Err("Terminal command binding changed".into());
+                                }
+                                if let Some(live) = supervisor.live_session(&key)
+                                    && matches!(
+                                        live.lifecycle,
+                                        execution::terminal::TerminalLifecycle::Live
+                                    )
+                                    && live.dimensions
+                                        != PtyDimensions::new(*columns, *rows)
+                                            .map_err(|error| error.to_string())?
+                                {
+                                    supervisor
+                                        .resize_authorized(TerminalResizeRequest {
+                                            key: key.clone(),
+                                            terminal_session_id: expected_session_id.clone(),
+                                            process_generation: *process_generation,
+                                            dimensions: PtyDimensions::new(*columns, *rows)
+                                                .map_err(|error| error.to_string())?,
+                                        })
+                                        .map_err(|error| error.to_string())?;
+                                }
+                                supervisor
+                                    .execute_authorized(TerminalExecuteRequest {
+                                        key: key.clone(),
+                                        command: SupervisedTerminalCommandIdentity::new(
+                                            expected_session_id.clone(),
+                                            expected_command_id.clone(),
+                                            *expected_command_sequence,
+                                        )
+                                        .map_err(|error| error.to_string())?,
+                                        process_generation: *process_generation,
+                                        environment: environment.clone(),
+                                        dimensions: PtyDimensions::new(*columns, *rows)
+                                            .map_err(|error| error.to_string())?,
+                                        trusted_project_root: pending.scope.project_root.clone(),
+                                        shell_path: PathBuf::from(shell_path),
+                                        command_line: command.clone(),
+                                    })
+                                    .map_err(|error| error.to_string())?;
+                                Ok(())
+                            }
+                            PendingArtifactTerminalPayload::Stdin {
+                                process_generation,
+                                text,
+                            } => {
+                                let mut bytes = text.as_bytes().to_vec();
+                                bytes.push(b'\n');
+                                supervisor
+                                    .submit_stdin_authorized(TerminalStdinRequest {
+                                        key: key.clone(),
+                                        command: SupervisedTerminalCommandIdentity::new(
+                                            terminal_session_id.clone(),
+                                            command_id.clone(),
+                                            command_sequence,
+                                        )
+                                        .map_err(|error| error.to_string())?,
+                                        process_generation: *process_generation,
+                                        bytes,
+                                    })
+                                    .map_err(|error| error.to_string())
+                            }
+                            PendingArtifactTerminalPayload::Resize {
+                                process_generation,
+                                columns,
+                                rows,
+                            } => supervisor
+                                .resize_authorized(TerminalResizeRequest {
+                                    key: key.clone(),
+                                    terminal_session_id: terminal_session_id.clone(),
+                                    process_generation: *process_generation,
+                                    dimensions: PtyDimensions::new(*columns, *rows)
+                                        .map_err(|error| error.to_string())?,
+                                })
+                                .map_err(|error| error.to_string()),
+                            PendingArtifactTerminalPayload::Stop { process_generation } => {
+                                supervisor
+                                    .stop_authorized(TerminalStopRequest {
+                                        key: key.clone(),
+                                        command: SupervisedTerminalCommandIdentity::new(
+                                            terminal_session_id.clone(),
+                                            command_id.clone(),
+                                            command_sequence,
+                                        )
+                                        .map_err(|error| error.to_string())?,
+                                        process_generation: *process_generation,
+                                    })
+                                    .map(|_| ())
+                                    .map_err(|error| error.to_string())
+                            }
+                        }
+                    })();
+                    let normalized = match &result {
+                        Ok(()) => NormalizedActionResult {
+                            status: NormalizedActionStatus::Succeeded,
+                            result_code: "terminal-operation-succeeded".into(),
+                            exit_code: Some(0),
+                            changed_targets: vec![canonical_target.clone()],
+                            output_sha256: None,
+                            completed_at_ms,
+                        },
+                        Err(_) => NormalizedActionResult {
+                            status: NormalizedActionStatus::Failed,
+                            result_code: "terminal-operation-failed".into(),
+                            exit_code: None,
+                            changed_targets: Vec::new(),
+                            output_sha256: None,
+                            completed_at_ms,
+                        },
+                    };
+                    effect_result = Some(result);
+                    normalized
+                },
+            )?;
+            Ok(())
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let result =
+        effect_result.ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    if let Err(message) = result {
+        if matches!(&pending.payload, PendingArtifactTerminalPayload::Run { .. }) {
+            persist_terminal_failure(
+                &pending,
+                "terminal-operation-failed",
+                &message,
+                true,
+                completed_at_ms,
+                correlation_id,
+            )?;
+            return Ok(());
+        }
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The authorized Terminal operation no longer matched the live process",
+            true,
+        ));
+    }
+    match &pending.payload {
+        PendingArtifactTerminalPayload::Run { .. } => {}
+        PendingArtifactTerminalPayload::Stdin { .. }
+        | PendingArtifactTerminalPayload::Resize { .. }
+        | PendingArtifactTerminalPayload::Stop { .. } => {
+            let mut record = load_scoped_artifact_record(
+                &pending.scope,
+                &pending.artifact_id,
+                correlation_id.clone(),
+            )?;
+            let artifact::ArtifactState::Terminal(terminal) = &mut record.state else {
+                return Err(workspace_state_unavailable(correlation_id));
+            };
+            let (kind, transition) = match &pending.payload {
+                PendingArtifactTerminalPayload::Stdin { .. } => (
+                    artifact::ArtifactHistoryKind::InputSubmitted,
+                    terminal.note_input_submitted(completed_at_ms),
+                ),
+                PendingArtifactTerminalPayload::Resize { columns, rows, .. } => (
+                    artifact::ArtifactHistoryKind::TerminalResized,
+                    artifact::TerminalDimensions::new(*columns, *rows)
+                        .and_then(|dimensions| terminal.resize(dimensions, completed_at_ms)),
+                ),
+                PendingArtifactTerminalPayload::Stop { .. } => (
+                    artifact::ArtifactHistoryKind::StopRequested,
+                    terminal.request_stop(completed_at_ms),
+                ),
+                PendingArtifactTerminalPayload::Run { .. } => unreachable!(),
+            };
+            transition.map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            persist_terminal_event_transition(
+                &pending.scope,
+                &mut record,
+                kind,
+                completed_at_ms,
+                correlation_id,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn propose_terminal_action(
+    core: &AppCoreState,
+    mut pending: PendingArtifactTerminalAction,
+    facts: ActionFacts,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, pending.action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            if matches!(&pending.payload, PendingArtifactTerminalPayload::Run { .. }) {
+                persist_terminal_failure(
+                    &pending,
+                    "policy-denied",
+                    "Policy denied the Terminal operation.",
+                    false,
+                    now_ms,
+                    correlation_id,
+                )
+            } else {
+                Ok(())
+            }
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            pending.record_revision = load_scoped_artifact_record(
+                &pending.scope,
+                &pending.artifact_id,
+                correlation_id.clone(),
+            )?
+            .record_revision;
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id))?
+                .pending_terminal_actions
+                .insert(prompt.prompt_id, pending);
+            Ok(())
+        }
+        GatewayProposal::Authorized { token, .. } => {
+            execute_terminal_action(core, pending, token, None, now_ms, correlation_id)
+        }
+    }
+}
+
+#[tauri::command]
+fn artifact_run_terminal(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactTerminalRunInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    if terminal_command_contains_secret_material(&input.command) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Terminal commands cannot contain inline credential material; use an environment or credential reference",
+            false,
+        ));
+    }
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let plan = plan_terminal_command(&core, &scope, request.correlation_id.clone())?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let command_sha256 = sha256_bytes(input.command.as_bytes());
+    let terminal = artifact::TerminalArtifactState::new_queued(
+        artifact::TerminalCommandIdentity {
+            terminal_session_id: plan.terminal_session_id.clone(),
+            command_id: plan.command_id.clone(),
+            command_sequence: plan.command_sequence,
+        },
+        input.command.clone(),
+        plan.working_directory.to_string_lossy(),
+        artifact::TerminalDimensions::new(input.columns, input.rows)
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?,
+        artifact::TerminalProcessProvenance {
+            shell_path: plan.shell_path.clone(),
+            environment_id: plan.environment.environment_id.clone(),
+            environment_generation: plan.environment.generation,
+            process_generation: plan.process_generation,
+            shell_process_id: None,
+            foreground_process_group_id: None,
+        },
+        now_ms,
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let record = new_artifact_record(
+        &scope,
+        artifact::ArtifactProviderDescriptor::terminal(),
+        artifact::ArtifactState::Terminal(Box::new(terminal)),
+        "run-terminal",
+        now_ms,
+    )?;
+    persist_artifact_record(&scope, &record, None, request.correlation_id.clone())?;
+    let (pending, facts) = prepare_terminal_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactTerminalPayload::Run {
+            terminal_session_id: plan.terminal_session_id,
+            command_id: plan.command_id,
+            command_sequence: plan.command_sequence,
+            command: input.command.clone(),
+            shell_path: plan.shell_path,
+            environment: plan.environment,
+            process_generation: plan.process_generation,
+            columns: input.columns,
+            rows: input.rows,
+        },
+        "terminal.execute",
+        "terminal.execute",
+        ActionEffect::Execute,
+        CanonicalRisk::Medium,
+        ClassificationConfidence::Ambiguous,
+        serde_json::json!({
+            "artifactId": record.artifact_id,
+            "terminalSessionId": match &record.state {
+                artifact::ArtifactState::Terminal(terminal) => terminal.identity.terminal_session_id.clone(),
+                _ => unreachable!(),
+            },
+            "commandId": match &record.state {
+                artifact::ArtifactState::Terminal(terminal) => terminal.identity.command_id.clone(),
+                _ => unreachable!(),
+            },
+            "commandSequence": plan.command_sequence,
+            "commandSha256": command_sha256,
+            "commandByteLength": input.command.len(),
+            "columns": input.columns,
+            "rows": input.rows,
+            "terminalProcessGeneration": plan.process_generation,
+        }),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_terminal_action(
+        &core,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+fn require_no_pending_terminal_action(
+    core: &AppCoreState,
+    artifact_id: &protocol::ArtifactId,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    if core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_terminal_actions
+        .values()
+        .any(|pending| pending.artifact_id == artifact_id.as_str())
+    {
+        Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Resolve the pending Terminal approval before another operation",
+            false,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn artifact_terminal_stdin(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactTerminalStdinInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_terminal_action(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a running Terminal command accepts process input",
+            false,
+        ));
+    };
+    if terminal.process.process_generation != input.process_generation
+        || !matches!(
+            &terminal.status,
+            artifact::TerminalCommandStatus::Running {
+                stdin_ready: true,
+                stop_requested_at_ms: None,
+                ..
+            }
+        )
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Terminal input no longer targets the live command",
+            true,
+        ));
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut exact_bytes = input.text.as_bytes().to_vec();
+    exact_bytes.push(b'\n');
+    let (pending, facts) = prepare_terminal_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactTerminalPayload::Stdin {
+            process_generation: input.process_generation,
+            text: input.text,
+        },
+        "terminal.input",
+        "terminal.input",
+        ActionEffect::Control,
+        CanonicalRisk::Medium,
+        ClassificationConfidence::Ambiguous,
+        serde_json::json!({
+            "artifactId": record.artifact_id,
+            "commandId": terminal.identity.command_id,
+            "terminalProcessGeneration": input.process_generation,
+            "inputSha256": sha256_bytes(&exact_bytes),
+            "inputByteLength": exact_bytes.len(),
+        }),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_terminal_action(
+        &core,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_terminal_resize(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactTerminalResizeInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_terminal_action(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a running Terminal command can be resized",
+            false,
+        ));
+    };
+    if terminal.process.process_generation != input.process_generation
+        || !matches!(
+            &terminal.status,
+            artifact::TerminalCommandStatus::Running { .. }
+        )
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Terminal resize no longer targets the live process",
+            true,
+        ));
+    }
+    if terminal.dimensions.columns == input.columns && terminal.dimensions.rows == input.rows {
+        let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+        return protocol::artifact_workspace_snapshot(request, payload);
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (pending, facts) = prepare_terminal_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactTerminalPayload::Resize {
+            process_generation: input.process_generation,
+            columns: input.columns,
+            rows: input.rows,
+        },
+        "terminal.resize",
+        "terminal.resize",
+        ActionEffect::Control,
+        CanonicalRisk::Low,
+        ClassificationConfidence::Known,
+        serde_json::json!({
+            "artifactId": record.artifact_id,
+            "commandId": terminal.identity.command_id,
+            "terminalProcessGeneration": input.process_generation,
+            "columns": input.columns,
+            "rows": input.rows,
+        }),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_terminal_action(
+        &core,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_terminal_stop(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactTerminalOperationInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    require_no_pending_terminal_action(&core, &input.artifact_id, request.correlation_id.clone())?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a running Terminal command can be stopped",
+            false,
+        ));
+    };
+    if terminal.process.process_generation != input.process_generation
+        || !matches!(
+            &terminal.status,
+            artifact::TerminalCommandStatus::Running {
+                stop_requested_at_ms: None,
+                ..
+            }
+        )
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Terminal Stop no longer targets the live command",
+            true,
+        ));
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (pending, facts) = prepare_terminal_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactTerminalPayload::Stop {
+            process_generation: input.process_generation,
+        },
+        "terminal.stop",
+        "terminal.stop",
+        ActionEffect::Control,
+        CanonicalRisk::Medium,
+        ClassificationConfidence::Known,
+        serde_json::json!({
+            "artifactId": record.artifact_id,
+            "commandId": terminal.identity.command_id,
+            "terminalProcessGeneration": input.process_generation,
+        }),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_terminal_action(
+        &core,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_terminal_ack_output(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactTerminalOutputAckInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_scoped_artifact_record(
+        &scope,
+        input.artifact_id.as_str(),
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Terminal(terminal) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only Terminal output can be acknowledged",
+            false,
+        ));
+    };
+    if terminal.process.process_generation != input.process_generation
+        || terminal.output.sequence != input.output_sequence
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Terminal output changed before acknowledgement",
+            true,
+        ));
+    }
+    let through_chunk_sequence = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .terminal_ack_cursors
+        .get(&record.artifact_id)
+        .copied()
+        .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))?;
+    core.terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .acknowledge_output(TerminalAcknowledgeRequest {
+            key: terminal_key(&scope)?,
+            terminal_session_id: terminal.identity.terminal_session_id.clone(),
+            process_generation: input.process_generation,
+            through_chunk_sequence,
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
 #[tauri::command]
 fn artifact_open_file(
     core: tauri::State<'_, AppCoreState>,
@@ -5164,7 +7248,9 @@ fn require_no_pending_artifact_write(
         .transpose()?
         .is_some_and(|record| match record.state {
             artifact::ArtifactState::File(file) => file.pending_save_requested_at_ms.is_some(),
-            artifact::ArtifactState::Folder(_) | artifact::ArtifactState::Unknown(_) => false,
+            artifact::ArtifactState::Folder(_)
+            | artifact::ArtifactState::Terminal(_)
+            | artifact::ArtifactState::Unknown(_) => false,
         });
     if process_pending || durable_pending {
         Err(platform_boundary_error(
@@ -5621,7 +7707,7 @@ fn artifact_folder_navigation_allowed(record: &artifact::ArtifactRecord, target:
                 .map_or("", |(parent, _)| parent);
             target.is_empty() || target == parent || parent.starts_with(&format!("{target}/"))
         }
-        artifact::ArtifactState::Unknown(_) => false,
+        artifact::ArtifactState::Terminal(_) | artifact::ArtifactState::Unknown(_) => false,
     }
 }
 
@@ -5945,6 +8031,33 @@ fn durable_artifact_reply_capture(
                     correlation_id,
                     ProtocolErrorCode::Conflict,
                     "The selected Folder context is stale or invalid",
+                    true,
+                ));
+            }
+        }
+        artifact::ArtifactState::Terminal(terminal) => {
+            let output = terminal.output.safe_text().map_err(|_| {
+                platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::InvalidPayload,
+                    "The selected Terminal output is unavailable",
+                    false,
+                )
+            })?;
+            let selection_safe = terminal
+                .output
+                .is_safe_for_automatic_context()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                && !terminal_command_references_secret_environment(&terminal.command);
+            if selected_entry_id.is_some()
+                || selected_text
+                    .as_deref()
+                    .is_some_and(|selection| !selection_safe || !output.contains(selection))
+            {
+                return Err(platform_boundary_error(
+                    correlation_id,
+                    ProtocolErrorCode::Conflict,
+                    "The selected Terminal output is stale or invalid",
                     true,
                 ));
             }
@@ -6658,21 +8771,31 @@ fn artifact_answer_approval(
     require_exact_artifact_generation(&request, &before)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let pending = core
-        .artifact
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-        .pending_writes
-        .get(&input.prompt_id)
-        .cloned();
-    let pending = pending.ok_or_else(|| {
-        platform_boundary_error(
-            request.correlation_id.clone(),
-            ProtocolErrorCode::NotFound,
-            "The File write approval is no longer active",
-            false,
+    let (pending_write, pending_terminal) = {
+        let state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        (
+            state.pending_writes.get(&input.prompt_id).cloned(),
+            state
+                .pending_terminal_actions
+                .get(&input.prompt_id)
+                .cloned(),
         )
-    })?;
+    };
+    let expected_action = pending_write
+        .as_ref()
+        .map(|pending| &pending.action)
+        .or_else(|| pending_terminal.as_ref().map(|pending| &pending.action))
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The Artifact approval is no longer active",
+                false,
+            )
+        })?;
     let answer = match input.answer {
         ArtifactApprovalAnswer::Allow => ApprovalAnswer::Allow,
         ArtifactApprovalAnswer::Deny => ApprovalAnswer::Deny,
@@ -6689,53 +8812,87 @@ fn artifact_answer_approval(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     match response {
         ApprovalResponse::Denied { prompt } => {
-            if prompt.action != pending.action {
+            if &prompt.action != expected_action {
                 return Err(workspace_state_unavailable(request.correlation_id));
             }
-            core.artifact
-                .lock()
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-                .pending_writes
-                .remove(&input.prompt_id);
-            let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
-            let artifact_id = protocol::ArtifactId::new(pending.artifact_id.clone())?;
-            let mut record = load_active_artifact_record(
-                &scope,
-                &artifact_id,
-                pending.record_revision,
-                request.correlation_id.clone(),
-            )?;
-            persist_file_save_result(
-                &scope,
-                &mut record,
-                artifact::FileSaveResult::Failed {
-                    code: "approval-denied".into(),
-                    message: "The File write was cancelled; the draft was retained.".into(),
-                    retryable: false,
-                    failed_at_ms: now_ms,
-                },
-                artifact::ArtifactHistoryKind::RecoveryChanged,
-                now_ms,
-                request.correlation_id.clone(),
-            )?;
+            if let Some(pending) = pending_write {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_writes
+                    .remove(&input.prompt_id);
+                let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+                let artifact_id = protocol::ArtifactId::new(pending.artifact_id.clone())?;
+                let mut record = load_active_artifact_record(
+                    &scope,
+                    &artifact_id,
+                    pending.record_revision,
+                    request.correlation_id.clone(),
+                )?;
+                persist_file_save_result(
+                    &scope,
+                    &mut record,
+                    artifact::FileSaveResult::Failed {
+                        code: "approval-denied".into(),
+                        message: "The File write was cancelled; the draft was retained.".into(),
+                        retryable: false,
+                        failed_at_ms: now_ms,
+                    },
+                    artifact::ArtifactHistoryKind::RecoveryChanged,
+                    now_ms,
+                    request.correlation_id.clone(),
+                )?;
+            } else if let Some(pending) = pending_terminal {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_terminal_actions
+                    .remove(&input.prompt_id);
+                if matches!(&pending.payload, PendingArtifactTerminalPayload::Run { .. }) {
+                    persist_terminal_failure(
+                        &pending,
+                        "approval-denied",
+                        "The Terminal operation was cancelled.",
+                        false,
+                        now_ms,
+                        request.correlation_id.clone(),
+                    )?;
+                }
+            }
         }
         ApprovalResponse::Authorized { prompt, token } => {
-            if prompt.action != pending.action {
+            if &prompt.action != expected_action {
                 return Err(workspace_state_unavailable(request.correlation_id));
             }
-            core.artifact
-                .lock()
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-                .pending_writes
-                .remove(&input.prompt_id);
-            execute_artifact_write(
-                &core,
-                pending,
-                token,
-                Some(&input.prompt_id),
-                now_ms,
-                request.correlation_id.clone(),
-            )?;
+            if let Some(pending) = pending_write {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_writes
+                    .remove(&input.prompt_id);
+                execute_artifact_write(
+                    &core,
+                    pending,
+                    token,
+                    Some(&input.prompt_id),
+                    now_ms,
+                    request.correlation_id.clone(),
+                )?;
+            } else if let Some(pending) = pending_terminal {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_terminal_actions
+                    .remove(&input.prompt_id);
+                execute_terminal_action(
+                    &core,
+                    pending,
+                    token,
+                    Some(&input.prompt_id),
+                    now_ms,
+                    request.correlation_id.clone(),
+                )?;
+            }
         }
     }
     let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
@@ -10438,6 +12595,69 @@ fn capture_artifact_record_context(
                 capabilities: vec![readable()],
             })
         }
+        artifact::ArtifactState::Terminal(terminal) => {
+            if selected_entry_id.is_some() {
+                return Err(platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::InvalidPayload,
+                    "Terminal Reply cannot select a Folder entry",
+                    false,
+                ));
+            }
+            let output = terminal
+                .output
+                .safe_text()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            let automatic_output_safe = terminal
+                .output
+                .is_safe_for_automatic_context()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                && !terminal_command_references_secret_environment(&terminal.command);
+            let selected_output = selected_text
+                .filter(|_| automatic_output_safe)
+                .map(artifact::SafeContextText::new)
+                .transpose()
+                .map_err(|_| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::InvalidPayload,
+                        "The selected Terminal context is invalid",
+                        false,
+                    )
+                })?;
+            let mut recent_start = output.len().saturating_sub(64 * 1_024);
+            while !output.is_char_boundary(recent_start) {
+                recent_start = recent_start.saturating_add(1);
+            }
+            artifact::ContextCaptureInput::Terminal(artifact::TerminalContextInput {
+                command: artifact::SafeContextText::new(terminal.command.clone())
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                working_directory_display: artifact::SafeContextText::new(
+                    terminal.working_directory_display.clone(),
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                environment_id: terminal.process.environment_id.clone(),
+                process_state: terminal.status.phase().into(),
+                exit_code: terminal.status.exit_code(),
+                selected_output,
+                visible_output: automatic_output_safe
+                    .then(|| artifact::SafeContextText::new(output.clone()))
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                recent_output_tail: automatic_output_safe
+                    .then(|| artifact::SafeContextText::new(output[recent_start..].to_owned()))
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                capabilities: vec![
+                    readable(),
+                    artifact::CapabilitySummaryEntry {
+                        capability_id: "terminal.execute".into(),
+                        access: artifact::CapabilityAccess::ApprovalRequired,
+                        reason_code: Some("action-gateway".into()),
+                    },
+                ],
+            })
+        }
         artifact::ArtifactState::Unknown(_) => {
             return Err(platform_boundary_error(
                 correlation_id,
@@ -11120,6 +13340,7 @@ pub fn run() {
                 artifact_operation: Mutex::new(()),
                 conversation: Mutex::new(conversation),
                 artifact: Mutex::new(ArtifactApplicationState::default()),
+                terminal: Mutex::new(TerminalSupervisor::new()),
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 runtime_production: Arc::clone(&runtime_production),
                 runtime: Arc::clone(&runtime),
@@ -11164,6 +13385,11 @@ pub fn run() {
             workspace_start_snapshot,
             conversation_snapshot,
             artifact_snapshot,
+            artifact_run_terminal,
+            artifact_terminal_stdin,
+            artifact_terminal_resize,
+            artifact_terminal_stop,
+            artifact_terminal_ack_output,
             artifact_open_file,
             artifact_open_folder,
             artifact_focus,
@@ -11393,5 +13619,308 @@ mod artifact_file_projection_tests {
         let stale =
             require_current_artifact_reply_capture(&record, &durable, correlation).unwrap_err();
         assert_eq!(stale.code, ProtocolErrorCode::Conflict);
+    }
+}
+
+#[cfg(test)]
+mod artifact_terminal_projection_tests {
+    use super::*;
+
+    fn queued_terminal() -> artifact::TerminalArtifactState {
+        artifact::TerminalArtifactState::new_queued(
+            artifact::TerminalCommandIdentity {
+                terminal_session_id: "terminal-session-test".into(),
+                command_id: "terminal-command-test".into(),
+                command_sequence: 1,
+            },
+            "printf safe",
+            "/project",
+            artifact::TerminalDimensions::new(80, 24).unwrap(),
+            artifact::TerminalProcessProvenance {
+                shell_path: "/bin/zsh".into(),
+                environment_id: "desktop".into(),
+                environment_generation: 1,
+                process_generation: 1,
+                shell_process_id: None,
+                foreground_process_group_id: None,
+            },
+            10,
+        )
+        .unwrap()
+    }
+
+    fn running_terminal(output: &[u8]) -> artifact::TerminalArtifactState {
+        let mut terminal = queued_terminal();
+        terminal.mark_running(42, Some(43), true, 11).unwrap();
+        terminal.append_output(output, 12).unwrap();
+        terminal
+    }
+
+    fn terminal_record(terminal: artifact::TerminalArtifactState) -> artifact::ArtifactRecord {
+        artifact::ArtifactRecord {
+            schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
+            artifact_id: "artifact-terminal-test".into(),
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "session-1".into(),
+            provider: artifact::ArtifactProviderDescriptor::terminal(),
+            source: artifact::ArtifactSource::DirectOperation {
+                operation_id: "terminal-operation-test".into(),
+            },
+            record_revision: 1,
+            lifecycle: artifact::ArtifactLifecycle::Ready,
+            state: artifact::ArtifactState::Terminal(Box::new(terminal)),
+            history: Vec::new(),
+            created_at_ms: 10,
+            updated_at_ms: 12,
+        }
+    }
+
+    #[test]
+    fn inline_credentials_are_rejected_but_environment_references_remain_allowed() {
+        assert!(terminal_command_contains_secret_material(
+            "curl -H 'Authorization: Bearer abc' https://example.test"
+        ));
+        assert!(terminal_command_contains_secret_material(
+            "AWS_SECRET_ACCESS_KEY=plaintext deploy"
+        ));
+        assert!(terminal_command_contains_secret_material(
+            "psql postgres://user:pass@example.test/db"
+        ));
+        assert!(!terminal_command_contains_secret_material(
+            "curl -H \"Authorization: Bearer $TOKEN\" https://example.test"
+        ));
+        assert!(!terminal_command_contains_secret_material("echo password"));
+        assert!(terminal_command_references_secret_environment(
+            "printf '%s' \"${API_TOKEN}\""
+        ));
+        assert!(!terminal_command_references_secret_environment(
+            "printf '%s' \"$ORDINARY_VALUE\""
+        ));
+    }
+
+    #[test]
+    fn queued_terminal_recovery_does_not_requeue_a_run_already_dispatched_to_the_live_shell() {
+        let terminal = queued_terminal();
+        let mut live = execution::terminal::TerminalLiveSessionSnapshot {
+            key: TerminalSessionKey::new("workspace-1", "session-1").unwrap(),
+            terminal_session_id: terminal.identity.terminal_session_id.clone(),
+            lifecycle: execution::terminal::TerminalLifecycle::Live,
+            process_generation: terminal.process.process_generation,
+            process_id: Some(42),
+            foreground_process_group_id: Some(43),
+            active_command: Some(
+                SupervisedTerminalCommandIdentity::new(
+                    terminal.identity.terminal_session_id.clone(),
+                    terminal.identity.command_id.clone(),
+                    terminal.identity.command_sequence,
+                )
+                .unwrap(),
+            ),
+            next_command_sequence: terminal.identity.command_sequence + 1,
+            environment: execution::environment::ExecutionEnvironmentIdentity::new(
+                execution::environment::ExecutionEnvironmentKind::Local,
+                terminal.process.environment_id.clone(),
+                terminal.process.environment_generation,
+            )
+            .unwrap(),
+            dimensions: PtyDimensions::new(80, 24).unwrap(),
+            shell_path: PathBuf::from("/bin/zsh"),
+            working_directory: PathBuf::from("/project"),
+            pending_event_count: 0,
+            pending_output_bytes: 0,
+            output_bytes_dropped: 0,
+        };
+
+        assert!(terminal_run_was_dispatched(&terminal, &live));
+
+        live.active_command = Some(
+            SupervisedTerminalCommandIdentity::new(
+                terminal.identity.terminal_session_id.clone(),
+                "another-command",
+                terminal.identity.command_sequence,
+            )
+            .unwrap(),
+        );
+        assert!(!terminal_run_was_dispatched(&terminal, &live));
+
+        // A prior idle command leaves the next sequence equal to the queued
+        // command, so a genuinely interrupted approval still requeues.
+        live.active_command = None;
+        live.next_command_sequence = terminal.identity.command_sequence;
+        assert!(!terminal_run_was_dispatched(&terminal, &live));
+
+        // A short command may complete after the empty event drain but before
+        // recovery inspects the supervisor. Its queued events still prove the
+        // command was dispatched and must be reconciled on the next poll.
+        live.next_command_sequence = terminal.identity.command_sequence + 1;
+        live.pending_event_count = 1;
+        assert!(terminal_run_was_dispatched(&terminal, &live));
+
+        // A dormant post-restart session is recovery evidence, not dispatch
+        // evidence, even if it retained the advanced sequence.
+        live.lifecycle = execution::terminal::TerminalLifecycle::DormantAfterRecovery;
+        assert!(!terminal_run_was_dispatched(&terminal, &live));
+
+        live.lifecycle = execution::terminal::TerminalLifecycle::Live;
+        live.process_generation = terminal.process.process_generation + 1;
+        assert!(!terminal_run_was_dispatched(&terminal, &live));
+
+        live.process_generation = terminal.process.process_generation;
+        live.terminal_session_id = "another-terminal-session".into();
+        assert!(!terminal_run_was_dispatched(&terminal, &live));
+    }
+
+    #[test]
+    fn queued_restart_command_drains_the_retained_supervisor_generation() {
+        let mut terminal = queued_terminal();
+        terminal.identity.command_sequence = 3;
+        terminal.process.process_generation = 2;
+        let retained = execution::terminal::TerminalLiveSessionSnapshot {
+            key: TerminalSessionKey::new("workspace-1", "session-1").unwrap(),
+            terminal_session_id: terminal.identity.terminal_session_id.clone(),
+            lifecycle: execution::terminal::TerminalLifecycle::DormantAfterRestart,
+            process_generation: 1,
+            process_id: None,
+            foreground_process_group_id: None,
+            active_command: None,
+            next_command_sequence: terminal.identity.command_sequence,
+            environment: execution::environment::ExecutionEnvironmentIdentity::new(
+                execution::environment::ExecutionEnvironmentKind::Local,
+                terminal.process.environment_id.clone(),
+                terminal.process.environment_generation,
+            )
+            .unwrap(),
+            dimensions: PtyDimensions::new(80, 24).unwrap(),
+            shell_path: PathBuf::from("/bin/zsh"),
+            working_directory: PathBuf::from("/project/nested"),
+            pending_event_count: 0,
+            pending_output_bytes: 0,
+            output_bytes_dropped: 0,
+        };
+
+        let binding = terminal_event_drain_binding(&terminal, &retained).unwrap();
+        assert_eq!(
+            binding.terminal_session_id,
+            terminal.identity.terminal_session_id
+        );
+        assert_eq!(binding.process_generation, 1);
+        assert_eq!(binding.working_directory, PathBuf::from("/project/nested"));
+        assert!(terminal_run_can_be_requeued(&terminal, &retained));
+
+        let mut mismatched = retained.clone();
+        mismatched.terminal_session_id = "another-terminal-session".into();
+        assert!(!terminal_run_can_be_requeued(&terminal, &mismatched));
+        mismatched = retained.clone();
+        mismatched.next_command_sequence += 1;
+        assert!(!terminal_run_can_be_requeued(&terminal, &mismatched));
+        mismatched = retained;
+        mismatched.process_generation += 1;
+        assert!(!terminal_run_can_be_requeued(&terminal, &mismatched));
+    }
+
+    #[test]
+    fn durable_output_redacts_complete_secret_lines_across_chunk_boundaries() {
+        let mut state = ArtifactApplicationState::default();
+        assert!(
+            retain_redacted_terminal_output(
+                &mut state,
+                "terminal-command-test",
+                b"AWS_SECRET_ACCESS_",
+                false,
+            )
+            .is_empty()
+        );
+        let output = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-test",
+            b"KEY=plaintext\nvisible\n",
+            false,
+        );
+        assert_eq!(output, b"[sensitive Terminal output redacted]\nvisible\n");
+        assert!(!String::from_utf8_lossy(&output).contains("plaintext"));
+    }
+
+    #[test]
+    fn unterminated_output_lines_are_memory_bounded_and_fully_redacted() {
+        let mut state = ArtifactApplicationState::default();
+        let oversized = vec![b'x'; artifact::MAX_TERMINAL_OUTPUT_BYTES + 1];
+        assert!(
+            retain_redacted_terminal_output(
+                &mut state,
+                "terminal-command-oversized",
+                &oversized,
+                false,
+            )
+            .is_empty()
+        );
+        assert!(
+            !state
+                .terminal_output_lines
+                .contains_key("terminal-command-oversized")
+        );
+        assert!(
+            state
+                .terminal_redacted_output_lines
+                .contains("terminal-command-oversized")
+        );
+        let output = retain_redacted_terminal_output(
+            &mut state,
+            "terminal-command-oversized",
+            b"still-hidden\nvisible\n",
+            false,
+        );
+        assert_eq!(
+            output,
+            b"[oversized Terminal output line redacted]\nvisible\n"
+        );
+        assert!(state.terminal_redacted_output_lines.is_empty());
+    }
+
+    #[test]
+    fn control_sequence_output_cannot_be_renderer_selected_for_reply() {
+        let record = terminal_record(running_terminal(b"\x1b[2Jhidden"));
+        let error = durable_artifact_reply_capture(
+            &record,
+            Some("hidden".into()),
+            None,
+            protocol::CorrelationId::new("terminal-selection-test").unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ProtocolErrorCode::Conflict);
+    }
+
+    #[test]
+    fn secret_environment_references_exclude_output_from_reply_context() {
+        let mut terminal = running_terminal(b"unlabelled-secret-value");
+        terminal.command = "printf '%s' \"$API_TOKEN\"".into();
+        let record = terminal_record(terminal);
+        let correlation = protocol::CorrelationId::new("terminal-secret-context-test").unwrap();
+        let error = durable_artifact_reply_capture(
+            &record,
+            Some("unlabelled-secret-value".into()),
+            None,
+            correlation.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ProtocolErrorCode::Conflict);
+
+        let snapshot =
+            capture_artifact_record_context(&record, None, None, 1_024, 20, correlation).unwrap();
+        let artifact::ContextPayload::Terminal { segments, .. } = snapshot.payload else {
+            unreachable!()
+        };
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["terminal-metadata"]
+        );
+        assert!(
+            segments
+                .iter()
+                .all(|segment| !segment.text.contains("unlabelled-secret-value"))
+        );
     }
 }

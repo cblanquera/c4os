@@ -548,6 +548,15 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(response)
     }
 
+    pub(crate) fn cancel_direct_action_run(
+        &mut self,
+        run_id: &str,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<usize>, CoordinatorError> {
+        let cancelled = self.action_gateway.cancel_run(run_id, now_ms)?;
+        self.operation(cancelled)
+    }
+
     pub(crate) fn execute_direct_action(
         &mut self,
         token: &AuthorizationToken,

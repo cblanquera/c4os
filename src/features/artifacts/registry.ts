@@ -2,6 +2,9 @@ import type {
   ArtifactProviderDefinition,
   ResolvedArtifactProvider,
 } from "./types";
+import { FILE_ARTIFACT_PROVIDER } from "./file/provider";
+import { FOLDER_ARTIFACT_PROVIDER } from "./folder/provider";
+import { TERMINAL_ARTIFACT_PROVIDER } from "./terminal/provider";
 
 export interface ArtifactProviderRegistry {
   readonly providers: readonly ArtifactProviderDefinition[];
@@ -78,6 +81,13 @@ export function createArtifactProviderRegistry(
   };
   return Object.freeze(registry);
 }
+
+/** The exact production-composed provider set for this application build. */
+export const ARTIFACT_PROVIDER_REGISTRY = createArtifactProviderRegistry([
+  FILE_ARTIFACT_PROVIDER,
+  FOLDER_ARTIFACT_PROVIDER,
+  TERMINAL_ARTIFACT_PROVIDER,
+]);
 
 /** Builds the collision-resistant registry key for one exact provider version. */
 function providerKey(type: string, version: number): string {

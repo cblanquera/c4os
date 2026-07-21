@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ARTIFACT_PROVIDER_REGISTRY,
   createArtifactProviderRegistry,
   UNKNOWN_ARTIFACT_PROVIDER,
 } from "./registry";
@@ -16,6 +17,13 @@ const FILE_PROVIDER: ArtifactProviderDefinition = {
 };
 
 describe("artifact provider registry", () => {
+  it("production-composes the exact Terminal provider version", () => {
+    expect(ARTIFACT_PROVIDER_REGISTRY.resolve("terminal", 1)).toMatchObject({
+      kind: "registered",
+      provider: { type: "terminal", version: 1, focusSupported: true },
+    });
+  });
+
   it("resolves only an exact registered provider version", () => {
     const versionTwo = { ...FILE_PROVIDER, version: 2 };
     const registry = createArtifactProviderRegistry([

@@ -8,7 +8,7 @@
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; Tasks 00001 through 00008 are verified with passed Agent Acceptance. Tasks 00009 through 00015C remain open.
+- Implementation status: Active; Tasks 00001 through 00008 are verified with passed Agent Acceptance. Task 00009 is started; Tasks 00010 through 00015C remain open.
 
 ## Work Items
 
@@ -43,4 +43,4 @@ Inherited feasibility Proofs do not count as production verification. Tasks 0000
 
 ## Recommended Next Action
 
-Begin Task 00009 as the next isolated Terminal-facility epoch after the Task 00008 checkpoint. Preserve the complete-contract target and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.
+Complete Task 00009 as the active isolated Terminal-facility epoch from checkpoint `1a51ac5`. Preserve the complete-contract target and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.

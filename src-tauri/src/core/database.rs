@@ -7,11 +7,13 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::Write as _,
 };
 
-use crate::artifact::{ArtifactHistoryKind, ArtifactRecord, ArtifactWorkspaceUiState};
+use crate::artifact::{
+    ArtifactHistoryKind, ArtifactRecord, ArtifactState, ArtifactWorkspaceUiState,
+};
 
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Params, TransactionBehavior, params};
@@ -2454,6 +2456,7 @@ fn validate_artifact_documents(connection: &Connection, workspace_id: &str) -> D
             })?;
         current_records.insert(artifact_id, record);
     }
+    validate_terminal_artifact_sessions(&current_records)?;
 
     let event_count: i64 = connection.query_row(
         "SELECT COUNT(*) FROM artifact_events WHERE workspace_id = ?1",
@@ -2552,6 +2555,51 @@ fn validate_artifact_documents(connection: &Connection, workspace_id: &str) -> D
         return Err(DatabaseError::Validation(
             "artifact current records do not match their latest immutable events".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_terminal_artifact_sessions(
+    records: &BTreeMap<String, WorkspaceArtifactDocumentRecord>,
+) -> DatabaseResult<()> {
+    let mut sessions: BTreeMap<String, Vec<(String, u64, u64)>> = BTreeMap::new();
+    for record in records.values() {
+        if record.provider_kind != "terminal" {
+            continue;
+        }
+        let artifact = serde_json::from_str::<ArtifactRecord>(&record.canonical_document)
+            .map_err(|_| DatabaseError::Validation("Terminal artifact is invalid".into()))?;
+        let ArtifactState::Terminal(terminal) = artifact.state else {
+            return Err(DatabaseError::Validation(
+                "Terminal provider does not carry Terminal state".into(),
+            ));
+        };
+        sessions
+            .entry(record.session_id.clone())
+            .or_default()
+            .push((
+                terminal.identity.terminal_session_id,
+                terminal.identity.command_sequence,
+                terminal.process.process_generation,
+            ));
+    }
+    for commands in sessions.values_mut() {
+        commands.sort_by_key(|(_, command_sequence, _)| *command_sequence);
+        let expected_session = commands.first().map(|(session, _, _)| session.clone());
+        let mut command_sequences = BTreeSet::new();
+        let mut previous_process_generation = 0;
+        for (terminal_session, command_sequence, process_generation) in commands {
+            if Some(terminal_session.as_str()) != expected_session.as_deref()
+                || !command_sequences.insert(*command_sequence)
+                || *process_generation < previous_process_generation
+            {
+                return Err(DatabaseError::Validation(
+                    "Terminal artifacts violate per-Chat shell identity or sequence invariants"
+                        .into(),
+                ));
+            }
+            previous_process_generation = *process_generation;
+        }
     }
     Ok(())
 }
@@ -3144,27 +3192,6 @@ fn write_artifact_document(
         DatabaseError::InvalidInput("artifact timestamp exceeds SQLite range".into())
     })?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let active_owner: i64 = transaction.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM workspaces AS workspace
-            JOIN projects AS project ON project.workspace_id = workspace.workspace_id
-            JOIN chats AS chat ON chat.workspace_id = workspace.workspace_id
-            WHERE workspace.workspace_id = ?1
-              AND project.project_id = ?2
-              AND chat.chat_id = ?3
-              AND chat.project_id = project.project_id
-              AND workspace.lifecycle_state = 'active'
-              AND project.lifecycle_state = 'active'
-              AND chat.lifecycle_state = 'active'
-        )",
-        params![workspace_id, record.project_id, record.session_id],
-        |row| row.get(0),
-    )?;
-    if active_owner != 1 {
-        return Err(DatabaseError::Conflict(
-            "active artifact Workspace, Project, or Chat owner changed".into(),
-        ));
-    }
     let current = transaction
         .query_row(
             "SELECT project_id, session_id, provider_kind, provider_version,
@@ -3185,6 +3212,58 @@ fn write_artifact_document(
             },
         )
         .optional()?;
+    let active_owner: i64 = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM workspaces AS workspace
+            JOIN projects AS project ON project.workspace_id = workspace.workspace_id
+            JOIN chats AS chat ON chat.workspace_id = workspace.workspace_id
+            WHERE workspace.workspace_id = ?1
+              AND project.project_id = ?2
+              AND chat.chat_id = ?3
+              AND chat.project_id = project.project_id
+              AND workspace.lifecycle_state = 'active'
+              AND project.lifecycle_state = 'active'
+              AND chat.lifecycle_state = 'active'
+        )",
+        params![workspace_id, record.project_id, record.session_id],
+        |row| row.get(0),
+    )?;
+    if active_owner != 1 {
+        let retained_owner: i64 = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM workspaces AS workspace
+                JOIN projects AS project ON project.workspace_id = workspace.workspace_id
+                JOIN chats AS chat ON chat.workspace_id = workspace.workspace_id
+                WHERE workspace.workspace_id = ?1
+                  AND project.project_id = ?2
+                  AND chat.chat_id = ?3
+                  AND chat.project_id = project.project_id
+                  AND workspace.lifecycle_state = 'active'
+                  AND project.lifecycle_state = 'active'
+                  AND chat.lifecycle_state = 'inactive'
+            )",
+            params![workspace_id, record.project_id, record.session_id],
+            |row| row.get(0),
+        )?;
+        let retained_terminal_update =
+            current
+                .as_ref()
+                .is_some_and(|(_, _, provider_kind, _, _, _, current_document)| {
+                    provider_kind == "terminal"
+                        && record.provider_kind == "terminal"
+                        && retained_terminal_artifact_update_allowed(
+                            current_document,
+                            &record.canonical_document,
+                        )
+                        .unwrap_or(false)
+                });
+        if retained_owner != 1 || !retained_terminal_update {
+            return Err(DatabaseError::Conflict(
+                "active artifact owner changed outside the retained Terminal update boundary"
+                    .into(),
+            ));
+        }
+    }
     let event_count: i64 = transaction.query_row(
         "SELECT COUNT(*) FROM artifact_events WHERE workspace_id = ?1",
         [workspace_id],
@@ -3225,6 +3304,20 @@ fn write_artifact_document(
         })
         .transpose()?
         .unwrap_or(false);
+    let terminal_update = current
+        .as_ref()
+        .map(|(_, _, provider_kind, _, _, _, current_document)| {
+            if provider_kind == "terminal" || record.provider_kind == "terminal" {
+                retained_terminal_artifact_update_allowed(
+                    current_document,
+                    &record.canonical_document,
+                )
+            } else {
+                Ok(true)
+            }
+        })
+        .transpose()?
+        .unwrap_or(true);
     match (&current, expected_revision) {
         (None, None) if record.revision == 1 => {}
         (
@@ -3245,7 +3338,8 @@ fn write_artifact_document(
             && ((provider_kind == &record.provider_kind
                 && *stored_provider_version == provider_version)
                 || provider_conversion)
-            && *stored_schema == state_schema_version => {}
+            && *stored_schema == state_schema_version
+            && terminal_update => {}
         (actual, expected) => {
             let actual_revision = actual
                 .as_ref()
@@ -3308,6 +3402,57 @@ fn write_artifact_document(
     let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
     transaction.commit()?;
     Ok(durable_generation)
+}
+
+fn retained_terminal_artifact_update_allowed(
+    previous_document: &str,
+    next_document: &str,
+) -> DatabaseResult<bool> {
+    let previous = serde_json::from_str::<ArtifactRecord>(previous_document).map_err(|_| {
+        DatabaseError::Validation("previous retained Terminal record is invalid".into())
+    })?;
+    let next = serde_json::from_str::<ArtifactRecord>(next_document).map_err(|_| {
+        DatabaseError::Validation("next retained Terminal record is invalid".into())
+    })?;
+    let (ArtifactState::Terminal(previous), ArtifactState::Terminal(next)) =
+        (&previous.state, &next.state)
+    else {
+        return Ok(false);
+    };
+    let invariant_identity = previous.identity == next.identity
+        && previous.command == next.command
+        && previous.process.shell_path == next.process.shell_path
+        && previous.process.environment_id == next.process.environment_id
+        && previous.process.environment_generation == next.process.environment_generation
+        && previous.process.process_generation == next.process.process_generation;
+    let previous_phase = previous.status.phase();
+    let next_phase = next.status.phase();
+    let valid_phase = match previous_phase {
+        "queued" => matches!(
+            next_phase,
+            "queued" | "running" | "stdinReady" | "failed" | "recovery"
+        ),
+        "running" | "stdinReady" => matches!(
+            next_phase,
+            "running"
+                | "stdinReady"
+                | "stopping"
+                | "completed"
+                | "interrupted"
+                | "failed"
+                | "recovery"
+        ),
+        "stopping" => matches!(
+            next_phase,
+            "stopping" | "interrupted" | "failed" | "recovery"
+        ),
+        _ => false,
+    };
+    Ok(invariant_identity
+        && valid_phase
+        && next.version.sequence > previous.version.sequence
+        && next.output.sequence >= previous.output.sequence
+        && next.output.dropped_bytes >= previous.output.dropped_bytes)
 }
 
 fn validate_artifact_ui_state_record(
@@ -5906,6 +6051,66 @@ fn truncate<T>(records: &mut Vec<T>, max_records: usize) -> bool {
 mod tests {
     use super::*;
 
+    fn terminal_record(
+        artifact_id: &str,
+        terminal_session_id: &str,
+        command_sequence: u64,
+        process_generation: u64,
+    ) -> ArtifactRecord {
+        let terminal = crate::artifact::TerminalArtifactState::new_queued(
+            crate::artifact::TerminalCommandIdentity {
+                terminal_session_id: terminal_session_id.into(),
+                command_id: format!("command-{command_sequence}"),
+                command_sequence,
+            },
+            format!("printf {command_sequence}"),
+            "/project",
+            crate::artifact::TerminalDimensions::new(80, 24).unwrap(),
+            crate::artifact::TerminalProcessProvenance {
+                shell_path: "/bin/zsh".into(),
+                environment_id: "desktop".into(),
+                environment_generation: 1,
+                process_generation,
+                shell_process_id: None,
+                foreground_process_group_id: None,
+            },
+            10,
+        )
+        .unwrap();
+        ArtifactRecord {
+            schema_version: crate::artifact::ARTIFACT_SCHEMA_VERSION,
+            artifact_id: artifact_id.into(),
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "chat-1".into(),
+            provider: crate::artifact::ArtifactProviderDescriptor::terminal(),
+            source: crate::artifact::ArtifactSource::DirectOperation {
+                operation_id: format!("operation-{command_sequence}"),
+            },
+            record_revision: 1,
+            lifecycle: crate::artifact::ArtifactLifecycle::Ready,
+            state: ArtifactState::Terminal(Box::new(terminal)),
+            history: Vec::new(),
+            created_at_ms: 10,
+            updated_at_ms: 10,
+        }
+    }
+
+    fn terminal_document(record: ArtifactRecord) -> WorkspaceArtifactDocumentRecord {
+        WorkspaceArtifactDocumentRecord {
+            workspace_id: record.workspace_id.clone(),
+            project_id: record.project_id.clone(),
+            session_id: record.session_id.clone(),
+            artifact_id: record.artifact_id.clone(),
+            provider_kind: "terminal".into(),
+            provider_version: 1,
+            state_schema_version: 1,
+            revision: record.record_revision,
+            canonical_document: serde_json::to_string(&record).unwrap(),
+            updated_at_ms: record.updated_at_ms,
+        }
+    }
+
     #[test]
     fn auxiliary_connection_permits_are_strictly_bounded_and_released() {
         let permits = (0..MAX_CONCURRENT_AUXILIARY_CONNECTIONS)
@@ -5918,5 +6123,89 @@ mod tests {
         assert!(error.to_string().contains("connection limit"));
         drop(permits);
         AuxiliaryConnectionPermit::acquire().expect("released permit can be reacquired");
+    }
+
+    #[test]
+    fn retained_terminal_updates_allow_forward_progress_but_reject_rebinding() {
+        let mut running = terminal_record("artifact-1", "terminal-session-1", 1, 1);
+        let ArtifactState::Terminal(terminal) = &mut running.state else {
+            unreachable!()
+        };
+        terminal.mark_running(42, Some(43), true, 11).unwrap();
+        let mut completed = running.clone();
+        let ArtifactState::Terminal(terminal) = &mut completed.state else {
+            unreachable!()
+        };
+        terminal.complete(0, "/project", 12).unwrap();
+        assert!(
+            retained_terminal_artifact_update_allowed(
+                &serde_json::to_string(&running).unwrap(),
+                &serde_json::to_string(&completed).unwrap(),
+            )
+            .unwrap()
+        );
+
+        let mut rebound = completed.clone();
+        let ArtifactState::Terminal(terminal) = &mut rebound.state else {
+            unreachable!()
+        };
+        terminal.identity.command_id = "rebound-command".into();
+        assert!(
+            !retained_terminal_artifact_update_allowed(
+                &serde_json::to_string(&running).unwrap(),
+                &serde_json::to_string(&rebound).unwrap(),
+            )
+            .unwrap()
+        );
+        assert!(
+            !retained_terminal_artifact_update_allowed(
+                &serde_json::to_string(&completed).unwrap(),
+                &serde_json::to_string(&running).unwrap(),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn terminal_chat_documents_require_one_session_unique_sequence_and_monotonic_processes() {
+        let first = terminal_document(terminal_record("artifact-1", "terminal-session-1", 1, 2));
+        let second = terminal_document(terminal_record("artifact-2", "terminal-session-1", 2, 3));
+        let valid = BTreeMap::from([
+            (first.artifact_id.clone(), first.clone()),
+            (second.artifact_id.clone(), second.clone()),
+        ]);
+        validate_terminal_artifact_sessions(&valid).unwrap();
+
+        let mismatched = terminal_document(terminal_record(
+            "artifact-2",
+            "terminal-session-other",
+            2,
+            3,
+        ));
+        assert!(
+            validate_terminal_artifact_sessions(&BTreeMap::from([
+                (first.artifact_id.clone(), first.clone()),
+                (mismatched.artifact_id.clone(), mismatched),
+            ]))
+            .is_err()
+        );
+        let duplicate =
+            terminal_document(terminal_record("artifact-2", "terminal-session-1", 1, 3));
+        assert!(
+            validate_terminal_artifact_sessions(&BTreeMap::from([
+                (first.artifact_id.clone(), first.clone()),
+                (duplicate.artifact_id.clone(), duplicate),
+            ]))
+            .is_err()
+        );
+        let regressed =
+            terminal_document(terminal_record("artifact-2", "terminal-session-1", 2, 1));
+        assert!(
+            validate_terminal_artifact_sessions(&BTreeMap::from([
+                (first.artifact_id.clone(), first),
+                (regressed.artifact_id.clone(), regressed),
+            ]))
+            .is_err()
+        );
     }
 }

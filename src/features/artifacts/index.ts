@@ -1,5 +1,6 @@
 export {
   createArtifactProviderRegistry,
+  ARTIFACT_PROVIDER_REGISTRY,
   UNKNOWN_ARTIFACT_PROVIDER,
 } from "./registry";
 export type { ArtifactProviderRegistry } from "./registry";
@@ -31,3 +32,9 @@ export type {
   FolderListingState,
 } from "./folder/FolderArtifact";
 export { FOLDER_ARTIFACT_PROVIDER } from "./folder/provider";
+export { TerminalArtifact } from "./terminal/TerminalArtifact";
+export type { TerminalArtifactProps } from "./terminal/TerminalArtifact";
+export { TerminalViewport } from "./terminal/TerminalViewport";
+export type { TerminalViewportProps } from "./terminal/TerminalViewport";
+export { TERMINAL_ARTIFACT_PROVIDER } from "./terminal/provider";
+export type * from "./terminal/terminal-types";

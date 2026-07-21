@@ -8,6 +8,7 @@ pub mod context;
 pub mod file;
 pub mod folder;
 pub mod record;
+pub mod terminal;
 
 pub use context::{
     ARTIFACT_CONTEXT_SCHEMA_VERSION, ArtifactContextSnapshot, BrowserContextInput,
@@ -31,4 +32,9 @@ pub use record::{
     ArtifactHistoryEntry, ArtifactHistoryKind, ArtifactLifecycle, ArtifactProviderDescriptor,
     ArtifactRecord, ArtifactRecordError, ArtifactResourceVersion, ArtifactSource, ArtifactState,
     ArtifactWorkspaceUiState, UnknownArtifactState,
+};
+pub use terminal::{
+    MAX_TERMINAL_COMMAND_BYTES, MAX_TERMINAL_OUTPUT_BYTES, TerminalArtifactState,
+    TerminalCommandIdentity, TerminalCommandStatus, TerminalDimensions, TerminalOutputBuffer,
+    TerminalProcessProvenance, TerminalStateError,
 };

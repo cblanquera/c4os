@@ -1,6 +1,6 @@
 # Task 00009 — Terminal Facility
 
-Status: open
+Status: started
 
 Coverage: ART-005; support for UX-008, UX-010, UX-014, CHAT-007, ART-001, ART-006, ART-007.
 
@@ -33,7 +33,7 @@ Required evidence: exact dependency lock; automated results; authorization/audit
 
 ## Implementation Notes
 
-Not started. The stale proof behavior that terminates a PTY when a Chat is removed must not be promoted.
+Started 2026-07-21 from verified checkpoint `1a51ac5`. The smallest production-composed golden path is one active Chat owning one Rust-supervised PTY rooted in its active Project: a direct Terminal `Run` must pass the Action Gateway before any command bytes reach the shell, create one durable immutable command artifact, stream bounded sequenced output, record terminal/environment/process provenance, complete with an exit result, and render through the existing shared artifact shell inline and focused. Persistent shell reuse, stdin, resize, Stop/130, Chat-inactivation continuity, restart recovery, and immutable Reply context must extend this path. The stale proof behavior that terminates a PTY when a Chat is removed remains explicitly excluded.
 
 ## Verification Notes
 

@@ -44,6 +44,63 @@ function fileArtifact(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function terminalArtifact(overrides: Record<string, unknown> = {}) {
+  return {
+    artifactId: "artifact-terminal-1",
+    projectId: "project-1",
+    sessionId: "session-1",
+    providerType: "terminal",
+    providerVersion: 1,
+    stateSchemaVersion: 1,
+    recordRevision: 4,
+    title: "$ read value",
+    focusSupported: true,
+    pendingApprovalId: null,
+    status: { kind: "ready", message: null },
+    sourceLabel: "Direct operation",
+    resourceVersion: { sequence: 4, sha256: DIGEST, observedAtMs: 13 },
+    history: [
+      {
+        recordRevision: 1,
+        kind: "commandQueued",
+        recordedAtMs: 10,
+        resourceVersion: { sequence: 1, sha256: DIGEST, observedAtMs: 10 },
+      },
+    ],
+    providerState: {
+      type: "terminal",
+      value: {
+        terminalSessionId: "terminal-session-1",
+        commandId: "terminal-command-1",
+        commandSequence: 1,
+        command: "read value",
+        workingDirectoryDisplay: "/project",
+        shellPath: "/bin/zsh",
+        environmentId: "desktop",
+        environmentGeneration: 1,
+        processGeneration: 1,
+        shellProcessId: 42,
+        foregroundProcessGroupId: 43,
+        columns: 80,
+        rows: 24,
+        outputBase64: "aGVsbG8K",
+        outputText: "hello\n",
+        outputSequence: 2,
+        retainedBytes: 6,
+        droppedBytes: 0,
+        phase: "stdinReady",
+        exitCode: null,
+        statusMessage: null,
+        stdinReady: true,
+        stopAvailable: true,
+        promptReady: false,
+        shellReplaced: false,
+      },
+    },
+    ...overrides,
+  };
+}
+
 function workspace(generation: number, artifacts: readonly unknown[]) {
   return {
     protocolVersion: 1,
@@ -275,5 +332,196 @@ describe("Artifact native adapter", () => {
     const snapshot = await adapter.read();
     expect(snapshot.artifacts[0]?.providerState).toEqual({ type: "unknown" });
     expect(snapshot.artifacts[0]?.focusSupported).toBe(false);
+  });
+
+  it("validates Terminal lifecycle state and serializes every exact live operation", async () => {
+    const calls: { command: string; input: unknown }[] = [];
+    const adapter = createArtifactAdapter({
+      async invoke(command, args) {
+        calls.push({ command, input: args.input });
+        const request = args.request as SnapshotRequest;
+        return response(
+          request,
+          calls.length,
+          workspace(calls.length, [terminalArtifact()]),
+        );
+      },
+    });
+
+    const read = await adapter.read();
+    expect(read.artifacts[0]?.providerState).toMatchObject({
+      type: "terminal",
+      value: { phase: "stdinReady", outputText: "hello\n" },
+    });
+    await adapter.runTerminal({ command: "pwd", columns: 90, rows: 28 });
+    await adapter.submitTerminalStdin({
+      artifactId: "artifact-terminal-1" as never,
+      baseRecordRevision: 4,
+      processGeneration: 1,
+      text: "answer",
+    });
+    await adapter.resizeTerminal({
+      artifactId: "artifact-terminal-1" as never,
+      baseRecordRevision: 4,
+      processGeneration: 1,
+      columns: 100,
+      rows: 30,
+    });
+    await adapter.stopTerminal({
+      artifactId: "artifact-terminal-1" as never,
+      baseRecordRevision: 4,
+      processGeneration: 1,
+    });
+    await adapter.acknowledgeTerminalOutput({
+      artifactId: "artifact-terminal-1" as never,
+      processGeneration: 1,
+      outputSequence: 2,
+    });
+
+    expect(calls).toEqual([
+      { command: "artifact_snapshot", input: undefined },
+      {
+        command: "artifact_run_terminal",
+        input: { command: "pwd", columns: 90, rows: 28 },
+      },
+      {
+        command: "artifact_terminal_stdin",
+        input: {
+          artifactId: "artifact-terminal-1",
+          baseRecordRevision: 4,
+          processGeneration: 1,
+          text: "answer",
+        },
+      },
+      {
+        command: "artifact_terminal_resize",
+        input: {
+          artifactId: "artifact-terminal-1",
+          baseRecordRevision: 4,
+          processGeneration: 1,
+          columns: 100,
+          rows: 30,
+        },
+      },
+      {
+        command: "artifact_terminal_stop",
+        input: {
+          artifactId: "artifact-terminal-1",
+          baseRecordRevision: 4,
+          processGeneration: 1,
+        },
+      },
+      {
+        command: "artifact_terminal_ack_output",
+        input: {
+          artifactId: "artifact-terminal-1",
+          processGeneration: 1,
+          outputSequence: 2,
+        },
+      },
+    ]);
+  });
+
+  it("fails closed for unsafe or lifecycle-inconsistent Terminal projections", async () => {
+    const invalid = [
+      terminalArtifact({
+        providerState: {
+          ...terminalArtifact().providerState,
+          value: {
+            ...(terminalArtifact().providerState as { value: object }).value,
+            outputText: "visible\u001bhidden",
+          },
+        },
+      }),
+      terminalArtifact({
+        providerState: {
+          ...terminalArtifact().providerState,
+          value: {
+            ...(terminalArtifact().providerState as { value: object }).value,
+            retainedBytes: 7,
+          },
+        },
+      }),
+      terminalArtifact({
+        providerState: {
+          ...terminalArtifact().providerState,
+          value: {
+            ...(terminalArtifact().providerState as { value: object }).value,
+            phase: "completed",
+            exitCode: 0,
+            foregroundProcessGroupId: 43,
+            stdinReady: false,
+            stopAvailable: false,
+            promptReady: true,
+          },
+        },
+      }),
+    ];
+    for (const artifact of invalid) {
+      const adapter = createArtifactAdapter({
+        async invoke(_command, args) {
+          const request = args.request as SnapshotRequest;
+          return response(request, 1, workspace(1, [artifact]));
+        },
+      });
+      await expect(adapter.read()).rejects.toMatchObject({
+        code: "invalidPayload",
+      });
+    }
+  });
+
+  it("accepts a pending live Terminal control only when Stop authority is withheld", async () => {
+    const pendingLive = terminalArtifact({
+      pendingApprovalId: "approval-terminal-input",
+      status: {
+        kind: "ready",
+        message:
+          "Approval is required before this Terminal operation can continue.",
+      },
+      providerState: {
+        ...terminalArtifact().providerState,
+        value: {
+          ...(terminalArtifact().providerState as { value: object }).value,
+          stopAvailable: false,
+        },
+      },
+    });
+    const adapter = createArtifactAdapter({
+      async invoke(_command, args) {
+        const request = args.request as SnapshotRequest;
+        return response(request, 1, workspace(1, [pendingLive]));
+      },
+    });
+    await expect(adapter.read()).resolves.toMatchObject({
+      artifacts: [
+        {
+          pendingApprovalId: "approval-terminal-input",
+          providerState: {
+            type: "terminal",
+            value: { phase: "stdinReady", stopAvailable: false },
+          },
+        },
+      ],
+    });
+
+    const unsafe = {
+      ...pendingLive,
+      providerState: {
+        ...pendingLive.providerState,
+        value: {
+          ...(pendingLive.providerState as { value: object }).value,
+          stopAvailable: true,
+        },
+      },
+    };
+    const unsafeAdapter = createArtifactAdapter({
+      async invoke(_command, args) {
+        const request = args.request as SnapshotRequest;
+        return response(request, 1, workspace(1, [unsafe]));
+      },
+    });
+    await expect(unsafeAdapter.read()).rejects.toMatchObject({
+      code: "invalidPayload",
+    });
   });
 });

@@ -5,6 +5,7 @@
 //! cannot accidentally degrade into a permissive operation.
 //! JSON object fields and enum discriminants use stable `camelCase` names.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -1008,11 +1009,43 @@ pub struct ArtifactFolderSnapshot {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalSnapshot {
+    pub terminal_session_id: String,
+    pub command_id: String,
+    pub command_sequence: u64,
+    pub command: String,
+    pub working_directory_display: String,
+    pub shell_path: String,
+    pub environment_id: String,
+    pub environment_generation: u64,
+    pub process_generation: u64,
+    pub shell_process_id: Option<u32>,
+    pub foreground_process_group_id: Option<u32>,
+    pub columns: u16,
+    pub rows: u16,
+    pub output_base64: String,
+    pub output_text: String,
+    pub output_sequence: u64,
+    pub retained_bytes: u64,
+    pub dropped_bytes: u64,
+    pub phase: String,
+    pub exit_code: Option<i32>,
+    pub status_message: Option<String>,
+    pub stdin_ready: bool,
+    pub stop_available: bool,
+    pub prompt_ready: bool,
+    pub shell_replaced: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub enum ArtifactProviderStateSnapshot {
     File(ArtifactFileSnapshot),
     Folder(ArtifactFolderSnapshot),
+    Terminal(ArtifactTerminalSnapshot),
     Unknown,
 }
 
@@ -1096,6 +1129,54 @@ pub struct ArtifactContextExpandInput {
     pub maximum_bytes: u64,
     pub selected_text: Option<String>,
     pub selected_entry_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalRunInput {
+    pub command: String,
+    pub columns: u16,
+    pub rows: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalStdinInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub process_generation: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalResizeInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub process_generation: u64,
+    pub columns: u16,
+    pub rows: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalOperationInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub process_generation: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactTerminalOutputAckInput {
+    pub artifact_id: ArtifactId,
+    pub process_generation: u64,
+    pub output_sequence: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1222,6 +1303,111 @@ impl ArtifactContextExpandInput {
             ));
         }
         validate_artifact_context_selection(&self.selected_text, &self.selected_entry_id)
+    }
+}
+
+fn validate_terminal_dimensions(columns: u16, rows: u16) -> Result<(), ProtocolError> {
+    if !(20..=500).contains(&columns) || !(4..=300).contains(&rows) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Terminal dimensions are outside the supported range",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+impl ArtifactTerminalRunInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.command.trim().is_empty()
+            || self.command.len() > 16 * 1_024
+            || self.command.chars().any(char::is_control)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Terminal command must be one bounded line",
+                false,
+            ));
+        }
+        validate_terminal_dimensions(self.columns, self.rows)
+    }
+}
+
+impl ArtifactTerminalStdinInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        if self.process_generation == 0 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "Terminal process generation must be non-zero",
+                false,
+            ));
+        }
+        if self.text.is_empty()
+            || self.text.len() > 64 * 1_024
+            || self.text.chars().any(char::is_control)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Terminal input exceeds its bound",
+                false,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactTerminalResizeInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        if self.process_generation == 0 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "Terminal process generation must be non-zero",
+                false,
+            ));
+        }
+        validate_terminal_dimensions(self.columns, self.rows)
+    }
+}
+
+impl ArtifactTerminalOperationInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        ArtifactMutationInput {
+            artifact_id: self.artifact_id.clone(),
+            base_record_revision: self.base_record_revision,
+        }
+        .validate()?;
+        if self.process_generation == 0 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "Terminal process generation must be non-zero",
+                false,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactTerminalOutputAckInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.artifact_id.validate()?;
+        if self.process_generation == 0 || self.output_sequence == 0 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidGeneration,
+                "Terminal output acknowledgement is invalid",
+                false,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1888,11 +2074,137 @@ pub fn artifact_workspace_snapshot(
                     }
                 }
             }
+            ArtifactProviderStateSnapshot::Terminal(terminal) => {
+                if artifact.provider_type != "terminal"
+                    || artifact.provider_version != 1
+                    || artifact.state_schema_version != 1
+                    || terminal.command_sequence == 0
+                    || terminal.environment_generation == 0
+                    || terminal.process_generation == 0
+                    || terminal.output_sequence == 0
+                    || terminal.shell_process_id == Some(0)
+                    || terminal.foreground_process_group_id == Some(0)
+                    || !(20..=500).contains(&terminal.columns)
+                    || !(4..=300).contains(&terminal.rows)
+                    || terminal.retained_bytes > 256 * 1_024
+                    || !matches!(
+                        terminal.phase.as_str(),
+                        "queued"
+                            | "approvalWaiting"
+                            | "running"
+                            | "stdinReady"
+                            | "stopping"
+                            | "completed"
+                            | "interrupted"
+                            | "failed"
+                            | "recovery"
+                    )
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Terminal artifact provider state is invalid",
+                        false,
+                    ));
+                }
+                validate_identifier("Terminal session id", &terminal.terminal_session_id)?;
+                validate_identifier("Terminal command id", &terminal.command_id)?;
+                validate_identifier("Terminal environment id", &terminal.environment_id)?;
+                validate_display_text("Terminal command", &terminal.command, 16 * 1_024)?;
+                validate_display_text(
+                    "Terminal working directory",
+                    &terminal.working_directory_display,
+                    4_096,
+                )?;
+                validate_display_text("Terminal shell path", &terminal.shell_path, 4_096)?;
+                if let Some(message) = &terminal.status_message {
+                    validate_display_text("Terminal status", message, MAX_DIAGNOSTIC_BYTES)?;
+                }
+                let output = BASE64_STANDARD
+                    .decode(&terminal.output_base64)
+                    .map_err(|_| {
+                        ProtocolError::new(
+                            ProtocolErrorCode::InvalidPayload,
+                            "Terminal output encoding is invalid",
+                            false,
+                        )
+                    })?;
+                if output.len() as u64 != terminal.retained_bytes {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Terminal output length is invalid",
+                        false,
+                    ));
+                }
+                if terminal.output_text.len() > 256 * 1_024
+                    || terminal.output_text.contains('\0')
+                    || terminal.output_text.chars().any(|character| {
+                        character.is_control() && !matches!(character, '\n' | '\r' | '\t')
+                    })
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Terminal semantic output is invalid",
+                        false,
+                    ));
+                }
+                let approval_waiting = terminal.phase == "approvalWaiting";
+                if (approval_waiting && artifact.pending_approval_id.is_none())
+                    || (terminal.phase == "queued" && artifact.pending_approval_id.is_some())
+                    || terminal.stop_available
+                        != (artifact.pending_approval_id.is_none()
+                            && matches!(terminal.phase.as_str(), "running" | "stdinReady"))
+                    || terminal.stdin_ready != (terminal.phase == "stdinReady")
+                    || terminal.exit_code.is_some()
+                        != matches!(terminal.phase.as_str(), "completed" | "interrupted")
+                    || (terminal.phase == "interrupted" && terminal.exit_code != Some(130))
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Terminal lifecycle projection is inconsistent",
+                        false,
+                    ));
+                }
+                let live_phase = matches!(
+                    terminal.phase.as_str(),
+                    "running" | "stdinReady" | "stopping"
+                );
+                let prompt_phase = terminal.phase == "completed"
+                    || (terminal.phase == "interrupted" && !terminal.shell_replaced);
+                let dead_phase = matches!(terminal.phase.as_str(), "failed" | "recovery")
+                    || (terminal.phase == "interrupted" && terminal.shell_replaced);
+                if (live_phase
+                    && (terminal.shell_process_id.is_none()
+                        || terminal.foreground_process_group_id.is_none()))
+                    || (matches!(terminal.phase.as_str(), "queued" | "approvalWaiting")
+                        && (terminal.shell_process_id.is_some()
+                            || terminal.foreground_process_group_id.is_some()))
+                    || (prompt_phase
+                        && (terminal.shell_process_id.is_none()
+                            || terminal.foreground_process_group_id.is_some()))
+                    || (dead_phase
+                        && (terminal.shell_process_id.is_some()
+                            || terminal.foreground_process_group_id.is_some()))
+                    || terminal.prompt_ready != prompt_phase
+                    || terminal.shell_replaced != matches!(terminal.phase.as_str(), "recovery")
+                        && terminal.phase != "interrupted"
+                    || (matches!(
+                        terminal.phase.as_str(),
+                        "failed" | "recovery" | "interrupted"
+                    ) && terminal.status_message.is_none())
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Terminal process projection is inconsistent",
+                        false,
+                    ));
+                }
+            }
             ArtifactProviderStateSnapshot::Unknown => {
-                let is_supported_known_version =
-                    matches!(artifact.provider_type.as_str(), "file" | "folder")
-                        && artifact.provider_version == 1
-                        && artifact.state_schema_version == 1;
+                let is_supported_known_version = matches!(
+                    artifact.provider_type.as_str(),
+                    "file" | "folder" | "terminal"
+                ) && artifact.provider_version == 1
+                    && artifact.state_schema_version == 1;
                 if artifact.focus_supported
                     || artifact.status.kind != "degraded"
                     || is_supported_known_version

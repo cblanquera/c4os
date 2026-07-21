@@ -1,0 +1,205 @@
+.artifact-terminal {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-sunken);
+}
+
+.artifact-terminal[data-terminal-context="focused"] {
+  height: 100%;
+  grid-template-rows: minmax(180px, 1fr) auto auto auto;
+}
+
+.artifact-shell[data-artifact-context="focused"]
+  .artifact-shell__body:has(
+    > .artifact-terminal[data-terminal-context="focused"]
+  ) {
+  overflow: hidden;
+}
+
+.artifact-terminal__viewport,
+.artifact-terminal__output {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-family:
+    ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.artifact-terminal__output {
+  min-height: 84px;
+  padding: 2px;
+}
+
+.artifact-terminal__viewport {
+  position: relative;
+}
+
+.artifact-terminal__viewport .xterm {
+  height: 100%;
+  padding: 2px;
+}
+
+.artifact-terminal__viewport:focus-within,
+.artifact-terminal__output:focus-visible,
+.artifact-terminal__input input:focus-visible,
+.artifact-terminal__metadata button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.artifact-terminal__metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.artifact-terminal__approval {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.artifact-terminal__location {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.artifact-terminal__location strong,
+.artifact-terminal__location span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-terminal__location span,
+.artifact-terminal__retention,
+.artifact-terminal__phase,
+.artifact-terminal__footer-status {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.artifact-terminal__metadata details {
+  position: relative;
+  flex: none;
+}
+
+.artifact-terminal__metadata summary {
+  cursor: default;
+}
+
+.artifact-terminal__metadata dl {
+  display: grid;
+  min-width: min(320px, 70vw);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--border-separator);
+  border-radius: var(--control-radius-small);
+  background: var(--surface-raised);
+}
+
+.artifact-terminal__metadata dt {
+  color: var(--text-secondary);
+}
+
+.artifact-terminal__metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.artifact-terminal__retention,
+.artifact-terminal__message,
+.artifact-terminal__phase {
+  margin: 0;
+}
+
+.artifact-terminal[data-terminal-phase="failed"] .artifact-terminal__message {
+  color: var(--danger);
+}
+
+.artifact-terminal__input {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.artifact-terminal__input label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.artifact-terminal__input input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-separator);
+  border-radius: var(--control-radius-small);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 7px 8px;
+}
+
+.artifact-terminal__prompt label {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.artifact-terminal__visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .artifact-terminal__metadata {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .artifact-terminal__location {
+    flex-basis: 100%;
+  }
+
+  .artifact-terminal__input {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-terminal,
+  .artifact-terminal * {
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+  }
+
+  .artifact-terminal__viewport .xterm-cursor-layer {
+    animation: none !important;
+  }
+}

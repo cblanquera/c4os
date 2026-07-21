@@ -28,6 +28,7 @@ import {
 import {
   FileArtifact,
   FolderArtifact,
+  TerminalArtifact,
   UnknownArtifact,
   type ArtifactContext,
   type FileArtifactState,
@@ -71,6 +72,7 @@ import {
 } from "../../platform/conversation-service";
 import {
   answerArtifactApproval,
+  acknowledgeTerminalArtifactOutput,
   beginFileArtifactEdit,
   closeArtifactFocus,
   discardFileArtifactDraft,
@@ -83,8 +85,12 @@ import {
   refreshFolderArtifact,
   replyToArtifact,
   resolveFileArtifactConflict,
+  resizeTerminalArtifact,
+  runTerminalArtifact,
   saveFileArtifact,
   selectFolderArtifactEntry,
+  stopTerminalArtifact,
+  submitTerminalArtifactStdin,
   updateFileArtifactDraft,
   type ArtifactMutationInput,
   type ArtifactSnapshot as NativeArtifactSnapshot,
@@ -176,6 +182,12 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const artifactDraftTimers = useRef(new Map<string, number>());
   const artifactDraftOverridesRef = useRef<Record<string, string>>({});
   const [artifactDraftOverrides, setArtifactDraftOverrides] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const [terminalPromptValues, setTerminalPromptValues] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const [terminalStdinValues, setTerminalStdinValues] = useState<
     Readonly<Record<string, string>>
   >({});
   const replyReference = useMemo(
@@ -366,6 +378,41 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     [queueArtifactWorkspaceOperation],
   );
 
+  const queueTerminalMutation = useCallback(
+    (
+      artifactId: string,
+      operation: (
+        artifact: NativeArtifactSnapshot & {
+          readonly providerState: Extract<
+            NativeArtifactSnapshot["providerState"],
+            { readonly type: "terminal" }
+          >;
+        },
+      ) => Promise<ArtifactWorkspaceSnapshot>,
+    ): Promise<ArtifactWorkspaceSnapshot> =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          const latest = await readArtifactWorkspaceSnapshot();
+          const artifact = latest.artifacts.find(
+            (candidate) => candidate.artifactId === artifactId,
+          );
+          if (artifact?.providerState.type !== "terminal") {
+            throw new Error("The Terminal artifact is no longer available.");
+          }
+          return operation(
+            artifact as NativeArtifactSnapshot & {
+              readonly providerState: Extract<
+                NativeArtifactSnapshot["providerState"],
+                { readonly type: "terminal" }
+              >;
+            },
+          );
+        },
+        { rebaseConversation: true },
+      ),
+    [queueArtifactWorkspaceOperation],
+  );
+
   useEffect(() => {
     if (sessions.value.activeSessionId === null) {
       artifactWorkspaceRef.current = null;
@@ -379,6 +426,38 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     sessions.value.activeSessionId,
     workspace.value.activeProjectId,
   ]);
+
+  const terminalPollingActive =
+    activeArtifactWorkspace?.artifacts.some(
+      (artifact) =>
+        artifact.providerState.type === "terminal" &&
+        (artifact.providerState.value.phase === "queued" ||
+          artifact.providerState.value.phase === "running" ||
+          artifact.providerState.value.phase === "stdinReady" ||
+          artifact.providerState.value.phase === "stopping"),
+    ) === true;
+
+  useEffect(() => {
+    if (!terminalPollingActive) return;
+    let disposed = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      try {
+        await queueArtifactWorkspaceOperation(readArtifactWorkspaceSnapshot, {
+          rebaseConversation: true,
+        });
+      } catch {
+        // The queued operation already publishes its bounded native error.
+      } finally {
+        if (!disposed) timer = window.setTimeout(() => void poll(), 125);
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 125);
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [queueArtifactWorkspaceOperation, terminalPollingActive]);
 
   useEffect(() => {
     const prior = priorActiveAttemptId.current;
@@ -931,18 +1010,28 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     });
     if (signature === persistedDraftSignature.current) return;
     const timer = window.setTimeout(() => {
-      void updateConversationDraft({
-        prompt: composerDraft.text,
-        pickerGrantIds: [],
-        retainedAttachmentIds: composerDraft.attachments.map(
-          (attachment) => attachment.id,
-        ),
-        providerId: selectedModel?.providerId ?? null,
-        modelId: selectedModel?.modelId ?? null,
-        reasoningMode: selectedReasoning,
-        mode: replyReference ? "chat" : composerDraft.mode,
-        replyTargetId: replyReference?.id ?? null,
-      })
+      const queued = artifactOperationQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          // Terminal event polling and Conversation drafts share the Workspace
+          // generation. Rebase only after prior Artifact work has settled, then
+          // keep the draft write in that same serialized operation stream.
+          await readConversationSnapshot();
+          return updateConversationDraft({
+            prompt: composerDraft.text,
+            pickerGrantIds: [],
+            retainedAttachmentIds: composerDraft.attachments.map(
+              (attachment) => attachment.id,
+            ),
+            providerId: selectedModel?.providerId ?? null,
+            modelId: selectedModel?.modelId ?? null,
+            reasoningMode: selectedReasoning,
+            mode: replyReference ? "chat" : composerDraft.mode,
+            replyTargetId: replyReference?.id ?? null,
+          });
+        });
+      artifactOperationQueue.current = queued;
+      void queued
         .then((snapshot) => {
           persistedDraftSignature.current = signature;
           publishConversation(snapshot);
@@ -963,6 +1052,27 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     selectedReasoning,
     sessions.value.activeSessionId,
   ]);
+
+  const submitTerminalCommand = async (source: string) => {
+    const command = source.trim();
+    if (command.length === 0) return;
+    setConversationBusy(true);
+    setConversationError(null);
+    try {
+      await queueArtifactWorkspaceOperation(
+        async () => {
+          await readArtifactWorkspaceSnapshot();
+          return runTerminalArtifact({ command, columns: 80, rows: 24 });
+        },
+        { rebaseConversation: true },
+      );
+      dispatch(shellDraftActions.composerTextChanged(""));
+    } catch (error) {
+      setConversationError(messageFor(error));
+    } finally {
+      setConversationBusy(false);
+    }
+  };
 
   const submitChat = async (source: string) => {
     const expectedReplyTargetId = composerDraft.replyTargetId;
@@ -1346,6 +1456,165 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           />
         );
       }
+      if (nativeArtifact.providerState.type === "terminal") {
+        const terminal = nativeArtifact.providerState.value;
+        const artifactId = nativeArtifact.artifactId;
+        return (
+          <TerminalArtifact
+            context={context}
+            model={{
+              ...terminal,
+              artifactId,
+              pendingApprovalId: nativeArtifact.pendingApprovalId,
+              status: nativeArtifact.status,
+            }}
+            {...common}
+            onAllowApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "allow")
+            }
+            onDenyApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "deny")
+            }
+            onOutputWritten={(outputSequence) => {
+              void queueArtifactWorkspaceOperation(
+                async () => {
+                  const latest = await readArtifactWorkspaceSnapshot();
+                  const current = latest.artifacts.find(
+                    (candidate) => candidate.artifactId === artifactId,
+                  );
+                  if (
+                    current?.providerState.type !== "terminal" ||
+                    current.providerState.value.outputSequence !==
+                      outputSequence
+                  ) {
+                    return latest;
+                  }
+                  return acknowledgeTerminalArtifactOutput({
+                    artifactId: current.artifactId,
+                    processGeneration:
+                      current.providerState.value.processGeneration,
+                    outputSequence,
+                  });
+                },
+                { rebaseConversation: true },
+              );
+            }}
+            onPromptValueChange={(value) =>
+              setTerminalPromptValues((current) => ({
+                ...current,
+                [artifactId]: value,
+              }))
+            }
+            onReply={(replyArtifactId, selection) =>
+              void selectArtifactForReply(replyArtifactId, selection)
+            }
+            {...(terminal.phase === "running" || terminal.phase === "stdinReady"
+              ? {
+                  onResize: ({ columns, rows }) => {
+                    if (
+                      columns === terminal.columns &&
+                      rows === terminal.rows
+                    ) {
+                      return;
+                    }
+                    void queueTerminalMutation(artifactId, (current) =>
+                      resizeTerminalArtifact({
+                        artifactId: current.artifactId,
+                        baseRecordRevision: current.recordRevision,
+                        processGeneration:
+                          current.providerState.value.processGeneration,
+                        columns,
+                        rows,
+                      }),
+                    );
+                  },
+                }
+              : {})}
+            onRunNext={({ command }) => {
+              void queueArtifactWorkspaceOperation(
+                async () => {
+                  await readArtifactWorkspaceSnapshot();
+                  return runTerminalArtifact({
+                    command,
+                    columns: terminal.columns,
+                    rows: terminal.rows,
+                  });
+                },
+                { rebaseConversation: true },
+              )
+                .then(async (snapshot) => {
+                  setTerminalPromptValues((current) => ({
+                    ...current,
+                    [artifactId]: "",
+                  }));
+                  const next = snapshot.artifacts
+                    .filter(
+                      (candidate) =>
+                        candidate.providerState.type === "terminal" &&
+                        candidate.providerState.value.terminalSessionId ===
+                          terminal.terminalSessionId,
+                    )
+                    .sort((left, right) => {
+                      if (
+                        left.providerState.type !== "terminal" ||
+                        right.providerState.type !== "terminal"
+                      ) {
+                        return 0;
+                      }
+                      return (
+                        right.providerState.value.commandSequence -
+                        left.providerState.value.commandSequence
+                      );
+                    })[0];
+                  if (
+                    next !== undefined &&
+                    snapshot.focusedArtifactId !== next.artifactId
+                  ) {
+                    await focusNativeArtifact(next.artifactId);
+                  }
+                })
+                .catch(() => undefined);
+            }}
+            onStdinValueChange={(value) =>
+              setTerminalStdinValues((current) => ({
+                ...current,
+                [artifactId]: value,
+              }))
+            }
+            onStop={(stopArtifactId) =>
+              void queueTerminalMutation(stopArtifactId, (current) =>
+                stopTerminalArtifact({
+                  artifactId: current.artifactId,
+                  baseRecordRevision: current.recordRevision,
+                  processGeneration:
+                    current.providerState.value.processGeneration,
+                }),
+              )
+            }
+            onSubmitStdin={({ input }) =>
+              void queueTerminalMutation(artifactId, (current) =>
+                submitTerminalArtifactStdin({
+                  artifactId: current.artifactId,
+                  baseRecordRevision: current.recordRevision,
+                  processGeneration:
+                    current.providerState.value.processGeneration,
+                  text: input,
+                }),
+              )
+                .then(() =>
+                  setTerminalStdinValues((current) => ({
+                    ...current,
+                    [artifactId]: "",
+                  })),
+                )
+                .catch(() => undefined)
+            }
+            promptValue={terminalPromptValues[artifactId] ?? ""}
+            reducedMotion={platform.value.reducedMotion}
+            stdinValue={terminalStdinValues[artifactId] ?? ""}
+          />
+        );
+      }
       return (
         <UnknownArtifact
           artifactId={nativeArtifact.artifactId}
@@ -1370,9 +1639,14 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       decideArtifactApproval,
       focusNativeArtifact,
       queueArtifactMutation,
+      queueArtifactWorkspaceOperation,
+      queueTerminalMutation,
       retainArtifactDraft,
       saveArtifactDraft,
       selectArtifactForReply,
+      terminalPromptValues,
+      terminalStdinValues,
+      platform.value.reducedMotion,
     ],
   );
 
@@ -1537,6 +1811,12 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     sessions.value.activeSessionId !== null &&
     conversation.value.activeAttemptId === null &&
     activeComposerModel?.available === true;
+  const terminalComposerActive =
+    replyReference === null && composerDraft.mode === "terminal";
+  const canSubmitComposer = terminalComposerActive
+    ? sessions.value.activeSessionId !== null &&
+      conversation.value.activeAttemptId === null
+    : canSubmitChat;
   const composerAttachments = composerDraft.attachments.map((attachment) => {
     const compatibility = attachmentCompatibility(
       attachment.mediaType,
@@ -1604,7 +1884,9 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     (latestAssistantTurn?.inputTokens ?? 0) +
     (latestAssistantTurn?.outputTokens ?? 0);
   const directModeUnavailable =
-    replyReference === null && composerDraft.mode !== "chat";
+    replyReference === null &&
+    composerDraft.mode !== "chat" &&
+    composerDraft.mode !== "terminal";
   const conversationTranscript = (
     <ConversationTranscript
       onArtifactFocusRequest={(artifactId) =>
@@ -1739,7 +2021,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           isDisabled={conversationBusy}
           isModeLocked={focusedConversationArtifact !== null}
           isSubmitDisabled={
-            !canSubmitChat ||
+            !canSubmitComposer ||
             directModeUnavailable ||
             incompatibleAttachment !== undefined
           }
@@ -1793,7 +2075,11 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           onRemoveReply={() =>
             dispatch(shellDraftActions.composerReplyChanged(null))
           }
-          onSubmit={(submission) => void submitChat(submission.source)}
+          onSubmit={(submission) =>
+            void (terminalComposerActive
+              ? submitTerminalCommand(submission.source)
+              : submitChat(submission.source))
+          }
           onValueChange={(value) =>
             dispatch(shellDraftActions.composerTextChanged(value))
           }

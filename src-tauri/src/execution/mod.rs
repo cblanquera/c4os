@@ -1,6 +1,7 @@
 pub mod environment;
 pub mod filesystem;
 pub mod git;
+pub mod terminal;
 
 pub use environment::{
     CredentialReference, DockerExecutionProfile, ExactExecutionEffect, ExactExecutionGrant,

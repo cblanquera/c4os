@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use super::file::FileArtifactState;
 use super::folder::FolderArtifactState;
+use super::terminal::TerminalArtifactState;
 
 pub const ARTIFACT_SCHEMA_VERSION: u16 = 1;
 pub const ARTIFACT_PROVIDER_SCHEMA_VERSION: u16 = 1;
@@ -46,6 +47,16 @@ impl ArtifactProviderDescriptor {
             type_id: "folder".into(),
             label: "Folder".into(),
             accessible_name: "Folder artifact".into(),
+            focus: ArtifactFocusCapability::Focusable,
+        }
+    }
+
+    pub fn terminal() -> Self {
+        Self {
+            schema_version: ARTIFACT_PROVIDER_SCHEMA_VERSION,
+            type_id: "terminal".into(),
+            label: "Terminal".into(),
+            accessible_name: "Terminal command artifact".into(),
             focus: ArtifactFocusCapability::Focusable,
         }
     }
@@ -186,6 +197,7 @@ impl UnknownArtifactState {
 pub enum ArtifactState {
     File(Box<FileArtifactState>),
     Folder(Box<FolderArtifactState>),
+    Terminal(Box<TerminalArtifactState>),
     Unknown(UnknownArtifactState),
 }
 
@@ -194,6 +206,7 @@ impl ArtifactState {
         match self {
             Self::File(file) => file.live_version.as_resource_version(),
             Self::Folder(folder) => folder.listing_version.as_resource_version(),
+            Self::Terminal(terminal) => terminal.as_resource_version(),
             Self::Unknown(unknown) => unknown.resource_version.clone(),
         }
     }
@@ -202,6 +215,7 @@ impl ArtifactState {
         match self {
             Self::File(file) => file.validate().map_err(ArtifactRecordError::File),
             Self::Folder(folder) => folder.validate().map_err(ArtifactRecordError::Folder),
+            Self::Terminal(terminal) => terminal.validate().map_err(ArtifactRecordError::Terminal),
             Self::Unknown(unknown) => unknown.validate(),
         }
     }
@@ -221,6 +235,15 @@ pub enum ArtifactHistoryKind {
     RecoveryChanged,
     NavigationChanged,
     Converted,
+    CommandQueued,
+    CommandStarted,
+    OutputAppended,
+    InputSubmitted,
+    TerminalResized,
+    StopRequested,
+    CommandCompleted,
+    CommandInterrupted,
+    CommandFailed,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -401,7 +424,9 @@ impl ArtifactRecord {
 
     fn validate_provider_state_pair(&self) -> Result<(), ArtifactRecordError> {
         match (&self.state, self.provider.type_id.as_str()) {
-            (ArtifactState::File(_), "file") | (ArtifactState::Folder(_), "folder")
+            (ArtifactState::File(_), "file")
+            | (ArtifactState::Folder(_), "folder")
+            | (ArtifactState::Terminal(_), "terminal")
                 if self.provider.schema_version == ARTIFACT_PROVIDER_SCHEMA_VERSION
                     && !matches!(&self.lifecycle, ArtifactLifecycle::UnknownVersion { .. }) =>
             {
@@ -478,6 +503,8 @@ pub enum ArtifactRecordError {
     File(#[from] super::file::FileStateError),
     #[error(transparent)]
     Folder(#[from] super::folder::FolderStateError),
+    #[error(transparent)]
+    Terminal(#[from] super::terminal::TerminalStateError),
 }
 
 pub(crate) fn validate_identifier(
