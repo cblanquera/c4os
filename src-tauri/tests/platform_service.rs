@@ -305,3 +305,35 @@ fn picker_registry_rejects_conflicts_without_partial_registration() {
     );
     assert!(registry.is_empty());
 }
+
+#[test]
+fn picker_registry_batch_take_is_all_or_nothing_and_preserves_order() {
+    let platform = service();
+    let request =
+        platform.picker_request(request_id("picker-batch"), PickerPurpose::AttachChatFiles);
+    let selections = [
+        NativePickerSelection::new("/private/tmp/one.txt", PickerObjectKind::File).unwrap(),
+        NativePickerSelection::new("/private/tmp/two.txt", PickerObjectKind::File).unwrap(),
+    ];
+    let mut registry = PickerGrantRegistry::default();
+    registry
+        .register_batch(
+            &request,
+            &selections,
+            vec![grant_id("grant-one"), grant_id("grant-two")],
+            1,
+        )
+        .unwrap();
+    assert!(
+        registry
+            .take_batch(&[grant_id("grant-one"), grant_id("missing")])
+            .is_err()
+    );
+    assert_eq!(registry.len(), 2);
+    let grants = registry
+        .take_batch(&[grant_id("grant-two"), grant_id("grant-one")])
+        .unwrap();
+    assert_eq!(grants[0].path().to_str(), Some("/private/tmp/two.txt"));
+    assert_eq!(grants[1].path().to_str(), Some("/private/tmp/one.txt"));
+    assert!(registry.is_empty());
+}

@@ -1,0 +1,167 @@
+.conversation-branch-control {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.conversation-branch-control__status {
+  display: inline-block;
+  max-width: min(44ch, 55vw);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.conversation-branch-control__trigger {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 180px;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-small);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.conversation-branch-control__trigger > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-branch-control__trigger[data-hovered],
+.conversation-branch-control__branch[data-hovered],
+.conversation-branch-control__create[data-hovered] {
+  background: var(--selection);
+}
+
+.conversation-branch-control__trigger[data-focus-visible],
+.conversation-branch-control__branch[data-focus-visible],
+.conversation-branch-control__create[data-focus-visible],
+.conversation-branch-control__field input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.conversation-branch-control__trigger[data-disabled] {
+  color: var(--text-disabled);
+}
+
+.conversation-branch-control__mark {
+  color: var(--text-secondary);
+}
+
+.conversation-branch-control__popover {
+  width: min(300px, calc(100vw - 24px));
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-medium);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-primary);
+}
+
+.conversation-branch-control__menu {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 5px;
+  outline: none;
+}
+
+.conversation-branch-control__menu section {
+  display: grid;
+  gap: 2px;
+}
+
+.conversation-branch-control__branch,
+.conversation-branch-control__create {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--control-radius-small);
+  cursor: default;
+}
+
+.conversation-branch-control__branch[data-selected] {
+  background: var(--selection);
+  font-weight: 680;
+}
+
+.conversation-branch-control__branch small {
+  color: var(--text-secondary);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.conversation-branch-control__create {
+  margin-block-start: 4px;
+  border-block-start: 1px solid var(--border-separator);
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+.conversation-branch-control__approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 0.73rem;
+}
+
+.conversation-branch-control__approval-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.conversation-branch-control__approval-actions button {
+  min-height: 28px;
+  padding-inline: 7px;
+}
+
+.conversation-branch-control__field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 680;
+}
+
+.conversation-branch-control__field input {
+  min-height: 34px;
+  padding-inline: 9px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-small);
+  background: var(--surface-window);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 400;
+}
+
+.conversation-branch-control__field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.conversation-branch-control__error {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 0.73rem;
+}
+
+@media (max-width: 620px) {
+  .conversation-branch-control__approval {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

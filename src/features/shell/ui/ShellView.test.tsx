@@ -224,9 +224,6 @@ describe("ShellView", () => {
     expect(
       screen.getByText("Not available: Detached native windows."),
     ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Reply target: Chat" }),
-    ).toBeDisabled();
 
     rerender(<ShellView {...createProps({ route: "/browser" })} />);
     expect(screen.getByRole("button", { name: "New tab" })).toBeDisabled();

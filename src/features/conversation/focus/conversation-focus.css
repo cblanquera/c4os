@@ -1,0 +1,74 @@
+.conversation-focus__center,
+.conversation-focus__artifact {
+  min-width: 0;
+  min-height: 100%;
+}
+
+.conversation-focus__artifact {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.conversation-focus__artifact-header,
+.conversation-focus__contextual-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-block-end: 1px solid var(--border-separator);
+}
+
+.conversation-focus__artifact-header h2,
+.conversation-focus__contextual-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-focus__artifact-content,
+.conversation-focus__contextual-transcript {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.conversation-focus__contextual-chat {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.conversation-focus__contextual-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 4px;
+}
+
+.conversation-focus__activity {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.conversation-focus__activity > p {
+  color: var(--text-secondary);
+}
+
+.conversation-focus__activity ol {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 0;
+  padding-inline-start: 24px;
+}
+
+.conversation-focus__activity li p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}

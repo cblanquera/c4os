@@ -20,7 +20,10 @@ use crate::runtime::capability::{
 pub const SESSION_SCHEMA_VERSION: u16 = 3;
 pub const MAX_SESSION_IDENTIFIER_BYTES: usize = 160;
 pub const MAX_SESSION_TEXT_BYTES: usize = 1_048_576;
-pub const MAX_SESSION_TITLE_CHARS: usize = 80;
+/// Accepted Chat titles occupy at most 48 visible characters. A truncated
+/// title reserves the final character for the ellipsis so the complete value
+/// remains inside that bound.
+pub const MAX_SESSION_TITLE_CHARS: usize = 48;
 pub const MAX_ATTACHMENTS_PER_TURN: usize = 64;
 pub const MAX_RESOURCES_PER_SNAPSHOT: usize = 512;
 pub const MAX_CAPABILITIES_PER_SNAPSHOT: usize = 512;
@@ -175,6 +178,9 @@ pub struct AttachmentSnapshot {
     pub byte_length: u64,
     pub content_sha256: String,
     pub snapshot_version: u64,
+    /// Immutable one-based display reference assigned by the owning Chat draft.
+    #[serde(default)]
+    pub original_reference: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -183,7 +189,18 @@ pub struct UserTurnRecord {
     pub turn_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_context: Option<MessageReplyContextSnapshot>,
     pub submitted_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MessageReplyContextSnapshot {
+    pub target_id: String,
+    pub target_kind: String,
+    pub source_sha256: String,
+    pub source_excerpt: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -192,6 +209,7 @@ pub enum RunEventKind {
     Status,
     TextDelta,
     ReasoningDelta,
+    ReasoningSummary,
     WorkActivity,
     ActionIntent,
     ActionProgress,
@@ -862,7 +880,24 @@ impl UserTurnRecord {
                 return Err(SessionError::DuplicateIdentifier("attachment id"));
             }
         }
+        if let Some(reply) = &self.reply_context {
+            reply.validate()?;
+        }
         Ok(())
+    }
+}
+
+impl MessageReplyContextSnapshot {
+    fn validate(&self) -> Result<(), SessionError> {
+        validate_identifier("Reply target id", &self.target_id)?;
+        if !matches!(
+            self.target_kind.as_str(),
+            "user-message" | "assistant-message"
+        ) {
+            return Err(SessionError::InvalidRecord("Reply target kind"));
+        }
+        validate_sha256(&self.source_sha256)?;
+        validate_bounded_text("Reply source excerpt", &self.source_excerpt, 4_096, false)
     }
 }
 
@@ -1081,6 +1116,7 @@ pub struct TurnSubmission {
     pub process_generation: u64,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub reply_context: Option<MessageReplyContextSnapshot>,
     pub context: AttemptContextSnapshot,
     pub submitted_at_ms: u64,
 }
@@ -1176,6 +1212,22 @@ impl<R: SessionRepository> SessionService<R> {
         Ok(record)
     }
 
+    /// Lists only durable bound sessions from the Workspace repository.
+    /// Memory-only provisionals are intentionally excluded so a blank Chat
+    /// cannot leak into navigation before its first valid submission.
+    pub fn durable_sessions(&self) -> Result<Vec<SessionRecord>, SessionError> {
+        let records = self.repository.list()?;
+        for record in &records {
+            record.validate()?;
+            if matches!(record.lifecycle, SessionLifecycle::Provisional) {
+                return Err(SessionError::InvalidRecord(
+                    "durable repository contains a provisional session",
+                ));
+            }
+        }
+        Ok(records)
+    }
+
     pub fn discard_provisional(&self, session_id: &str) -> Result<SessionRecord, SessionError> {
         validate_identifier("session id", session_id)?;
         self.provisionals
@@ -1245,6 +1297,7 @@ impl<R: SessionRepository> SessionService<R> {
             turn_id: submission.turn_id,
             prompt: submission.prompt,
             attachments: submission.attachments,
+            reply_context: None,
             submitted_at_ms: submission.submitted_at_ms,
         };
         turn.validate()?;
@@ -1296,6 +1349,7 @@ impl<R: SessionRepository> SessionService<R> {
             turn_id: submission.turn_id,
             prompt: submission.prompt,
             attachments: submission.attachments,
+            reply_context: submission.reply_context,
             submitted_at_ms: submission.submitted_at_ms,
         };
         turn.validate()?;
@@ -1715,7 +1769,15 @@ fn derive_title(turn: &UserTurnRecord) -> String {
         })
         .unwrap_or("New Chat");
     let compact = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
-    compact.chars().take(MAX_SESSION_TITLE_CHARS).collect()
+    if compact.chars().count() <= MAX_SESSION_TITLE_CHARS {
+        compact
+    } else {
+        compact
+            .chars()
+            .take(MAX_SESSION_TITLE_CHARS.saturating_sub(1))
+            .chain(std::iter::once('…'))
+            .collect()
+    }
 }
 
 fn validate_version(version: u64) -> Result<(), SessionError> {

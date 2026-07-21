@@ -1,0 +1,56 @@
+.conversation-file-drop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  padding: clamp(16px, 3vw, 32px);
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface-window) 78%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.conversation-file-drop__target {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 72%, transparent);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.conversation-file-drop__target strong {
+  font-size: clamp(1.15rem, 3vw, 1.5rem);
+}
+
+.conversation-file-drop__target > span:last-child {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.conversation-file-drop__icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-size: 1.75rem;
+  font-weight: 750;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-file-drop,
+  .conversation-file-drop__target {
+    animation: none;
+    transition: none;
+  }
+}

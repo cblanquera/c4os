@@ -12,7 +12,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::runtime::capability::{CapabilityDescriptor, CapabilityLayer, RouteIdentity};
+use crate::runtime::capability::{
+    AttachmentMediaType, CapabilityDescriptor, CapabilityLayer, InstalledResourcePreflight,
+    RouteIdentity,
+};
 use crate::runtime::session::{
     AdapterBinding, AttemptContextSnapshot, CapabilitySnapshot, ConfigurationSnapshot,
     ExecutionEnvironmentBinding, ModelRouteSnapshot, ResourceSnapshot, RuntimeKind, SessionBinding,
@@ -385,6 +388,45 @@ impl DispatchAuthorityRegistry {
             bound_at_ms,
             true,
         )
+    }
+
+    /// Projects the exact worker-installed resource set into capability
+    /// preflight input. The renderer never supplies resource identifiers or
+    /// digests; this view is minted from the same authority record later used
+    /// to bind the first run.
+    pub(crate) fn installed_resource_preflight_for_active_project(
+        &self,
+        intent: &AuthorityMintIntent,
+        effective_capabilities: &CapabilityDescriptor,
+    ) -> Result<InstalledResourcePreflight, DispatchAuthorityError> {
+        let (authority, _) = self.authority_for(intent, effective_capabilities, true)?;
+        let digest = resources_sha256(&authority.resources)?;
+        let tool_ids = authority
+            .resources
+            .records
+            .iter()
+            .filter(|(_, resource)| resource.kind == "broker-tool")
+            .map(|(resource_id, _)| resource_id.clone())
+            .collect();
+        let attachment_converters = authority
+            .resources
+            .records
+            .values()
+            .filter_map(|resource| match resource.kind.as_str() {
+                "attachment-converter:image" => Some(AttachmentMediaType::Image),
+                "attachment-converter:audio" => Some(AttachmentMediaType::Audio),
+                "attachment-converter:video" => Some(AttachmentMediaType::Video),
+                "attachment-converter:pdf" => Some(AttachmentMediaType::Pdf),
+                "attachment-converter:file" => Some(AttachmentMediaType::OtherFile),
+                _ => None,
+            })
+            .collect();
+        Ok(InstalledResourcePreflight {
+            snapshot_id: snapshot_id("resources", &digest),
+            snapshot_sha256: digest,
+            tool_ids,
+            attachment_converters,
+        })
     }
 
     fn mint_first_binding_with_scope(

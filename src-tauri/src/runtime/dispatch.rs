@@ -17,8 +17,8 @@ use crate::runtime::attachment_materializer::{AttachmentContentPlan, VerifiedAtt
 use crate::runtime::broker_worker::BrokerActionContext;
 use crate::runtime::capability::{DraftRequirements, PreflightOutcome};
 use crate::runtime::coordinator::{
-    CoordinatedFirstSubmission, CoordinatedRetry, CoordinatorError, CoordinatorOperation,
-    RuntimeCoordinator,
+    CoordinatedFirstSubmission, CoordinatedRetry, CoordinatedTurn, CoordinatorError,
+    CoordinatorOperation, RuntimeCoordinator,
 };
 use crate::runtime::opencode::{
     AdapterError as OpenCodeError, CommandDriver, EventCorrelation, ModelRoute, NormalizedEvent,
@@ -412,6 +412,9 @@ pub enum DispatchEventCategory {
     Lifecycle,
     TextDelta,
     ReasoningDelta,
+    /// Provider-supplied display-safe summary normalized separately from raw
+    /// thinking deltas by an app-owned adapter.
+    ReasoningSummary,
     ActionIntent(Box<RuntimeIntentIdentity>),
     /// Pi action material retained only after the sidecar event crossed the
     /// generation, active-run, sequence, authority, and payload validators.
@@ -510,6 +513,7 @@ impl DispatchEvent {
             DispatchEventCategory::Lifecycle => RunEventKind::Status,
             DispatchEventCategory::TextDelta => RunEventKind::TextDelta,
             DispatchEventCategory::ReasoningDelta => RunEventKind::ReasoningDelta,
+            DispatchEventCategory::ReasoningSummary => RunEventKind::ReasoningSummary,
             DispatchEventCategory::ActionIntent(_) | DispatchEventCategory::PiActionIntent(_) => {
                 RunEventKind::ActionIntent
             }
@@ -880,6 +884,27 @@ pub struct RetryDispatchOptions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CoordinatedRetryDispatch {
+    Accepted {
+        coordinator_generation: u64,
+        record: SessionRecord,
+    },
+    Rejected {
+        coordinator_generation: u64,
+        record: SessionRecord,
+        failure: DispatchFailureCode,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TurnDispatchOptions {
+    pub credential_reference: Option<String>,
+    pub credential_lease_id: Option<String>,
+    pub attachment_resolution: AttachmentPreflightResolution,
+    pub broker_authority: Option<BrokerDispatchAuthority>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CoordinatedTurnDispatch {
     Accepted {
         coordinator_generation: u64,
         record: SessionRecord,
@@ -1406,6 +1431,99 @@ pub fn coordinate_retry_dispatch<R: SessionRepository>(
     }
 }
 
+/// A follow-up turn reuses the immutable native session binding while creating
+/// fresh turn, attempt, authorization, and correlation identities. The same
+/// preflight-before-persistence and terminal-close-on-rejection contract used
+/// for first submission and Retry applies here.
+pub fn coordinate_turn_dispatch<R: SessionRepository>(
+    coordinator: &mut RuntimeCoordinator<R>,
+    registry: &mut RuntimeDispatchRegistry,
+    request: CoordinatedTurn,
+    options: TurnDispatchOptions,
+) -> Result<CoordinatedTurnDispatch, DispatchError> {
+    let record = coordinator.session(&request.submission.session_id)?;
+    let identity = identity_from_turn(&request)?;
+    let preflight = coordinator.model_preflight(
+        &request.provider_id,
+        &request.selected_model_id,
+        &request.capability_layers,
+        &request.draft,
+        request.preflight_at_ms,
+    )?;
+    if !matches!(preflight.outcome, PreflightOutcome::Ready { .. }) {
+        return Err(DispatchError::PreflightBlocked);
+    }
+    let model = DispatchModelRoute {
+        provider_id: preflight.effective_capabilities.route.provider_id.clone(),
+        model_id: preflight
+            .effective_capabilities
+            .route
+            .provider_model_id
+            .clone(),
+        credential_reference: options.credential_reference,
+        credential_lease_id: options.credential_lease_id,
+    };
+    let (mut input, direct_attachments, attachments) = prepare_attachment_dispatch(
+        &identity.workspace_id,
+        request.submission.prompt.as_deref(),
+        &request.submission.attachments,
+        &request.submission.context.resources,
+        &request.draft,
+        &options.attachment_resolution,
+    )?;
+    if let Some(reply) = &request.submission.reply_context {
+        let composed = format!(
+            "Reply to the immutable {kind} reference {target} ({digest}).\n\
+             <reply-context>\n{excerpt}\n</reply-context>\n\
+             <user-message>\n{input}\n</user-message>",
+            kind = reply.target_kind,
+            target = reply.target_id,
+            digest = reply.source_sha256,
+            excerpt = reply.source_excerpt,
+        );
+        if composed.len() > MAX_INPUT_BYTES {
+            return Err(DispatchError::InvalidRequest);
+        }
+        input = composed;
+    }
+    let dispatch = PeerDispatchRequest {
+        identity: identity.clone(),
+        model,
+        title: record.title.unwrap_or_else(|| "C4OS Chat".into()),
+        input,
+        eligible_tool_ids: request.draft.installed_resources.tool_ids.clone(),
+        broker_authority: options.broker_authority,
+        direct_attachments,
+        attachments,
+    };
+    dispatch.validate()?;
+    registry.ensure_ready(&identity)?;
+
+    let submitted = coordinator.submit_turn(request)?;
+    match registry.dispatch_existing(&dispatch) {
+        Ok(()) => Ok(CoordinatedTurnDispatch::Accepted {
+            coordinator_generation: submitted.coordinator_generation,
+            record: submitted.value,
+        }),
+        Err(error) => {
+            let failure = DispatchFailureCode::from_dispatch_error(&error);
+            let closed = coordinator.finish_attempt(
+                &identity.session_id,
+                &identity.attempt_identity(),
+                TerminalAttemptOutcome::Failed {
+                    error_code: failure.as_error_code().into(),
+                },
+                dispatch_close_time(request_time(&submitted.value)),
+            )?;
+            Ok(CoordinatedTurnDispatch::Rejected {
+                coordinator_generation: closed.coordinator_generation,
+                record: closed.value,
+                failure,
+            })
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppliedDispatchEvent {
     pub event: DispatchEvent,
@@ -1597,6 +1715,29 @@ fn identity_from_retry(
         adapter_version: context.adapter.adapter_version.clone(),
         native_version: context.adapter.native_version.clone(),
         process_generation: request.request.process_generation,
+    };
+    identity.validate()?;
+    Ok(identity)
+}
+
+fn identity_from_turn(request: &CoordinatedTurn) -> Result<DispatchIdentity, DispatchError> {
+    let context = &request.submission.context;
+    let runtime_kind = match context.runtime_kind {
+        crate::runtime::session::RuntimeKind::OpenCode => RuntimeKind::OpenCode,
+        crate::runtime::session::RuntimeKind::Pi => RuntimeKind::Pi,
+    };
+    let identity = DispatchIdentity {
+        workspace_id: context.workspace_id.clone(),
+        environment_id: context.environment.environment_id.clone(),
+        session_id: request.submission.session_id.clone(),
+        turn_id: request.submission.turn_id.clone(),
+        attempt_id: request.submission.attempt_id.clone(),
+        correlation_id: request.submission.correlation_id.clone(),
+        runtime_id: context.runtime_id.clone(),
+        runtime_kind,
+        adapter_version: context.adapter.adapter_version.clone(),
+        native_version: context.adapter.native_version.clone(),
+        process_generation: request.submission.process_generation,
     };
     identity.validate()?;
     Ok(identity)

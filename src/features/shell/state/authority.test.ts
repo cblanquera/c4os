@@ -134,9 +134,15 @@ describe("authoritative shell projections", () => {
         generation: generation(12),
         value: {
           activeModelId: "model:new",
+          activeReasoningEffort: "low",
+          models: [],
           allowedModes: ["chat", "files"],
           reasoningEfforts: ["off", "low"],
           activeBranch: "main",
+          branches: [{ name: "main", targetOid: "1".repeat(40) }],
+          branchPendingApprovalId: null,
+          branchOperationStatus: null,
+          branchOperationMessage: null,
         },
       }),
     );

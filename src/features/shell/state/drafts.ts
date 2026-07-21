@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 import type { AppRoutePath } from "../../../app/route-contract";
+import { restoreAttachmentDraft } from "../../conversation/composer/attachment-draft";
 import type {
   ArtifactId,
   AttachmentId,
@@ -40,7 +41,8 @@ export const initialShellDraftState: ShellDraftState = {
     modeBeforeFocus: null,
     text: "",
     attachments: [],
-    replyArtifactId: null,
+    nextAttachmentReference: 1,
+    replyTargetId: null,
   },
   settings: {
     activeSection: "providers",
@@ -115,28 +117,57 @@ const shellDraftsSlice = createSlice({
     composerTextChanged(state, { payload }: PayloadAction<string>) {
       state.composer.text = payload;
     },
-    composerAttachmentAdded(
+    composerAttachmentsReconciled(
       state,
       {
         payload,
       }: PayloadAction<{
-        readonly id: AttachmentId;
-        readonly name: string;
-        readonly compatibility:
-          "ready" | "needs-vision" | "needs-audio" | "converted";
+        readonly attachments: readonly {
+          readonly id: AttachmentId;
+          readonly name: string;
+          readonly byteLength?: number;
+          readonly mediaType?: string;
+          readonly stableReference?: string;
+          readonly referenceNumber: number;
+          readonly compatibility:
+            | "ready"
+            | "needs-vision"
+            | "needs-audio"
+            | "converted"
+            | "incompatible";
+        }[];
+        readonly nextAttachmentReference: number;
       }>,
     ) {
-      if (!state.composer.attachments.some(({ id }) => id === payload.id)) {
-        state.composer.attachments.push(payload);
-      }
+      const restored = restoreAttachmentDraft(
+        payload.attachments,
+        payload.nextAttachmentReference,
+      );
+      state.composer.attachments = restored.attachments.map((attachment) => ({
+        ...attachment,
+      }));
+      state.composer.nextAttachmentReference = restored.nextReferenceNumber;
     },
     composerAttachmentRemoved(state, { payload }: PayloadAction<AttachmentId>) {
       state.composer.attachments = state.composer.attachments.filter(
         ({ id }) => id !== payload,
       );
     },
-    composerReplyChanged(state, { payload }: PayloadAction<ArtifactId | null>) {
-      state.composer.replyArtifactId = payload;
+    composerReplyChanged(state, { payload }: PayloadAction<string | null>) {
+      state.composer.replyTargetId = payload;
+    },
+    composerReplyReconciled(
+      state,
+      {
+        payload,
+      }: PayloadAction<{
+        readonly expectedReplyTargetId: string | null;
+        readonly authoritativeReplyTargetId: string | null;
+      }>,
+    ) {
+      if (state.composer.replyTargetId === payload.expectedReplyTargetId) {
+        state.composer.replyTargetId = payload.authoritativeReplyTargetId;
+      }
     },
     settingsVisited(
       state,

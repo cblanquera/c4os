@@ -6,8 +6,12 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const MAX_GIT_OUTPUT_BYTES: usize = 64 * 1024;
@@ -54,6 +58,100 @@ impl GitCommandOutput {
 
 pub trait GitCommandRunner {
     fn run(&mut self, invocation: &GitCommandInvocation) -> Result<GitCommandOutput, GitError>;
+}
+
+/// Production Git process boundary. It receives only hardened, absolute-path
+/// invocations assembled by this module, clears ambient configuration, drains
+/// both pipes with fixed memory bounds, and terminates stalled commands.
+pub struct ProductionGitRunner {
+    timeout: Duration,
+}
+
+impl Default for ProductionGitRunner {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+impl GitCommandRunner for ProductionGitRunner {
+    fn run(&mut self, invocation: &GitCommandInvocation) -> Result<GitCommandOutput, GitError> {
+        if !invocation.program.is_absolute() || !invocation.current_dir.is_absolute() {
+            return Err(GitError::InvalidRequest(
+                "Git invocation paths must be absolute".into(),
+            ));
+        }
+        let mut child = Command::new(&invocation.program)
+            .args(&invocation.arguments)
+            .current_dir(&invocation.current_dir)
+            .env_clear()
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("LC_ALL", "C")
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| GitError::CommandFailed("Git could not be started".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| GitError::CommandFailed("Git stdout is unavailable".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| GitError::CommandFailed("Git stderr is unavailable".into()))?;
+        let stdout_reader = thread::spawn(move || read_bounded_pipe(stdout));
+        let stderr_reader = thread::spawn(move || read_bounded_pipe(stderr));
+        let started = Instant::now();
+        let status = loop {
+            match child
+                .try_wait()
+                .map_err(|_| GitError::CommandFailed("Git status is unavailable".into()))?
+            {
+                Some(status) => break status,
+                None if started.elapsed() < self.timeout => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                None => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(GitError::CommandFailed("Git command timed out".into()));
+                }
+            }
+        };
+        let stdout = stdout_reader
+            .join()
+            .map_err(|_| GitError::CommandFailed("Git stdout reader failed".into()))??;
+        let stderr = stderr_reader
+            .join()
+            .map_err(|_| GitError::CommandFailed("Git stderr reader failed".into()))??;
+        Ok(GitCommandOutput {
+            exit_code: status.code().unwrap_or(-1),
+            stdout,
+            stderr,
+        })
+    }
+}
+
+fn read_bounded_pipe(mut pipe: impl Read) -> Result<Vec<u8>, GitError> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = pipe
+            .read(&mut buffer)
+            .map_err(|_| GitError::CommandFailed("Git output could not be read".into()))?;
+        if read == 0 {
+            return Ok(output);
+        }
+        if output.len() <= MAX_GIT_OUTPUT_BYTES {
+            let remaining = MAX_GIT_OUTPUT_BYTES
+                .saturating_add(1)
+                .saturating_sub(output.len());
+            output.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -450,6 +548,82 @@ pub fn capture_git_state<R: GitCommandRunner>(
     Ok(GitStateVersion {
         head_oid: single_line(&head.stdout, "HEAD object id")?.to_owned(),
         worktree_porcelain_v1_z: status.stdout,
+    })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitBranchSummary {
+    pub name: String,
+    pub target_oid: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitBranchMenuSnapshot {
+    pub current_branch: Option<String>,
+    pub branches: Vec<GitBranchSummary>,
+    pub state: GitStateVersion,
+}
+
+/// Reads the exact repository state needed to render and later bind an
+/// explicit Branch operation. No renderer-provided object id or Git state is
+/// trusted on the write path.
+pub fn snapshot_branch_menu<R: GitCommandRunner>(
+    repository: &ActiveProjectRepository,
+    runner: &mut R,
+) -> Result<GitBranchMenuSnapshot, GitError> {
+    let state = capture_git_state(repository, runner)?;
+    let current = run_repository_git(
+        repository,
+        runner,
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    )?;
+    let current_branch = match current.exit_code {
+        0 => Some(single_line(&current.stdout, "current branch")?.to_owned()),
+        1 if current.stdout.is_empty() => None,
+        _ => return Err(GitError::CommandFailed(safe_message(&current.stderr))),
+    };
+    let listed = run_repository_git(
+        repository,
+        runner,
+        [
+            "for-each-ref",
+            "--format=%(refname:short)%00%(objectname)",
+            "refs/heads",
+        ],
+    )?;
+    if listed.exit_code != 0 {
+        return Err(GitError::CommandFailed(safe_message(&listed.stderr)));
+    }
+    let text = std::str::from_utf8(&listed.stdout)
+        .map_err(|_| GitError::CommandFailed("Git branch output is not UTF-8".into()))?;
+    let mut branches = Vec::new();
+    for line in text.lines().filter(|line| !line.is_empty()) {
+        let (name, target_oid) = line
+            .split_once('\0')
+            .ok_or_else(|| GitError::CommandFailed("Git branch output is malformed".into()))?;
+        validate_branch_name(name)?;
+        if !valid_object_id(target_oid) {
+            return Err(GitError::CommandFailed(
+                "Git branch object id is invalid".into(),
+            ));
+        }
+        branches.push(GitBranchSummary {
+            name: name.to_owned(),
+            target_oid: target_oid.to_owned(),
+        });
+    }
+    branches.sort_by(|left, right| left.name.cmp(&right.name));
+    if let Some(current_branch) = &current_branch
+        && !branches.iter().any(|branch| &branch.name == current_branch)
+    {
+        return Err(GitError::CommandFailed(
+            "The current Git branch is absent from local refs".into(),
+        ));
+    }
+    Ok(GitBranchMenuSnapshot {
+        current_branch,
+        branches,
+        state,
     })
 }
 

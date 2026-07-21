@@ -351,7 +351,7 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     );
     {
         let (database, report) = DatabaseActor::start(descriptor.clone()).unwrap();
-        assert_eq!(report.current_version, 3);
+        assert_eq!(report.current_version, 4);
         seed_workspace(&database);
         let repository = SqliteSessionRepository::new(Arc::new(database)).unwrap();
         let service = SessionService::new(repository.clone());
@@ -370,7 +370,7 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     }
 
     let (database, report) = DatabaseActor::start(descriptor).unwrap();
-    assert_eq!(report.previous_version, 3);
+    assert_eq!(report.previous_version, 4);
     let repository = SqliteSessionRepository::new(Arc::new(database)).unwrap();
     let service = SessionService::new(repository);
     let restored = service.session("session-1").unwrap();
@@ -381,6 +381,63 @@ fn sqlite_session_repository_atomically_persists_first_binding_and_restart_recov
     assert_eq!(recovered.revision, 2);
     assert_eq!(recovered.active_attempt_id, None);
     assert!(recovered.attempts[0].status.is_terminal());
+}
+
+#[test]
+fn first_submission_atomically_creates_chat_and_session_without_a_saved_blank() {
+    let temporary = TempDir::new().unwrap();
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temporary.path().join("active-atomic-promotion"),
+        "workspace-1",
+        temporary.path().join("recovery-atomic-promotion"),
+    );
+    let (database, _) = DatabaseActor::start(descriptor).unwrap();
+    database
+        .create_workspace(WorkspaceRecord {
+            workspace_id: "workspace-1".into(),
+            display_name: "C4OS".into(),
+            created_at: 1,
+            updated_at: 1,
+            lifecycle_state: LifecycleState::Active,
+            inactivated_at: None,
+        })
+        .unwrap();
+    database
+        .add_project(ProjectRecord {
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            display_name: "Project One".into(),
+            current_path: "/tmp/project-1".into(),
+            last_known_path: "/tmp/project-1".into(),
+            path_state: ProjectPathState::Found,
+            position: 0,
+            lifecycle_state: LifecycleState::Active,
+            inactivated_at: None,
+        })
+        .unwrap();
+    let database = Arc::new(database);
+    assert!(database.session_documents().unwrap().is_empty());
+    let repository = SqliteSessionRepository::new(Arc::clone(&database)).unwrap();
+    let service = SessionService::new(repository);
+    service.create_provisional("session-1", NOW).unwrap();
+    let promoted = service
+        .submit_first(first_submission(session_binding()))
+        .unwrap();
+    assert_eq!(
+        promoted.title.as_deref(),
+        Some("Implement durable sessions")
+    );
+    let snapshot = match database
+        .snapshot(c4os_lib::core::database::SnapshotQuery::new(16).unwrap())
+        .unwrap()
+    {
+        c4os_lib::core::database::DatabaseSnapshot::Workspace(snapshot) => snapshot,
+        _ => panic!("expected Workspace snapshot"),
+    };
+    assert_eq!(snapshot.chats.len(), 1);
+    assert_eq!(snapshot.chats[0].chat_id, "session-1");
+    assert_eq!(snapshot.chats[0].title, "Implement durable sessions");
+    assert_eq!(database.session_documents().unwrap().len(), 1);
 }
 
 #[test]

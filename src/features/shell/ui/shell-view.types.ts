@@ -37,7 +37,13 @@ export interface ShellComposerState {
 export interface ShellViewProps {
   readonly route: ShellRoutePath;
   readonly routeContent?: ReactNode;
+  /** Real contextual content supplied by an explicit focused provider surface. */
+  readonly contextualChatContent?: ReactNode;
   readonly projectPanelContent?: ReactNode;
+  readonly projectPanelContentOwnsHeading?: boolean;
+  readonly composerContent?: ReactNode;
+  readonly workspaceTitle?: string;
+  readonly workspaceTitleAccessory?: ReactNode;
   readonly composer: ShellComposerState;
   readonly projectPanel: ShellProjectPanelState;
   readonly focusRestoreRequest?: ShellFocusRestoreRequest | null;

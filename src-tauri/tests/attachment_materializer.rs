@@ -4,7 +4,8 @@ use std::fs;
 use std::os::unix::fs::symlink;
 
 use c4os_lib::runtime::attachment_materializer::{
-    AttachmentMaterializationError, WorkspaceAttachmentMaterializer,
+    AttachmentMaterializationError, NativeAttachmentImport, WorkspaceAttachmentMaterializer,
+    import_native_attachments,
 };
 use c4os_lib::runtime::session::AttachmentSnapshot;
 use sha2::{Digest, Sha256};
@@ -47,6 +48,7 @@ fn fixture(
         byte_length: bytes.len() as u64,
         content_sha256,
         snapshot_version: 3,
+        original_reference: 1,
     };
     (temporary, workspace, materializer, attachment)
 }
@@ -165,4 +167,64 @@ fn bound_directory_descriptor_prevents_workspace_root_substitution() {
 
     let plan = materializer.materialize(&[attachment]).unwrap();
     assert_eq!(plan.attachments()[0].content(), b"known");
+}
+
+#[test]
+fn native_import_creates_an_immutable_blob_and_materializable_snapshot() {
+    let temporary = TempDir::new().unwrap();
+    let workspace = temporary.path().join("workspace");
+    fs::create_dir(&workspace).unwrap();
+    let source = temporary.path().join("concept.png");
+    fs::write(&source, b"native-picker-authorized-image").unwrap();
+    let snapshots = import_native_attachments(
+        &workspace,
+        &[NativeAttachmentImport {
+            attachment_id: "attachment-native-1".into(),
+            source_path: source,
+            display_name: "concept.png".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(snapshots[0].media_type, "image/png");
+    assert_eq!(snapshots[0].snapshot_version, 1);
+    assert!(
+        snapshots[0]
+            .stable_reference
+            .starts_with("workspace-blob:sha256:")
+    );
+    let materializer = WorkspaceAttachmentMaterializer::bind("workspace-1", &workspace).unwrap();
+    let plan = materializer.materialize(&snapshots).unwrap();
+    assert_eq!(
+        plan.attachments()[0].content(),
+        b"native-picker-authorized-image"
+    );
+}
+
+#[test]
+fn native_import_rejects_a_picker_symlink_without_creating_a_blob() {
+    let temporary = TempDir::new().unwrap();
+    let workspace = temporary.path().join("workspace");
+    fs::create_dir(&workspace).unwrap();
+    let outside = temporary.path().join("outside.txt");
+    let selected = temporary.path().join("selected.txt");
+    fs::write(&outside, b"outside").unwrap();
+    symlink(&outside, &selected).unwrap();
+    assert_eq!(
+        import_native_attachments(
+            &workspace,
+            &[NativeAttachmentImport {
+                attachment_id: "attachment-native-1".into(),
+                source_path: selected,
+                display_name: "selected.txt".into(),
+            }],
+        )
+        .unwrap_err(),
+        AttachmentMaterializationError::SymlinkRejected
+    );
+    assert_eq!(
+        fs::read_dir(workspace.join("blobs/sha256"))
+            .unwrap()
+            .count(),
+        0
+    );
 }

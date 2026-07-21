@@ -61,8 +61,24 @@ function ShellRouteView(props: ShellViewProps) {
     <WorkspaceLayout
       route={props.route}
       composer={props.composer}
+      composerContent={props.composerContent}
+      {...(props.workspaceTitle === undefined
+        ? {}
+        : { workspaceTitle: props.workspaceTitle })}
+      {...(props.workspaceTitleAccessory === undefined
+        ? {}
+        : { workspaceTitleAccessory: props.workspaceTitleAccessory })}
       projectPanel={props.projectPanel}
       projectPanelContent={props.projectPanelContent}
+      {...(props.contextualChatContent === undefined
+        ? {}
+        : { contextualChatContent: props.contextualChatContent })}
+      {...(props.projectPanelContentOwnsHeading === undefined
+        ? {}
+        : {
+            projectPanelContentOwnsHeading:
+              props.projectPanelContentOwnsHeading,
+          })}
       {...(props.showReviewSettingsControl === undefined
         ? {}
         : { showReviewSettingsControl: props.showReviewSettingsControl })}

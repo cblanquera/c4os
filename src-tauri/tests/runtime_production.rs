@@ -1289,6 +1289,7 @@ fn packaged_production_peers_complete_the_app_owned_native_golden_paths() {
         byte_length: PI_IMAGE.len() as u64,
         content_sha256: image_sha256.clone(),
         snapshot_version: 1,
+        original_reference: 1,
     };
 
     let before_opencode = application

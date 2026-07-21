@@ -628,6 +628,56 @@ fn branch_control_is_visible_only_for_a_repository_exactly_scoped_to_the_project
 }
 
 #[test]
+fn branch_menu_snapshot_binds_current_local_refs_and_git_state() {
+    let (_temporary, repository) = visible_repository();
+    let dirty = b" M src/main.rs\0";
+    let mut runner = FakeGitRunner::with([
+        GitCommandOutput::success(format!("{HEAD}\n")),
+        GitCommandOutput::success(dirty.to_vec()),
+        GitCommandOutput::success(b"main\n".to_vec()),
+        GitCommandOutput::success(format!("feature/safe\0{TARGET}\nmain\0{HEAD}\n").into_bytes()),
+    ]);
+
+    let snapshot = snapshot_branch_menu(&repository, &mut runner).unwrap();
+
+    assert_eq!(snapshot.current_branch.as_deref(), Some("main"));
+    assert_eq!(snapshot.state, state(dirty));
+    assert_eq!(
+        snapshot.branches,
+        vec![
+            GitBranchSummary {
+                name: "feature/safe".into(),
+                target_oid: TARGET.into(),
+            },
+            GitBranchSummary {
+                name: "main".into(),
+                target_oid: HEAD.into(),
+            },
+        ]
+    );
+    let commands = runner
+        .calls
+        .iter()
+        .map(|call| {
+            call.arguments
+                .iter()
+                .map(|argument| argument.to_string_lossy())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        commands
+            .iter()
+            .any(|arguments| { arguments.iter().any(|argument| argument == "symbolic-ref") })
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|arguments| { arguments.iter().any(|argument| argument == "for-each-ref") })
+    );
+}
+
+#[test]
 fn chat_write_matrix_honors_repository_project_and_explicit_ask_boundaries() {
     let (temporary, repository) = visible_repository();
     fs::write(temporary.path().join("tracked.txt"), b"content").unwrap();

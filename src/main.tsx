@@ -16,7 +16,10 @@ import {
   revealMainWindow,
 } from "./platform/platform-service";
 import { shellDraftActions } from "./features/shell/state";
-import { ingestNativeShellProjections } from "./features/shell/native-bootstrap";
+import {
+  ingestNativeShellProjections,
+  nativeResumeRoute,
+} from "./features/shell/native-bootstrap";
 import "./styles.css";
 import "./features/platform/platform-theme.css";
 
@@ -54,7 +57,15 @@ async function start() {
   // Snapshot ingestion is independent from first-frame theme authority. Each
   // available native domain publishes atomically; unavailable domains stay
   // fail-closed for their later service-integration owners.
-  void ingestNativeShellProjections(store.dispatch);
+  void ingestNativeShellProjections(store.dispatch).then((result) => {
+    const currentRoute = window.location.hash.slice(1) || "/";
+    const destination = nativeResumeRoute(
+      result,
+      store.getState(),
+      currentRoute,
+    );
+    if (destination !== null) void navigateAppRoute(destination);
+  });
 
   requestAnimationFrame(() => {
     void revealMainWindow().catch(() => undefined);

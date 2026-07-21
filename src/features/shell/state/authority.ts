@@ -39,15 +39,21 @@ export const initialShellAuthorityState: ShellAuthorityState = {
   },
   conversation: {
     generation: UNINITIALIZED_GENERATION,
-    value: { sessionId: null, turns: [], activeAttemptId: null },
+    value: { sessionId: null, title: null, turns: [], activeAttemptId: null },
   },
   composer: {
     generation: UNINITIALIZED_GENERATION,
     value: {
       activeModelId: null,
+      activeReasoningEffort: null,
+      models: [],
       allowedModes: ["chat"],
       reasoningEfforts: [],
       activeBranch: null,
+      branches: [],
+      branchPendingApprovalId: null,
+      branchOperationStatus: null,
+      branchOperationMessage: null,
     },
   },
   artifacts: {

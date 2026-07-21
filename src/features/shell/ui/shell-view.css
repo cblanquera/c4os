@@ -66,9 +66,15 @@
 }
 
 .shell-title-header__settings {
-  grid-column: 3;
-  justify-self: end;
   padding-inline: 12px;
+}
+
+.shell-title-header__accessories {
+  display: flex;
+  grid-column: 3;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
 }
 
 .shell-title-header .c4-brand-mark {
@@ -213,6 +219,11 @@
   min-height: 100%;
   margin-inline: auto;
   padding: clamp(24px, 5vw, 56px);
+}
+
+.shell-route-surface[data-route-surface="compact"] {
+  width: 100%;
+  padding: 0;
 }
 
 .shell-route-surface__header h1 {

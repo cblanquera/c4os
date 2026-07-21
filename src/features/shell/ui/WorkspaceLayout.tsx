@@ -18,7 +18,12 @@ import { RouteSurface, UnavailableGate } from "./RouteSurface";
 interface WorkspaceLayoutProps {
   readonly route: WorkspaceRoutePath;
   readonly children?: ReactNode;
+  readonly composerContent?: ReactNode;
+  readonly workspaceTitle?: string;
+  readonly workspaceTitleAccessory?: ReactNode;
   readonly projectPanelContent?: ReactNode;
+  readonly contextualChatContent?: ReactNode;
+  readonly projectPanelContentOwnsHeading?: boolean;
   readonly composer: ShellComposerState;
   readonly projectPanel: ShellProjectPanelState;
   readonly showReviewSettingsControl?: boolean;
@@ -37,7 +42,12 @@ const COMPOSER_MODES = ["chat", "files", "browser", "terminal"] as const;
 export function WorkspaceLayout({
   route,
   children,
+  composerContent,
+  workspaceTitle,
+  workspaceTitleAccessory,
   projectPanelContent,
+  contextualChatContent,
+  projectPanelContentOwnsHeading = false,
   composer,
   projectPanel,
   showReviewSettingsControl = false,
@@ -49,6 +59,9 @@ export function WorkspaceLayout({
   onComposerDraftChange,
   onComposerModeChange,
 }: WorkspaceLayoutProps) {
+  const hasContextualChat =
+    contextualChatContent !== undefined && contextualChatContent !== null;
+  const exposesContextualChat = showContextualChat || hasContextualChat;
   const minimumWidth = projectPanel.minimumWidth ?? 180;
   const maximumWidth = Math.max(minimumWidth, projectPanel.maximumWidth ?? 640);
 
@@ -74,7 +87,7 @@ export function WorkspaceLayout({
     }
   };
 
-  const title = getShellRouteCopy(route).title;
+  const title = workspaceTitle ?? getShellRouteCopy(route).title;
   const panelStyle = {
     "--shell-project-panel-width": `${projectPanel.width}px`,
   } as CSSProperties;
@@ -101,15 +114,20 @@ export function WorkspaceLayout({
           onPress={() => onPanelOpenChange(!projectPanel.isOpen)}
         />
         <span className="shell-title-header__route">{title}</span>
-        {showReviewSettingsControl ? (
-          <Button
-            className="shell-title-header__settings"
-            data-shell-focus-target="workspace-settings"
-            onPress={() => onVisitSettings("workspace-settings")}
-            variant="quiet"
-          >
-            Settings
-          </Button>
+        {workspaceTitleAccessory || showReviewSettingsControl ? (
+          <span className="shell-title-header__accessories">
+            {workspaceTitleAccessory}
+            {showReviewSettingsControl ? (
+              <Button
+                className="shell-title-header__settings"
+                data-shell-focus-target="workspace-settings"
+                onPress={() => onVisitSettings("workspace-settings")}
+                variant="quiet"
+              >
+                Settings
+              </Button>
+            ) : null}
+          </span>
         ) : null}
       </header>
 
@@ -117,15 +135,18 @@ export function WorkspaceLayout({
         <aside
           className="shell-project-panel"
           aria-label={
-            showContextualChat ? "Projects and contextual chat" : "Projects"
+            exposesContextualChat ? "Projects and contextual chat" : "Projects"
           }
           aria-hidden={!projectPanel.isOpen}
-          data-contextual-chat={showContextualChat}
+          data-contextual-chat={exposesContextualChat}
           inert={!projectPanel.isOpen ? true : undefined}
         >
           <div className="shell-project-panel__projects">
-            <div className="shell-project-panel__heading">
-              <h2>Projects</h2>
+            <div
+              className="shell-project-panel__heading"
+              data-content-heading={projectPanelContentOwnsHeading}
+            >
+              {projectPanelContentOwnsHeading ? null : <h2>Projects</h2>}
               <IconButton
                 icon={<Icon name="chevron-right" />}
                 label="Hide project panel"
@@ -134,7 +155,11 @@ export function WorkspaceLayout({
             </div>
             {projectPanelContent ?? <p>No project is open.</p>}
           </div>
-          {showContextualChat ? (
+          {hasContextualChat ? (
+            <div className="shell-project-panel__context">
+              {contextualChatContent}
+            </div>
+          ) : showContextualChat ? (
             <section
               className="shell-project-panel__context"
               aria-labelledby="shell-context-chat-title"
@@ -168,44 +193,49 @@ export function WorkspaceLayout({
             className="shell-workspace__stage"
             onPointerDown={handleStagePointerDown}
           >
-            <RouteSurface route={route}>
+            <RouteSurface
+              compact={route === "/chat" && children !== undefined}
+              route={route}
+            >
               {children}
               <RouteNegativeGates route={route} />
             </RouteSurface>
           </main>
 
-          <form
-            className="shell-composer"
-            aria-label="Message composer"
-            onSubmit={(event) => event.preventDefault()}
-          >
-            <label className="shell-composer__mode">
-              <span>Mode</span>
-              <select
-                aria-label="Composer mode"
-                value={composer.mode}
-                disabled={composer.isModeLocked}
-                onChange={handleModeChange}
-              >
-                {COMPOSER_MODES.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode[0]?.toLocaleUpperCase()}
-                    {mode.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="shell-composer__draft">
-              <span className="shell-visually-hidden">Message</span>
-              <textarea
-                rows={2}
-                value={composer.draft}
-                placeholder="Ask C4OS"
-                data-shell-focus-target="composer-draft"
-                onChange={handleDraftChange}
-              />
-            </label>
-          </form>
+          {composerContent ?? (
+            <form
+              className="shell-composer"
+              aria-label="Message composer"
+              onSubmit={(event) => event.preventDefault()}
+            >
+              <label className="shell-composer__mode">
+                <span>Mode</span>
+                <select
+                  aria-label="Composer mode"
+                  value={composer.mode}
+                  disabled={composer.isModeLocked}
+                  onChange={handleModeChange}
+                >
+                  {COMPOSER_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode[0]?.toLocaleUpperCase()}
+                      {mode.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="shell-composer__draft">
+                <span className="shell-visually-hidden">Message</span>
+                <textarea
+                  rows={2}
+                  value={composer.draft}
+                  placeholder="Ask C4OS"
+                  data-shell-focus-target="composer-draft"
+                  onChange={handleDraftChange}
+                />
+              </label>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -234,16 +264,6 @@ function RouteNegativeGates({ route }: RouteNegativeGatesProps) {
         </UnavailableGate>
         <UnavailableGate feature="Terminal password entry">
           Enter password
-        </UnavailableGate>
-      </div>
-    );
-  }
-
-  if (route === "/chat" || route === "/chat-capabilities") {
-    return (
-      <div className="shell-route-gates">
-        <UnavailableGate feature="Multiple Reply targets">
-          Reply target: Chat
         </UnavailableGate>
       </div>
     );

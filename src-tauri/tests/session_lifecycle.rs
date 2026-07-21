@@ -217,6 +217,7 @@ fn attachment(id: &str) -> AttachmentSnapshot {
         byte_length: 123,
         content_sha256: digest('d'),
         snapshot_version: 1,
+        original_reference: 1,
     }
 }
 
@@ -436,6 +437,7 @@ fn fresh_turn_may_capture_current_snapshots_but_not_runtime_identity() {
             process_generation: 8,
             prompt: Some("Use the current approved route".into()),
             attachments: Vec::new(),
+            reply_context: None,
             context: context.clone(),
             submitted_at_ms: 40,
         })

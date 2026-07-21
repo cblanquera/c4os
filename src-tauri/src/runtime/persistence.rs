@@ -6,8 +6,8 @@ use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use thiserror::Error;
 
 use crate::core::database::{
-    DatabaseActor, DatabaseError, DatabaseKind, RuntimeStateDocumentRecord,
-    WorkspaceSessionDocumentRecord,
+    ChatRecord, DatabaseActor, DatabaseError, DatabaseKind, LifecycleState,
+    RuntimeStateDocumentRecord, WorkspaceSessionDocumentRecord,
 };
 use crate::runtime::capability_evidence::{
     CapabilityEvidenceError, CapabilityEvidenceRegistry, CapabilityEvidenceSnapshot,
@@ -305,8 +305,30 @@ impl SessionRepository for SqliteSessionRepository {
 
     fn create(&self, record: &SessionRecord) -> Result<(), SessionRepositoryError> {
         let (document, active_project_id) = self.encode_for_write(record)?;
+        let title = record
+            .title
+            .as_ref()
+            .filter(|title| !title.trim().is_empty())
+            .cloned()
+            .ok_or(SessionRepositoryError::Unavailable)?;
+        let created_at =
+            i64::try_from(record.created_at_ms).map_err(|_| SessionRepositoryError::Unavailable)?;
+        let updated_at =
+            i64::try_from(record.updated_at_ms).map_err(|_| SessionRepositoryError::Unavailable)?;
         self.database
-            .create_session_document(document, active_project_id)
+            .promote_session_document(
+                document,
+                ChatRecord {
+                    workspace_id: self.workspace_id.clone(),
+                    project_id: active_project_id,
+                    chat_id: record.session_id.clone(),
+                    title,
+                    created_at,
+                    updated_at,
+                    lifecycle_state: LifecycleState::Active,
+                    inactivated_at: None,
+                },
+            )
             .map(|_| ())
             .map_err(map_session_database_error)
     }

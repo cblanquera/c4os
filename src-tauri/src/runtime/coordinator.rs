@@ -24,14 +24,20 @@ use crate::runtime::provider::{
 };
 use crate::runtime::session::{
     AttemptIdentity, FirstSubmission, RetryRequest, RunEventRecord, SessionError, SessionRecord,
-    SessionRepository, SessionService, SideEffectState, TerminalAttemptOutcome,
+    SessionRepository, SessionService, SideEffectState, TerminalAttemptOutcome, TurnSubmission,
 };
 use crate::runtime::supervisor::{
     CompatibilityState, HealthState, RuntimeInstallation, RuntimeLifecycle, RuntimeSupervisor,
     SupervisorError, SupervisorSnapshot,
 };
-use crate::security::authorization::{ApprovalAnswer, LiveAuthorityState};
-use crate::security::gateway::{ActionGateway, ExecutionPermit, NormalizedActionResult};
+use crate::security::authorization::{
+    ApprovalAnswer, AuthorizationToken, CanonicalAction, LiveAuthorityState,
+};
+use crate::security::gateway::{
+    ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit, GatewayProposal,
+    NormalizedActionResult,
+};
+use crate::security::policy::ActionFacts;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -71,6 +77,16 @@ pub struct CoordinatedFirstSubmission {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoordinatedRetry {
     pub request: RetryRequest,
+    pub provider_id: String,
+    pub selected_model_id: String,
+    pub capability_layers: [CapabilityDescriptor; 3],
+    pub draft: DraftRequirements,
+    pub preflight_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoordinatedTurn {
+    pub submission: TurnSubmission,
     pub provider_id: String,
     pub selected_model_id: String,
     pub capability_layers: [CapabilityDescriptor; 3],
@@ -132,6 +148,10 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
 
     pub fn session(&self, session_id: &str) -> Result<SessionRecord, CoordinatorError> {
         Ok(self.sessions.session(session_id)?)
+    }
+
+    pub fn durable_sessions(&self) -> Result<Vec<SessionRecord>, CoordinatorError> {
+        Ok(self.sessions.durable_sessions()?)
     }
 
     pub fn save_provider(
@@ -302,6 +322,14 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(record)
     }
 
+    pub fn discard_provisional(
+        &mut self,
+        session_id: &str,
+    ) -> Result<CoordinatorOperation<SessionRecord>, CoordinatorError> {
+        let record = self.sessions.discard_provisional(session_id)?;
+        self.operation(record)
+    }
+
     /// Resolve the exact selected route. This is read-only; callers may show a
     /// blocked outcome without mutating or silently rewriting the draft.
     pub fn model_preflight(
@@ -360,6 +388,36 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             &request.submission.binding.adapter.adapter_version,
         )?;
         let record = self.sessions.submit_first(request.submission)?;
+        self.operation(record)
+    }
+
+    pub fn submit_turn(
+        &mut self,
+        request: CoordinatedTurn,
+    ) -> Result<CoordinatorOperation<SessionRecord>, CoordinatorError> {
+        let resolved = self.model_preflight(
+            &request.provider_id,
+            &request.selected_model_id,
+            &request.capability_layers,
+            &request.draft,
+            request.preflight_at_ms,
+        )?;
+        require_ready(&resolved.outcome)?;
+        let route = &request.submission.context.model_route;
+        if route.provider_id != resolved.provider_id
+            || route.model_id != resolved.effective_capabilities.route.provider_model_id
+            || route.endpoint_id != resolved.effective_capabilities.route.endpoint_id
+            || route.model_revision != resolved.effective_capabilities.route.model_revision
+        {
+            return Err(CoordinatorError::BindingMismatch);
+        }
+        self.ensure_runtime_ready(
+            &request.submission.context.runtime_id,
+            request.submission.process_generation,
+            &request.submission.context.adapter.native_version,
+            &request.submission.context.adapter.adapter_version,
+        )?;
+        let record = self.sessions.submit_turn(request.submission)?;
         self.operation(record)
     }
 
@@ -452,6 +510,45 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         let decision =
             RuntimeActionBridge::new(&mut self.action_gateway).propose(proposal, now_ms)?;
         self.operation(decision)
+    }
+
+    /// Routes a core-owned direct user action through the same durable gateway
+    /// without pretending it originated from a runtime tool attempt.
+    pub(crate) fn propose_direct_action(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
+        let proposal = self.action_gateway.propose(facts, action, now_ms)?;
+        self.operation(proposal)
+    }
+
+    pub(crate) fn answer_direct_approval(
+        &mut self,
+        prompt_id: &str,
+        answer: ApprovalAnswer,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<ApprovalResponse>, CoordinatorError> {
+        let response = self
+            .action_gateway
+            .answer_approval(prompt_id, answer, now_ms)?;
+        self.operation(response)
+    }
+
+    pub(crate) fn execute_direct_action(
+        &mut self,
+        token: &AuthorizationToken,
+        action: &CanonicalAction,
+        live: LiveAuthorityState,
+        approval_prompt_id: Option<&str>,
+        now_ms: u64,
+        effect: impl FnOnce(ExecutionPermit) -> NormalizedActionResult,
+    ) -> Result<CoordinatorOperation<NormalizedActionResult>, CoordinatorError> {
+        let result =
+            self.action_gateway
+                .execute(token, action, live, approval_prompt_id, now_ms, effect)?;
+        self.operation(result)
     }
 
     pub fn answer_runtime_approval(
@@ -579,7 +676,6 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             .get(model_id)
             .ok_or(CoordinatorError::ModelRouteUnavailable)?;
         if !record.profile.enabled
-            || record.selected_model_id.as_deref() != Some(model_id)
             || !route.is_usable()
             || record.connection_evidence.as_ref().is_none_or(|evidence| {
                 evidence.tested_at_ms != tested_at_ms
@@ -719,4 +815,6 @@ pub enum CoordinatorError {
     Session(#[from] SessionError),
     #[error(transparent)]
     RuntimeBridge(#[from] RuntimeBridgeError),
+    #[error(transparent)]
+    ActionGateway(#[from] ActionGatewayError),
 }

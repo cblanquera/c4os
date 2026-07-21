@@ -7,19 +7,24 @@ import { WorkspaceStartRoute } from "../features/workspace/WorkspaceStartRoute";
 import { QA_POLICY_PATH, QaPolicyRoute } from "../qa/policy-route";
 import { QA_FOUNDATION_PATH, QaFoundationRoute } from "../qa/route";
 import { QA_WORKSPACE_PATH, QaWorkspaceRoute } from "../qa/workspace-route";
+import { resolveBuildGatedQaRootEntry } from "./qa-entry";
 import { APP_ROUTE_DEFINITIONS } from "./route-contract";
 
+const qaRootEntry = resolveBuildGatedQaRootEntry(
+  import.meta.env.VITE_C4OS_QA_FIXTURES === "1",
+  import.meta.env.VITE_C4OS_QA_ENTRY,
+);
+
 const rootElement =
-  import.meta.env.VITE_C4OS_QA_FIXTURES === "1" &&
-  ["platform", "policy", "runtime"].includes(
-    import.meta.env.VITE_C4OS_QA_ENTRY ?? "",
-  ) ? (
-    import.meta.env.VITE_C4OS_QA_ENTRY === "platform" ? (
+  qaRootEntry !== null ? (
+    qaRootEntry === "platform" ? (
       <PlatformThemeQaSurface />
-    ) : import.meta.env.VITE_C4OS_QA_ENTRY === "runtime" ? (
+    ) : qaRootEntry === "runtime" ? (
       <RuntimeQaSurface />
-    ) : (
+    ) : qaRootEntry === "policy" ? (
       <QaPolicyRoute />
+    ) : (
+      <Navigate replace to="/chat" />
     )
   ) : (
     <WorkspaceStartRoute />
@@ -29,14 +34,7 @@ export const appRouter = createHashRouter([
   {
     path: "/",
     element:
-      import.meta.env.VITE_C4OS_QA_FIXTURES === "1" &&
-      ["platform", "policy", "runtime"].includes(
-        import.meta.env.VITE_C4OS_QA_ENTRY ?? "",
-      ) ? (
-        rootElement
-      ) : (
-        <Navigate replace to="/start" />
-      ),
+      qaRootEntry !== null ? rootElement : <Navigate replace to="/start" />,
   },
   {
     path: "/foundation",

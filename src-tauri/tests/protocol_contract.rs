@@ -66,6 +66,20 @@ fn rejects_stale_and_future_renderer_generations() {
 }
 
 #[test]
+fn snapshot_identity_validation_does_not_invent_a_response_generation() {
+    let request = SnapshotRequest {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: RequestId::new("request-snapshot").unwrap(),
+        correlation_id: CorrelationId::new("correlation-snapshot").unwrap(),
+        expected_generation: StateGeneration(99),
+    };
+
+    validate_snapshot_request(&request).unwrap();
+    let error = snapshot_envelope(request, StateGeneration(0), ()).unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::FutureGeneration);
+}
+
+#[test]
 fn rejects_unbounded_or_empty_turn_payloads() {
     let empty = request(
         1,
@@ -321,6 +335,14 @@ fn export_protocol_types(config: &Config) {
     EventEnvelope::export_all(config).unwrap();
     ProtocolEnvelope::<FoundationSnapshot>::export_all(config).unwrap();
     ProtocolEnvelope::<WorkspaceStartSnapshot>::export_all(config).unwrap();
+    ProtocolEnvelope::<ConversationSnapshot>::export_all(config).unwrap();
+    ProtocolEnvelope::<ConversationAttachmentPreviewSnapshot>::export_all(config).unwrap();
+    ConversationAttachmentPreviewInput::export_all(config).unwrap();
+    ConversationSubmitInput::export_all(config).unwrap();
+    ConversationDraftInput::export_all(config).unwrap();
+    ConversationRetryInput::export_all(config).unwrap();
+    ConversationBranchInput::export_all(config).unwrap();
+    ConversationBranchApprovalInput::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

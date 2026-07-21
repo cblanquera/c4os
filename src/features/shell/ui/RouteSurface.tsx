@@ -7,23 +7,33 @@ import { getShellRouteCopy } from "./shell-routes";
 interface RouteSurfaceProps {
   readonly route: ShellRoutePath;
   readonly children?: ReactNode;
+  readonly compact?: boolean;
 }
 
 /** Provides the stable title/support boundary for every direct route. */
-export function RouteSurface({ route, children }: RouteSurfaceProps) {
+export function RouteSurface({
+  route,
+  children,
+  compact = false,
+}: RouteSurfaceProps) {
   const copy = getShellRouteCopy(route);
   const titleId = `shell-route-${route.replaceAll("/", "-").slice(1)}-title`;
 
   return (
     <section
       className="shell-route-surface"
-      aria-labelledby={titleId}
+      {...(compact
+        ? { "aria-label": copy.title }
+        : { "aria-labelledby": titleId })}
       data-route={route}
+      data-route-surface={compact ? "compact" : "standard"}
     >
-      <div className="shell-route-surface__header">
-        <h1 id={titleId}>{copy.title}</h1>
-        <p>{copy.support}</p>
-      </div>
+      {compact ? null : (
+        <div className="shell-route-surface__header">
+          <h1 id={titleId}>{copy.title}</h1>
+          <p>{copy.support}</p>
+        </div>
+      )}
       {children === undefined ? (
         <div className="shell-route-surface__placeholder" aria-hidden="true" />
       ) : (

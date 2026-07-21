@@ -29,6 +29,31 @@ function createStateStore() {
 }
 
 describe("renderer-local shell drafts", () => {
+  it("reconciles Reply only when the command still owns the local target", () => {
+    const store = createStateStore();
+    store.dispatch(shellDraftActions.composerReplyChanged("turn:one"));
+    store.dispatch(
+      shellDraftActions.composerReplyReconciled({
+        expectedReplyTargetId: "turn:one",
+        authoritativeReplyTargetId: "turn:one",
+      }),
+    );
+    expect(selectComposerDraft(store.getState()).replyTargetId).toBe(
+      "turn:one",
+    );
+
+    store.dispatch(shellDraftActions.composerReplyChanged("turn:newer"));
+    store.dispatch(
+      shellDraftActions.composerReplyReconciled({
+        expectedReplyTargetId: "turn:one",
+        authoritativeReplyTargetId: null,
+      }),
+    );
+    expect(selectComposerDraft(store.getState()).replyTargetId).toBe(
+      "turn:newer",
+    );
+  });
+
   it("preserves workspace, composer, panel, and focus state across Settings", () => {
     const store = createStateStore();
     const workspaceId = "workspace:settings" as WorkspaceId;

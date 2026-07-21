@@ -20,18 +20,18 @@ use c4os_lib::runtime::capability::{
     NumericCapabilityKey, PolicyPreflight, RouteIdentity,
 };
 use c4os_lib::runtime::coordinator::{
-    CoordinatedFirstSubmission, CoordinatedRetry, RuntimeCoordinator,
+    CoordinatedFirstSubmission, CoordinatedRetry, CoordinatedTurn, RuntimeCoordinator,
 };
 use c4os_lib::runtime::dispatch::{
     AttachmentMaterializationPlan, AttachmentPreflightResolution, CoordinatedCancellation,
-    CoordinatedFirstDispatch, CoordinatedRetryDispatch, DispatchError, DispatchEventCategory,
-    DispatchIdentity, DispatchModelRoute, FirstDispatchOptions,
+    CoordinatedFirstDispatch, CoordinatedRetryDispatch, CoordinatedTurnDispatch, DispatchError,
+    DispatchEventCategory, DispatchIdentity, DispatchModelRoute, FirstDispatchOptions,
     InstalledAttachmentConverterDescriptor, PeerDispatchError, PeerDispatchEvent,
     PeerDispatchRequest, PiDispatchCredentialIssuer, PiDispatchPeer,
     ProductionOpenCodeDispatchPeer, ProductionPiDispatchPeer, RetryDispatchOptions,
-    RuntimeDispatchPeer, RuntimeDispatchRegistry, RuntimePeerRegistration, coordinate_cancellation,
-    coordinate_first_dispatch, coordinate_polled_events, coordinate_recovery,
-    coordinate_retry_dispatch,
+    RuntimeDispatchPeer, RuntimeDispatchRegistry, RuntimePeerRegistration, TurnDispatchOptions,
+    coordinate_cancellation, coordinate_first_dispatch, coordinate_polled_events,
+    coordinate_recovery, coordinate_retry_dispatch, coordinate_turn_dispatch,
 };
 use c4os_lib::runtime::pi::{PI_NATIVE_VERSION, PiAdapter, PiSidecarManifest, PiSidecarRunner};
 use c4os_lib::runtime::provider::{
@@ -41,10 +41,10 @@ use c4os_lib::runtime::provider::{
 };
 use c4os_lib::runtime::session::{
     AdapterBinding, AttachmentSnapshot, AttemptContextSnapshot, CapabilitySnapshot,
-    ConfigurationSnapshot, ExecutionEnvironmentBinding, FirstSubmission, ModelRouteSnapshot,
-    ResourceSnapshot, RetryRequest, RunAttemptStatus, SessionLifecycle, SessionRecord,
-    SessionRepository, SessionRepositoryError, SessionService, SideEffectState,
-    capability_snapshot_from_effective_descriptor,
+    ConfigurationSnapshot, ExecutionEnvironmentBinding, FirstSubmission,
+    MessageReplyContextSnapshot, ModelRouteSnapshot, ResourceSnapshot, RetryRequest,
+    RunAttemptStatus, SessionLifecycle, SessionRecord, SessionRepository, SessionRepositoryError,
+    SessionService, SideEffectState, TurnSubmission, capability_snapshot_from_effective_descriptor,
 };
 use c4os_lib::runtime::supervisor::{
     HealthState, OPENCODE_NATIVE_VERSION, RUNTIME_PROTOCOL_VERSION, RuntimeInstallation,
@@ -417,6 +417,7 @@ fn attachment() -> AttachmentSnapshot {
         byte_length: 4_096,
         content_sha256: digest('b'),
         snapshot_version: 3,
+        original_reference: 1,
     }
 }
 
@@ -441,6 +442,7 @@ fn direct_attachment() -> AttachmentSnapshot {
         byte_length: DIRECT_ATTACHMENT_CONTENT.len() as u64,
         content_sha256,
         snapshot_version: 3,
+        original_reference: 1,
     }
 }
 
@@ -794,6 +796,47 @@ fn retry_request(
 
 fn retry_options() -> RetryDispatchOptions {
     RetryDispatchOptions {
+        credential_reference: None,
+        credential_lease_id: None,
+        attachment_resolution: AttachmentPreflightResolution::NotRequired,
+        broker_authority: None,
+    }
+}
+
+fn turn_request(
+    coordinator: &RuntimeCoordinator<MemoryRepository>,
+    process_generation: u64,
+    turn_id: &str,
+    attempt_id: &str,
+    correlation_id: &str,
+    created_at_ms: u64,
+) -> CoordinatedTurn {
+    let record = coordinator.session("session-1").unwrap();
+    let context = AttemptContextSnapshot::from_binding(record.binding().unwrap());
+    CoordinatedTurn {
+        submission: TurnSubmission {
+            session_id: "session-1".into(),
+            turn_id: turn_id.into(),
+            attempt_id: attempt_id.into(),
+            authorization_scope_id: format!("authority-{attempt_id}"),
+            correlation_id: correlation_id.into(),
+            process_generation,
+            prompt: Some(format!("Prompt for {turn_id}")),
+            attachments: Vec::new(),
+            reply_context: None,
+            context,
+            submitted_at_ms: created_at_ms,
+        },
+        provider_id: "provider-openrouter".into(),
+        selected_model_id: "claude-sonnet".into(),
+        capability_layers: layers(),
+        draft: draft(),
+        preflight_at_ms: created_at_ms,
+    }
+}
+
+fn turn_options() -> TurnDispatchOptions {
+    TurnDispatchOptions {
         credential_reference: None,
         credential_lease_id: None,
         attachment_resolution: AttachmentPreflightResolution::NotRequired,
@@ -1453,6 +1496,109 @@ fn retry_reuses_native_session_with_fresh_identity_and_failure_terminally_closes
         coordinate_retry_dispatch(&mut coordinator, &mut registry, retry, retry_options()).unwrap();
     let CoordinatedRetryDispatch::Rejected { record, .. } = result else {
         panic!("native retry rejection must not leave a dispatching attempt");
+    };
+    assert!(matches!(
+        record.attempt("attempt-3").unwrap().status,
+        RunAttemptStatus::Failed { .. }
+    ));
+    assert_eq!(record.active_attempt_id, None);
+}
+
+#[test]
+fn follow_up_turn_reuses_native_session_and_terminally_closes_rejection() {
+    let temporary = TempDir::new().unwrap();
+    let trace = Arc::new(Mutex::new(Vec::new()));
+    let (mut coordinator, process_generation) =
+        ready_coordinator(temporary.path(), Arc::clone(&trace));
+    let control = Arc::new(Mutex::new(PeerControl {
+        ready: true,
+        cancel_accepted: true,
+        ..PeerControl::default()
+    }));
+    let mut registry =
+        registry_with_peer(process_generation, Arc::clone(&control), Arc::clone(&trace));
+    coordinate_first_dispatch(
+        &mut coordinator,
+        &mut registry,
+        first_submission(process_generation),
+        options(),
+    )
+    .unwrap();
+    coordinate_cancellation(
+        &mut coordinator,
+        &mut registry,
+        &dispatch_identity(process_generation),
+        NOW + 20,
+    )
+    .unwrap();
+
+    trace.lock().unwrap().clear();
+    let mut turn = turn_request(
+        &coordinator,
+        process_generation,
+        "turn-2",
+        "attempt-2",
+        "correlation-2",
+        NOW + 21,
+    );
+    turn.submission.reply_context = Some(MessageReplyContextSnapshot {
+        target_id: "attempt-1".into(),
+        target_kind: "assistant-message".into(),
+        source_sha256: digest('a'),
+        source_excerpt: "Immutable earlier response".into(),
+    });
+    let accepted =
+        coordinate_turn_dispatch(&mut coordinator, &mut registry, turn, turn_options()).unwrap();
+    let CoordinatedTurnDispatch::Accepted { record, .. } = accepted else {
+        panic!("follow-up turn must reach the existing native session");
+    };
+    assert_eq!(record.turns.len(), 2);
+    assert_eq!(
+        record.turn("turn-2").unwrap().prompt.as_deref(),
+        Some("Prompt for turn-2")
+    );
+    assert_eq!(*trace.lock().unwrap(), ["ready", "ready", "dispatch"]);
+    assert!(
+        control
+            .lock()
+            .unwrap()
+            .requests
+            .last()
+            .unwrap()
+            .input
+            .contains("<reply-context>\nImmutable earlier response")
+    );
+    assert_eq!(
+        record
+            .turn("turn-2")
+            .unwrap()
+            .reply_context
+            .as_ref()
+            .unwrap()
+            .target_id,
+        "attempt-1"
+    );
+
+    let identity = DispatchIdentity {
+        turn_id: "turn-2".into(),
+        attempt_id: "attempt-2".into(),
+        correlation_id: "correlation-2".into(),
+        ..dispatch_identity(process_generation)
+    };
+    coordinate_cancellation(&mut coordinator, &mut registry, &identity, NOW + 22).unwrap();
+    control.lock().unwrap().fail_dispatch = true;
+    let turn = turn_request(
+        &coordinator,
+        process_generation,
+        "turn-3",
+        "attempt-3",
+        "correlation-3",
+        NOW + 23,
+    );
+    let rejected =
+        coordinate_turn_dispatch(&mut coordinator, &mut registry, turn, turn_options()).unwrap();
+    let CoordinatedTurnDispatch::Rejected { record, .. } = rejected else {
+        panic!("native turn rejection must not leave a dispatching attempt");
     };
     assert!(matches!(
         record.attempt("attempt-3").unwrap().status,

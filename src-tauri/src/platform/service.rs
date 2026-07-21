@@ -530,6 +530,34 @@ impl PickerGrantRegistry {
         self.grants.remove(grant_id)
     }
 
+    /// Consumes a complete ordered grant set atomically. Missing or repeated
+    /// identifiers leave the registry unchanged, so a partial attachment
+    /// submission cannot strand otherwise valid picker authority.
+    pub fn take_batch(
+        &mut self,
+        grant_ids: &[PickerGrantId],
+    ) -> Result<Vec<NativePickerGrant>, PlatformError> {
+        let unique = grant_ids.iter().collect::<BTreeSet<_>>();
+        if grant_ids.is_empty()
+            || unique.len() != grant_ids.len()
+            || grant_ids
+                .iter()
+                .any(|grant_id| !self.grants.contains_key(grant_id))
+        {
+            return Err(PlatformError::InvalidPickerGrant(
+                "picker grant batch is missing or repeated",
+            ));
+        }
+        Ok(grant_ids
+            .iter()
+            .map(|grant_id| {
+                self.grants
+                    .remove(grant_id)
+                    .expect("validated grant remains present until removal")
+            })
+            .collect())
+    }
+
     pub fn len(&self) -> usize {
         self.grants.len()
     }

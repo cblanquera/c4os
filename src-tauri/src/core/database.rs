@@ -31,7 +31,7 @@ pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
 const APP_SCHEMA_VERSION: usize = 6;
-const WORKSPACE_SCHEMA_VERSION: usize = 3;
+const WORKSPACE_SCHEMA_VERSION: usize = 4;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 struct AuxiliaryConnectionPermit;
@@ -345,6 +345,16 @@ pub struct WorkspaceSessionDocumentRecord {
     pub updated_at_ms: u64,
 }
 
+/// Strict conversation UI state validated by the conversation application
+/// service before it reaches the Workspace single-writer actor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceConversationStateRecord {
+    pub workspace_id: String,
+    pub generation: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleState {
     Active,
@@ -513,6 +523,11 @@ enum WriteCommand {
         path_state: ProjectPathState,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    RenameProject {
+        project_id: String,
+        display_name: String,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     ActivateConfiguration {
         record: ConfigurationSnapshotRecord,
         reply: mpsc::Sender<DatabaseResult<u64>>,
@@ -530,9 +545,19 @@ enum WriteCommand {
         expected_generation: Option<u64>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    SaveConversationState {
+        record: WorkspaceConversationStateRecord,
+        expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     CreateSessionDocument {
         record: WorkspaceSessionDocumentRecord,
         active_project_id: String,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    PromoteSessionDocument {
+        record: WorkspaceSessionDocumentRecord,
+        chat: ChatRecord,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
     CompareAndSwapSessionDocument {
@@ -696,6 +721,19 @@ impl DatabaseActor {
         })
     }
 
+    pub fn rename_project(
+        &self,
+        project_id: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace()?;
+        self.request(|reply| WriteCommand::RenameProject {
+            project_id: project_id.into(),
+            display_name: display_name.into(),
+            reply,
+        })
+    }
+
     /// Confirms one exact active Project inside this actor's bound Workspace.
     /// Runtime authority uses this narrow lookup instead of accepting a
     /// renderer-supplied Project identifier or a potentially truncated
@@ -827,6 +865,26 @@ impl DatabaseActor {
         read_runtime_state_document(&connection, document_kind, document_id)
     }
 
+    pub fn save_conversation_state(
+        &self,
+        record: WorkspaceConversationStateRecord,
+        expected_generation: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.request(|reply| WriteCommand::SaveConversationState {
+            record,
+            expected_generation,
+            reply,
+        })
+    }
+
+    pub fn conversation_state(&self) -> DatabaseResult<Option<WorkspaceConversationStateRecord>> {
+        let workspace_id = self.require_workspace()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_conversation_state(&connection, workspace_id)
+    }
+
     pub fn create_session_document(
         &self,
         record: WorkspaceSessionDocumentRecord,
@@ -836,6 +894,24 @@ impl DatabaseActor {
         self.request(|reply| WriteCommand::CreateSessionDocument {
             record,
             active_project_id,
+            reply,
+        })
+    }
+
+    /// Atomically creates the first durable Chat row and its complete session
+    /// document. A same-identity active Chat is updated in place so callers
+    /// from older epochs that pre-created the shell remain compatible, while
+    /// an inactive or cross-Project identity fails closed.
+    pub fn promote_session_document(
+        &self,
+        record: WorkspaceSessionDocumentRecord,
+        chat: ChatRecord,
+    ) -> DatabaseResult<u64> {
+        self.require_workspace_id(&record.workspace_id)?;
+        self.require_workspace_id(&chat.workspace_id)?;
+        self.request(|reply| WriteCommand::PromoteSessionDocument {
+            record,
+            chat,
             reply,
         })
     }
@@ -1100,6 +1176,19 @@ fn writer_loop(
                     path_state,
                 ),
             ),
+            WriteCommand::RenameProject {
+                project_id,
+                display_name,
+                reply,
+            } => reply_result(
+                reply,
+                write_project_name(
+                    &mut connection,
+                    &descriptor.kind,
+                    &project_id,
+                    &display_name,
+                ),
+            ),
             WriteCommand::ActivateConfiguration { record, reply } => {
                 reply_result(reply, write_configuration(&mut connection, record));
             }
@@ -1118,6 +1207,19 @@ fn writer_loop(
                 reply,
                 write_runtime_state_document(&mut connection, record, expected_generation),
             ),
+            WriteCommand::SaveConversationState {
+                record,
+                expected_generation,
+                reply,
+            } => reply_result(
+                reply,
+                write_conversation_state(
+                    &mut connection,
+                    &descriptor.kind,
+                    record,
+                    expected_generation,
+                ),
+            ),
             WriteCommand::CreateSessionDocument {
                 record,
                 active_project_id,
@@ -1131,6 +1233,14 @@ fn writer_loop(
                     &active_project_id,
                     None,
                 ),
+            ),
+            WriteCommand::PromoteSessionDocument {
+                record,
+                chat,
+                reply,
+            } => reply_result(
+                reply,
+                write_promoted_session_document(&mut connection, &descriptor.kind, record, chat),
             ),
             WriteCommand::CompareAndSwapSessionDocument {
                 record,
@@ -1634,6 +1744,18 @@ fn workspace_migrations() -> Migrations<'static> {
         )
         .foreign_key_check()
         .comment("Workspace-owned immutable-turn and run-attempt session documents"),
+        M::up(
+            "CREATE TABLE conversation_state (
+                workspace_id TEXT PRIMARY KEY NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0),
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+            );",
+        )
+        .foreign_key_check()
+        .comment("Workspace-owned conversation selection and durable composer drafts"),
     ])
 }
 
@@ -2043,6 +2165,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "configuration_lkg",
             "workspace_diagnostics",
             "session_records",
+            "conversation_state",
             "durable_generation",
         ],
     };
@@ -2066,6 +2189,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
         validate_runtime_state_documents(connection)?;
     } else if let DatabaseKind::Workspace { workspace_id } = kind {
         validate_session_documents(connection, workspace_id)?;
+        let _ = read_conversation_state(connection, workspace_id)?;
     }
     Ok(())
 }
@@ -2361,6 +2485,135 @@ fn write_runtime_state_document(
     Ok(durable_generation)
 }
 
+fn read_conversation_state(
+    connection: &Connection,
+    workspace_id: &str,
+) -> DatabaseResult<Option<WorkspaceConversationStateRecord>> {
+    require_nonempty("workspace_id", workspace_id)?;
+    let raw = connection
+        .query_row(
+            "SELECT generation, canonical_document, document_sha256, updated_at_ms
+             FROM conversation_state WHERE workspace_id = ?1",
+            [workspace_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(generation, canonical_document, stored_digest, updated_at_ms)| {
+            validate_text_field(
+                "conversation canonical document",
+                &canonical_document,
+                MAX_RUNTIME_DOCUMENT_BYTES,
+            )?;
+            if stored_digest != canonical_document_digest(&canonical_document) {
+                return Err(DatabaseError::Validation(format!(
+                    "conversation document digest mismatch for {workspace_id}"
+                )));
+            }
+            Ok(WorkspaceConversationStateRecord {
+                workspace_id: workspace_id.into(),
+                generation: generation_to_u64(generation)?,
+                canonical_document,
+                updated_at_ms: generation_to_u64(updated_at_ms)?,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn write_conversation_state(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    record: WorkspaceConversationStateRecord,
+    expected_generation: Option<u64>,
+) -> DatabaseResult<u64> {
+    let DatabaseKind::Workspace { workspace_id } = kind else {
+        return Err(DatabaseError::WrongKind {
+            expected: "workspace",
+            actual: "app",
+        });
+    };
+    if record.workspace_id != *workspace_id {
+        return Err(DatabaseError::InvalidInput(
+            "conversation state Workspace identity is mismatched".into(),
+        ));
+    }
+    validate_text_field(
+        "conversation canonical document",
+        &record.canonical_document,
+        MAX_RUNTIME_DOCUMENT_BYTES,
+    )?;
+    if record.generation == 0 || record.canonical_document.is_empty() || record.updated_at_ms == 0 {
+        return Err(DatabaseError::InvalidInput(
+            "conversation generation, document, and timestamp must be present".into(),
+        ));
+    }
+    let generation = i64::try_from(record.generation).map_err(|_| {
+        DatabaseError::InvalidInput("conversation generation exceeds SQLite range".into())
+    })?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("conversation timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active_workspace: i64 = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM workspaces
+         WHERE workspace_id = ?1 AND lifecycle_state = 'active')",
+        [workspace_id],
+        |row| row.get(0),
+    )?;
+    if active_workspace != 1 {
+        return Err(DatabaseError::Conflict(
+            "active Workspace changed before conversation state commit".into(),
+        ));
+    }
+    let current = transaction
+        .query_row(
+            "SELECT generation FROM conversation_state WHERE workspace_id = ?1",
+            [workspace_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current, expected_generation) {
+        (None, None) => {}
+        (Some(current), Some(expected)) if current == expected && record.generation > current => {}
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "conversation state expected generation {expected:?}, found {actual:?}"
+            )));
+        }
+    }
+    let digest = canonical_document_digest(&record.canonical_document);
+    transaction.execute(
+        "INSERT INTO conversation_state(
+            workspace_id, generation, canonical_document, document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+            generation = excluded.generation,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            workspace_id,
+            generation,
+            record.canonical_document,
+            digest,
+            updated_at_ms
+        ],
+    )?;
+    let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
 fn read_session_document(
     connection: &Connection,
     workspace_id: &str,
@@ -2436,6 +2689,121 @@ fn read_session_documents(
             })
         })
         .collect()
+}
+
+fn write_promoted_session_document(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    record: WorkspaceSessionDocumentRecord,
+    chat: ChatRecord,
+) -> DatabaseResult<u64> {
+    let workspace_id = workspace_id(kind)?;
+    if record.workspace_id != workspace_id
+        || chat.workspace_id != workspace_id
+        || chat.chat_id != record.session_id
+    {
+        return Err(DatabaseError::InvalidInput(
+            "promoted Chat and session identities do not match this Workspace".into(),
+        ));
+    }
+    require_nonempty("session_id", &record.session_id)?;
+    require_nonempty("project_id", &chat.project_id)?;
+    validate_canonical_display_name("Chat title", &chat.title, MAX_PROJECT_DISPLAY_NAME_BYTES)?;
+    validate_inactivation(chat.lifecycle_state, chat.inactivated_at)?;
+    if chat.lifecycle_state != LifecycleState::Active
+        || chat.created_at <= 0
+        || chat.updated_at < chat.created_at
+    {
+        return Err(DatabaseError::InvalidInput(
+            "promoted Chat must be active with valid timestamps".into(),
+        ));
+    }
+    validate_text_field(
+        "session canonical document",
+        &record.canonical_document,
+        MAX_SESSION_DOCUMENT_BYTES,
+    )?;
+    if record.revision != 1 || record.canonical_document.is_empty() || record.updated_at_ms == 0 {
+        return Err(DatabaseError::InvalidInput(
+            "first session revision, document, and timestamp must be present".into(),
+        ));
+    }
+    let revision = i64::try_from(record.revision)
+        .map_err(|_| DatabaseError::InvalidInput("session revision exceeds SQLite range".into()))?;
+    let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+        DatabaseError::InvalidInput("session timestamp exceeds SQLite range".into())
+    })?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let active_project_exists: i64 = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM workspaces AS workspace
+            JOIN projects AS project ON project.workspace_id = workspace.workspace_id
+            WHERE workspace.workspace_id = ?1
+              AND project.project_id = ?2
+              AND workspace.lifecycle_state = 'active'
+              AND project.lifecycle_state = 'active'
+        )",
+        params![workspace_id, chat.project_id],
+        |row| row.get(0),
+    )?;
+    if active_project_exists != 1 {
+        return Err(DatabaseError::Conflict(
+            "active Workspace and Project binding changed before Chat promotion".into(),
+        ));
+    }
+    let existing_chat = transaction
+        .query_row(
+            "SELECT project_id, lifecycle_state FROM chats
+             WHERE workspace_id = ?1 AND chat_id = ?2",
+            params![workspace_id, record.session_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    if existing_chat
+        .as_ref()
+        .is_some_and(|(project_id, lifecycle)| {
+            project_id != &chat.project_id || lifecycle != "active"
+        })
+    {
+        return Err(DatabaseError::Conflict(
+            "Chat identity is inactive or belongs to another Project".into(),
+        ));
+    }
+    let existing_session: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM session_records
+         WHERE workspace_id = ?1 AND session_id = ?2",
+        params![workspace_id, record.session_id],
+        |row| row.get(0),
+    )?;
+    if existing_session != 0 {
+        return Err(DatabaseError::Conflict(
+            "session record already exists during first promotion".into(),
+        ));
+    }
+    insert_chat(&transaction, &chat)?;
+    let digest = canonical_document_digest(&record.canonical_document);
+    let written = transaction.execute(
+        "INSERT INTO session_records(
+            workspace_id, session_id, revision, canonical_document,
+            document_sha256, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            workspace_id,
+            record.session_id,
+            revision,
+            record.canonical_document,
+            digest,
+            updated_at_ms
+        ],
+    )?;
+    if written != 1 {
+        return Err(DatabaseError::Conflict(
+            "session promotion lost a concurrent race".into(),
+        ));
+    }
+    let durable_generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(durable_generation)
 }
 
 fn write_session_document(
@@ -2897,6 +3265,36 @@ fn write_project_path(
             workspace_id,
             project_id
         ],
+    )?;
+    require_one_update(updated, "Project", project_id)?;
+    let generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(generation)
+}
+
+fn write_project_name(
+    connection: &mut Connection,
+    kind: &DatabaseKind,
+    project_id: &str,
+    display_name: &str,
+) -> DatabaseResult<u64> {
+    let workspace_id = workspace_id(kind)?;
+    require_nonempty("project_id", project_id)?;
+    validate_text_field(
+        "Project display name",
+        display_name,
+        MAX_PROJECT_DISPLAY_NAME_BYTES,
+    )?;
+    if display_name.trim().is_empty() || display_name.contains('\0') {
+        return Err(DatabaseError::InvalidInput(
+            "Project display name is invalid".into(),
+        ));
+    }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let updated = transaction.execute(
+        "UPDATE projects SET display_name = ?1
+         WHERE workspace_id = ?2 AND project_id = ?3 AND lifecycle_state = 'active'",
+        params![display_name.trim(), workspace_id, project_id],
     )?;
     require_one_update(updated, "Project", project_id)?;
     let generation = bump_workspace_generation(&transaction, workspace_id)?;

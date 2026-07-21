@@ -41,9 +41,13 @@ test("all accepted product routes are directly addressable", async ({
 
   for (const [path, title] of routes) {
     await page.goto(`/#${path}`);
-    await expect(
-      page.getByRole("heading", { name: title, level: 1 }),
-    ).toBeVisible();
+    if (path === "/chat") {
+      await expect(page.getByRole("region", { name: title })).toBeVisible();
+    } else {
+      await expect(
+        page.getByRole("heading", { name: title, level: 1 }),
+      ).toBeVisible();
+    }
     await expect(page.locator(`[data-route="${path}"]`)).toBeVisible();
     await expectNoDocumentOverflow(page);
   }
@@ -130,10 +134,6 @@ test("responsive overlay, compressed Settings, and deferred gates stay explicit"
   await expect(page.getByRole("button", { name: "Detach Chat" })).toHaveCount(
     0,
   );
-  await expect(
-    page.getByRole("button", { name: "Reply target: Chat" }),
-  ).toBeDisabled();
-
   await page.setViewportSize({ width: 620, height: 720 });
   await page.goto("/#/settings/providers");
   await expect(page.locator(".shell-settings__body")).toHaveCSS(
@@ -153,9 +153,7 @@ for (const width of [1440, 993, 992, 680, 620, 390]) {
   }) => {
     await page.setViewportSize({ width, height: 760 });
     await page.goto("/#/chat");
-    await expect(
-      page.getByRole("heading", { name: "Chat", level: 1 }),
-    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
     await expect(
       page.getByRole("form", { name: "Message composer" }),
     ).toBeVisible();

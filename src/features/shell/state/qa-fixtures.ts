@@ -93,6 +93,7 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
         generation,
         value: {
           sessionId,
+          title: "Build onboarding start screens",
           activeAttemptId: null,
           turns: [
             {
@@ -114,9 +115,31 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
         generation,
         value: {
           activeModelId: "openai/gpt-5",
+          activeReasoningEffort: "medium",
+          models: [
+            {
+              providerId: "openai",
+              providerName: "OpenAI",
+              modelId: "openai/gpt-5",
+              selected: true,
+              available: true,
+              supportsVision: true,
+              supportsTools: true,
+              supportsReasoning: true,
+              supportsAudio: false,
+              contextTokens: 400_000,
+            },
+          ],
           allowedModes: ["chat", "files", "browser", "terminal"],
           reasoningEfforts: ["off", "low", "medium", "high"],
           activeBranch: "main",
+          branches: [
+            { name: "main", targetOid: "1".repeat(40) },
+            { name: "feature/demo", targetOid: "2".repeat(40) },
+          ],
+          branchPendingApprovalId: null,
+          branchOperationStatus: null,
+          branchOperationMessage: null,
         },
       },
       artifacts: {

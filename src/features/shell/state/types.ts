@@ -69,10 +69,34 @@ export type ConversationTurnProjection = {
   readonly author: "user" | "assistant";
   readonly markdown: string;
   readonly status: "streaming" | "completed" | "failed";
+  readonly attachments?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly mediaType: string;
+    readonly byteLength: number;
+    readonly stableReference: string;
+    readonly referenceNumber: number;
+  }[];
+  readonly modelLabel?: string;
+  readonly runtimeId?: string;
+  readonly runtimeLabel?: string;
+  readonly adapterLabel?: string;
+  readonly environmentLabel?: string;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly durationMs?: number;
+  readonly activities?: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly label: string;
+    readonly detail?: string;
+    readonly state: "running" | "completed" | "failed";
+  }[];
 };
 
 export type ConversationProjection = {
   readonly sessionId: SessionId | null;
+  readonly title: string | null;
   readonly turns: readonly ConversationTurnProjection[];
   readonly activeAttemptId: string | null;
 };
@@ -81,9 +105,30 @@ export type ComposerMode = "chat" | "files" | "browser" | "terminal";
 
 export type ComposerProjection = {
   readonly activeModelId: string | null;
+  readonly activeReasoningEffort: "off" | "low" | "medium" | "high" | null;
+  readonly models: readonly {
+    readonly providerId: string;
+    readonly providerName: string;
+    readonly modelId: string;
+    readonly selected: boolean;
+    readonly available: boolean;
+    readonly supportsVision: boolean;
+    readonly supportsTools: boolean;
+    readonly supportsReasoning: boolean;
+    readonly supportsAudio: boolean;
+    readonly contextTokens: number;
+  }[];
   readonly allowedModes: readonly ComposerMode[];
   readonly reasoningEfforts: readonly ("off" | "low" | "medium" | "high")[];
   readonly activeBranch: string | null;
+  readonly branches: readonly {
+    readonly name: string;
+    readonly targetOid: string;
+  }[];
+  readonly branchPendingApprovalId: string | null;
+  readonly branchOperationStatus:
+    "pending" | "switched" | "created" | "blocked" | "denied" | null;
+  readonly branchOperationMessage: string | null;
 };
 
 export type ArtifactKind = "browser" | "file" | "folder" | "terminal";
@@ -195,8 +240,12 @@ export type AuthoritativePublication = {
 export type DraftAttachment = {
   readonly id: AttachmentId;
   readonly name: string;
+  readonly byteLength?: number;
+  readonly mediaType?: string;
+  readonly stableReference?: string;
+  readonly referenceNumber: number;
   readonly compatibility:
-    "ready" | "needs-vision" | "needs-audio" | "converted";
+    "ready" | "needs-vision" | "needs-audio" | "converted" | "incompatible";
 };
 
 export type ComposerDraft = {
@@ -204,7 +253,8 @@ export type ComposerDraft = {
   readonly modeBeforeFocus: ComposerMode | null;
   readonly text: string;
   readonly attachments: readonly DraftAttachment[];
-  readonly replyArtifactId: ArtifactId | null;
+  readonly nextAttachmentReference: number;
+  readonly replyTargetId: string | null;
 };
 
 export type LeftPanelDraft = {

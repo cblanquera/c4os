@@ -3,7 +3,7 @@ use std::fs;
 use c4os_lib::core::database::{
     self, AppConfigurationSnapshotRecord, DatabaseActor, DatabaseDescriptor, DatabaseSnapshot,
     InactiveEntity, InstallationRecord, LifecycleState, ProjectPathState, ProjectRecord,
-    RecentWorkspaceRecord, SnapshotQuery, WorkspaceRecord,
+    RecentWorkspaceRecord, SnapshotQuery, WorkspaceConversationStateRecord, WorkspaceRecord,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -60,6 +60,68 @@ fn workspace_snapshot(
         DatabaseSnapshot::Workspace(snapshot) => snapshot,
         DatabaseSnapshot::App(_) => panic!("expected Workspace snapshot"),
     }
+}
+
+#[test]
+fn conversation_state_is_workspace_owned_cas_and_survives_restart() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::workspace_with_recovery_dir(
+        temp.path().join("active"),
+        "workspace-1",
+        temp.path().join("recovery"),
+    );
+    {
+        let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("Workspace database");
+        assert_eq!(report.current_version, 4);
+        actor
+            .create_workspace(workspace_record("workspace-1", "Workspace"))
+            .expect("seed Workspace");
+        actor
+            .save_conversation_state(
+                WorkspaceConversationStateRecord {
+                    workspace_id: "workspace-1".into(),
+                    generation: 1,
+                    canonical_document: r#"{"schemaVersion":1,"activeProjectId":null,"activeSessionId":null,"drafts":{}}"#.into(),
+                    updated_at_ms: NOW as u64,
+                },
+                None,
+            )
+            .expect("first state");
+        let stale = actor.save_conversation_state(
+            WorkspaceConversationStateRecord {
+                workspace_id: "workspace-1".into(),
+                generation: 2,
+                canonical_document: "{}".into(),
+                updated_at_ms: NOW as u64 + 1,
+            },
+            None,
+        );
+        assert!(
+            stale
+                .expect_err("stale create must lose")
+                .to_string()
+                .contains("expected")
+        );
+        actor
+            .save_conversation_state(
+                WorkspaceConversationStateRecord {
+                    workspace_id: "workspace-1".into(),
+                    generation: 2,
+                    canonical_document: r#"{"schemaVersion":1,"activeProjectId":null,"activeSessionId":null,"drafts":{"chat-1":{"prompt":"keep me","attachments":[],"providerId":null,"modelId":null,"reasoningMode":null,"mode":"chat","replyTargetId":null}}}"#.into(),
+                    updated_at_ms: NOW as u64 + 2,
+                },
+                Some(1),
+            )
+            .expect("replacement state");
+    }
+    let (actor, report) = DatabaseActor::start(descriptor).expect("restart Workspace database");
+    assert_eq!(report.previous_version, 4);
+    let restored = actor
+        .conversation_state()
+        .expect("read state")
+        .expect("state exists");
+    assert_eq!(restored.generation, 2);
+    assert!(restored.canonical_document.contains("keep me"));
 }
 
 #[test]
@@ -293,7 +355,7 @@ fn workspace_migration_recovery_and_writer_lock_stay_outside_portable_root() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 3).expect("Workspace backup path");
+        database::migration_backup_path(&descriptor, 99, 4).expect("Workspace backup path");
     let diagnostic_path = database::migration_diagnostic_path(&descriptor);
     let writer_lock_path = descriptor
         .recovery_dir
@@ -415,7 +477,7 @@ fn pre_promotion_inspector_is_read_only_bounded_and_fails_closed() {
             .including_inactive(),
     )
     .expect("semantic inspection");
-    assert_eq!(inspection.schema_version, 3);
+    assert_eq!(inspection.schema_version, 4);
     assert_eq!(inspection.snapshot.projects.len(), 1);
     assert_eq!(inspection.snapshot.chats.len(), 1);
     assert!(inspection.snapshot.truncated);

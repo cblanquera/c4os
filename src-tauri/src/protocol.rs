@@ -6,7 +6,7 @@
 //! JSON object fields and enum discriminants use stable `camelCase` names.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use ts_rs::TS;
 
@@ -670,6 +670,256 @@ pub struct WorkspaceStartSnapshot {
     pub recents: Vec<WorkspaceRecentSnapshot>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationProjectSnapshot {
+    pub project_id: ProjectId,
+    pub display_name: String,
+    pub path_state: String,
+    pub position: i64,
+    pub git_versioned: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationBranchSnapshot {
+    pub name: String,
+    pub target_oid: String,
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationBranchControlSnapshot {
+    pub current_branch: Option<String>,
+    pub branches: Vec<ConversationBranchSnapshot>,
+    pub pending_approval_id: Option<String>,
+    pub operation_status: Option<String>,
+    pub operation_message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationSessionSummarySnapshot {
+    pub session_id: SessionId,
+    pub project_id: ProjectId,
+    pub title: String,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationAttachmentSnapshot {
+    pub attachment_id: AttachmentId,
+    pub display_name: String,
+    pub media_type: String,
+    pub byte_length: u64,
+    pub stable_reference: String,
+    pub original_reference: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationAttachmentPreviewInput {
+    pub attachment_id: AttachmentId,
+    pub stable_reference: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationAttachmentPreviewSnapshot {
+    pub attachment_id: AttachmentId,
+    pub media_type: String,
+    pub data_url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationTurnSnapshot {
+    pub turn_id: TurnId,
+    pub prompt: Option<String>,
+    pub attachments: Vec<ConversationAttachmentSnapshot>,
+    pub submitted_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationActivitySnapshot {
+    pub sequence: u64,
+    pub kind: String,
+    pub label: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationAttemptSnapshot {
+    pub attempt_id: AttemptId,
+    pub turn_id: TurnId,
+    pub status: String,
+    pub assistant_markdown: String,
+    pub activities: Vec<ConversationActivitySnapshot>,
+    pub runtime_id: RuntimeId,
+    pub runtime_kind: String,
+    pub environment_id: EnvironmentId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub adapter_id: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationSessionSnapshot {
+    pub session_id: SessionId,
+    pub title: Option<String>,
+    pub turns: Vec<ConversationTurnSnapshot>,
+    pub attempts: Vec<ConversationAttemptSnapshot>,
+    pub active_attempt_id: Option<AttemptId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationModelSnapshot {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model_id: String,
+    pub selected: bool,
+    pub available: bool,
+    pub supports_vision: bool,
+    pub supports_tools: bool,
+    pub supports_reasoning: bool,
+    pub supports_audio: bool,
+    pub context_tokens: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct PendingConversationSnapshot {
+    pub session_id: SessionId,
+    pub project_id: ProjectId,
+    pub title: String,
+    pub attachments: Vec<ConversationAttachmentSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationDraftSnapshot {
+    pub prompt: String,
+    pub attachments: Vec<ConversationAttachmentSnapshot>,
+    pub next_attachment_reference: u32,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub reasoning_mode: Option<String>,
+    pub mode: String,
+    pub reply_target_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationSnapshot {
+    pub protocol_version: u16,
+    pub generation: StateGeneration,
+    pub authority: String,
+    pub workspace_id: Option<WorkspaceId>,
+    pub workspace_name: Option<String>,
+    pub active_project_id: Option<ProjectId>,
+    pub active_session_id: Option<SessionId>,
+    pub pending: Option<PendingConversationSnapshot>,
+    pub draft: ConversationDraftSnapshot,
+    pub projects: Vec<ConversationProjectSnapshot>,
+    pub sessions: Vec<ConversationSessionSummarySnapshot>,
+    pub active_conversation: Option<ConversationSessionSnapshot>,
+    pub models: Vec<ConversationModelSnapshot>,
+    pub branch_control: Option<ConversationBranchControlSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(rename_all = "kebab-case")]
+pub enum ConversationBranchOperation {
+    Switch,
+    Create,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationBranchInput {
+    pub operation: ConversationBranchOperation,
+    pub branch: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(rename_all = "kebab-case")]
+pub enum ConversationBranchApprovalAnswer {
+    Allow,
+    Deny,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationBranchApprovalInput {
+    pub prompt_id: String,
+    pub answer: ConversationBranchApprovalAnswer,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationSubmitInput {
+    pub prompt: Option<String>,
+    pub picker_grant_ids: Vec<PickerGrantId>,
+    pub retained_attachment_ids: Vec<AttachmentId>,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub reasoning_mode: Option<String>,
+    pub resume_mode: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationDraftInput {
+    pub prompt: String,
+    pub picker_grant_ids: Vec<PickerGrantId>,
+    pub retained_attachment_ids: Vec<AttachmentId>,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub reasoning_mode: Option<String>,
+    pub mode: String,
+    pub reply_target_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationRetryInput {
+    pub parent_attempt_id: AttemptId,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub reasoning_mode: Option<String>,
+}
+
 /// Generic response wrapper used by the minimal Task 00001 Tauri command.
 /// Product commands use the non-generic `ResponseEnvelope` so generated
 /// renderer types remain a closed union.
@@ -686,14 +936,21 @@ pub struct ProtocolEnvelope<T> {
 
 pub type StructuredCoreError = ProtocolError;
 
+/// Validates only the versioned request identity. Mutation commands perform
+/// their own exact generation comparison against the complete authority they
+/// are about to change; a synthetic response generation is not a valid proxy.
+pub fn validate_snapshot_request(request: &SnapshotRequest) -> Result<(), StructuredCoreError> {
+    validate_protocol_version(request.protocol_version)?;
+    request.request_id.validate()?;
+    request.correlation_id.validate()
+}
+
 pub(crate) fn snapshot_envelope<T>(
     request: SnapshotRequest,
     generation: StateGeneration,
     payload: T,
 ) -> Result<ProtocolEnvelope<T>, StructuredCoreError> {
-    validate_protocol_version(request.protocol_version)?;
-    request.request_id.validate()?;
-    request.correlation_id.validate()?;
+    validate_snapshot_request(&request)?;
     if request.expected_generation > generation {
         return Err(generation_error(
             ProtocolErrorCode::FutureGeneration,
@@ -776,6 +1033,298 @@ pub fn workspace_start_snapshot(
         generation: payload.generation,
         payload,
     })
+}
+
+pub fn conversation_snapshot(
+    request: SnapshotRequest,
+    payload: ConversationSnapshot,
+) -> Result<ProtocolEnvelope<ConversationSnapshot>, StructuredCoreError> {
+    validate_protocol_version(request.protocol_version)?;
+    request.request_id.validate()?;
+    request.correlation_id.validate()?;
+    validate_protocol_version(payload.protocol_version)?;
+    if request.expected_generation > payload.generation {
+        return Err(generation_error(
+            ProtocolErrorCode::FutureGeneration,
+            request.expected_generation.0,
+            payload.generation.0,
+        ));
+    }
+    if payload.authority != "rust-core"
+        || payload.projects.len() > 250
+        || payload.sessions.len() > 250
+        || payload.models.len() > 250
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Conversation snapshot is invalid",
+            false,
+        ));
+    }
+    if let Some(workspace_id) = &payload.workspace_id {
+        workspace_id.validate()?;
+    }
+    if let Some(project_id) = &payload.active_project_id {
+        project_id.validate()?;
+    }
+    if let Some(session_id) = &payload.active_session_id {
+        session_id.validate()?;
+    }
+    for project in &payload.projects {
+        project.project_id.validate()?;
+        validate_display_text("Project display name", &project.display_name, 512)?;
+        if !matches!(
+            project.path_state.as_str(),
+            "found" | "missing" | "relocated"
+        ) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Project path state is invalid",
+                false,
+            ));
+        }
+    }
+    for session in &payload.sessions {
+        session.session_id.validate()?;
+        session.project_id.validate()?;
+        validate_display_text("Chat title", &session.title, 512)?;
+    }
+    if let Some(pending) = &payload.pending {
+        pending.session_id.validate()?;
+        pending.project_id.validate()?;
+        validate_display_text("pending Chat title", &pending.title, 512)?;
+        if pending.attachments.len() > MAX_ATTACHMENTS {
+            return Err(ProtocolError::payload_too_large(
+                "pending attachment list exceeds its bound",
+            ));
+        }
+        for attachment in &pending.attachments {
+            validate_conversation_attachment(attachment)?;
+        }
+    }
+    if payload.draft.prompt.len() > MAX_TEXT_BYTES || payload.draft.prompt.contains('\0') {
+        return Err(ProtocolError::payload_too_large(
+            "composer draft prompt exceeds its bound",
+        ));
+    }
+    if payload.draft.attachments.len() > MAX_ATTACHMENTS {
+        return Err(ProtocolError::payload_too_large(
+            "composer draft attachment list exceeds its bound",
+        ));
+    }
+    let mut draft_references = BTreeSet::new();
+    for attachment in &payload.draft.attachments {
+        validate_conversation_attachment(attachment)?;
+        if attachment.original_reference >= payload.draft.next_attachment_reference
+            || !draft_references.insert(attachment.original_reference)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "composer draft attachment references are invalid",
+                false,
+            ));
+        }
+    }
+    if payload.draft.next_attachment_reference == 0 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "composer draft attachment counter is invalid",
+            false,
+        ));
+    }
+    for (label, value) in [
+        ("draft provider", payload.draft.provider_id.as_deref()),
+        ("draft model", payload.draft.model_id.as_deref()),
+        (
+            "draft Reply target",
+            payload.draft.reply_target_id.as_deref(),
+        ),
+    ] {
+        if let Some(value) = value {
+            validate_display_text(label, value, 512)?;
+        }
+    }
+    if !matches!(
+        payload.draft.mode.as_str(),
+        "chat" | "files" | "browser" | "terminal"
+    ) || payload
+        .draft
+        .reasoning_mode
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "off" | "low" | "medium" | "high"))
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "composer draft controls are invalid",
+            false,
+        ));
+    }
+    let selected_models = payload.models.iter().filter(|model| model.selected).count();
+    if selected_models > 1 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Conversation model selection is inconsistent",
+            false,
+        ));
+    }
+    for model in &payload.models {
+        validate_identifier("Conversation provider", &model.provider_id)?;
+        validate_display_text("Conversation provider name", &model.provider_name, 512)?;
+        validate_display_text("Conversation model", &model.model_id, 512)?;
+    }
+    if let Some(branch_control) = &payload.branch_control {
+        if branch_control.branches.len() > 4_096
+            || branch_control
+                .operation_status
+                .as_deref()
+                .is_some_and(|status| {
+                    !matches!(
+                        status,
+                        "pending" | "switched" | "created" | "blocked" | "denied"
+                    )
+                })
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Git Branch control snapshot is invalid",
+                false,
+            ));
+        }
+        if let Some(current) = &branch_control.current_branch {
+            validate_display_text("current Git branch", current, 255)?;
+        }
+        if let Some(message) = &branch_control.operation_message {
+            validate_display_text("Git Branch operation message", message, 4_096)?;
+        }
+        if branch_control
+            .pending_approval_id
+            .as_deref()
+            .is_some_and(|value| value.is_empty() || value.len() > 512)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Git Branch approval identity is invalid",
+                false,
+            ));
+        }
+        let selected = branch_control
+            .branches
+            .iter()
+            .filter(|branch| branch.selected)
+            .count();
+        for branch in &branch_control.branches {
+            validate_display_text("Git branch", &branch.name, 255)?;
+            if !matches!(branch.target_oid.len(), 40 | 64)
+                || !branch
+                    .target_oid
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::InvalidPayload,
+                    "Git branch object identity is invalid",
+                    false,
+                ));
+            }
+        }
+        if selected > 1 || branch_control.current_branch.is_some() != (selected == 1) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Git Branch selection is inconsistent",
+                false,
+            ));
+        }
+    }
+    if let Some(active) = &payload.active_conversation {
+        active.session_id.validate()?;
+        if active.turns.len() > 4_096 || active.attempts.len() > 4_096 {
+            return Err(ProtocolError::payload_too_large(
+                "Conversation history exceeds its bound",
+            ));
+        }
+        if let Some(active_attempt_id) = &active.active_attempt_id {
+            active_attempt_id.validate()?;
+        }
+        for turn in &active.turns {
+            turn.turn_id.validate()?;
+            if turn.attachments.len() > MAX_ATTACHMENTS {
+                return Err(ProtocolError::payload_too_large(
+                    "Conversation attachment list exceeds its bound",
+                ));
+            }
+            if turn
+                .prompt
+                .as_ref()
+                .is_some_and(|prompt| prompt.len() > MAX_TEXT_BYTES)
+            {
+                return Err(ProtocolError::payload_too_large(
+                    "Conversation prompt exceeds its bound",
+                ));
+            }
+            for attachment in &turn.attachments {
+                validate_conversation_attachment(attachment)?;
+            }
+        }
+        for attempt in &active.attempts {
+            attempt.attempt_id.validate()?;
+            attempt.turn_id.validate()?;
+            attempt.runtime_id.validate()?;
+            attempt.environment_id.validate()?;
+            if attempt.assistant_markdown.len() > MAX_TEXT_BYTES || attempt.activities.len() > 4_096
+            {
+                return Err(ProtocolError::payload_too_large(
+                    "Conversation attempt exceeds its bound",
+                ));
+            }
+        }
+    }
+    Ok(ProtocolEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request.request_id,
+        correlation_id: request.correlation_id,
+        generation: payload.generation,
+        payload,
+    })
+}
+
+fn validate_conversation_attachment(
+    attachment: &ConversationAttachmentSnapshot,
+) -> Result<(), ProtocolError> {
+    attachment.attachment_id.validate()?;
+    validate_display_text("attachment display name", &attachment.display_name, 512)?;
+    validate_display_text("attachment media type", &attachment.media_type, 128)?;
+    validate_identifier("attachment stable reference", &attachment.stable_reference)?;
+    if attachment.original_reference == 0
+        || attachment.byte_length == 0
+        || attachment.byte_length > 64 * 1024 * 1024
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "attachment length is invalid",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_display_text(
+    kind: &'static str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<(), ProtocolError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || value.len() > max_bytes
+        || value.chars().any(|character| character == '\0')
+    {
+        Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            format!("{kind} is invalid"),
+            false,
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 impl EventEnvelope {
