@@ -90,7 +90,7 @@ fn provider_and_supervisor_state_round_trip_with_cas_and_interrupted_recovery() 
     let descriptor = DatabaseDescriptor::app(temporary.path().join("home"));
     {
         let (database, report) = DatabaseActor::start(descriptor.clone()).unwrap();
-        assert_eq!(report.current_version, 6);
+        assert_eq!(report.current_version, 7);
         let database = Arc::new(database);
 
         let mut providers = ProviderService::new();
@@ -117,7 +117,7 @@ fn provider_and_supervisor_state_round_trip_with_cas_and_interrupted_recovery() 
     }
 
     let (database, report) = DatabaseActor::start(descriptor).unwrap();
-    assert_eq!(report.previous_version, 6);
+    assert_eq!(report.previous_version, 7);
     let database = Arc::new(database);
     let provider_store = ProviderStateStore::new(Arc::clone(&database)).unwrap();
     let providers = provider_store.load().unwrap().unwrap();
@@ -343,6 +343,7 @@ fn first_submission(binding: SessionBinding) -> FirstSubmission {
         process_generation: 7,
         prompt: Some("Implement durable sessions".into()),
         attachments: vec![],
+        skill_context: vec![],
         binding,
         submitted_at_ms: NOW + 1,
     }
@@ -484,6 +485,7 @@ fn immutable_artifact_reply_context_survives_session_restart() {
                 process_generation: 7,
                 prompt: Some("Update this exact Artifact".into()),
                 attachments: Vec::new(),
+                skill_context: Vec::new(),
                 reply_context: Some(file_reply_context()),
                 context: bound.attempts[0].context.clone(),
                 submitted_at_ms: NOW + 3,

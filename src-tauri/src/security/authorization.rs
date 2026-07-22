@@ -42,6 +42,8 @@ pub struct CanonicalAction {
     pub run_id: String,
     pub runtime_id: String,
     pub environment_id: String,
+    #[serde(default)]
+    pub plugin_or_mcp_id: Option<String>,
     pub process_generation: u64,
     pub configuration_version: u64,
     pub policy_version: u64,
@@ -76,6 +78,10 @@ impl CanonicalAction {
             ]
             .iter()
             .any(|value| !is_safe_persisted_identifier(value))
+            || self
+                .plugin_or_mcp_id
+                .as_deref()
+                .is_some_and(|value| !is_safe_persisted_identifier(value))
             || !is_bounded_canonical_value(&self.canonical_target)
             || !is_bounded_canonical_value(&self.target_version)
             || serde_json::to_vec(&self.arguments).map_or(true, |arguments| {
@@ -435,6 +441,16 @@ impl AuthorizationLedger {
         true
     }
 
+    pub fn revoke_plugin(&mut self, plugin_id: &str, now_ms: u64) -> usize {
+        mutate_issued(&mut self.records, now_ms, |record| {
+            (record.action.plugin_or_mcp_id.as_deref() == Some(plugin_id)).then_some(
+                AuthorizationState::Revoked {
+                    revoked_at_ms: now_ms,
+                },
+            )
+        })
+    }
+
     pub fn invalidate_stale_authority(
         &mut self,
         runtime_id: &str,
@@ -528,6 +544,9 @@ fn compare_action(
     }
     if expected.environment_id != actual.environment_id {
         return Some(AuthorizationInvalidation::Environment);
+    }
+    if expected.plugin_or_mcp_id != actual.plugin_or_mcp_id {
+        return Some(AuthorizationInvalidation::ActionIdentity);
     }
     if expected.process_generation != actual.process_generation {
         return Some(AuthorizationInvalidation::ProcessGeneration);
@@ -868,6 +887,34 @@ impl ApprovalQueue {
             }
         }
         count
+    }
+
+    pub fn cancel_plugin(&mut self, plugin_id: &str, now_ms: u64) -> usize {
+        let matches = self
+            .prompts
+            .values()
+            .filter(|record| {
+                record.state.is_open()
+                    && record.action.plugin_or_mcp_id.as_deref() == Some(plugin_id)
+            })
+            .map(|record| (record.prompt_id.clone(), record.action.run_id.clone()))
+            .collect::<Vec<_>>();
+        let mut affected_runs = BTreeSet::new();
+        for (prompt_id, run_id) in &matches {
+            if let Some(record) = self.prompts.get_mut(prompt_id) {
+                record.state = ApprovalPromptState::Cancelled {
+                    cancelled_at_ms: now_ms,
+                };
+            }
+            if let Some(queue) = self.run_queues.get_mut(run_id) {
+                queue.retain(|queued_id| queued_id != prompt_id);
+            }
+            affected_runs.insert(run_id.clone());
+        }
+        for run_id in affected_runs {
+            self.promote_front(&run_id);
+        }
+        matches.len()
     }
 
     pub fn expire_due(&mut self, now_ms: u64) -> usize {

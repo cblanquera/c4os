@@ -3,6 +3,7 @@ pub mod browser;
 pub mod conversation;
 pub mod core;
 pub mod execution;
+pub mod extension;
 pub mod platform;
 pub mod protocol;
 pub mod runtime;
@@ -98,7 +99,7 @@ use runtime::provider::{ProviderProbe, ProviderProfile, ProviderTestReport};
 use runtime::session::{
     AttachmentSnapshot, FirstSubmission, MAX_REPLY_SOURCE_EXCERPT_BYTES,
     MessageReplyContextSnapshot, RetryRequest, RuntimeKind as SessionRuntimeKind, SessionError,
-    SessionRecord, SessionService, TerminalAttemptOutcome, TurnSubmission,
+    SessionRecord, SessionService, SkillContextSnapshot, TerminalAttemptOutcome, TurnSubmission,
 };
 use runtime::supervisor::{
     CompatibilityState, HealthState, RuntimeInstallation, RuntimeSupervisor,
@@ -243,8 +244,41 @@ fn install_production_broker_facilities(
     Ok(())
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn initialize_extension_hook_supervisor(
+    c4os_home: &Path,
+    resource_root: &Path,
+) -> Result<extension::hook::HookSupervisor, std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch_root = c4os_home.join("extensions/hook-scratch");
+    if scratch_root.exists() {
+        let metadata = std::fs::symlink_metadata(&scratch_root)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(std::io::Error::other(
+                "extension hook scratch root is not a private directory",
+            ));
+        }
+    } else {
+        std::fs::create_dir(&scratch_root)?;
+    }
+    std::fs::set_permissions(&scratch_root, std::fs::Permissions::from_mode(0o700))?;
+    let trusted_runtime = runtime::production::verified_node_runtime_executable(resource_root)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    extension::hook::HookSupervisor::new(extension::hook::HookSupervisorPolicy {
+        trusted_runtime,
+        runtime_read_roots: vec![resource_root.to_path_buf()],
+        scratch_root,
+    })
+    .map_err(|error| std::io::Error::other(error.to_string()))
+}
+
 struct AppCoreState {
     database: Arc<core::database::DatabaseActor>,
+    c4os_home: PathBuf,
+    bundled_skill_root: PathBuf,
+    extensions: Mutex<extension::service::ExtensionService>,
+    hook_supervisor: Mutex<Option<extension::hook::HookSupervisor>>,
     configuration: Mutex<core::services::ManagedAppConfiguration>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation_operation: Mutex<()>,
@@ -1105,6 +1139,7 @@ pub struct FirstRuntimeDispatchIntent {
     pub correlation_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub draft: DraftRequirements,
     pub submitted_at_ms: u64,
     pub preflight_at_ms: u64,
@@ -1117,6 +1152,7 @@ pub struct ConversationFirstDispatchIntent {
     pub session_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_mode: Option<String>,
@@ -1130,6 +1166,7 @@ pub struct ConversationTurnDispatchIntent {
     pub session_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_mode: Option<String>,
@@ -1149,6 +1186,7 @@ pub struct TurnRuntimeDispatchIntent {
     pub correlation_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub reply_context: Option<MessageReplyContextSnapshot>,
     pub draft: DraftRequirements,
     pub submitted_at_ms: u64,
@@ -1645,6 +1683,17 @@ impl RuntimeApplicationService {
 
     pub fn capability_evidence_generation(&self) -> Result<u64, RuntimeApplicationError> {
         Ok(self.capabilities()?.generation())
+    }
+
+    pub fn revoke_plugin_authority(
+        &self,
+        plugin_id: &str,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        Ok(coordinator
+            .revoke_plugin_authority(plugin_id, now_ms)?
+            .value)
     }
 
     /// Publishes policy/revocation authority atomically with the coordinator
@@ -2272,6 +2321,7 @@ impl RuntimeApplicationService {
                 correlation_id: format!("run-{submission_id}"),
                 prompt: intent.prompt,
                 attachments: intent.attachments,
+                skill_context: intent.skill_context,
                 draft,
                 submitted_at_ms: intent.submitted_at_ms,
                 preflight_at_ms: intent.submitted_at_ms,
@@ -2403,6 +2453,7 @@ impl RuntimeApplicationService {
                 correlation_id: format!("run-{submission_id}"),
                 prompt: intent.prompt,
                 attachments: intent.attachments,
+                skill_context: intent.skill_context,
                 reply_context: intent.reply_context,
                 draft,
                 submitted_at_ms: intent.submitted_at_ms,
@@ -2640,6 +2691,7 @@ impl RuntimeApplicationService {
                 process_generation: minted.process_generation,
                 prompt: intent.prompt,
                 attachments: intent.attachments,
+                skill_context: intent.skill_context,
                 binding: minted.binding,
                 submitted_at_ms: intent.submitted_at_ms,
             },
@@ -2728,6 +2780,7 @@ impl RuntimeApplicationService {
                 process_generation: minted.process_generation,
                 prompt: intent.prompt,
                 attachments: intent.attachments,
+                skill_context: intent.skill_context,
                 reply_context: intent.reply_context,
                 context: minted.context,
                 submitted_at_ms: intent.submitted_at_ms,
@@ -3635,6 +3688,1106 @@ fn platform_boundary_error(
     retryable: bool,
 ) -> ProtocolError {
     ProtocolError::new(code, message, retryable).with_correlation(correlation_id)
+}
+
+fn extension_boundary_error(
+    error: extension::ExtensionError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        extension::ExtensionError::InvalidInput | extension::ExtensionError::BoundExceeded => (
+            ProtocolErrorCode::InvalidPayload,
+            "The Extension request exceeds its bound",
+            false,
+        ),
+        extension::ExtensionError::Conflict => (
+            ProtocolErrorCode::Conflict,
+            "Extension state changed before the operation completed",
+            true,
+        ),
+        extension::ExtensionError::MutableContent
+        | extension::ExtensionError::VerificationFailed
+        | extension::ExtensionError::UntrustedOrigin
+        | extension::ExtensionError::Revoked
+        | extension::ExtensionError::Incompatible
+        | extension::ExtensionError::HookDenied => (
+            ProtocolErrorCode::Forbidden,
+            "The Extension failed its trust or policy checks",
+            false,
+        ),
+        extension::ExtensionError::UnsupportedHookTarget => (
+            ProtocolErrorCode::Unavailable,
+            "Extension hooks are unavailable on this target",
+            false,
+        ),
+        extension::ExtensionError::HookTimedOut
+        | extension::ExtensionError::HookOutputExceeded
+        | extension::ExtensionError::InvalidState
+        | extension::ExtensionError::Unavailable
+        | extension::ExtensionError::Database(_)
+        | extension::ExtensionError::Io(_)
+        | extension::ExtensionError::Toml(_)
+        | extension::ExtensionError::Json(_) => (
+            ProtocolErrorCode::Unavailable,
+            "Extension state is unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+const MAX_EXTENSION_HOOK_ANNOTATION_BYTES: usize = 4 * 1024;
+
+enum ExtensionHookMediation {
+    Applied(SkillContextSnapshot),
+    Denied(&'static str),
+}
+
+fn mediate_extension_hook_proposal(
+    core: &AppCoreState,
+    hook: &extension::service::PreparedExtensionHook,
+    proposal: &extension::hook::HookEffectProposal,
+    workspace_id: &str,
+    session_id: &str,
+    within_turn_context_bounds: bool,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ExtensionHookMediation, ProtocolError> {
+    let annotation = (proposal.kind == "context.annotation")
+        .then(|| proposal.payload.as_object())
+        .flatten()
+        .filter(|payload| payload.len() == 1)
+        .and_then(|payload| payload.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|text| {
+            !text.trim().is_empty()
+                && text.len() <= MAX_EXTENSION_HOOK_ANNOTATION_BYTES
+                && !text.contains('\0')
+        });
+    let declared = hook.grants.iter().any(|grant| grant == &proposal.kind);
+    let recognized = annotation.is_some();
+    let permitted_shape = recognized && declared && within_turn_context_bounds;
+    let payload_sha256 = sha256_bytes(&serde_json::to_vec(&proposal.payload).map_err(|_| {
+        extension_boundary_error(
+            extension::ExtensionError::HookDenied,
+            correlation_id.clone(),
+        )
+    })?);
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let action_id = format!("extension-hook-{}", Uuid::new_v4().as_simple());
+    let canonical_target = format!(
+        "extension:{}:{}:{}",
+        hook.activation.package_id, hook.contract.hook_id, hook.activation.package_digest
+    );
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: if recognized {
+            "c4os.extension.context-annotation".into()
+        } else {
+            "c4os.extension.unsupported-proposal".into()
+        },
+        arguments: serde_json::json!({
+            "hookId": hook.contract.hook_id,
+            "packageDigest": hook.activation.package_digest,
+            "payloadSha256": payload_sha256,
+            "proposalKind": proposal.kind,
+            "summarySha256": sha256_bytes(proposal.summary.as_bytes()),
+        }),
+        risk: if recognized {
+            CanonicalRisk::Low
+        } else {
+            CanonicalRisk::Unknown
+        },
+        requested_authority: BTreeSet::from([proposal.kind.clone()]),
+        canonical_target: canonical_target.clone(),
+        target_version: hook.activation.package_digest.clone(),
+        workspace_id: workspace_id.into(),
+        session_id: session_id.into(),
+        run_id: format!("extension-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: Some(hook.activation.package_id.clone()),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        extension_boundary_error(
+            extension::ExtensionError::HookDenied,
+            correlation_id.clone(),
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: proposal.kind.clone(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::C4os,
+        effects: BTreeSet::from([ActionEffect::Control]),
+        scope: ActionScope::Workspace,
+        initiator: ActionInitiator::Plugin,
+        sensitivity: if recognized {
+            ActionSensitivity::Ordinary
+        } else {
+            ActionSensitivity::Unknown
+        },
+        reversibility: if recognized {
+            ActionReversibility::Reversible
+        } else {
+            ActionReversibility::Unknown
+        },
+        confidence: if recognized {
+            ClassificationConfidence::Known
+        } else {
+            ClassificationConfidence::Ambiguous
+        },
+        request_origin: ActionRequestOrigin::RuntimeTool,
+        repository_state: if recognized {
+            RepositoryState::NotApplicable
+        } else {
+            RepositoryState::Unknown
+        },
+        inside_active_project: true,
+        canonical_target: canonical_target.clone(),
+        workspace_id: workspace_id.into(),
+        session_id: session_id.into(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: action.plugin_or_mcp_id.clone(),
+        target_resolved: recognized,
+        authenticated: false,
+        trusted_root: true,
+        explicit_scope_grant: declared,
+        sandbox_allows: true,
+        declaration_exceeded: !permitted_shape,
+    };
+    let proposal_result = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let token = match proposal_result {
+        GatewayProposal::Denied { .. } => {
+            return Ok(ExtensionHookMediation::Denied(
+                "Action Gateway denied the exact proposal",
+            ));
+        }
+        GatewayProposal::PendingApproval { .. } => {
+            return Ok(ExtensionHookMediation::Denied(
+                "Action Gateway is awaiting explicit approval",
+            ));
+        }
+        GatewayProposal::Authorized { token, .. } => token,
+    };
+    let annotation = annotation.ok_or_else(|| {
+        extension_boundary_error(
+            extension::ExtensionError::HookDenied,
+            correlation_id.clone(),
+        )
+    })?;
+    let annotation_sha256 = sha256_bytes(annotation.as_bytes());
+    let executed = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .execute_direct_action(&token, &action, live, None, now_ms, |_permit| {
+                    NormalizedActionResult {
+                        status: NormalizedActionStatus::Succeeded,
+                        result_code: "extension-context-annotation-applied".into(),
+                        exit_code: Some(0),
+                        changed_targets: vec![canonical_target.clone()],
+                        output_sha256: Some(annotation_sha256.clone()),
+                        completed_at_ms: now_ms,
+                    }
+                })
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    if executed.status != NormalizedActionStatus::Succeeded {
+        return Ok(ExtensionHookMediation::Denied(
+            "Action Gateway did not consume the proposal",
+        ));
+    }
+    Ok(ExtensionHookMediation::Applied(SkillContextSnapshot {
+        identity: format!(
+            "plugin:{}:hook:{}:annotation",
+            hook.activation.package_id, hook.contract.hook_id
+        ),
+        package_id: Some(hook.activation.package_id.clone()),
+        entrypoint_sha256: annotation_sha256,
+        instructions: annotation.into(),
+        referenced_resources: Vec::new(),
+    }))
+}
+
+fn dispatch_reviewed_extension_hooks(
+    core: &AppCoreState,
+    event: &str,
+    payload: serde_json::Value,
+    workspace_id: &str,
+    session_id: &str,
+    available_context_slots: usize,
+    available_context_bytes: usize,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<Vec<SkillContextSnapshot>, ProtocolError> {
+    let (generation, prepared, supervisor) = {
+        let mut extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let current_generation = extensions.snapshot().generation;
+        let initially_prepared = extensions
+            .prepared_hooks(event)
+            .map_err(|error| extension_boundary_error(error, correlation_id.clone()))?;
+        if initially_prepared.is_empty() {
+            return Ok(Vec::new());
+        }
+        let supervisor = core
+            .hook_supervisor
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .clone()
+            .ok_or_else(|| {
+                extension_boundary_error(
+                    extension::ExtensionError::UnsupportedHookTarget,
+                    correlation_id.clone(),
+                )
+            })?;
+        let package_ids = initially_prepared
+            .iter()
+            .map(|hook| hook.activation.package_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let execution = extensions
+            .begin_hook_execution(current_generation, &package_ids, now_ms)
+            .map_err(|error| extension_boundary_error(error, correlation_id.clone()))?;
+        let prepared = match extensions.prepared_hooks(event) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let records = initially_prepared
+                    .iter()
+                    .map(|hook| extension::service::ExtensionHookExecutionRecord {
+                        package_id: hook.activation.package_id.clone(),
+                        hook_id: hook.contract.hook_id.clone(),
+                        succeeded: false,
+                        detail: "execution contract could not be rebound after durable start"
+                            .into(),
+                    })
+                    .collect::<Vec<_>>();
+                extensions
+                    .record_hook_execution_batch(execution.generation, &records, now_ms)
+                    .map_err(|record_error| {
+                        extension_boundary_error(record_error, correlation_id.clone())
+                    })?;
+                return Err(extension_boundary_error(error, correlation_id));
+            }
+        };
+        (execution.generation, prepared, supervisor)
+    };
+    let mut records = Vec::with_capacity(prepared.len());
+    let mut context = Vec::new();
+    let mut context_bytes = 0usize;
+    let mut denied = false;
+    let mut mediation_error = None;
+    for hook in prepared {
+        let envelope = extension::hook::HookEventEnvelope {
+            protocol_version: extension::EXTENSION_HOOK_PROTOCOL_VERSION,
+            operation_id: format!("hook-{}", Uuid::new_v4().as_simple()),
+            package_id: hook.activation.package_id.clone(),
+            package_digest: hook.activation.package_digest.clone(),
+            event: event.into(),
+            payload: payload.clone(),
+        };
+        let outcome = supervisor.run(
+            &hook.activation,
+            &hook.contract,
+            &hook.package_root,
+            &envelope,
+        );
+        let (succeeded, detail) = match outcome {
+            Ok(result) if result.proposals.is_empty() => (
+                true,
+                format!(
+                    "completed in {} ms with no effect proposals",
+                    result.duration_ms
+                ),
+            ),
+            Ok(result) => {
+                let Some(proposal) = result.proposals.first() else {
+                    records.push(extension::service::ExtensionHookExecutionRecord {
+                        package_id: hook.activation.package_id,
+                        hook_id: hook.contract.hook_id,
+                        succeeded: false,
+                        detail: "worker returned an inconsistent proposal batch".into(),
+                    });
+                    denied = true;
+                    continue;
+                };
+                let proposed_bytes = proposal
+                    .payload
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .map_or(0, str::len);
+                let within_turn_context_bounds = context.len() < available_context_slots
+                    && context_bytes.saturating_add(proposed_bytes) <= available_context_bytes;
+                match mediate_extension_hook_proposal(
+                    core,
+                    &hook,
+                    proposal,
+                    workspace_id,
+                    session_id,
+                    within_turn_context_bounds,
+                    now_ms,
+                    correlation_id.clone(),
+                ) {
+                    Ok(ExtensionHookMediation::Applied(annotation)) => {
+                        context_bytes = context_bytes.saturating_add(annotation.instructions.len());
+                        context.push(annotation);
+                        (
+                            true,
+                            format!(
+                                "completed in {} ms; one proposal consumed by Action Gateway",
+                                result.duration_ms
+                            ),
+                        )
+                    }
+                    Ok(ExtensionHookMediation::Denied(reason)) => {
+                        denied = true;
+                        (false, reason.into())
+                    }
+                    Err(error) => {
+                        denied = true;
+                        if mediation_error.is_none() {
+                            mediation_error = Some(error);
+                        }
+                        (
+                            false,
+                            "Action Gateway failed closed before consuming the proposal".into(),
+                        )
+                    }
+                }
+            }
+            Err(error) => {
+                denied = true;
+                (false, format!("worker failed closed: {error}"))
+            }
+        };
+        records.push(extension::service::ExtensionHookExecutionRecord {
+            package_id: hook.activation.package_id,
+            hook_id: hook.contract.hook_id,
+            succeeded,
+            detail,
+        });
+    }
+    core.extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .record_hook_execution_batch(generation, &records, now_ms)
+        .map_err(|error| extension_boundary_error(error, correlation_id.clone()))?;
+    if let Some(error) = mediation_error {
+        return Err(error);
+    }
+    if denied {
+        return Err(extension_boundary_error(
+            extension::ExtensionError::HookDenied,
+            correlation_id,
+        ));
+    }
+    Ok(context)
+}
+
+fn require_extension_generation(
+    request: &SnapshotRequest,
+    current: u64,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation.0 == current {
+        return Ok(());
+    }
+    Err(platform_boundary_error(
+        request.correlation_id.clone(),
+        if request.expected_generation.0 < current {
+            ProtocolErrorCode::StaleGeneration
+        } else {
+            ProtocolErrorCode::FutureGeneration
+        },
+        "Extension state changed before the operation",
+        request.expected_generation.0 < current,
+    ))
+}
+
+fn current_extension_skill_roots(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<Vec<extension::skill_sources::SkillSourceRoot>, ProtocolError> {
+    let active_project_id = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .active_project_id
+        .clone();
+    let mut roots = vec![
+        extension::skill_sources::SkillSourceRoot {
+            source_kind: extension::ExtensionSourceKind::UserGlobal,
+            source_id: "user-global".into(),
+            root: core.c4os_home.join("skills/user"),
+            trusted: true,
+        },
+        extension::skill_sources::SkillSourceRoot {
+            source_kind: extension::ExtensionSourceKind::Bundled,
+            source_id: "c4os-bundled".into(),
+            root: core.bundled_skill_root.clone(),
+            trusted: true,
+        },
+    ];
+    let active_workspace = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let Some(workspace) = active_workspace.as_ref() else {
+        return Ok(roots);
+    };
+    let workspace_id = workspace.manifest().workspace_id.to_string();
+    roots.push(extension::skill_sources::SkillSourceRoot {
+        source_kind: extension::ExtensionSourceKind::WorkspaceLocal,
+        source_id: workspace_id,
+        root: workspace.working_root().join("skills"),
+        trusted: true,
+    });
+    let Some(active_project_id) = active_project_id else {
+        return Ok(roots);
+    };
+    let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let snapshot = workspace
+        .snapshot(query)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let Some(project) = snapshot.projects.iter().find(|project| {
+        project.project_id == active_project_id
+            && project.lifecycle_state == core::database::LifecycleState::Active
+            && project.path_state != core::database::ProjectPathState::Missing
+    }) else {
+        return Ok(roots);
+    };
+    let project_id = Uuid::parse_str(&project.project_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    roots.push(extension::skill_sources::SkillSourceRoot {
+        source_kind: extension::ExtensionSourceKind::ProjectLocal,
+        source_id: project.project_id.clone(),
+        root: Path::new(&project.current_path).join(".c4os/skills"),
+        trusted: workspace.is_project_trusted(project_id),
+    });
+    Ok(roots)
+}
+
+fn synchronize_extension_skill_sources(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<extension::ExtensionServiceSnapshot, ProtocolError> {
+    let roots = current_extension_skill_roots(core, correlation_id.clone())?;
+    core.extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .synchronize_skill_source_roots(roots, now_ms)
+        .map_err(|error| extension_boundary_error(error, correlation_id))
+}
+
+fn extension_snapshot_envelope(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    mut snapshot: extension::ExtensionServiceSnapshot,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, ProtocolError> {
+    snapshot.active_workers = core
+        .hook_supervisor
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .as_ref()
+        .map(extension::hook::HookSupervisor::active_worker_count)
+        .transpose()
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+        .unwrap_or(0);
+    snapshot
+        .validate()
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
+}
+
+#[tauri::command]
+fn extension_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot =
+        synchronize_extension_skill_sources(&core, now_ms, request.correlation_id.clone())?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_add_marketplace(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::MarketplaceSourceInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    let snapshot = extensions
+        .add_marketplace(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_refresh_catalogs(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    let snapshot = extensions
+        .refresh_catalogs(request.expected_generation.0, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+fn require_extension_input_generation(
+    request: &SnapshotRequest,
+    expected_generation: u64,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation.0 != expected_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidGeneration,
+            "The Extension input generation does not match its request",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn mutate_extension_package(
+    core: &AppCoreState,
+    request: &SnapshotRequest,
+    input: extension::service::ExtensionPackageInput,
+    now_ms: u64,
+    operation: impl FnOnce(
+        &mut extension::service::ExtensionService,
+        extension::service::ExtensionPackageInput,
+        u64,
+    )
+        -> Result<extension::ExtensionServiceSnapshot, extension::ExtensionError>,
+) -> Result<extension::ExtensionServiceSnapshot, ProtocolError> {
+    require_extension_input_generation(request, input.expected_generation)?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    operation(&mut extensions, input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+}
+
+fn invalidate_extension_generation(
+    core: &AppCoreState,
+    package_id: &str,
+    generation: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    if let Some(supervisor) = core
+        .hook_supervisor
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .as_ref()
+    {
+        supervisor
+            .invalidate_package_generation(package_id, generation)
+            .map_err(|error| extension_boundary_error(error, correlation_id))?;
+    }
+    Ok(())
+}
+
+macro_rules! extension_package_command {
+    ($command:ident, $method:ident) => {
+        #[tauri::command]
+        fn $command(
+            core: tauri::State<'_, AppCoreState>,
+            request: SnapshotRequest,
+            input: extension::service::ExtensionPackageInput,
+        ) -> Result<
+            ProtocolEnvelope<extension::ExtensionServiceSnapshot>,
+            protocol::StructuredCoreError,
+        > {
+            validate_snapshot_request(&request)?;
+            let now_ms = current_time_ms()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let snapshot =
+                mutate_extension_package(&core, &request, input, now_ms, |service, input, now| {
+                    service.$method(input, now)
+                })?;
+            extension_snapshot_envelope(&core, request, snapshot)
+        }
+    };
+}
+
+extension_package_command!(extension_install_disabled, install_disabled);
+extension_package_command!(extension_enable, enable);
+extension_package_command!(extension_stage_update, stage_update);
+
+macro_rules! extension_package_command_with_worker_termination {
+    ($command:ident, $method:ident, $mutation:ident) => {
+        #[tauri::command]
+        fn $command(
+            core: tauri::State<'_, AppCoreState>,
+            request: SnapshotRequest,
+            input: extension::service::ExtensionPackageInput,
+        ) -> Result<
+            ProtocolEnvelope<extension::ExtensionServiceSnapshot>,
+            protocol::StructuredCoreError,
+        > {
+            validate_snapshot_request(&request)?;
+            require_extension_input_generation(&request, input.expected_generation)?;
+            let package_id = input.package_id.clone();
+            let invalidated_generation = input.expected_generation;
+            let now_ms = current_time_ms()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let mut extensions = core
+                .extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            require_extension_generation(&request, extensions.snapshot().generation)?;
+            extensions
+                .preflight_package_mutation(
+                    &input,
+                    extension::service::ExtensionPackageMutation::$mutation,
+                )
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+            core.runtime
+                .revoke_plugin_authority(&package_id, now_ms)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            invalidate_extension_generation(
+                &core,
+                &package_id,
+                invalidated_generation,
+                request.correlation_id.clone(),
+            )?;
+            let snapshot = extensions
+                .$method(input, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+            extension_snapshot_envelope(&core, request, snapshot)
+        }
+    };
+}
+
+extension_package_command_with_worker_termination!(extension_disable, disable, Disable);
+extension_package_command_with_worker_termination!(
+    extension_activate_update,
+    activate_staged_update,
+    ActivateStagedUpdate
+);
+extension_package_command_with_worker_termination!(extension_rollback, rollback, Rollback);
+extension_package_command_with_worker_termination!(extension_uninstall, uninstall, Uninstall);
+
+#[tauri::command]
+fn extension_revoke(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionRevocationInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let package_id = input.package_id.clone();
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    extensions
+        .preflight_package_mutation(
+            &extension::service::ExtensionPackageInput {
+                expected_generation: input.expected_generation,
+                package_id: package_id.clone(),
+            },
+            extension::service::ExtensionPackageMutation::Revoke,
+        )
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    if input.reason.trim().is_empty() || input.reason.len() > 1_024 {
+        return Err(extension_boundary_error(
+            extension::ExtensionError::InvalidInput,
+            request.correlation_id.clone(),
+        )
+        .into());
+    }
+    core.runtime
+        .revoke_plugin_authority(&package_id, now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    invalidate_extension_generation(
+        &core,
+        &package_id,
+        input.expected_generation,
+        request.correlation_id.clone(),
+    )?;
+    let snapshot = extensions
+        .revoke(
+            extension::service::ExtensionPackageInput {
+                expected_generation: input.expected_generation,
+                package_id: package_id.clone(),
+            },
+            &input.reason,
+            now_ms,
+        )
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_revoke_key(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionKeyRevocationInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    if input.reason.trim().is_empty() || input.reason.len() > 1_024 {
+        return Err(extension_boundary_error(
+            extension::ExtensionError::InvalidInput,
+            request.correlation_id.clone(),
+        )
+        .into());
+    }
+    let package_ids = extensions
+        .package_ids_signed_by_key(&input.key_id)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    for package_id in &package_ids {
+        core.runtime
+            .revoke_plugin_authority(package_id, now_ms)
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        invalidate_extension_generation(
+            &core,
+            package_id,
+            input.expected_generation,
+            request.correlation_id.clone(),
+        )?;
+    }
+    let snapshot = extensions
+        .revoke_key(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_set_skill_enabled(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionSkillAvailabilityInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .set_skill_enabled(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_select_skill(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionSkillInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .select_skill(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_customize_skill(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionSkillInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .customize_skill(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_review_hook(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionHookReviewInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .review_hook(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
+
+#[tauri::command]
+fn extension_load_skill(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionSkillInput,
+) -> Result<
+    ProtocolEnvelope<extension::service::SkillInstructionsSnapshot>,
+    protocol::StructuredCoreError,
+> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    let payload = extensions
+        .load_skill_instructions(&input.skill_identity)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    protocol::snapshot_envelope(request, StateGeneration(input.expected_generation), payload)
+}
+
+#[tauri::command]
+fn extension_publisher_link(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionPublisherLinkInput,
+) -> Result<ProtocolEnvelope<String>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let (snapshot, payload) = {
+        let extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let snapshot = extensions.snapshot();
+        let payload = extensions
+            .publisher_link(&input)
+            .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+        (snapshot, payload)
+    };
+    require_extension_generation(&request, snapshot.generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let live = current_artifact_live_authority(&core, now_ms, request.correlation_id.clone())?;
+    let action_id = format!("publisher-link-{}", Uuid::new_v4().as_simple());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.desktop.open-url".into(),
+        arguments: serde_json::json!({
+            "packageId": input.package_id,
+            "link": input.link,
+            "urlSha256": sha256_bytes(payload.as_bytes()),
+        }),
+        risk: CanonicalRisk::Low,
+        requested_authority: BTreeSet::from(["desktop.open-url".into()]),
+        canonical_target: payload.clone(),
+        target_version: sha256_bytes(payload.as_bytes()),
+        workspace_id: "c4os-app".into(),
+        session_id: "settings".into(),
+        run_id: format!("settings-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: Some(input.package_id.clone()),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The publisher link could not be bound to an exact action",
+            false,
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: "desktop.open-publisher-link".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Desktop,
+        effects: BTreeSet::from([ActionEffect::Control]),
+        scope: ActionScope::Remote,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: payload.clone(),
+        workspace_id: action.workspace_id.clone(),
+        session_id: action.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: action.plugin_or_mcp_id.clone(),
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: true,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (token, prompt_id) = match proposal {
+        GatewayProposal::Denied { .. } => {
+            return Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::Forbidden,
+                "Policy denied opening the publisher link",
+                false,
+            ));
+        }
+        GatewayProposal::Authorized { token, .. } => (token, None),
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            // This Settings click is the user's one-time approval for the
+            // exact package-bound URL; the Action Gateway still consumes the
+            // resulting permit before `/usr/bin/open` can run.
+            let prompt_id = prompt.prompt_id.clone();
+            let response = core
+                .runtime
+                .coordinator()
+                .and_then(|mut coordinator| {
+                    coordinator
+                        .answer_direct_approval(&prompt_id, ApprovalAnswer::Allow, now_ms)
+                        .map(|operation| operation.value)
+                        .map_err(Into::into)
+                })
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            match response {
+                ApprovalResponse::Authorized { token, prompt }
+                    if prompt.prompt_id == prompt_id && prompt.action == action =>
+                {
+                    (token, Some(prompt_id))
+                }
+                _ => return Err(workspace_state_unavailable(request.correlation_id)),
+            }
+        }
+    };
+    let mut effect_result = None;
+    let canonical_target = action.canonical_target.clone();
+    core.runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator.execute_direct_action(
+                &token,
+                &action,
+                live,
+                prompt_id.as_deref(),
+                now_ms,
+                |_permit| {
+                    let result = Command::new("/usr/bin/open")
+                        .arg(&canonical_target)
+                        .env_clear()
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|status| status.success());
+                    let succeeded = matches!(result, Ok(true));
+                    effect_result = Some(result);
+                    NormalizedActionResult {
+                        status: if succeeded {
+                            NormalizedActionStatus::Succeeded
+                        } else {
+                            NormalizedActionStatus::Failed
+                        },
+                        result_code: if succeeded {
+                            "publisher-link-opened"
+                        } else {
+                            "publisher-link-open-failed"
+                        }
+                        .into(),
+                        exit_code: succeeded.then_some(0),
+                        changed_targets: if succeeded {
+                            vec![canonical_target.clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        output_sha256: None,
+                        completed_at_ms: now_ms.saturating_add(1),
+                    }
+                },
+            )?;
+            Ok(())
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if !matches!(effect_result, Some(Ok(true))) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "The system browser could not open the publisher link",
+            true,
+        ));
+    }
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), payload)
 }
 
 fn invalid_picker_selection(correlation_id: protocol::CorrelationId) -> ProtocolError {
@@ -8035,6 +9188,7 @@ fn prepare_terminal_action(
         run_id: format!("terminal-run-{}", Uuid::new_v4().as_simple()),
         runtime_id: "c4os-core".into(),
         environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
         process_generation: live.process_generation,
         configuration_version: live.configuration_version,
         policy_version: live.policy_version,
@@ -8655,6 +9809,7 @@ fn prepare_browser_action(
         run_id: format!("browser-run-{}", Uuid::new_v4().as_simple()),
         runtime_id: "c4os-core".into(),
         environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
         process_generation: live.process_generation,
         configuration_version: live.configuration_version,
         policy_version: live.policy_version,
@@ -8746,6 +9901,7 @@ fn prepare_browser_clear_action(
         run_id: format!("browser-run-{}", Uuid::new_v4().as_simple()),
         runtime_id: "c4os-core".into(),
         environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
         process_generation: live.process_generation,
         configuration_version: live.configuration_version,
         policy_version: live.policy_version,
@@ -11785,6 +12941,7 @@ fn prepare_artifact_write(
         run_id: format!("artifact-run-{}", Uuid::new_v4().as_simple()),
         runtime_id: "c4os-core".into(),
         environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
         process_generation: live.process_generation,
         configuration_version: live.configuration_version,
         policy_version: live.policy_version,
@@ -13228,7 +14385,7 @@ fn conversation_submit(
         runtime_generation,
         "Conversation state changed before submission",
     )?;
-    let (current_generation, reply_target) = {
+    let (current_generation, reply_target, active_session_id) = {
         let conversation = core
             .conversation
             .lock()
@@ -13267,7 +14424,11 @@ fn conversation_submit(
         .flatten()
         .zip(conversation.active_session_id.clone())
         .map(|((target_id, capture), session_id)| (target_id, session_id, capture));
-        (current_generation, reply_target)
+        (
+            current_generation,
+            reply_target,
+            conversation.active_session_id.clone(),
+        )
     };
     let (workspace_id, workspace_root) = core
         .runtime
@@ -13316,6 +14477,44 @@ fn conversation_submit(
             }
         })
         .transpose()?;
+    synchronize_extension_skill_sources(&core, now_ms, request.correlation_id.clone())?;
+    let mut skill_context = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .active_turn_skills()
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+        .into_iter()
+        .map(|skill| SkillContextSnapshot {
+            identity: skill.identity.stable_id(),
+            package_id: skill.package_id,
+            entrypoint_sha256: skill.entrypoint_digest,
+            instructions: skill.instructions,
+            referenced_resources: skill.referenced_resources,
+        })
+        .collect::<Vec<_>>();
+    let existing_skill_bytes = skill_context
+        .iter()
+        .map(|skill| skill.instructions.len())
+        .sum::<usize>();
+    let hook_context = dispatch_reviewed_extension_hooks(
+        &core,
+        "before-turn",
+        serde_json::json!({
+            "workspaceId": workspace_id,
+            "promptSha256": input.prompt.as_deref().map(|prompt| sha256_bytes(prompt.as_bytes())),
+            "promptBytes": input.prompt.as_deref().map_or(0, str::len),
+            "retainedAttachmentCount": input.retained_attachment_ids.len(),
+            "newAttachmentCount": input.picker_grant_ids.len(),
+        }),
+        &workspace_id,
+        active_session_id.as_deref().unwrap_or("extension-hook"),
+        runtime::session::MAX_SKILL_CONTEXTS_PER_TURN.saturating_sub(skill_context.len()),
+        runtime::session::MAX_SKILL_CONTEXT_BYTES.saturating_sub(existing_skill_bytes),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    skill_context.extend(hook_context);
 
     let (dispatch_intent, promotion_floor) = {
         let mut conversation = core
@@ -13400,6 +14599,7 @@ fn conversation_submit(
                 session_id,
                 prompt: (!draft.prompt.trim().is_empty()).then(|| draft.prompt.clone()),
                 attachments: draft.attachments.clone(),
+                skill_context: skill_context.clone(),
                 provider_id: draft.provider_id.clone(),
                 model_id: draft.model_id.clone(),
                 reasoning_mode: draft.reasoning_mode.clone(),
@@ -13469,6 +14669,7 @@ fn conversation_submit(
                 session_id: promotion.session_id.clone(),
                 prompt: promotion.prompt.clone(),
                 attachments: conversation.pending_attachments.clone(),
+                skill_context: skill_context.clone(),
                 provider_id: input.provider_id.clone(),
                 model_id: input.model_id.clone(),
                 reasoning_mode: input.reasoning_mode.clone(),
@@ -15250,6 +16451,7 @@ fn prepare_conversation_branch_operation(
         run_id: format!("branch-run-{}", Uuid::new_v4().as_simple()),
         runtime_id: "c4os-core".into(),
         environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
         process_generation: live.process_generation,
         configuration_version: live.configuration_version,
         policy_version: live.policy_version,
@@ -16986,6 +18188,7 @@ pub fn run() {
             .map_err(|error| std::io::Error::other(error.to_string()))?;
             let platform_snapshot = platform.initial_snapshot(initial_theme);
             let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
+            let application_resource_dir = app.path().resource_dir()?;
             let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
             let (database, _) = core::database::DatabaseActor::start(
                 core::database::DatabaseDescriptor::app(&c4os_home),
@@ -17017,6 +18220,12 @@ pub fn run() {
                 })
                 .collect::<Vec<_>>();
             let now_ms = current_time_ms()?;
+            let extensions = extension::service::ExtensionService::restore(
+                Arc::clone(&database),
+                &c4os_home,
+                now_ms,
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
             let active_workspace = core::services::restore_active_workspace(
                 &home_layout,
                 configuration
@@ -17037,7 +18246,14 @@ pub fn run() {
                 now_ms,
             )?);
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let runtime_resource_dir = app.path().resource_dir()?;
+            let runtime_resource_dir = application_resource_dir.clone();
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let hook_supervisor = Some(initialize_extension_hook_supervisor(
+                &c4os_home,
+                &runtime_resource_dir,
+            )?);
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            let hook_supervisor = None;
             if let Some(workspace) = &active_workspace {
                 runtime.bind_workspace(Arc::clone(workspace.database_actor()))?;
             } else {
@@ -17069,6 +18285,10 @@ pub fn run() {
             let runtime_production = Arc::new(ManagedProductionRuntime::default());
             app.manage(AppCoreState {
                 database,
+                c4os_home: c4os_home.clone(),
+                bundled_skill_root: application_resource_dir.join("skills"),
+                extensions: Mutex::new(extensions),
+                hook_supervisor: Mutex::new(hook_supervisor),
                 configuration: Mutex::new(configuration),
                 active_workspace: Arc::clone(&active_workspace),
                 conversation_operation: Mutex::new(()),
@@ -17128,6 +18348,24 @@ pub fn run() {
             platform_snapshot,
             platform_reveal_main,
             platform_pick,
+            extension_snapshot,
+            extension_add_marketplace,
+            extension_refresh_catalogs,
+            extension_install_disabled,
+            extension_enable,
+            extension_disable,
+            extension_stage_update,
+            extension_activate_update,
+            extension_rollback,
+            extension_revoke,
+            extension_revoke_key,
+            extension_uninstall,
+            extension_set_skill_enabled,
+            extension_select_skill,
+            extension_customize_skill,
+            extension_review_hook,
+            extension_load_skill,
+            extension_publisher_link,
             foundation_snapshot,
             workspace_start_snapshot,
             conversation_snapshot,

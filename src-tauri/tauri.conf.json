@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.c4os.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run sidecar:node:record && npm run dev",
     "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run sidecars:verify && npm run sidecar:node:record && npm run build:web",
     "frontendDist": "../dist"

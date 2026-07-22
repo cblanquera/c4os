@@ -120,6 +120,39 @@ import type {
 } from "../../platform/protocol";
 import { NativePlatformSettingsContent } from "../platform";
 import {
+  PluginSettings,
+  SkillSettings,
+  type ExtensionOperation,
+  type PluginSettingsActions,
+  type PluginSettingsSnapshot,
+  type PluginView,
+  type SkillSettingsActions,
+  type SkillSettingsSnapshot,
+  type SkillView,
+} from "../settings/extensions";
+import {
+  activateExtensionUpdate,
+  addExtensionMarketplace,
+  customizeExtensionSkill,
+  disableExtension,
+  enableExtension,
+  installExtensionDisabled,
+  loadExtensionSkill,
+  openExtensionPublisherLink,
+  readExtensionSnapshot,
+  refreshExtensionCatalogs,
+  reviewExtensionHook,
+  rollbackExtension,
+  selectExtensionSkill,
+  setExtensionSkillEnabled,
+  stableSkillIdentity,
+  stageExtensionUpdate,
+  uninstallExtension,
+  type ExtensionServiceSnapshot,
+  type SkillInstructionsSnapshot,
+  type SkillQualifiedIdentity,
+} from "../../platform/extension-service";
+import {
   selectComposerDraft,
   selectComposerProjection,
   selectConversation,
@@ -172,6 +205,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const composerDraft = useAppSelector(selectComposerDraft);
   const composerProjection = useAppSelector(selectComposerProjection);
   const settingsReturn = useAppSelector(selectSettingsReturnState);
+  const extensionSettings = useExtensionSettings(route, navigate, dispatch);
   const qaEnabled = useAppSelector((state) => state.shellQa.enabled);
   const viewportWidth = useViewportWidth();
   const overlayPanel = viewportWidth <= 992;
@@ -2515,6 +2549,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
         launch={launch}
         sessions={sessions}
         settings={settings}
+        extensionSettings={extensionSettings}
         workspace={workspace}
       />
     );
@@ -2561,6 +2596,463 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   );
 }
 
+interface ExtensionSettingsProjection {
+  readonly plugins: PluginSettingsSnapshot;
+  readonly skills: SkillSettingsSnapshot;
+  readonly pluginActions: PluginSettingsActions;
+  readonly skillActions: SkillSettingsActions;
+}
+
+function useExtensionSettings(
+  route: ShellRoutePath,
+  navigate: ReturnType<typeof useNavigate>,
+  dispatch: ReturnType<typeof useAppDispatch>,
+): ExtensionSettingsProjection {
+  const [snapshot, setSnapshot] = useState<ExtensionServiceSnapshot | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadedSkills, setLoadedSkills] = useState<
+    Readonly<Record<string, SkillInstructionsSnapshot>>
+  >({});
+  const [pluginOperations, setPluginOperations] = useState<
+    Readonly<Record<string, ExtensionOperation>>
+  >({});
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setSnapshot(await readExtensionSnapshot());
+    } catch (failure) {
+      setError(extensionMessage(failure));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (route !== "/settings/plugins" && route !== "/settings/skills") {
+      return;
+    }
+    let cancelled = false;
+    void readExtensionSnapshot()
+      .then((next) => {
+        if (!cancelled) {
+          setError(null);
+          setSnapshot(next);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (!cancelled) {
+          setError(extensionMessage(failure));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route]);
+
+  const mutate = useCallback(
+    async (
+      pluginId: string | null,
+      pending: ExtensionOperation | null,
+      operation: () => Promise<ExtensionServiceSnapshot>,
+    ) => {
+      setError(null);
+      if (pluginId !== null && pending !== null) {
+        setPluginOperations((current) => ({
+          ...current,
+          [pluginId]: pending,
+        }));
+      }
+      try {
+        setSnapshot(await operation());
+      } catch (failure) {
+        setError(extensionMessage(failure));
+      } finally {
+        if (pluginId !== null && pending !== null) {
+          setPluginOperations((current) => {
+            const next = { ...current };
+            delete next[pluginId];
+            return next;
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  const pluginActions = useMemo<PluginSettingsActions>(
+    () => ({
+      onActivateUpdate: (pluginId) =>
+        mutate(pluginId, "activatingUpdate", () =>
+          activateExtensionUpdate(pluginId),
+        ),
+      onAddMarketplace: (input) =>
+        mutate(null, null, () =>
+          addExtensionMarketplace({
+            source: input.source,
+            gitRef: input.gitRef,
+            sparsePaths: [...input.sparsePaths],
+            trustedOrigin: input.trustedOrigin,
+            signingKeyId: input.signingKeyId,
+            publicKeySha256: input.publicKeySha256,
+          }),
+        ),
+      onDisable: (pluginId) =>
+        mutate(pluginId, "disabling", () => disableExtension(pluginId)),
+      onEnableForNextTurn: (pluginId) =>
+        mutate(pluginId, "enabling", () => enableExtension(pluginId)),
+      onInstallDisabled: (pluginId) =>
+        mutate(pluginId, "installing", () =>
+          installExtensionDisabled(pluginId),
+        ),
+      onOpenPublisherLink: async (pluginId, link) => {
+        setError(null);
+        try {
+          await openExtensionPublisherLink(pluginId, link);
+        } catch (failure) {
+          setError(extensionMessage(failure));
+        }
+      },
+      onRefreshCatalog: () => mutate(null, null, refreshExtensionCatalogs),
+      onRetry: refresh,
+      onReviewHook: (pluginId, hookId) =>
+        mutate(null, null, () => reviewExtensionHook(pluginId, hookId)),
+      onRollback: (pluginId) =>
+        mutate(pluginId, "rollingBack", () => rollbackExtension(pluginId)),
+      onStageUpdate: (pluginId) =>
+        mutate(pluginId, "stagingUpdate", () => stageExtensionUpdate(pluginId)),
+      onUninstall: (pluginId) =>
+        mutate(pluginId, "uninstalling", () => uninstallExtension(pluginId)),
+    }),
+    [mutate, refresh],
+  );
+
+  const skillActions = useMemo<SkillSettingsActions>(
+    () => ({
+      onCustomize: (skillId) =>
+        mutate(null, null, () => customizeExtensionSkill(skillId)),
+      onLoadInstructions: async (skillId) => {
+        try {
+          const loaded = await loadExtensionSkill(skillId);
+          setLoadedSkills((current) => ({ ...current, [skillId]: loaded }));
+        } catch (failure) {
+          setError(extensionMessage(failure));
+        }
+      },
+      onRetry: refresh,
+      onSelectExplicitly: (skillId) =>
+        mutate(null, null, () => selectExtensionSkill(skillId)),
+      onSetEnabled: (skillId, enabled) =>
+        mutate(null, null, () => setExtensionSkillEnabled(skillId, enabled)),
+      onTryInChat: async (skillId) => {
+        setError(null);
+        try {
+          setSnapshot(await selectExtensionSkill(skillId));
+          dispatch(shellDraftActions.composerModeChanged("chat"));
+          dispatch(
+            shellDraftActions.composerTextChanged(
+              `[Selected Skill: ${skillId}]\n\n`,
+            ),
+          );
+          void navigate("/chat");
+        } catch (failure) {
+          setError(extensionMessage(failure));
+        }
+      },
+      onUninstall: (skillId) => {
+        const pluginId = snapshot?.skills.find(
+          (skill) => stableSkillIdentity(skill.identity) === skillId,
+        )?.packageId;
+        if (pluginId === null || pluginId === undefined) {
+          setError(
+            "Local Skills remain owned by their source folder and cannot be uninstalled here.",
+          );
+          return;
+        }
+        return mutate(pluginId, "uninstalling", () =>
+          uninstallExtension(pluginId),
+        );
+      },
+    }),
+    [dispatch, mutate, navigate, refresh, snapshot?.skills],
+  );
+
+  if (loading && snapshot === null) {
+    return {
+      plugins: {
+        status: "loading",
+        message: "Loading the signed Plugin catalog…",
+      },
+      skills: { status: "loading", message: "Discovering eligible Skills…" },
+      pluginActions,
+      skillActions,
+    };
+  }
+  if (error !== null) {
+    return {
+      plugins: { status: "error", message: error, retryable: true },
+      skills: { status: "error", message: error, retryable: true },
+      pluginActions,
+      skillActions,
+    };
+  }
+  if (snapshot === null) {
+    return {
+      plugins: {
+        status: "loading",
+        message: "Loading the signed Plugin catalog…",
+      },
+      skills: { status: "loading", message: "Discovering eligible Skills…" },
+      pluginActions,
+      skillActions,
+    };
+  }
+  return {
+    plugins: pluginSettingsProjection(snapshot, pluginOperations),
+    skills: skillSettingsProjection(snapshot, loadedSkills),
+    pluginActions,
+    skillActions,
+  };
+}
+
+function pluginSettingsProjection(
+  snapshot: ExtensionServiceSnapshot,
+  operations: Readonly<Record<string, ExtensionOperation>>,
+): PluginSettingsSnapshot {
+  return {
+    status: "ready",
+    generation: snapshot.generation,
+    catalogStatus: snapshot.marketplaces.every(
+      ({ status }) => status === "ready",
+    )
+      ? "current"
+      : "degraded",
+    catalogDetail:
+      snapshot.marketplaces.length === 0
+        ? "No marketplace sources are configured."
+        : `${snapshot.marketplaces.length} signed marketplace source${snapshot.marketplaces.length === 1 ? "" : "s"} checked.`,
+    marketplaces: snapshot.marketplaces.map((marketplace) => ({
+      id: marketplace.marketplaceId,
+      label: marketplace.label,
+      source: marketplace.source,
+      gitRef: marketplace.gitRef,
+      resolvedCommit: marketplace.resolvedCommit,
+      sparsePaths: marketplace.sparsePaths,
+      status: marketplace.status === "ready" ? "ready" : "unavailable",
+      trustedOrigin: marketplace.trustedOrigin,
+      packageCount: marketplace.packageCount,
+      lastCheckedAt:
+        marketplace.lastCheckedAtMs === null
+          ? null
+          : new Date(marketplace.lastCheckedAtMs).toLocaleString(),
+      detail: marketplace.detail,
+    })),
+    plugins: snapshot.plugins.map((plugin) =>
+      pluginView(plugin, operations[plugin.packageId] ?? null),
+    ),
+  };
+}
+
+function pluginView(
+  plugin: ExtensionServiceSnapshot["plugins"][number],
+  operation: ExtensionOperation | null,
+): PluginView {
+  const lifecycle =
+    plugin.lifecycle === "enabling" ? "installedDisabled" : plugin.lifecycle;
+  return {
+    id: plugin.packageId,
+    packageKind: plugin.packageKind,
+    name: plugin.name,
+    summary: plugin.summary,
+    publisher: plugin.publisher,
+    version: plugin.version,
+    capabilities: plugin.capabilities,
+    compatibility: plugin.compatibility,
+    failureCode: plugin.failureCode,
+    marketplaceId: plugin.marketplaceId,
+    source: plugin.source,
+    settings: plugin.settings.map((setting) => ({
+      id: setting.settingId,
+      label: setting.label,
+      description: setting.description,
+      kind: setting.kind as PluginView["settings"][number]["kind"],
+      required: setting.required,
+      choices: setting.choices,
+    })),
+    apps: plugin.apps.map((app) => ({
+      id: app.appId,
+      title: app.title,
+      summary: app.summary,
+      settingIds: app.settingIds,
+    })),
+    mcpServers: plugin.mcpServers.map((server) => ({
+      id: server.serverId,
+      name: server.name,
+      transport:
+        server.transport as PluginView["mcpServers"][number]["transport"],
+      settingIds: server.settingIds,
+    })),
+    lifecycle,
+    operation,
+    isInstalled: !["available", "quarantined"].includes(plugin.lifecycle),
+    trustState:
+      plugin.trust === "trusted"
+        ? "verified"
+        : plugin.trust === "untrusted"
+          ? "quarantined"
+          : plugin.trust,
+    signature: {
+      originSignature:
+        plugin.verifiedAtMs !== null && plugin.trust !== "invalid"
+          ? "verified"
+          : "invalid",
+      contentSignature:
+        plugin.verifiedAtMs !== null && plugin.trust !== "invalid"
+          ? "verified"
+          : "invalid",
+      originKeyId: plugin.originKeyId,
+      contentKeyId: plugin.contentKeyId,
+      verifiedAt:
+        plugin.verifiedAtMs === null
+          ? null
+          : new Date(plugin.verifiedAtMs).toLocaleString(),
+    },
+    websiteUrl: plugin.website,
+    termsUrl: plugin.terms,
+    privacyPolicyUrl: plugin.privacyPolicy,
+    hooks: plugin.hooks.map((hook) => ({
+      id: hook.hookId,
+      name: hook.name,
+      arguments: hook.arguments,
+      grants: hook.grants,
+      lastResult: hook.lastResult,
+      review: `${hook.event} · ${hook.reviewDigest}`,
+      status:
+        hook.status === "ready" ||
+        hook.status === "blocked" ||
+        hook.status === "failed"
+          ? hook.status
+          : "notReviewed",
+    })),
+    update: {
+      currentDigest: plugin.digest,
+      availableVersion: plugin.availableVersion,
+      stagedVersion: plugin.stagedVersion,
+      stagedDigest: plugin.stagedDigest,
+    },
+    rollbackAvailable:
+      plugin.lastKnownGoodDigest !== null &&
+      plugin.lastKnownGoodDigest !== plugin.digest,
+    lastKnownGoodVersion: plugin.lastKnownGoodVersion,
+    revocationReason: plugin.revocationReason,
+  };
+}
+
+function skillSettingsProjection(
+  snapshot: ExtensionServiceSnapshot,
+  loadedSkills: Readonly<Record<string, SkillInstructionsSnapshot>>,
+): SkillSettingsSnapshot {
+  const selected =
+    snapshot.selectedSkill === null
+      ? null
+      : stableSkillIdentity(snapshot.selectedSkill);
+  return {
+    status: "ready",
+    generation: snapshot.generation,
+    discoveryStatus: "current",
+    discoveryDetail: `${snapshot.skills.length} source-qualified Skill${snapshot.skills.length === 1 ? "" : "s"} discovered.`,
+    skills: snapshot.skills.map((skill) =>
+      skillView(
+        skill,
+        selected,
+        loadedSkills[stableSkillIdentity(skill.identity)],
+      ),
+    ),
+  };
+}
+
+function skillView(
+  skill: ExtensionServiceSnapshot["skills"][number],
+  selected: string | null,
+  loaded: SkillInstructionsSnapshot | undefined,
+): SkillView {
+  const sourceQualifiedId = stableSkillIdentity(skill.identity);
+  return {
+    id: sourceQualifiedId,
+    sourceQualifiedId,
+    name: skill.name,
+    summary: skill.summary,
+    version: skill.version,
+    sourceKind: skillSourceKind(skill.identity),
+    sourceLabel: skill.sourceLabel,
+    sourcePrecedence: skillSourcePrecedence(skill.identity),
+    enabled: skill.enabled,
+    isInstalled: skill.isInstalled,
+    isExplicitSelection: selected === sourceQualifiedId,
+    effectiveState: !skill.valid
+      ? "invalid"
+      : skill.shadowed
+        ? "shadowed"
+        : !skill.enabled
+          ? "disabled"
+          : !skill.eligible || !skill.active
+            ? "ineligible"
+            : "active",
+    eligibilityDetail: skill.eligibilityDetail,
+    frontmatter: skill.valid
+      ? { state: "valid" }
+      : {
+          state: "invalid",
+          diagnostic: skill.diagnostic ?? "Invalid Skill metadata.",
+        },
+    collisions: skill.collisionSources.map((identity) => ({
+      sourceQualifiedId: stableSkillIdentity(identity),
+      sourceLabel: skillSourceLabel(identity),
+      sourcePrecedence: skillSourcePrecedence(identity),
+    })),
+    instructions:
+      loaded === undefined
+        ? { state: "notLoaded" }
+        : { state: "loaded", instructions: loaded.instructions },
+  };
+}
+
+function skillSourceKind(
+  identity: SkillQualifiedIdentity,
+): SkillView["sourceKind"] {
+  return {
+    projectLocal: "project",
+    workspaceLocal: "workspace",
+    userGlobal: "user",
+    pluginProvided: "plugin",
+    bundled: "bundled",
+  }[identity.sourceKind] as SkillView["sourceKind"];
+}
+
+function skillSourcePrecedence(identity: SkillQualifiedIdentity): number {
+  return {
+    projectLocal: 0,
+    workspaceLocal: 1,
+    userGlobal: 2,
+    pluginProvided: 3,
+    bundled: 4,
+  }[identity.sourceKind];
+}
+
+function skillSourceLabel(identity: SkillQualifiedIdentity): string {
+  return `${skillSourceKind(identity)} · ${identity.sourceId}`;
+}
+
+function extensionMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "The native Extension service could not complete the request.";
+}
+
 function useViewportWidth(): number {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 
@@ -2587,6 +3079,7 @@ interface ProjectedRouteContentProps {
   readonly sessions: SessionsState;
   readonly conversation: ConversationState;
   readonly settings: SettingsState;
+  readonly extensionSettings: ExtensionSettingsProjection;
 }
 
 /** Renders only state already present in authoritative projections. */
@@ -2597,9 +3090,28 @@ function ProjectedRouteContent({
   sessions,
   conversation,
   settings,
+  extensionSettings,
 }: ProjectedRouteContentProps): ReactNode {
   if (route === "/settings/providers") {
     return <NativePlatformSettingsContent />;
+  }
+
+  if (route === "/settings/plugins") {
+    return (
+      <PluginSettings
+        actions={extensionSettings.pluginActions}
+        snapshot={extensionSettings.plugins}
+      />
+    );
+  }
+
+  if (route === "/settings/skills") {
+    return (
+      <SkillSettings
+        actions={extensionSettings.skillActions}
+        snapshot={extensionSettings.skills}
+      />
+    );
   }
 
   if (route === "/onboarding") {

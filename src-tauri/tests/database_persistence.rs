@@ -669,7 +669,7 @@ fn app_database_round_trips_across_actor_restart() {
     {
         let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("open app database");
         assert_eq!(report.previous_version, 0);
-        assert_eq!(report.current_version, 6);
+        assert_eq!(report.current_version, 7);
         assert!(
             report
                 .backup_path
@@ -696,7 +696,7 @@ fn app_database_round_trips_across_actor_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("reopen app database");
-    assert_eq!(report.previous_version, 6);
+    assert_eq!(report.previous_version, 7);
     assert!(report.backup_path.is_none());
     let snapshot = match actor
         .snapshot(SnapshotQuery::new(3).expect("valid bounds"))
@@ -740,7 +740,7 @@ fn app_configuration_lkg_round_trips_across_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("restart app database");
-    assert_eq!(report.previous_version, 6);
+    assert_eq!(report.previous_version, 7);
     assert_eq!(
         actor
             .app_configuration_lkg()
@@ -837,7 +837,7 @@ fn migration_creates_validated_online_backup_and_failure_preserves_source() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 6).expect("deterministic backup path");
+        database::migration_backup_path(&descriptor, 99, 7).expect("deterministic backup path");
     assert!(backup_path.exists());
     let backup = Connection::open(backup_path).expect("open backup");
     assert_eq!(

@@ -26,6 +26,9 @@ pub const MAX_REPLY_SOURCE_EXCERPT_BYTES: usize = 256 * 1_024;
 /// remains inside that bound.
 pub const MAX_SESSION_TITLE_CHARS: usize = 48;
 pub const MAX_ATTACHMENTS_PER_TURN: usize = 64;
+pub const MAX_SKILL_CONTEXTS_PER_TURN: usize = 16;
+pub const MAX_SKILL_CONTEXT_BYTES: usize = 512 * 1024;
+pub const MAX_SKILL_CONTEXT_REFERENCES: usize = 128;
 pub const MAX_RESOURCES_PER_SNAPSHOT: usize = 512;
 pub const MAX_CAPABILITIES_PER_SNAPSHOT: usize = 512;
 pub const MAX_RUN_EVENTS_PER_ATTEMPT: usize = 4_096;
@@ -190,9 +193,25 @@ pub struct UserTurnRecord {
     pub turn_id: String,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_context: Vec<SkillContextSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_context: Option<MessageReplyContextSnapshot>,
     pub submitted_at_ms: u64,
+}
+
+/// Immutable, turn-start Skill material. The qualified identity and entrypoint
+/// digest make the exact instructions auditable without granting the native
+/// runtime access to extension storage.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SkillContextSnapshot {
+    pub identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_id: Option<String>,
+    pub entrypoint_sha256: String,
+    pub instructions: String,
+    pub referenced_resources: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -876,6 +895,9 @@ impl UserTurnRecord {
         if self.attachments.len() > MAX_ATTACHMENTS_PER_TURN {
             return Err(SessionError::BoundExceeded("turn attachments"));
         }
+        if self.skill_context.len() > MAX_SKILL_CONTEXTS_PER_TURN {
+            return Err(SessionError::BoundExceeded("turn Skill context"));
+        }
         let mut ids = BTreeSet::new();
         for attachment in &self.attachments {
             attachment.validate()?;
@@ -886,7 +908,45 @@ impl UserTurnRecord {
         if let Some(reply) = &self.reply_context {
             reply.validate()?;
         }
+        let mut skill_identities = BTreeSet::new();
+        let mut skill_bytes = 0usize;
+        for skill in &self.skill_context {
+            skill.validate()?;
+            if !skill_identities.insert(skill.identity.as_str()) {
+                return Err(SessionError::DuplicateIdentifier("Skill context identity"));
+            }
+            skill_bytes = skill_bytes
+                .checked_add(skill.instructions.len())
+                .ok_or(SessionError::BoundExceeded("turn Skill context"))?;
+        }
+        if skill_bytes > MAX_SKILL_CONTEXT_BYTES {
+            return Err(SessionError::BoundExceeded("turn Skill context"));
+        }
         Ok(())
+    }
+}
+
+impl SkillContextSnapshot {
+    pub fn validate(&self) -> Result<(), SessionError> {
+        validate_bounded_text("Skill context identity", &self.identity, 512, false)?;
+        if !self.identity.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@' | b'/')
+        }) {
+            return Err(SessionError::InvalidIdentifier("Skill context identity"));
+        }
+        validate_optional_identifier("Skill package id", self.package_id.as_deref())?;
+        validate_sha256(&self.entrypoint_sha256)?;
+        validate_bounded_text(
+            "Skill instructions",
+            &self.instructions,
+            MAX_SKILL_CONTEXT_BYTES,
+            false,
+        )?;
+        validate_unique_identifiers(
+            "Skill referenced resource",
+            &self.referenced_resources,
+            MAX_SKILL_CONTEXT_REFERENCES,
+        )
     }
 }
 
@@ -1125,6 +1185,7 @@ pub struct FirstSubmission {
     pub process_generation: u64,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub binding: SessionBinding,
     pub submitted_at_ms: u64,
 }
@@ -1139,6 +1200,7 @@ pub struct TurnSubmission {
     pub process_generation: u64,
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
+    pub skill_context: Vec<SkillContextSnapshot>,
     pub reply_context: Option<MessageReplyContextSnapshot>,
     pub context: AttemptContextSnapshot,
     pub submitted_at_ms: u64,
@@ -1320,6 +1382,7 @@ impl<R: SessionRepository> SessionService<R> {
             turn_id: submission.turn_id,
             prompt: submission.prompt,
             attachments: submission.attachments,
+            skill_context: submission.skill_context,
             reply_context: None,
             submitted_at_ms: submission.submitted_at_ms,
         };
@@ -1372,6 +1435,7 @@ impl<R: SessionRepository> SessionService<R> {
             turn_id: submission.turn_id,
             prompt: submission.prompt,
             attachments: submission.attachments,
+            skill_context: submission.skill_context,
             reply_context: submission.reply_context,
             submitted_at_ms: submission.submitted_at_ms,
         };

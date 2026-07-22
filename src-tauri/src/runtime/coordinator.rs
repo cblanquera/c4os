@@ -683,6 +683,18 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(cancelled)
     }
 
+    pub fn revoke_plugin_authority(
+        &mut self,
+        plugin_id: &str,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<usize>, CoordinatorError> {
+        let revoked = self
+            .action_gateway
+            .revoke_plugin(plugin_id, now_ms)
+            .map_err(RuntimeBridgeError::Gateway)?;
+        self.operation(revoked)
+    }
+
     fn fresh_selected_provider(
         &self,
         provider_id: &str,

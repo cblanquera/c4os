@@ -280,7 +280,14 @@ impl WorkspaceLayout {
     }
 
     pub fn ensure_roots(&self) -> WorkspaceResult<()> {
-        for relative in ["state", "config", "projects", "chats", "blobs/sha256"] {
+        for relative in [
+            "state",
+            "config",
+            "projects",
+            "chats",
+            "blobs/sha256",
+            "skills",
+        ] {
             fs::create_dir_all(self.root.join(relative))?;
         }
         Ok(())
@@ -1699,6 +1706,10 @@ fn archive_path_allowed(path: &str) -> bool {
                 && !tail.is_empty() =>
         {
             tail.iter().all(|segment| portable_segment(segment))
+        }
+        ["skills", skill_directory, tail @ ..] if !tail.is_empty() => {
+            portable_segment(skill_directory)
+                && tail.iter().all(|segment| portable_segment(segment))
         }
         ["blobs", "sha256", digest] => is_sha256_hex(digest),
         _ => false,

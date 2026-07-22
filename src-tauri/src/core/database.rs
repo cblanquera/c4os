@@ -30,6 +30,8 @@ pub const MAX_CONCURRENT_AUXILIARY_CONNECTIONS: usize = 32;
 pub const MAX_TEXT_FIELD_BYTES: usize = 1_048_576;
 pub const MAX_SNAPSHOT_TEXT_BYTES: usize = 4_194_304;
 pub const MAX_RUNTIME_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
+pub const MAX_EXTENSION_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
+pub const MAX_EXTENSION_EVENTS: usize = 1_000_000;
 pub const MAX_SESSION_DOCUMENT_BYTES: usize = 64 * 1_024 * 1_024;
 pub const MAX_ARTIFACT_DOCUMENT_BYTES: usize = 16 * 1_024 * 1_024;
 pub const MAX_ARTIFACT_UI_DOCUMENT_BYTES: usize = 64 * 1_024;
@@ -42,7 +44,7 @@ pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
-const APP_SCHEMA_VERSION: usize = 6;
+const APP_SCHEMA_VERSION: usize = 7;
 const WORKSPACE_SCHEMA_VERSION: usize = 5;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -346,6 +348,35 @@ pub struct RuntimeStateDocumentRecord {
     pub updated_at_ms: u64,
 }
 
+/// Strict ExtensionService state. One transition replaces this document and
+/// appends its matching immutable event in the same writer transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionStateDocumentRecord {
+    pub generation: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionEventRecord {
+    pub event_id: u64,
+    pub generation: u64,
+    pub operation_id: String,
+    pub package_id: Option<String>,
+    pub event_kind: String,
+    pub selector_digest: Option<String>,
+    pub result: String,
+    pub canonical_document: String,
+    pub occurred_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionEventPage {
+    pub events: Vec<ExtensionEventRecord>,
+    /// Pass this exclusive event identifier to the next page request.
+    pub next_before_event_id: Option<u64>,
+}
+
 /// Complete strict session JSON. The session domain validates every immutable
 /// child record before create or compare-and-swap.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -580,6 +611,12 @@ enum WriteCommand {
     },
     SaveRuntimeStateDocument {
         record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    SaveExtensionTransition {
+        state: ExtensionStateDocumentRecord,
+        event: ExtensionEventRecord,
         expected_generation: Option<u64>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
@@ -911,6 +948,44 @@ impl DatabaseActor {
         let connection = open_read_connection(&self.descriptor.path)?;
         connection.execute_batch("BEGIN DEFERRED")?;
         read_runtime_state_document(&connection, document_kind, document_id)
+    }
+
+    pub fn save_extension_transition(
+        &self,
+        state: ExtensionStateDocumentRecord,
+        event: ExtensionEventRecord,
+        expected_generation: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        self.request(|reply| WriteCommand::SaveExtensionTransition {
+            state,
+            event,
+            expected_generation,
+            reply,
+        })
+    }
+
+    pub fn extension_state_document(&self) -> DatabaseResult<Option<ExtensionStateDocumentRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_extension_state_document(&connection)
+    }
+
+    pub fn extension_event_page(
+        &self,
+        before_event_id: Option<u64>,
+        query: SnapshotQuery,
+    ) -> DatabaseResult<ExtensionEventPage> {
+        self.require_app()?;
+        if before_event_id == Some(0) {
+            return Err(DatabaseError::InvalidInput(
+                "extension event cursor must be positive".into(),
+            ));
+        }
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_extension_event_page(&connection, before_event_id, query)
     }
 
     pub fn save_conversation_state(
@@ -1317,6 +1392,15 @@ fn writer_loop(
             } => reply_result(
                 reply,
                 write_runtime_state_document(&mut connection, record, expected_generation),
+            ),
+            WriteCommand::SaveExtensionTransition {
+                state,
+                event,
+                expected_generation,
+                reply,
+            } => reply_result(
+                reply,
+                write_extension_transition(&mut connection, state, event, expected_generation),
             ),
             WriteCommand::SaveConversationState {
                 record,
@@ -1776,6 +1860,32 @@ fn app_migrations() -> Migrations<'static> {
                 ON runtime_state_documents(document_kind, updated_at_ms DESC, document_id);",
         )
         .comment("atomic runtime supervisor and capability control-plane document"),
+        M::up(
+            "CREATE TABLE extension_state (
+                singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0)
+            );
+            CREATE TABLE extension_events (
+                event_id INTEGER PRIMARY KEY NOT NULL CHECK (event_id > 0),
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                operation_id TEXT NOT NULL,
+                package_id TEXT,
+                event_kind TEXT NOT NULL,
+                selector_digest TEXT,
+                result TEXT NOT NULL,
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                occurred_at_ms INTEGER NOT NULL CHECK (occurred_at_ms > 0)
+            );
+            CREATE INDEX extension_events_generation
+                ON extension_events(generation DESC, event_id DESC);
+            CREATE INDEX extension_events_package
+                ON extension_events(package_id, event_id DESC);",
+        )
+        .comment("app-owned ExtensionService state and append-only lifecycle journal"),
     ])
 }
 
@@ -2348,6 +2458,8 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "security_records",
             "security_events",
             "runtime_state_documents",
+            "extension_state",
+            "extension_events",
             "durable_generation",
         ],
         DatabaseKind::Workspace { .. } => &[
@@ -2382,6 +2494,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
         let _ = read_app_configuration_lkg(connection)?;
         validate_security_journal(connection)?;
         validate_runtime_state_documents(connection)?;
+        validate_extension_documents(connection)?;
     } else if let DatabaseKind::Workspace { workspace_id } = kind {
         validate_session_documents(connection, workspace_id)?;
         let _ = read_conversation_state(connection, workspace_id)?;
@@ -2414,6 +2527,34 @@ fn validate_runtime_state_documents(connection: &Connection) -> DatabaseResult<(
         let _ = read_runtime_state_document(connection, &kind, &id)?;
     }
     Ok(())
+}
+
+fn validate_extension_documents(connection: &Connection) -> DatabaseResult<()> {
+    let state = read_extension_state_document(connection)?;
+    let event_count: i64 =
+        connection.query_row("SELECT COUNT(*) FROM extension_events", [], |row| {
+            row.get(0)
+        })?;
+    if !(0..=MAX_EXTENSION_EVENTS as i64).contains(&event_count) {
+        return Err(DatabaseError::Validation(format!(
+            "extension event count {event_count} exceeds {MAX_EXTENSION_EVENTS}"
+        )));
+    }
+    let newest_event = read_extension_event_page(connection, None, SnapshotQuery::new(1)?)?
+        .events
+        .into_iter()
+        .next();
+    match (state, newest_event) {
+        (None, None) => Ok(()),
+        (Some(state), Some(event))
+            if state.generation == event.generation && event.event_id > 0 =>
+        {
+            Ok(())
+        }
+        _ => Err(DatabaseError::Validation(
+            "extension current state and append-only journal are inconsistent".into(),
+        )),
+    }
 }
 
 fn validate_session_documents(connection: &Connection, workspace_id: &str) -> DatabaseResult<()> {
@@ -2873,6 +3014,305 @@ fn write_runtime_state_document(
             record.canonical_document,
             digest,
             updated_at_ms
+        ],
+    )?;
+    let durable_generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn read_extension_state_document(
+    connection: &Connection,
+) -> DatabaseResult<Option<ExtensionStateDocumentRecord>> {
+    let raw = connection
+        .query_row(
+            "SELECT generation, canonical_document, document_sha256, updated_at_ms
+             FROM extension_state WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(generation, canonical_document, stored_digest, updated_at_ms)| {
+            validate_text_field(
+                "extension canonical document",
+                &canonical_document,
+                MAX_EXTENSION_DOCUMENT_BYTES,
+            )?;
+            if canonical_document.is_empty()
+                || stored_digest != canonical_document_digest(&canonical_document)
+            {
+                return Err(DatabaseError::Validation(
+                    "extension state document digest mismatch".into(),
+                ));
+            }
+            let generation = generation_to_u64(generation)?;
+            let updated_at_ms = generation_to_u64(updated_at_ms)?;
+            if generation == 0 || updated_at_ms == 0 {
+                return Err(DatabaseError::Validation(
+                    "extension state generation and timestamp must be positive".into(),
+                ));
+            }
+            Ok(ExtensionStateDocumentRecord {
+                generation,
+                canonical_document,
+                updated_at_ms,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn read_extension_event_page(
+    connection: &Connection,
+    before_event_id: Option<u64>,
+    query: SnapshotQuery,
+) -> DatabaseResult<ExtensionEventPage> {
+    let cursor = before_event_id
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                DatabaseError::InvalidInput("extension event cursor exceeds SQLite range".into())
+            })
+        })
+        .transpose()?;
+    let limit = i64::try_from(query.max_records + 1)
+        .map_err(|_| DatabaseError::InvalidInput("extension event limit overflow".into()))?;
+    let mut statement = connection.prepare(
+        "SELECT event_id, generation, operation_id, package_id, event_kind,
+                selector_digest, result, canonical_document, document_sha256,
+                occurred_at_ms
+         FROM extension_events
+         WHERE (?1 IS NULL OR event_id < ?1)
+         ORDER BY event_id DESC
+         LIMIT ?2",
+    )?;
+    let rows = statement.query_map(params![cursor, limit], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, i64>(9)?,
+        ))
+    })?;
+    let mut events = Vec::new();
+    for row in rows {
+        let (
+            event_id,
+            generation,
+            operation_id,
+            package_id,
+            event_kind,
+            selector_digest,
+            result,
+            canonical_document,
+            stored_digest,
+            occurred_at_ms,
+        ) = row?;
+        validate_extension_event_fields(
+            &operation_id,
+            package_id.as_deref(),
+            &event_kind,
+            selector_digest.as_deref(),
+            &result,
+            &canonical_document,
+        )?;
+        if stored_digest != canonical_document_digest(&canonical_document) {
+            return Err(DatabaseError::Validation(format!(
+                "extension event {event_id} digest mismatch"
+            )));
+        }
+        events.push(ExtensionEventRecord {
+            event_id: generation_to_u64(event_id)?,
+            generation: generation_to_u64(generation)?,
+            operation_id,
+            package_id,
+            event_kind,
+            selector_digest,
+            result,
+            canonical_document,
+            occurred_at_ms: generation_to_u64(occurred_at_ms)?,
+        });
+    }
+    let next_before_event_id =
+        (events.len() > query.max_records).then(|| events[query.max_records - 1].event_id);
+    events.truncate(query.max_records);
+    Ok(ExtensionEventPage {
+        events,
+        next_before_event_id,
+    })
+}
+
+fn validate_extension_event_fields(
+    operation_id: &str,
+    package_id: Option<&str>,
+    event_kind: &str,
+    selector_digest: Option<&str>,
+    result: &str,
+    canonical_document: &str,
+) -> DatabaseResult<()> {
+    require_nonempty("extension operation_id", operation_id)?;
+    validate_text_field("extension operation_id", operation_id, 160)?;
+    if let Some(package_id) = package_id {
+        require_nonempty("extension package_id", package_id)?;
+        validate_text_field("extension package_id", package_id, 160)?;
+    }
+    require_nonempty("extension event_kind", event_kind)?;
+    validate_text_field("extension event_kind", event_kind, 160)?;
+    require_nonempty("extension event result", result)?;
+    validate_text_field("extension event result", result, 160)?;
+    if let Some(selector_digest) = selector_digest {
+        if selector_digest.len() != 71
+            || !selector_digest.starts_with("sha256:")
+            || !selector_digest[7..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(DatabaseError::InvalidInput(
+                "extension selector digest is invalid".into(),
+            ));
+        }
+    }
+    validate_text_field(
+        "extension event document",
+        canonical_document,
+        MAX_EXTENSION_DOCUMENT_BYTES,
+    )?;
+    if canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "extension event document cannot be empty".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_extension_transition(
+    connection: &mut Connection,
+    state: ExtensionStateDocumentRecord,
+    event: ExtensionEventRecord,
+    expected_generation: Option<u64>,
+) -> DatabaseResult<u64> {
+    validate_text_field(
+        "extension canonical document",
+        &state.canonical_document,
+        MAX_EXTENSION_DOCUMENT_BYTES,
+    )?;
+    if state.generation == 0 || state.updated_at_ms == 0 || state.canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "extension state generation, timestamp, and document must be non-empty".into(),
+        ));
+    }
+    if event.event_id == 0 || event.generation != state.generation || event.occurred_at_ms == 0 {
+        return Err(DatabaseError::InvalidInput(
+            "extension event identity must match the positive state generation".into(),
+        ));
+    }
+    validate_extension_event_fields(
+        &event.operation_id,
+        event.package_id.as_deref(),
+        &event.event_kind,
+        event.selector_digest.as_deref(),
+        &event.result,
+        &event.canonical_document,
+    )?;
+    let generation = i64::try_from(state.generation)
+        .map_err(|_| DatabaseError::InvalidInput("extension generation overflow".into()))?;
+    let updated_at_ms = i64::try_from(state.updated_at_ms)
+        .map_err(|_| DatabaseError::InvalidInput("extension timestamp overflow".into()))?;
+    let event_id = i64::try_from(event.event_id)
+        .map_err(|_| DatabaseError::InvalidInput("extension event identifier overflow".into()))?;
+    let occurred_at_ms = i64::try_from(event.occurred_at_ms)
+        .map_err(|_| DatabaseError::InvalidInput("extension event timestamp overflow".into()))?;
+
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current_generation = transaction
+        .query_row(
+            "SELECT generation FROM extension_state WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current_generation, expected_generation) {
+        (None, None) => {}
+        (Some(current), Some(expected)) if current == expected && state.generation > current => {}
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "extension state expected generation {expected:?}, found {actual:?}"
+            )));
+        }
+    }
+    let previous_event_id = transaction
+        .query_row("SELECT MAX(event_id) FROM extension_events", [], |row| {
+            row.get::<_, Option<i64>>(0)
+        })?
+        .map(generation_to_u64)
+        .transpose()?
+        .unwrap_or(0);
+    if event.event_id != previous_event_id.saturating_add(1) {
+        return Err(DatabaseError::Conflict(format!(
+            "extension event expected identifier {}, found {}",
+            previous_event_id.saturating_add(1),
+            event.event_id
+        )));
+    }
+    let event_count: i64 =
+        transaction.query_row("SELECT COUNT(*) FROM extension_events", [], |row| {
+            row.get(0)
+        })?;
+    if event_count >= MAX_EXTENSION_EVENTS as i64 {
+        return Err(DatabaseError::Validation(
+            "extension event journal is full".into(),
+        ));
+    }
+    let event_document_sha256 = canonical_document_digest(&event.canonical_document);
+    transaction.execute(
+        "INSERT INTO extension_events(
+            event_id, generation, operation_id, package_id, event_kind,
+            selector_digest, result, canonical_document, document_sha256,
+            occurred_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            event_id,
+            generation,
+            event.operation_id,
+            event.package_id,
+            event.event_kind,
+            event.selector_digest,
+            event.result,
+            event.canonical_document,
+            event_document_sha256,
+            occurred_at_ms,
+        ],
+    )?;
+    let state_document_sha256 = canonical_document_digest(&state.canonical_document);
+    transaction.execute(
+        "INSERT INTO extension_state(
+            singleton, generation, canonical_document, document_sha256, updated_at_ms
+         ) VALUES (1, ?1, ?2, ?3, ?4)
+         ON CONFLICT(singleton) DO UPDATE SET
+            generation = excluded.generation,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            generation,
+            state.canonical_document,
+            state_document_sha256,
+            updated_at_ms,
         ],
     )?;
     let durable_generation = bump_app_generation(&transaction)?;

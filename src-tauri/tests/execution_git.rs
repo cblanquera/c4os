@@ -108,6 +108,7 @@ fn action(
         run_id: "run-1".into(),
         runtime_id: context.runtime_id.into(),
         environment_id: context.environment_id.into(),
+        plugin_or_mcp_id: None,
         process_generation: context.process_generation,
         configuration_version: 11,
         policy_version: 12,

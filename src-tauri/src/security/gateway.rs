@@ -114,6 +114,8 @@ struct RedactedActionBinding {
     run_id: String,
     runtime_id: String,
     environment_id: String,
+    #[serde(default)]
+    plugin_or_mcp_id: Option<String>,
     process_generation: u64,
     configuration_version: u64,
     policy_version: u64,
@@ -138,6 +140,7 @@ impl RedactedActionBinding {
             run_id: action.run_id.clone(),
             runtime_id: action.runtime_id.clone(),
             environment_id: action.environment_id.clone(),
+            plugin_or_mcp_id: action.plugin_or_mcp_id.clone(),
             process_generation: action.process_generation,
             configuration_version: action.configuration_version,
             policy_version: action.policy_version,
@@ -1037,6 +1040,43 @@ impl ActionGateway {
         Ok(authorizations + approvals)
     }
 
+    /// Revokes only authority derived from one exact Plugin identity. The
+    /// transition is durably journaled before the ExtensionService terminates
+    /// that Plugin's supervised hook generation.
+    pub fn revoke_plugin(
+        &mut self,
+        plugin_id: &str,
+        now_ms: u64,
+    ) -> Result<usize, ActionGatewayError> {
+        if plugin_id.trim().is_empty() {
+            return Err(ActionGatewayError::BindingMismatch);
+        }
+        let authorization_states = self.authorization_states();
+        let approval_states = self.approval_states();
+        let mut authorizations = self.authorizations.revoke_plugin(plugin_id, now_ms);
+        let approvals = self.approvals.cancel_plugin(plugin_id, now_ms);
+        let mut records = self.changed_authorization_records(&authorization_states)?;
+        for authorization in self.restored_authorizations.values_mut() {
+            if authorization.state == AuthorizationState::Issued
+                && authorization.action_binding.plugin_or_mcp_id.as_deref() == Some(plugin_id)
+            {
+                authorization.state = AuthorizationState::Revoked {
+                    revoked_at_ms: now_ms,
+                };
+                records.push(
+                    self.repository
+                        .persisted_authorization_record(authorization, now_ms)?,
+                );
+                authorizations += 1;
+            }
+        }
+        records.extend(self.changed_approval_records(&approval_states)?);
+        if !records.is_empty() {
+            self.repository.save_batch(records)?;
+        }
+        Ok(authorizations + approvals)
+    }
+
     pub fn expire_due(&mut self, now_ms: u64) -> Result<usize, ActionGatewayError> {
         let authorization_states = self.authorization_states();
         let approval_states = self.approval_states();
@@ -1488,6 +1528,7 @@ fn validate_fact_binding(
         || facts.session_id != action.session_id
         || facts.runtime_id != action.runtime_id
         || facts.environment_id != action.environment_id
+        || facts.plugin_or_mcp_id != action.plugin_or_mcp_id
     {
         return Err(ActionGatewayError::BindingMismatch);
     }

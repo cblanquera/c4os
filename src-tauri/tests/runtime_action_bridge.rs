@@ -87,6 +87,7 @@ fn action() -> CanonicalAction {
         run_id: "run-1".into(),
         runtime_id: "opencode@1".into(),
         environment_id: "local".into(),
+        plugin_or_mcp_id: None,
         process_generation: 4,
         configuration_version: 7,
         policy_version: 9,

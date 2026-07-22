@@ -2,6 +2,17 @@
 #[path = "../src/protocol.rs"]
 mod protocol;
 
+use c4os_lib::extension::{
+    ExtensionLifecycle, ExtensionPackageKind, ExtensionServiceSnapshot, ExtensionSourceKind,
+    ExtensionTrustState, MarketplaceSnapshot, PluginAppSnapshot, PluginHookSnapshot,
+    PluginMcpServerSnapshot, PluginSettingSnapshot, PluginSnapshot, SkillQualifiedIdentity,
+    SkillSnapshot,
+    service::{
+        ExtensionHookReviewInput, ExtensionKeyRevocationInput, ExtensionPackageInput,
+        ExtensionPublisherLinkInput, ExtensionRevocationInput, ExtensionSkillAvailabilityInput,
+        ExtensionSkillInput, MarketplaceSourceInput, SkillInstructionsSnapshot,
+    },
+};
 use protocol::*;
 use std::collections::BTreeMap;
 use std::fs;
@@ -425,6 +436,26 @@ fn wire_json_uses_camel_case_fields_and_discriminants() {
 }
 
 #[test]
+fn legacy_extension_hook_snapshot_defaults_the_additive_argument_contract() {
+    let hook: PluginHookSnapshot = serde_json::from_value(serde_json::json!({
+        "hookId": "before-turn",
+        "name": "hooks/before-turn.mjs",
+        "event": "before-turn",
+        "reviewDigest": format!("sha256:{}", "a".repeat(64)),
+        "reviewed": true,
+        "status": "ready",
+        "grants": ["context.annotation"],
+        "lastResult": null
+    }))
+    .expect("legacy hook snapshot");
+    assert!(hook.arguments.is_empty());
+    assert_eq!(
+        serde_json::to_value(hook).unwrap()["arguments"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn artifact_file_states_are_tagged_and_bounded_at_the_protocol_boundary() {
     let snapshot = file_artifact_workspace(ArtifactFileStateSnapshot::Dirty {
         content: "one".into(),
@@ -658,6 +689,28 @@ fn export_protocol_types(config: &Config) {
     ArtifactBrowserNavigateInput::export_all(config).unwrap();
     ArtifactBrowserViewportInput::export_all(config).unwrap();
     ArtifactBrowserIdentityInput::export_all(config).unwrap();
+    ExtensionServiceSnapshot::export_all(config).unwrap();
+    MarketplaceSnapshot::export_all(config).unwrap();
+    PluginSnapshot::export_all(config).unwrap();
+    PluginHookSnapshot::export_all(config).unwrap();
+    PluginSettingSnapshot::export_all(config).unwrap();
+    PluginAppSnapshot::export_all(config).unwrap();
+    PluginMcpServerSnapshot::export_all(config).unwrap();
+    SkillSnapshot::export_all(config).unwrap();
+    SkillQualifiedIdentity::export_all(config).unwrap();
+    ExtensionLifecycle::export_all(config).unwrap();
+    ExtensionTrustState::export_all(config).unwrap();
+    ExtensionSourceKind::export_all(config).unwrap();
+    ExtensionPackageKind::export_all(config).unwrap();
+    MarketplaceSourceInput::export_all(config).unwrap();
+    ExtensionPackageInput::export_all(config).unwrap();
+    ExtensionSkillInput::export_all(config).unwrap();
+    ExtensionSkillAvailabilityInput::export_all(config).unwrap();
+    ExtensionHookReviewInput::export_all(config).unwrap();
+    ExtensionRevocationInput::export_all(config).unwrap();
+    ExtensionKeyRevocationInput::export_all(config).unwrap();
+    ExtensionPublisherLinkInput::export_all(config).unwrap();
+    SkillInstructionsSnapshot::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

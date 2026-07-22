@@ -27,6 +27,11 @@ const conversationServiceMocks = vi.hoisted(() => ({
   readConversationSnapshot: vi.fn(),
   submitConversation: vi.fn(),
 }));
+const extensionServiceMocks = vi.hoisted(() => ({
+  loadExtensionSkill: vi.fn(),
+  readExtensionSnapshot: vi.fn(),
+  selectExtensionSkill: vi.fn(),
+}));
 
 vi.mock("../../platform/conversation-service", async () => {
   const actual = await vi.importActual<
@@ -34,6 +39,49 @@ vi.mock("../../platform/conversation-service", async () => {
   >("../../platform/conversation-service");
   return { ...actual, ...conversationServiceMocks };
 });
+
+vi.mock("../../platform/extension-service", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../platform/extension-service")
+  >("../../platform/extension-service");
+  return { ...actual, ...extensionServiceMocks };
+});
+
+function extensionSnapshot(generation = 7) {
+  return {
+    schemaVersion: 1,
+    generation,
+    marketplaces: [],
+    plugins: [],
+    skills: [
+      {
+        identity: {
+          sourceKind: "pluginProvided" as const,
+          sourceId: "sample-plugin",
+          skillId: "review",
+        },
+        name: "Review",
+        summary: "Review the active Project.",
+        packageId: "sample-plugin",
+        sourceLabel: "Plugin · sample-plugin",
+        enabled: true,
+        eligible: true,
+        valid: true,
+        active: true,
+        shadowed: false,
+        instructionsLoaded: false,
+        collisionSources: [],
+        diagnostic: null,
+        version: "1.0.0",
+        isInstalled: true,
+        eligibilityDetail: "Eligible for the next turn.",
+      },
+    ],
+    selectedSkill: null,
+    activeWorkers: 0,
+    lastEventId: generation,
+  } satisfies import("../../platform/extension-service").ExtensionServiceSnapshot;
+}
 
 function renderShellAt(path: string, qaEnabled = false) {
   const store = createAppStore({
@@ -265,6 +313,12 @@ describe("ShellRouteController", () => {
   beforeEach(() => {
     conversationServiceMocks.readConversationSnapshot.mockReset();
     conversationServiceMocks.submitConversation.mockReset();
+    extensionServiceMocks.loadExtensionSkill.mockReset();
+    extensionServiceMocks.readExtensionSnapshot.mockReset();
+    extensionServiceMocks.selectExtensionSkill.mockReset();
+    extensionServiceMocks.readExtensionSnapshot.mockResolvedValue(
+      extensionSnapshot(),
+    );
   });
 
   it("never projects a cached Artifact Workspace into a different Chat", () => {
@@ -334,6 +388,48 @@ describe("ShellRouteController", () => {
       expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus(),
     );
     expect(store.getState().shellDrafts.settings.visit).toBeNull();
+  });
+
+  it("prepares the explicitly selected Skill visibly before Try in Chat navigates", async () => {
+    const snapshot = extensionSnapshot();
+    extensionServiceMocks.loadExtensionSkill.mockResolvedValue({
+      identity: snapshot.skills[0]?.identity,
+      packageId: "sample-plugin",
+      entrypointDigest: `sha256:${"a".repeat(64)}`,
+      instructions: "Review this change carefully.",
+      referencedResources: [],
+    });
+    extensionServiceMocks.selectExtensionSkill.mockResolvedValue({
+      ...snapshot,
+      generation: 8,
+      selectedSkill: snapshot.skills[0]?.identity ?? null,
+      lastEventId: 8,
+    });
+    const { router, store } = renderShellAt("/settings/skills");
+
+    expect(await screen.findByText("Review the active Project.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Load instructions" }),
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Try in Chat" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Try in Chat" }),
+    );
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/chat"));
+    expect(extensionServiceMocks.selectExtensionSkill).toHaveBeenCalledWith(
+      "plugin:sample-plugin:review",
+    );
+    expect(store.getState().shellDrafts.composer.mode).toBe("chat");
+    expect(store.getState().shellDrafts.composer.text).toBe(
+      "[Selected Skill: plugin:sample-plugin:review]\n\n",
+    );
   });
 
   it("does not expose the review Settings control in production state", () => {

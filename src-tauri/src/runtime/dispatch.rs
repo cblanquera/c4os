@@ -39,7 +39,7 @@ use crate::runtime::pi::{
 };
 use crate::runtime::session::{
     AttachmentSnapshot, AttemptIdentity, ResourceSnapshot, RunEventKind, RunEventRecord,
-    SessionRecord, SessionRepository, TerminalAttemptOutcome,
+    SessionRecord, SessionRepository, SkillContextSnapshot, TerminalAttemptOutcome,
 };
 use crate::runtime::supervisor::RuntimeKind;
 use crate::security::policy::ActionRequestOrigin;
@@ -1045,6 +1045,44 @@ fn prepare_attachment_dispatch(
     Ok((input, Vec::new(), ordered))
 }
 
+fn compose_skill_context(
+    input: String,
+    skills: &[SkillContextSnapshot],
+) -> Result<String, DispatchError> {
+    if skills.is_empty() {
+        return Ok(input);
+    }
+    let mut composed = String::new();
+    for skill in skills {
+        skill
+            .validate()
+            .map_err(|_| DispatchError::InvalidRequest)?;
+        composed.push_str("<c4os-skill-context identity=\"");
+        composed.push_str(&skill.identity);
+        composed.push_str("\" entrypoint=\"");
+        composed.push_str(&skill.entrypoint_sha256);
+        if let Some(package_id) = &skill.package_id {
+            composed.push_str("\" package=\"");
+            composed.push_str(package_id);
+        }
+        composed.push_str("\">\n");
+        composed.push_str(&skill.instructions);
+        if !skill.referenced_resources.is_empty() {
+            composed.push_str("\n<c4os-skill-references>");
+            composed.push_str(&skill.referenced_resources.join(","));
+            composed.push_str("</c4os-skill-references>");
+        }
+        composed.push_str("\n</c4os-skill-context>\n");
+    }
+    composed.push_str("<user-message>\n");
+    composed.push_str(&input);
+    composed.push_str("\n</user-message>");
+    if composed.len() > MAX_INPUT_BYTES {
+        return Err(DispatchError::InvalidRequest);
+    }
+    Ok(composed)
+}
+
 fn validate_installed_resource_preflight(
     resources: &ResourceSnapshot,
     draft: &DraftRequirements,
@@ -1309,6 +1347,7 @@ pub fn coordinate_first_dispatch<R: SessionRepository>(
         &request.draft,
         &options.attachment_resolution,
     )?;
+    let input = compose_skill_context(input, &request.submission.skill_context)?;
     let dispatch = PeerDispatchRequest {
         identity: identity.clone(),
         model,
@@ -1393,6 +1432,7 @@ pub fn coordinate_retry_dispatch<R: SessionRepository>(
         &request.draft,
         &options.attachment_resolution,
     )?;
+    let input = compose_skill_context(input, &turn.skill_context)?;
     let dispatch = PeerDispatchRequest {
         identity: identity.clone(),
         model,
@@ -1510,6 +1550,7 @@ pub fn coordinate_turn_dispatch<R: SessionRepository>(
         }
         input = composed;
     }
+    input = compose_skill_context(input, &request.submission.skill_context)?;
     let dispatch = PeerDispatchRequest {
         identity: identity.clone(),
         model,

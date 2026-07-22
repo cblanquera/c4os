@@ -2529,6 +2529,15 @@ fn verified_node_runtime(
     })
 }
 
+/// Returns the same fully pinned, digest-checked bundled Node executable used
+/// by production runtime adapters. Extension hooks may reuse this executable;
+/// package manifests never select their own native interpreter.
+pub(crate) fn verified_node_runtime_executable(
+    resource_root: &Path,
+) -> Result<PathBuf, RuntimeProductionError> {
+    Ok(verified_node_runtime(resource_root)?.executable)
+}
+
 fn verify_node_version(
     executable: &Path,
     expected_version: &str,

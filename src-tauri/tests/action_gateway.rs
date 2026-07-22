@@ -26,7 +26,7 @@ fn set<T: Ord>(values: impl IntoIterator<Item = T>) -> BTreeSet<T> {
 fn app_database(temp: &TempDir) -> (DatabaseDescriptor, Arc<DatabaseActor>) {
     let descriptor = DatabaseDescriptor::app(temp.path());
     let (database, report) = DatabaseActor::start(descriptor.clone()).expect("app database");
-    assert_eq!(report.current_version, 6);
+    assert_eq!(report.current_version, 7);
     (descriptor, Arc::new(database))
 }
 
@@ -99,6 +99,7 @@ fn action(effect: ActionEffect, action_id: &str, run_id: &str) -> CanonicalActio
         run_id: run_id.into(),
         runtime_id: "opencode@1".into(),
         environment_id: "local".into(),
+        plugin_or_mcp_id: None,
         process_generation: 4,
         configuration_version: 7,
         policy_version: 9,
@@ -124,6 +125,93 @@ fn success(at: u64) -> NormalizedActionResult {
         output_sha256: Some(format!("sha256:{:064x}", 7)),
         completed_at_ms: at,
     }
+}
+
+fn plugin_annotation_facts(declared: bool) -> ActionFacts {
+    ActionFacts {
+        action_kind: "context.annotation".into(),
+        native_tool: "c4os.extension.context-annotation".into(),
+        surface: ActionSurface::C4os,
+        effects: set([ActionEffect::Control]),
+        scope: ActionScope::Workspace,
+        initiator: ActionInitiator::Plugin,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::RuntimeTool,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: true,
+        canonical_target: "extension:sample-plugin:before-turn:sha256".into(),
+        workspace_id: "workspace-1".into(),
+        session_id: "session-1".into(),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: Some("sample-plugin".into()),
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: true,
+        explicit_scope_grant: declared,
+        sandbox_allows: true,
+        declaration_exceeded: !declared,
+    }
+}
+
+fn plugin_annotation_action(action_id: &str) -> CanonicalAction {
+    let mut action = action(ActionEffect::Modify, action_id, "extension-run");
+    action.tool = "c4os.extension.context-annotation".into();
+    action.arguments = json!({"payloadSha256": format!("sha256:{}", "a".repeat(64))});
+    action.risk = CanonicalRisk::Low;
+    action.requested_authority = set(["context.annotation".into()]);
+    action.canonical_target = "extension:sample-plugin:before-turn:sha256".into();
+    action.target_version = format!("sha256:{}", "b".repeat(64));
+    action.runtime_id = "c4os-core".into();
+    action.environment_id = "desktop".into();
+    action.plugin_or_mcp_id = Some("sample-plugin".into());
+    action
+}
+
+#[test]
+fn plugin_hook_proposal_requires_declared_authority_and_one_consumed_gateway_permit() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temporary);
+    let policy = PolicyConfiguration {
+        preset: ApprovalPreset::ApproveForMe,
+        ..PolicyConfiguration::default()
+    };
+    let mut gateway = ActionGateway::new(policy, database);
+    let undeclared = plugin_annotation_action("hook-undeclared");
+    assert!(matches!(
+        gateway
+            .propose(&plugin_annotation_facts(false), undeclared, 5)
+            .expect("durable denial"),
+        GatewayProposal::Denied { .. }
+    ));
+
+    let declared = plugin_annotation_action("hook-declared");
+    let token = match gateway
+        .propose(&plugin_annotation_facts(true), declared.clone(), 10)
+        .expect("declared proposal")
+    {
+        GatewayProposal::Authorized { token, .. } => token,
+        other => panic!("expected exact authorization, found {other:?}"),
+    };
+    let effects = AtomicUsize::new(0);
+    gateway
+        .execute(&token, &declared, live(&declared), None, 11, |_| {
+            effects.fetch_add(1, Ordering::SeqCst);
+            success(12)
+        })
+        .expect("consumed hook proposal");
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert!(
+        gateway
+            .execute(&token, &declared, live(&declared), None, 13, |_| {
+                effects.fetch_add(1, Ordering::SeqCst);
+                success(14)
+            })
+            .is_err()
+    );
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -632,4 +720,112 @@ fn executor_result_digest_is_validated_before_any_result_is_journaled() {
         .join("\n");
     assert!(!audit.contains(secret));
     assert!(!audit.contains("action-result-v1"));
+}
+
+#[test]
+fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority() {
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temp);
+    let policy = PolicyConfiguration {
+        preset: ApprovalPreset::ApproveForMe,
+        ..PolicyConfiguration::default()
+    };
+    let mut gateway = ActionGateway::new(policy.clone(), Arc::clone(&database));
+    let mut plugin_a = action(ActionEffect::Read, "action-plugin-a", "run-plugin-a");
+    plugin_a.plugin_or_mcp_id = Some("plugin.a".into());
+    let mut facts_a = facts(ActionEffect::Read);
+    facts_a.plugin_or_mcp_id = plugin_a.plugin_or_mcp_id.clone();
+    let token_a = match gateway.propose(&facts_a, plugin_a.clone(), 200).unwrap() {
+        GatewayProposal::Authorized { token, .. } => token,
+        other => panic!("expected Plugin A authorization, found {other:?}"),
+    };
+    let mut plugin_b = action(ActionEffect::Read, "action-plugin-b", "run-plugin-b");
+    plugin_b.plugin_or_mcp_id = Some("plugin.b".into());
+    let mut facts_b = facts(ActionEffect::Read);
+    facts_b.plugin_or_mcp_id = plugin_b.plugin_or_mcp_id.clone();
+    let token_b = match gateway.propose(&facts_b, plugin_b.clone(), 201).unwrap() {
+        GatewayProposal::Authorized { token, .. } => token,
+        other => panic!("expected Plugin B authorization, found {other:?}"),
+    };
+    assert_eq!(gateway.revoke_plugin("plugin.a", 202).unwrap(), 1);
+    assert!(matches!(
+        gateway.execute(
+            &token_a,
+            &plugin_a,
+            live(&plugin_a),
+            None,
+            203,
+            |_| success(204)
+        ),
+        Err(ActionGatewayError::Authorization(
+            AuthorizationError::Revoked
+        ))
+    ));
+    gateway
+        .execute(&token_b, &plugin_b, live(&plugin_b), None, 205, |_| {
+            success(206)
+        })
+        .expect("unrelated Plugin authority remains valid");
+
+    drop(gateway);
+    let mut restored = ActionGateway::restore(policy, Arc::clone(&database), 207).unwrap();
+    assert!(matches!(
+        restored.execute(
+            &token_a,
+            &plugin_a,
+            live(&plugin_a),
+            None,
+            208,
+            |_| success(209)
+        ),
+        Err(ActionGatewayError::Authorization(
+            AuthorizationError::NotFound
+        ))
+    ));
+    assert!(
+        database
+            .security_records(SnapshotQuery::new(50).unwrap())
+            .unwrap()
+            .iter()
+            .any(|record| record.record_kind == "authorization" && record.state == "revoked")
+    );
+
+    let prompt_temp = TempDir::new().expect("prompt database");
+    let (_, prompt_database) = app_database(&prompt_temp);
+    let mut prompts = ActionGateway::new(PolicyConfiguration::default(), prompt_database);
+    let mut modify_a = action(ActionEffect::Modify, "modify-plugin-a", "modify-run-a");
+    modify_a.plugin_or_mcp_id = Some("plugin.a".into());
+    let mut modify_facts_a = facts(ActionEffect::Modify);
+    modify_facts_a.plugin_or_mcp_id = modify_a.plugin_or_mcp_id.clone();
+    let prompt_a = match prompts.propose(&modify_facts_a, modify_a, 210).unwrap() {
+        GatewayProposal::PendingApproval { prompt, .. } => prompt,
+        other => panic!("expected Plugin A prompt, found {other:?}"),
+    };
+    let mut modify_b = action(ActionEffect::Modify, "modify-plugin-b", "modify-run-b");
+    modify_b.plugin_or_mcp_id = Some("plugin.b".into());
+    let mut modify_facts_b = facts(ActionEffect::Modify);
+    modify_facts_b.plugin_or_mcp_id = modify_b.plugin_or_mcp_id.clone();
+    let prompt_b = match prompts.propose(&modify_facts_b, modify_b, 211).unwrap() {
+        GatewayProposal::PendingApproval { prompt, .. } => prompt,
+        other => panic!("expected Plugin B prompt, found {other:?}"),
+    };
+    assert_eq!(prompts.revoke_plugin("plugin.a", 212).unwrap(), 1);
+    assert_eq!(
+        prompts
+            .approval_queue()
+            .prompt(&prompt_a.prompt_id)
+            .unwrap()
+            .state,
+        ApprovalPromptState::Cancelled {
+            cancelled_at_ms: 212
+        }
+    );
+    assert_eq!(
+        prompts
+            .approval_queue()
+            .prompt(&prompt_b.prompt_id)
+            .unwrap()
+            .state,
+        ApprovalPromptState::Pending
+    );
 }

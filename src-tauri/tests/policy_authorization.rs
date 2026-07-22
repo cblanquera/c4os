@@ -71,6 +71,7 @@ fn action() -> CanonicalAction {
         run_id: "run-1".into(),
         runtime_id: "opencode@1".into(),
         environment_id: "local".into(),
+        plugin_or_mcp_id: None,
         process_generation: 4,
         configuration_version: 7,
         policy_version: 9,
@@ -717,6 +718,13 @@ fn authorization_rejects_every_required_exact_binding_substitution() {
                 ..original.clone()
             },
             AuthorizationInvalidation::Environment,
+        ),
+        (
+            CanonicalAction {
+                plugin_or_mcp_id: Some("plugin.other".into()),
+                ..original.clone()
+            },
+            AuthorizationInvalidation::ActionIdentity,
         ),
         (
             CanonicalAction {

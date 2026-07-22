@@ -89,6 +89,7 @@ fn gateway_receipt_for_pi(
         run_id: "run-1".into(),
         runtime_id: runtime_id.into(),
         environment_id: "local".into(),
+        plugin_or_mcp_id: None,
         process_generation: GENERATION,
         configuration_version: 1,
         policy_version: 1,

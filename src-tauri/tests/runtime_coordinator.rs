@@ -388,6 +388,7 @@ fn first_submission(process_generation: u64) -> FirstSubmission {
         process_generation,
         prompt: Some("Implement the coordinator".into()),
         attachments: vec![],
+        skill_context: vec![],
         binding: binding(),
         submitted_at_ms: NOW + 10,
     }
@@ -462,6 +463,7 @@ fn action(process_generation: u64) -> CanonicalAction {
         run_id: "attempt-2".into(),
         runtime_id: "opencode-primary".into(),
         environment_id: "local".into(),
+        plugin_or_mcp_id: None,
         process_generation,
         configuration_version: 1,
         policy_version: 1,

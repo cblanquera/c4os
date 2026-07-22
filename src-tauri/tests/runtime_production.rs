@@ -209,6 +209,7 @@ fn text_dispatch_intent(
         correlation_id: "correlation-zero-provider".into(),
         prompt: Some("This dispatch must remain inside C4OS.".into()),
         attachments: Vec::new(),
+        skill_context: Vec::new(),
         draft: DraftRequirements {
             attachments: Vec::new(),
             reasoning_mode: None,
@@ -544,6 +545,7 @@ fn golden_dispatch_intent(
             "Complete the C4OS native approval golden path for {runtime_id}. C4OS-NATIVE-FLOW: {flow_marker}"
         )),
         attachments,
+        skill_context: Vec::new(),
         draft: DraftRequirements {
             attachments: attachment_requirements,
             reasoning_mode: None,

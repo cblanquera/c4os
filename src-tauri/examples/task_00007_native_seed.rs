@@ -141,6 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         process_generation: 1,
         prompt: Some("Verify the production-composed native Chat golden path.".into()),
         attachments: Vec::new(),
+        skill_context: Vec::new(),
         binding: acceptance_binding(&workspace_id.to_string(), &project_id.to_string(), now_ms)?,
         submitted_at_ms: now_ms + 2,
     })?;
