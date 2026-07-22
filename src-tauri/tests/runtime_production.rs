@@ -210,6 +210,7 @@ fn text_dispatch_intent(
         prompt: Some("This dispatch must remain inside C4OS.".into()),
         attachments: Vec::new(),
         skill_context: Vec::new(),
+        mcp_turn: None,
         draft: DraftRequirements {
             attachments: Vec::new(),
             reasoning_mode: None,
@@ -546,6 +547,7 @@ fn golden_dispatch_intent(
         )),
         attachments,
         skill_context: Vec::new(),
+        mcp_turn: None,
         draft: DraftRequirements {
             attachments: attachment_requirements,
             reasoning_mode: None,

@@ -7,9 +7,10 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tempfile::{Builder as TempDirBuilder, TempDir};
 use thiserror::Error;
 
 use crate::runtime::pi::{PI_MAX_LINE_BYTES, PiLaunchSpec, PiSidecarManifest, PiSidecarRunner};
@@ -75,12 +77,12 @@ impl PiSidecarIntegrity {
         ),
         (
             "adapter.mjs",
-            "sha256:36c03e98041531e5c757c36417d72c50194c436409f74db26f5aba7c71b2872d",
+            "sha256:f4baf2dddfac67187746514e9bb9f95534bb069910556cff0b7afa0c498e1774",
             1024 * 1024,
         ),
         (
             "pi-sdk-driver.mjs",
-            "sha256:62f959e5b1774de1362ea0bc4a187f936ba4bd647c3ac37e0a46b443af4eaa9e",
+            "sha256:276518a383d4963bbe9bd0422cf10559314327ca22b369056ef55cebeaf18455",
             512 * 1024,
         ),
         (
@@ -361,6 +363,125 @@ pub struct SpawnedPiRunner {
     credential_channel: Option<UnixStream>,
     process_group_id: u32,
     exchange_timeout: Duration,
+    _sidecar_snapshot: Option<TempDir>,
+}
+
+struct VerifiedPiSidecarSnapshot {
+    temporary: TempDir,
+    root: PathBuf,
+}
+
+impl VerifiedPiSidecarSnapshot {
+    fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+/// Copies the verified graph into a process-private directory and verifies the
+/// copy again. The launched Node process never reads the mutable installation
+/// path, closing the verify-to-import substitution window for both source and
+/// lazy dependency imports.
+fn snapshot_verified_sidecar(
+    sidecar_root: &Path,
+) -> Result<VerifiedPiSidecarSnapshot, PiProcessError> {
+    PiSidecarIntegrity::verify(sidecar_root)?;
+    let temporary = TempDirBuilder::new()
+        .prefix("c4os-pi-sidecar-")
+        .tempdir()
+        .map_err(PiProcessError::Io)?;
+    let root = temporary.path().join("sidecar");
+    fs::create_dir(&root).map_err(PiProcessError::Io)?;
+    let root = root
+        .canonicalize()
+        .map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
+    for (relative, _, max_bytes) in PiSidecarIntegrity::PINNED_FILES {
+        copy_bounded_regular_file(
+            &sidecar_root.join(relative),
+            &root.join(relative),
+            max_bytes,
+            true,
+        )?;
+    }
+    copy_dependency_snapshot(
+        &sidecar_root.join("node_modules"),
+        &root.join("node_modules"),
+    )?;
+    PiSidecarIntegrity::verify(&root)?;
+    Ok(VerifiedPiSidecarSnapshot { temporary, root })
+}
+
+fn copy_bounded_regular_file(
+    source: &Path,
+    destination: &Path,
+    max_bytes: u64,
+    require_nonempty: bool,
+) -> Result<(), PiProcessError> {
+    let metadata = fs::symlink_metadata(source).map_err(PiProcessError::Io)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || (require_nonempty && metadata.len() == 0)
+        || metadata.len() > max_bytes
+    {
+        return Err(PiProcessError::InvalidSidecarIntegrity);
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(PiProcessError::Io)?;
+    }
+    let input = File::open(source).map_err(PiProcessError::Io)?;
+    let mut output = File::create(destination).map_err(PiProcessError::Io)?;
+    let mut bounded = input.take(max_bytes.saturating_add(1));
+    let copied = std::io::copy(&mut bounded, &mut output).map_err(PiProcessError::Io)?;
+    if copied != metadata.len() || copied > max_bytes {
+        return Err(PiProcessError::InvalidSidecarIntegrity);
+    }
+    Ok(())
+}
+
+fn copy_dependency_snapshot(source: &Path, destination: &Path) -> Result<(), PiProcessError> {
+    let source = source
+        .canonicalize()
+        .map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
+    fs::create_dir(destination).map_err(PiProcessError::Io)?;
+    let mut entries = collect_dependency_entries(&source)?;
+    entries.sort_by(|left, right| {
+        left.components()
+            .count()
+            .cmp(&right.components().count())
+            .then_with(|| {
+                left.as_os_str()
+                    .as_bytes()
+                    .cmp(right.as_os_str().as_bytes())
+            })
+    });
+    for relative in entries {
+        let source_path = source.join(&relative);
+        let destination_path = destination.join(&relative);
+        let metadata = fs::symlink_metadata(&source_path)
+            .map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
+        if metadata.file_type().is_symlink() {
+            let target =
+                fs::read_link(&source_path).map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
+            if target.is_absolute() {
+                return Err(PiProcessError::InvalidSidecarIntegrity);
+            }
+            if let Some(parent) = destination_path.parent() {
+                fs::create_dir_all(parent).map_err(PiProcessError::Io)?;
+            }
+            symlink(target, destination_path).map_err(PiProcessError::Io)?;
+        } else if metadata.is_dir() {
+            fs::create_dir(&destination_path).map_err(PiProcessError::Io)?;
+        } else if metadata.is_file() {
+            copy_bounded_regular_file(
+                &source_path,
+                &destination_path,
+                PI_MAX_DEPENDENCY_FILE_BYTES,
+                false,
+            )?;
+        } else {
+            return Err(PiProcessError::InvalidSidecarIntegrity);
+        }
+    }
+    Ok(())
 }
 
 /// Owns a freshly spawned sidecar until every parent-side pipe and reader
@@ -474,8 +595,9 @@ impl SpawnedPiRunner {
         manifest
             .validate()
             .map_err(|_| PiProcessError::InvalidManifest)?;
-        PiSidecarIntegrity::verify(sidecar_root)?;
-        let pinned_manifest = PiSidecarManifest::load(sidecar_root)
+        let sidecar_snapshot = snapshot_verified_sidecar(sidecar_root)?;
+        let snapshot_root = sidecar_snapshot.root();
+        let pinned_manifest = PiSidecarManifest::load(snapshot_root)
             .map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
         if &pinned_manifest != manifest {
             return Err(PiProcessError::InvalidSidecarIntegrity);
@@ -501,13 +623,13 @@ impl SpawnedPiRunner {
         };
         let launch = PiLaunchSpec::new(
             node_executable.to_path_buf(),
-            sidecar_root,
+            snapshot_root,
             manifest,
             process_generation,
             Some(credential_fd),
         )
         .map_err(|_| PiProcessError::InvalidManifest)?;
-        let allowed_sidecar_root = sidecar_root
+        let allowed_sidecar_root = snapshot_root
             .canonicalize()
             .map_err(|_| PiProcessError::InvalidSidecarIntegrity)?;
 
@@ -515,7 +637,7 @@ impl SpawnedPiRunner {
         configure_node_permissions(&mut command, &allowed_sidecar_root);
         command
             .args(&launch.arguments)
-            .current_dir(sidecar_root)
+            .current_dir(snapshot_root)
             .env_clear()
             .envs(&launch.environment)
             .stdin(Stdio::piped())
@@ -585,6 +707,7 @@ impl SpawnedPiRunner {
             credential_channel: Some(credential_channel),
             process_group_id,
             exchange_timeout,
+            _sidecar_snapshot: Some(sidecar_snapshot.temporary),
         })
     }
 
@@ -1048,8 +1171,28 @@ mod tests {
             credential_channel: None,
             process_group_id,
             exchange_timeout: Duration::from_millis(10),
+            _sidecar_snapshot: None,
         };
 
         assert!(runner.poll().is_err());
+    }
+
+    #[test]
+    fn process_private_snapshot_is_unchanged_when_its_verified_source_is_mutated() {
+        let sidecar_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sidecars/pi");
+        let mutable_source = snapshot_verified_sidecar(&sidecar_root).unwrap();
+        let launch_snapshot = snapshot_verified_sidecar(mutable_source.root()).unwrap();
+
+        fs::write(
+            mutable_source.root().join("pi-sdk-driver.mjs"),
+            b"mutated after launch snapshot verification",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            PiSidecarIntegrity::verify(mutable_source.root()),
+            Err(PiProcessError::InvalidSidecarIntegrity)
+        ));
+        PiSidecarIntegrity::verify(launch_snapshot.root()).unwrap();
     }
 }

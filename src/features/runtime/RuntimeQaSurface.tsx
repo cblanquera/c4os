@@ -152,9 +152,12 @@ export function RuntimeQaSurface({
               <p className="runtime-eyebrow">Action Gateway approval</p>
               <h2>Runtime effect is paused</h2>
               <p>
-                {approval.runtimeId} is waiting for an exact Rust-owned
+                {approval.summary} This is waiting for an exact Rust-owned
                 allow/deny decision.
               </p>
+              {approval.disclosureScope === null ? null : (
+                <p>{approval.disclosureScope}</p>
+              )}
             </div>
             <div className="runtime-panel__actions">
               <button

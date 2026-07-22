@@ -108,7 +108,22 @@ export interface ConversationTurnSnapshot {
   readonly prompt: string | null;
   readonly attachments: readonly ConversationAttachmentSnapshot[];
   readonly artifactContext: ConversationArtifactContextSnapshot | null;
+  readonly mcpProvenance: ConversationMcpProvenanceSnapshot | null;
   readonly submittedAtMs: number;
+}
+
+export interface ConversationMcpProvenanceSnapshot {
+  readonly snapshotId: string;
+  readonly serverCount: number;
+  readonly toolCount: number;
+  readonly omittedToolCount: number;
+  readonly truncated: boolean;
+  readonly tools: readonly {
+    readonly serverId: string;
+    readonly sourceKind: "user" | "plugin";
+    readonly sourceId: string | null;
+    readonly toolName: string;
+  }[];
 }
 
 export interface ConversationAttemptSnapshot {
@@ -736,6 +751,10 @@ function parseActiveConversation(raw: unknown): ConversationSessionSnapshot {
           turn.artifactContext === null
             ? null
             : parseArtifactContext(turn.artifactContext),
+        mcpProvenance:
+          turn.mcpProvenance === null
+            ? null
+            : parseMcpProvenance(turn.mcpProvenance),
         submittedAtMs: nonnegative(turn.submittedAtMs, "turn timestamp"),
       };
     }),
@@ -744,6 +763,59 @@ function parseActiveConversation(raw: unknown): ConversationSessionSnapshot {
       value.activeAttemptId,
       "attempt ID",
     ) as AttemptId | null,
+  };
+}
+
+function parseMcpProvenance(raw: unknown): ConversationMcpProvenanceSnapshot {
+  const value = record(raw, "MCP provenance");
+  const snapshotId = text(value.snapshotId, "MCP snapshot ID");
+  if (!/^mcp-turn:[a-f0-9]{64}$/u.test(snapshotId)) {
+    throw boundary("invalidPayload", "MCP snapshot ID is invalid.");
+  }
+  const tools = array(value.tools, 128, "MCP provenance tools").map(
+    (rawTool) => {
+      const tool = record(rawTool, "MCP tool provenance");
+      const sourceKind = oneOf(
+        tool.sourceKind,
+        ["user", "plugin"] as const,
+        "MCP source kind",
+      );
+      const sourceId = nullableIdentifier(tool.sourceId, "MCP source ID");
+      if (
+        (sourceKind === "user" && sourceId !== null) ||
+        (sourceKind === "plugin" && sourceId === null)
+      ) {
+        throw boundary("invalidPayload", "MCP source identity is invalid.");
+      }
+      return {
+        serverId: identifier(tool.serverId, "MCP server ID"),
+        sourceKind,
+        sourceId,
+        toolName: text(tool.toolName, "MCP tool name"),
+      };
+    },
+  );
+  const serverCount = nonnegative(value.serverCount, "MCP server count");
+  const toolCount = nonnegative(value.toolCount, "MCP tool count");
+  const omittedToolCount = nonnegative(
+    value.omittedToolCount,
+    "MCP omitted tool count",
+  );
+  const truncated = booleanValue(value.truncated, "MCP provenance truncation");
+  if (
+    toolCount !== tools.length ||
+    serverCount !== new Set(tools.map((tool) => tool.serverId)).size ||
+    truncated !== omittedToolCount > 0
+  ) {
+    throw boundary("invalidPayload", "MCP provenance counts are invalid.");
+  }
+  return {
+    snapshotId,
+    serverCount,
+    toolCount,
+    omittedToolCount,
+    truncated,
+    tools,
   };
 }
 

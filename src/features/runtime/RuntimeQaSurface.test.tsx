@@ -52,6 +52,18 @@ describe("RuntimeQaSurface", () => {
       runtimeId: "opencode-primary" as never,
       correlationId: "correlation-approval" as never,
       promptId: "approval:prompt-1" as never,
+      approvalKind: "runtime-effect" as const,
+      summary: "Approval required by opencode-primary.",
+      serverId: null,
+      providerId: null,
+      modelId: null,
+      maxTokens: null,
+      expiresAtMs: null,
+      messageCount: null,
+      inputBytes: null,
+      hasSystemPrompt: null,
+      parentOperation: null,
+      disclosureScope: null,
     };
     const snapshot: RuntimeCoreSnapshot = {
       authority: "rust-core",

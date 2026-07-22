@@ -669,10 +669,22 @@ impl BehavioralPeer for PiPeer {
     fn cancel_twice(&mut self) -> (bool, bool) {
         (
             self.adapter
-                .cancel("session-1", "run-stream", "correlation-stream")
+                .cancel(
+                    "workspace-1",
+                    "session-1",
+                    "turn-stream",
+                    "run-stream",
+                    "correlation-stream",
+                )
                 .unwrap(),
             self.adapter
-                .cancel("session-1", "run-stream", "correlation-stream")
+                .cancel(
+                    "workspace-1",
+                    "session-1",
+                    "turn-stream",
+                    "run-stream",
+                    "correlation-stream",
+                )
                 .unwrap(),
         )
     }

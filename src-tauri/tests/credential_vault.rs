@@ -5,7 +5,8 @@
 mod credentials;
 
 use credentials::{
-    CredentialVault, CredentialVaultError, CredentialVaultResult, EntropySource, InstallationKey,
+    CredentialMutationKind, CredentialMutationObserver, CredentialReference, CredentialVault,
+    CredentialVaultError, CredentialVaultResult, EntropySource, InstallationKey,
     InstallationKeyStore, MonotonicClock, ReauthenticationError, ReauthenticationProvider,
     ReauthenticationPurpose, SecretSurface, VaultProtection,
 };
@@ -15,7 +16,7 @@ use std::{
     io::Cursor,
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -93,6 +94,28 @@ impl ReauthenticationProvider for FakeReauthentication {
     ) -> Result<(), ReauthenticationError> {
         assert_eq!(purpose, ReauthenticationPurpose::ImportCredential);
         self.0.then_some(()).ok_or(ReauthenticationError)
+    }
+}
+
+struct RecordingMutationObserver {
+    vault: CredentialVault,
+    events: Mutex<Vec<(String, CredentialMutationKind, u64)>>,
+}
+
+impl CredentialMutationObserver for RecordingMutationObserver {
+    fn credential_mutated(
+        &self,
+        credential_reference: &CredentialReference,
+        kind: CredentialMutationKind,
+    ) {
+        // Reading the vault from the callback proves mutation notifications
+        // occur after the state lock is released.
+        let generation = self.vault.generation().expect("observer reads generation");
+        self.events.lock().expect("event lock").push((
+            credential_reference.to_string(),
+            kind,
+            generation,
+        ));
     }
 }
 
@@ -358,6 +381,43 @@ fn removal_and_replacement_immediately_revoke_outstanding_leases() {
         ),
         Err(CredentialVaultError::CredentialNotFound)
     ));
+}
+
+#[test]
+fn replacement_and_removal_notify_reference_only_observers_after_durable_mutation() {
+    let vault = CredentialVault::session_only().expect("session-only vault");
+    let credential_reference = vault
+        .store("provider.api_key", PRIMARY_SECRET)
+        .expect("store secret");
+    let observer = Arc::new(RecordingMutationObserver {
+        vault: vault.clone(),
+        events: Mutex::new(Vec::new()),
+    });
+    let registered: Arc<dyn CredentialMutationObserver> = observer.clone();
+    vault
+        .register_mutation_observer(registered)
+        .expect("register observer");
+
+    let replaced_generation = vault
+        .replace(&credential_reference, b"replacement-secret")
+        .expect("replace secret");
+    let removed_generation = vault.remove(&credential_reference).expect("remove secret");
+
+    assert_eq!(
+        *observer.events.lock().expect("event lock"),
+        vec![
+            (
+                credential_reference.to_string(),
+                CredentialMutationKind::Replaced,
+                replaced_generation,
+            ),
+            (
+                credential_reference.to_string(),
+                CredentialMutationKind::Removed,
+                removed_generation,
+            ),
+        ]
+    );
 }
 
 #[test]

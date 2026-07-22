@@ -54,8 +54,8 @@ use crate::runtime::opencode_assets::{
 use crate::runtime::opencode_broker::{
     ActiveBrokerContextResolver, BrokerContextRegistryError, FacilityRegistryError,
     InstalledBrokerClassification, InstalledBrokerFacility, InstalledBrokerFacilityRegistry,
-    OpenCodeBrokerPump, OpenCodeBrokerPumpConfig, OpenCodeBrokerPumpError,
-    OpenCodeBrokerPumpOutcome,
+    InstalledDeferredBrokerFacility, OpenCodeBrokerPump, OpenCodeBrokerPumpConfig,
+    OpenCodeBrokerPumpError, OpenCodeBrokerPumpOutcome,
 };
 use crate::runtime::opencode_credential::{
     ProviderCredentialAuthorizationReceipt, ProviderCredentialRequest,
@@ -822,6 +822,14 @@ impl RuntimeProductionBootstrap {
         Ok(())
     }
 
+    pub fn install_deferred_broker_facility(
+        &self,
+        facility: Box<dyn InstalledDeferredBrokerFacility>,
+    ) -> Result<(), RuntimeProductionError> {
+        self.broker_facilities.install_deferred(facility)?;
+        Ok(())
+    }
+
     pub fn activate_broker_context(
         &self,
         context: BrokerActionContext,
@@ -1521,6 +1529,16 @@ impl OpenCodeProductionWorker {
             now_ms,
         )
     }
+
+    pub(crate) fn drain_deferred_unknown<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeProductionError> {
+        self.broker_pump
+            .drain_deferred_unknown(application, now_ms)
+            .map_err(Into::into)
+    }
 }
 
 pub struct PreparedPiProductionPeer {
@@ -1711,6 +1729,7 @@ pub struct PiGatewayAuthorityContext {
     pub policy_version: u64,
     pub revocation_epoch: u64,
     pub eligible_tool_ids: BTreeSet<String>,
+    pub mcp_turn: Option<crate::mcp::McpTurnSnapshot>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1718,6 +1737,13 @@ pub enum PiProductionGatewayOutcome {
     PendingApproval {
         native_request_id: String,
         prompt_id: String,
+    },
+    EffectRunning {
+        native_request_id: String,
+    },
+    SettledAfterCancellation {
+        native_request_id: String,
+        result_code: String,
     },
     Completed {
         native_request_id: String,
@@ -1733,8 +1759,17 @@ pub enum PiProductionGatewayOutcome {
 /// registered peer is resolved only in a later registry phase so production
 /// pumping never holds the dispatch lock while entering application authority.
 pub(crate) struct PiProductionGatewaySettlement {
-    identity: DispatchIdentity,
+    pub(crate) identity: DispatchIdentity,
     outcome: RuntimeBrokerWorkerOutcome,
+}
+
+impl PiProductionGatewaySettlement {
+    pub(crate) fn settled_after_cancellation(&self) -> bool {
+        matches!(
+            &self.outcome,
+            RuntimeBrokerWorkerOutcome::SettledAfterCancellation { .. }
+        )
+    }
 }
 
 /// Core-owned gateway continuation for one production Pi peer. The worker
@@ -1845,6 +1880,88 @@ impl PiProductionGatewayWorker {
         Ok(PiProductionGatewaySettlement { identity, outcome })
     }
 
+    fn poll_deferred<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<Option<PiProductionGatewaySettlement>, RuntimeProductionError> {
+        let Some(outcome) =
+            self.worker
+                .poll_runtime_deferred(application, &mut self.executor, now_ms)?
+        else {
+            return Ok(None);
+        };
+        let native_request_id = match &outcome {
+            RuntimeBrokerWorkerOutcome::Executed {
+                native_request_id, ..
+            }
+            | RuntimeBrokerWorkerOutcome::SettledAfterCancellation {
+                native_request_id, ..
+            }
+            | RuntimeBrokerWorkerOutcome::Denied {
+                native_request_id, ..
+            }
+            | RuntimeBrokerWorkerOutcome::PendingApproval {
+                native_request_id, ..
+            }
+            | RuntimeBrokerWorkerOutcome::EffectRunning { native_request_id } => native_request_id,
+        };
+        let identity = self
+            .pending
+            .get(native_request_id)
+            .cloned()
+            .ok_or(RuntimeProductionError::InvalidPiActionIntent)?;
+        Ok(Some(PiProductionGatewaySettlement { identity, outcome }))
+    }
+
+    fn cancel_deferred_for_identity(
+        &mut self,
+        identity: &DispatchIdentity,
+    ) -> Result<usize, RuntimeProductionError> {
+        if identity.runtime_kind != RuntimeKind::Pi
+            || identity.runtime_id != self.binding.runtime_id
+            || identity.workspace_id != self.binding.workspace_id
+            || identity.process_generation != self.binding.process_generation
+            || !self.pending.values().any(|pending| pending == identity)
+        {
+            return Ok(0);
+        }
+        Ok(self
+            .worker
+            .cancel_runtime_deferred_for_run(&mut self.executor, &identity.attempt_id))
+    }
+
+    fn drain_deferred_unknown<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeProductionError> {
+        Ok(self
+            .worker
+            .drain_deferred_unknown(application, &mut self.executor, now_ms)?)
+    }
+
+    fn settle_after_cancellation(
+        &mut self,
+        settlement: &PiProductionGatewaySettlement,
+    ) -> Result<PiProductionGatewayOutcome, RuntimeProductionError> {
+        let RuntimeBrokerWorkerOutcome::SettledAfterCancellation {
+            native_request_id,
+            receipt,
+        } = &settlement.outcome
+        else {
+            return Err(RuntimeProductionError::InvalidPiActionIntent);
+        };
+        if self.pending.get(native_request_id) != Some(&settlement.identity) {
+            return Err(RuntimeProductionError::PiApprovalBindingMismatch);
+        }
+        self.pending.remove(native_request_id);
+        Ok(PiProductionGatewayOutcome::SettledAfterCancellation {
+            native_request_id: native_request_id.clone(),
+            result_code: receipt.result().result_code.clone(),
+        })
+    }
+
     fn validate_event_binding(
         &self,
         event: &DispatchEvent,
@@ -1883,6 +2000,8 @@ impl PiProductionGatewayWorker {
                     std::collections::btree_map::Entry::Vacant(entry) => {
                         entry.insert(identity.clone());
                     }
+                    std::collections::btree_map::Entry::Occupied(entry)
+                        if entry.get() == identity => {}
                     std::collections::btree_map::Entry::Occupied(_) => {
                         return Err(RuntimeProductionError::PiApprovalBindingMismatch);
                     }
@@ -1891,6 +2010,24 @@ impl PiProductionGatewayWorker {
                     native_request_id: native_request_id.clone(),
                     prompt_id: prompt_id.clone(),
                 })
+            }
+            RuntimeBrokerWorkerOutcome::EffectRunning { native_request_id } => {
+                match self.pending.entry(native_request_id.clone()) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(identity.clone());
+                    }
+                    std::collections::btree_map::Entry::Occupied(entry)
+                        if entry.get() == identity => {}
+                    std::collections::btree_map::Entry::Occupied(_) => {
+                        return Err(RuntimeProductionError::PiApprovalBindingMismatch);
+                    }
+                }
+                Ok(PiProductionGatewayOutcome::EffectRunning {
+                    native_request_id: native_request_id.clone(),
+                })
+            }
+            RuntimeBrokerWorkerOutcome::SettledAfterCancellation { .. } => {
+                self.settle_after_cancellation(settlement)
             }
             RuntimeBrokerWorkerOutcome::Denied {
                 native_request_id,
@@ -1974,6 +2111,7 @@ fn pi_broker_context(
         configuration_version: authority.configuration_version,
         policy_version: authority.policy_version,
         revocation_epoch: authority.revocation_epoch,
+        mcp_turn: authority.mcp_turn,
     })
 }
 
@@ -2016,8 +2154,8 @@ pub struct PiProductionWorker {
 }
 
 enum PendingPiProductionAction {
-    AwaitingEvaluation(DispatchEvent),
-    AwaitingSettlement(PiProductionGatewaySettlement),
+    AwaitingEvaluation(Box<DispatchEvent>),
+    AwaitingSettlement(Box<PiProductionGatewaySettlement>),
 }
 
 #[derive(Default)]
@@ -2050,6 +2188,7 @@ impl PendingPiProductionActions {
         self.items.extend(
             events
                 .into_iter()
+                .map(Box::new)
                 .map(PendingPiProductionAction::AwaitingEvaluation),
         );
         Ok(())
@@ -2070,7 +2209,7 @@ impl PendingPiProductionActions {
 
     fn front_event(&self) -> Option<&DispatchEvent> {
         match self.items.front() {
-            Some(PendingPiProductionAction::AwaitingEvaluation(event)) => Some(event),
+            Some(PendingPiProductionAction::AwaitingEvaluation(event)) => Some(event.as_ref()),
             _ => None,
         }
     }
@@ -2085,13 +2224,15 @@ impl PendingPiProductionActions {
         if !matches!(pending, PendingPiProductionAction::AwaitingEvaluation(_)) {
             return Err(RuntimeProductionError::InvalidPiActionIntent);
         }
-        *pending = PendingPiProductionAction::AwaitingSettlement(settlement);
+        *pending = PendingPiProductionAction::AwaitingSettlement(Box::new(settlement));
         Ok(())
     }
 
     fn front_settlement(&self) -> Option<&PiProductionGatewaySettlement> {
         match self.items.front() {
-            Some(PendingPiProductionAction::AwaitingSettlement(settlement)) => Some(settlement),
+            Some(PendingPiProductionAction::AwaitingSettlement(settlement)) => {
+                Some(settlement.as_ref())
+            }
             _ => None,
         }
     }
@@ -2192,6 +2333,36 @@ impl PiProductionWorker {
             authority,
             now_ms,
         )
+    }
+
+    pub(crate) fn poll_deferred_action<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<Option<PiProductionGatewaySettlement>, RuntimeProductionError> {
+        self.gateway.poll_deferred(application, now_ms)
+    }
+
+    pub(crate) fn cancel_deferred_action(
+        &mut self,
+        identity: &DispatchIdentity,
+    ) -> Result<usize, RuntimeProductionError> {
+        self.gateway.cancel_deferred_for_identity(identity)
+    }
+
+    pub(crate) fn drain_deferred_actions<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeProductionError> {
+        self.gateway.drain_deferred_unknown(application, now_ms)
+    }
+
+    pub(crate) fn settle_deferred_after_cancellation(
+        &mut self,
+        settlement: PiProductionGatewaySettlement,
+    ) -> Result<PiProductionGatewayOutcome, RuntimeProductionError> {
+        self.gateway.settle_after_cancellation(&settlement)
     }
 
     pub(crate) fn evaluate_action_approval_by_correlation<A: BrokerActionApplication>(
@@ -2733,15 +2904,19 @@ mod tests {
 
     use crate::core::database::{DatabaseActor, DatabaseDescriptor};
     use crate::runtime::action_bridge::{
-        RuntimeActionBridge, RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
+        RuntimeActionBridge, RuntimeActionEffectLease, RuntimeActionProposal,
+        RuntimeApprovalDecision, RuntimeAuthorization, RuntimeEffectResult,
         RuntimeExecutionReceipt, RuntimeGatewayDecision,
     };
+    use crate::runtime::broker_worker::{BrokerDeferredStart, BrokerDeferredTicket};
     use crate::runtime::dispatch::{
         PeerDispatchError, PeerDispatchEvent, PeerDispatchRequest, RuntimeDispatchPeer,
         normalize_pi_event,
     };
     use crate::runtime::opencode::{C4OS_ACTION_PROPOSAL_TOOL, C4OS_RESOURCE_READ_TOOL};
-    use crate::runtime::opencode_broker::{InstalledBrokerClassification, InstalledBrokerFacility};
+    use crate::runtime::opencode_broker::{
+        InstalledBrokerClassification, InstalledBrokerFacility, InstalledDeferredBrokerFacility,
+    };
     use crate::runtime::pi::{PI_PROTOCOL_SCHEMA_VERSION, PiEventEnvelope, PiSidecarManifest};
     use crate::security::authorization::LiveAuthorityState;
     use crate::security::gateway::{ActionGateway, ExecutionPermit, NormalizedActionResult};
@@ -3060,6 +3235,167 @@ mod tests {
         );
         assert_eq!(denied_control.lock().unwrap().denied, 1);
         assert_eq!(denied_production.pending_count(), 0);
+    }
+
+    #[test]
+    fn production_pi_deferred_cancellation_settles_late_without_native_resolution() {
+        let temporary = TempDir::new().expect("temporary production roots");
+        let workspace = temporary.path().join("workspace");
+        let c4os_home = temporary.path().join("c4os-home");
+        fs::create_dir(&workspace).expect("workspace root");
+        fs::create_dir(&c4os_home).expect("C4OS home");
+        let binding = ProductionRuntimeBinding::from_core(CoreRuntimeBinding {
+            runtime_id: "pi-production".into(),
+            runtime_kind: RuntimeKind::Pi,
+            workspace_id: "workspace-1".into(),
+            workspace_root: workspace,
+            c4os_home,
+            process_generation: 4,
+            launch_id: "launch-1".into(),
+        })
+        .expect("Pi production binding");
+        let first_identity = pi_dispatch_identity();
+        let mut second_identity = first_identity.clone();
+        second_identity.session_id = "session-2".into();
+        second_identity.turn_id = "turn-2".into();
+        second_identity.attempt_id = "run-2".into();
+        second_identity.correlation_id = "run-correlation-2".into();
+
+        let deferred = Arc::new(Mutex::new(TestDeferredFacilityState::default()));
+        let facilities = InstalledBrokerFacilityRegistry::new();
+        facilities
+            .install_deferred(Box::new(TestDeferredFacility {
+                state: Arc::clone(&deferred),
+            }))
+            .expect("installed deferred facility");
+        let mut production =
+            PiProductionGatewayWorker::attach(binding, facilities).expect("Pi gateway");
+        let control = Arc::new(Mutex::new(TestPiPeerControl::default()));
+        let mut registry = RuntimeDispatchRegistry::new();
+        registry
+            .register(TestPiPeer::new(Arc::clone(&control)))
+            .expect("registered Pi peer");
+        let mut application = TestGatewayApplication::new();
+
+        for (identity, native_request_id) in [
+            (&first_identity, "pi-mcp-a"),
+            (&second_identity, "pi-mcp-b"),
+        ] {
+            let snapshot = mcp_turn_snapshot(&identity.session_id);
+            let target = snapshot.tools[0].target_id.clone();
+            let event = pi_mcp_action_event(identity.clone(), 1, native_request_id, &target);
+            let pending = production
+                .evaluate_action_intent(&mut application, &event, pi_mcp_authority(snapshot), 10)
+                .and_then(|settlement| production.settle(&mut registry, &settlement))
+                .expect("pending MCP approval");
+            let PiProductionGatewayOutcome::PendingApproval { prompt_id, .. } = pending else {
+                panic!("MCP action must retain explicit approval");
+            };
+            let started = production
+                .evaluate_approval(
+                    &mut application,
+                    native_request_id,
+                    &prompt_id,
+                    ApprovalAnswer::Allow,
+                    pi_mcp_authority(mcp_turn_snapshot(&identity.session_id)),
+                    20,
+                )
+                .and_then(|settlement| production.settle(&mut registry, &settlement))
+                .expect("start deferred MCP action");
+            assert_eq!(
+                started,
+                PiProductionGatewayOutcome::EffectRunning {
+                    native_request_id: native_request_id.into(),
+                }
+            );
+        }
+        assert_eq!(production.pending_count(), 2);
+        assert_eq!(deferred.lock().unwrap().started.len(), 2);
+
+        application
+            .cancel_runtime_run(&first_identity.attempt_id, 21)
+            .expect("terminalize first run");
+        let mut unrelated_identity = first_identity.clone();
+        unrelated_identity.attempt_id = "run-missing".into();
+        unrelated_identity.correlation_id = "run-correlation-missing".into();
+        assert_eq!(
+            production
+                .cancel_deferred_for_identity(&unrelated_identity)
+                .expect("ignore unrelated identity"),
+            0
+        );
+        assert_eq!(
+            production
+                .cancel_deferred_for_identity(&first_identity)
+                .expect("signal exact deferred effect"),
+            1
+        );
+        {
+            let mut state = deferred.lock().unwrap();
+            assert_eq!(state.cancelled, vec!["pi-mcp-a"]);
+            state.ready.insert("pi-mcp-a".into());
+        }
+
+        let settlement = production
+            .poll_deferred(&mut application, 30)
+            .expect("poll late result")
+            .expect("ready late result");
+        assert!(settlement.settled_after_cancellation());
+        let outcome = production
+            .settle(&mut registry, &settlement)
+            .expect("administrative late settlement");
+        assert_eq!(
+            outcome,
+            PiProductionGatewayOutcome::SettledAfterCancellation {
+                native_request_id: "pi-mcp-a".into(),
+                result_code: "mcp-tool-succeeded".into(),
+            }
+        );
+        assert_eq!(production.pending_count(), 1);
+        assert_eq!(production.pending_identity("run-correlation-1"), None);
+        assert_eq!(
+            production.pending_identity("run-correlation-2"),
+            Some(second_identity.clone())
+        );
+        assert!(
+            production
+                .poll_deferred(&mut application, 31)
+                .expect("unrelated effect remains pending")
+                .is_none()
+        );
+        {
+            let control = control.lock().unwrap();
+            assert_eq!(control.completed, 0);
+            assert_eq!(control.denied, 0);
+            assert_eq!(control.cancellations, 0);
+        }
+
+        deferred.lock().unwrap().ready.insert("pi-mcp-b".into());
+        let second_settlement = production
+            .poll_deferred(&mut application, 32)
+            .expect("poll unaffected result")
+            .expect("unrelated result is ready");
+        assert!(!second_settlement.settled_after_cancellation());
+        assert_eq!(
+            production
+                .settle(&mut registry, &second_settlement)
+                .expect("complete unaffected native request"),
+            PiProductionGatewayOutcome::Completed {
+                native_request_id: "pi-mcp-b".into(),
+                result_code: "mcp-tool-succeeded".into(),
+            }
+        );
+        assert_eq!(production.pending_count(), 0);
+        assert!(
+            production
+                .poll_deferred(&mut application, 33)
+                .expect("all deferred effects settled")
+                .is_none()
+        );
+        let control = control.lock().unwrap();
+        assert_eq!(control.completed, 1);
+        assert_eq!(control.denied, 0);
+        assert_eq!(control.cancellations, 0);
     }
 
     #[test]
@@ -3472,6 +3808,125 @@ mod tests {
         DispatchEvent { sequence, peer }
     }
 
+    fn sha256_value(value: &serde_json::Value) -> String {
+        let mut output = String::from("sha256:");
+        for byte in Sha256::digest(serde_json::to_vec(value).expect("test JSON")) {
+            use std::fmt::Write as _;
+            write!(&mut output, "{byte:02x}").expect("write digest");
+        }
+        output
+    }
+
+    fn mcp_turn_snapshot(session_id: &str) -> crate::mcp::McpTurnSnapshot {
+        let input_schema = json!({
+            "type": "object",
+            "properties": { "value": { "type": "string" } },
+            "required": ["value"],
+            "additionalProperties": false,
+        });
+        let input_schema_sha256 = sha256_value(&input_schema);
+        let definition_sha256 = format!("sha256:{}", "a".repeat(64));
+        let route = json!({
+            "serverId": "fixture",
+            "source": crate::mcp::McpDefinitionSource::User,
+            "lifecycleGeneration": 3,
+            "definitionSha256": definition_sha256,
+            "toolName": "echo",
+            "inputSchemaSha256": input_schema_sha256,
+            "outputSchemaSha256": null,
+            "workspaceId": "workspace-1",
+            "projectId": "project-1",
+            "sessionId": session_id,
+        });
+        let tool = crate::mcp::McpTurnToolSnapshot {
+            target_id: format!(
+                "mcp-tool:{}",
+                sha256_value(&route).trim_start_matches("sha256:")
+            ),
+            server_id: "fixture".into(),
+            source: crate::mcp::McpDefinitionSource::User,
+            lifecycle_generation: 3,
+            definition_sha256,
+            transport_kind: crate::mcp::McpTransportKind::Stdio,
+            tool_name: "echo".into(),
+            title: Some("Echo".into()),
+            description: None,
+            input_schema,
+            input_schema_sha256,
+            output_schema_sha256: None,
+        };
+        let catalog = json!({
+            "serviceGeneration": 7,
+            "capturedAtMs": 10,
+            "workspaceId": "workspace-1",
+            "projectId": "project-1",
+            "sessionId": session_id,
+            "tools": [&tool],
+            "truncated": false,
+            "omittedToolCount": 0,
+        });
+        let sha256 = sha256_value(&catalog);
+        let snapshot = crate::mcp::McpTurnSnapshot {
+            snapshot_id: format!("mcp-turn:{}", sha256.trim_start_matches("sha256:")),
+            service_generation: 7,
+            captured_at_ms: 10,
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: session_id.into(),
+            tools: vec![tool],
+            truncated: false,
+            omitted_tool_count: 0,
+            sha256,
+        };
+        snapshot.validate().expect("valid MCP turn snapshot");
+        snapshot
+    }
+
+    fn pi_mcp_action_event(
+        identity: DispatchIdentity,
+        sequence: u64,
+        tool_call_id: &str,
+        target: &str,
+    ) -> DispatchEvent {
+        let peer = normalize_pi_event(
+            identity.clone(),
+            PiEventEnvelope {
+                schema_version: PI_PROTOCOL_SCHEMA_VERSION,
+                kind: "event".into(),
+                event_id: format!("pi-mcp-event-{sequence}-{tool_call_id}"),
+                correlation_id: identity.correlation_id.clone(),
+                process_generation: identity.process_generation,
+                sequence,
+                runtime: "pi".into(),
+                workspace_id: identity.workspace_id.clone(),
+                session_id: identity.session_id.clone(),
+                turn_id: identity.turn_id.clone(),
+                run_id: identity.attempt_id.clone(),
+                category: "tool.action_intent".into(),
+                native_type: "beforeToolCall".into(),
+                tool_call_id: Some(tool_call_id.into()),
+                payload: json!({
+                    "tool": C4OS_ACTION_PROPOSAL_TOOL,
+                    "arguments": {
+                        "operation": "mcp.call-tool",
+                        "target": target,
+                        "arguments": { "value": "hello" },
+                    },
+                    "authority": "c4os-action-gateway-required",
+                }),
+            },
+            10,
+        )
+        .expect("normalized Pi MCP action event");
+        DispatchEvent { sequence, peer }
+    }
+
+    fn pi_mcp_authority(snapshot: crate::mcp::McpTurnSnapshot) -> PiGatewayAuthorityContext {
+        let mut authority = pi_authority();
+        authority.mcp_turn = Some(snapshot);
+        authority
+    }
+
     fn pi_authority() -> PiGatewayAuthorityContext {
         PiGatewayAuthorityContext {
             request_origin: ActionRequestOrigin::NaturalLanguageChat,
@@ -3482,6 +3937,7 @@ mod tests {
                 .into_iter()
                 .map(str::to_owned)
                 .collect(),
+            mcp_turn: None,
         }
     }
 
@@ -3541,6 +3997,39 @@ mod tests {
                 .map_err(|_| ())
         }
 
+        fn begin_runtime_action_effect(
+            &mut self,
+            authorization: RuntimeAuthorization,
+            live: LiveAuthorityState,
+            now_ms: u64,
+        ) -> Result<RuntimeActionEffectLease, Self::Error> {
+            RuntimeActionBridge::new(&mut self.gateway)
+                .begin_effect(authorization, live, now_ms)
+                .map_err(|_| ())
+        }
+
+        fn complete_runtime_action_effect(
+            &mut self,
+            lease: RuntimeActionEffectLease,
+            result: RuntimeEffectResult,
+            _now_ms: u64,
+        ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+            RuntimeActionBridge::new(&mut self.gateway)
+                .complete_effect(lease, result)
+                .map_err(|_| ())
+        }
+
+        fn complete_runtime_action_effect_retryable(
+            &mut self,
+            lease: &mut RuntimeActionEffectLease,
+            result: RuntimeEffectResult,
+            _now_ms: u64,
+        ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+            RuntimeActionBridge::new(&mut self.gateway)
+                .complete_effect_retryable(lease, result)
+                .map_err(|_| ())
+        }
+
         fn cancel_runtime_run(&mut self, run_id: &str, now_ms: u64) -> Result<(), Self::Error> {
             self.gateway
                 .cancel_run(run_id, now_ms)
@@ -3551,6 +4040,58 @@ mod tests {
 
     struct TestFacility {
         executions: Arc<AtomicUsize>,
+    }
+
+    #[derive(Default)]
+    struct TestDeferredFacilityState {
+        started: Vec<String>,
+        cancelled: Vec<String>,
+        ready: BTreeSet<String>,
+    }
+
+    struct TestDeferredFacility {
+        state: Arc<Mutex<TestDeferredFacilityState>>,
+    }
+
+    impl InstalledDeferredBrokerFacility for TestDeferredFacility {
+        fn start(&mut self, permit: ExecutionPermit) -> BrokerDeferredStart {
+            let native_request_id = permit.action().tool_call_id.clone();
+            self.state
+                .lock()
+                .unwrap()
+                .started
+                .push(native_request_id.clone());
+            BrokerDeferredStart::Started(
+                BrokerDeferredTicket::new(native_request_id).expect("valid deferred ticket"),
+            )
+        }
+
+        fn poll(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+            if !self.state.lock().unwrap().ready.remove(ticket.as_str()) {
+                return None;
+            }
+            Some(RuntimeEffectResult::normalized(NormalizedActionResult {
+                status: NormalizedActionStatus::Succeeded,
+                result_code: "mcp-tool-succeeded".into(),
+                exit_code: None,
+                changed_targets: vec!["mcp-tool:fixture".into()],
+                output_sha256: Some(format!("sha256:{}", "b".repeat(64))),
+                completed_at_ms: 30,
+            }))
+        }
+
+        fn cancel(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+            self.state
+                .lock()
+                .unwrap()
+                .cancelled
+                .push(ticket.as_str().into());
+            true
+        }
+
+        fn abandon(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+            self.cancel(ticket)
+        }
     }
 
     impl InstalledBrokerFacility for TestFacility {

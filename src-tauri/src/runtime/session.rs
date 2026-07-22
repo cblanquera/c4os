@@ -12,6 +12,8 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use thiserror::Error;
 
+use crate::mcp::McpTurnSnapshot;
+
 use crate::runtime::capability::{
     CapabilityDescriptor, CapabilityEvidence, CapabilityKey, CapabilityLayer, CapabilityState,
     NumericCapabilityKey,
@@ -197,6 +199,8 @@ pub struct UserTurnRecord {
     pub skill_context: Vec<SkillContextSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_context: Option<MessageReplyContextSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_turn: Option<McpTurnSnapshot>,
     pub submitted_at_ms: u64,
 }
 
@@ -908,6 +912,11 @@ impl UserTurnRecord {
         if let Some(reply) = &self.reply_context {
             reply.validate()?;
         }
+        if let Some(mcp_turn) = &self.mcp_turn {
+            mcp_turn
+                .validate()
+                .map_err(|_| SessionError::InvalidRecord("turn MCP capability snapshot"))?;
+        }
         let mut skill_identities = BTreeSet::new();
         let mut skill_bytes = 0usize;
         for skill in &self.skill_context {
@@ -1186,6 +1195,7 @@ pub struct FirstSubmission {
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
+    pub mcp_turn: Option<McpTurnSnapshot>,
     pub binding: SessionBinding,
     pub submitted_at_ms: u64,
 }
@@ -1202,6 +1212,7 @@ pub struct TurnSubmission {
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
     pub reply_context: Option<MessageReplyContextSnapshot>,
+    pub mcp_turn: Option<McpTurnSnapshot>,
     pub context: AttemptContextSnapshot,
     pub submitted_at_ms: u64,
 }
@@ -1384,6 +1395,7 @@ impl<R: SessionRepository> SessionService<R> {
             attachments: submission.attachments,
             skill_context: submission.skill_context,
             reply_context: None,
+            mcp_turn: submission.mcp_turn,
             submitted_at_ms: submission.submitted_at_ms,
         };
         turn.validate()?;
@@ -1437,6 +1449,7 @@ impl<R: SessionRepository> SessionService<R> {
             attachments: submission.attachments,
             skill_context: submission.skill_context,
             reply_context: submission.reply_context,
+            mcp_turn: submission.mcp_turn,
             submitted_at_ms: submission.submitted_at_ms,
         };
         turn.validate()?;

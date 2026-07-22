@@ -123,6 +123,7 @@ pub enum ActionInitiator {
     Agent,
     Plugin,
     Runtime,
+    McpServer,
     Unknown,
 }
 
@@ -158,6 +159,7 @@ pub enum ActionRequestOrigin {
     DirectUserEdit,
     ArtifactReplyProposal,
     RuntimeTool,
+    McpSampling,
     Unknown,
 }
 
@@ -501,6 +503,8 @@ pub enum DecisionSource {
     MaximumAuthority(String),
     ManagedRequirement(String),
     InterruptedApprovalRecovery,
+    ExplicitTrustConfirmation,
+    ExplicitSamplingConfirmation,
     UnknownOrIncomplete,
     Sandbox,
     UntrustedWorkspaceTarget,

@@ -87,6 +87,12 @@ export class PiSdkDriver {
 
     let activeRun;
     let activeCredential;
+    let dispatchAbort;
+    let dispatchSettled;
+    let settleDispatch;
+    let samplingAbort;
+    let samplingSettled;
+    let settleSampling;
     const tools = options.tools.map((toolName) => ({
       name: toolName,
       label:
@@ -171,19 +177,25 @@ export class PiSdkDriver {
         ) {
           throw new Error("Credential operation identity is incomplete");
         }
-        const operationCredential = hasCredentialOperation
-          ? await this.#credentials?.claimForOperation(
-              runIdentity,
-              modelRoute.provider,
-              CREDENTIAL_READY_TIMEOUT_MS,
-            )
-          : undefined;
-        if (hasCredentialOperation && !operationCredential) {
-          throw new Error("Credential lease channel is unavailable");
-        }
         activeRun = runIdentity;
-        activeCredential = operationCredential;
+        dispatchAbort = new AbortController();
+        dispatchSettled = new Promise((resolve) => {
+          settleDispatch = resolve;
+        });
+        let operationCredential;
         try {
+          operationCredential = hasCredentialOperation
+            ? await this.#credentials?.claimForOperation(
+                runIdentity,
+                modelRoute.provider,
+                CREDENTIAL_READY_TIMEOUT_MS,
+              )
+            : undefined;
+          if (hasCredentialOperation && !operationCredential) {
+            throw new Error("Credential lease channel is unavailable");
+          }
+          dispatchAbort.signal.throwIfAborted();
+          activeCredential = operationCredential;
           await agent.prompt(
             input,
             attachments.map((attachment) => ({
@@ -194,22 +206,162 @@ export class PiSdkDriver {
           );
           await agent.waitForIdle();
         } finally {
-          activeCredential?.release();
+          operationCredential?.release();
           activeRun = undefined;
           activeCredential = undefined;
+          dispatchAbort = undefined;
+          settleDispatch?.();
+          dispatchSettled = undefined;
+          settleDispatch = undefined;
         }
       },
       abort: async () => {
+        const settled = dispatchSettled;
+        dispatchAbort?.abort();
         agent.abort();
+        await settled;
         await agent.waitForIdle();
       },
+      sample: async ({
+        messages,
+        systemPrompt,
+        maxTokens,
+        temperature,
+        runIdentity,
+      }) => {
+        if (activeRun) throw new Error("Pi session already has an active run");
+        if (this.#testTlsTrustCapabilities) {
+          assertTestTlsTrustRoute(
+            this.#testTlsTrustCapabilities,
+            runIdentity,
+            modelRoute,
+          );
+        }
+        if (!runIdentity.runtimeId || !runIdentity.providerId) {
+          throw new Error("Sampling credential operation identity is incomplete");
+        }
+        activeRun = runIdentity;
+        samplingAbort = new AbortController();
+        samplingSettled = new Promise((resolve) => {
+          settleSampling = resolve;
+        });
+        let operationCredential;
+        try {
+          operationCredential = await this.#credentials?.claimForOperation(
+            runIdentity,
+            modelRoute.provider,
+            CREDENTIAL_READY_TIMEOUT_MS,
+          );
+          if (!operationCredential) {
+            throw new Error("Credential lease channel is unavailable");
+          }
+          activeCredential = operationCredential;
+          samplingAbort.signal.throwIfAborted();
+          const stream = sdk.streamSimple(
+            model,
+            {
+              ...(systemPrompt === undefined ? {} : { systemPrompt }),
+              messages: messages.map((message, index) =>
+                samplingMessage(model, message, index + 1),
+              ),
+              tools: [],
+            },
+            {
+              apiKey: operationCredential.get(modelRoute.provider),
+              maxTokens,
+              ...(temperature === undefined ? {} : { temperature }),
+              signal: samplingAbort.signal,
+              maxRetries: 0,
+            },
+          );
+          const result = await stream.result();
+          return normalizeSamplingResult(result);
+        } finally {
+          operationCredential?.release();
+          activeRun = undefined;
+          activeCredential = undefined;
+          samplingAbort = undefined;
+          settleSampling?.();
+          samplingSettled = undefined;
+          settleSampling = undefined;
+        }
+      },
+      abortSampling: async () => {
+        const settled = samplingSettled;
+        samplingAbort?.abort();
+        await settled;
+      },
       dispose: async () => {
+        const dispatchDone = dispatchSettled;
+        dispatchAbort?.abort();
         agent.abort();
+        await dispatchDone;
+        const settled = samplingSettled;
+        samplingAbort?.abort();
+        await settled;
         await agent.waitForIdle();
         agent.reset();
       },
     };
   }
+}
+
+function samplingMessage(model, message, timestamp) {
+  if (message.role === "user") {
+    return { role: "user", content: message.text, timestamp };
+  }
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: message.text }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp,
+  };
+}
+
+function normalizeSamplingResult(result) {
+  if (!result || result.role !== "assistant") {
+    throw new Error("Pi sampling returned no assistant message");
+  }
+  if (result.stopReason === "error") {
+    throw new Error(result.errorMessage || "Pi sampling failed");
+  }
+  if (result.stopReason === "aborted") {
+    throw new Error("Pi sampling was cancelled");
+  }
+  if (!new Set(["stop", "length"]).has(result.stopReason)) {
+    throw new Error("Pi sampling returned an unsupported stop reason");
+  }
+  if (!Array.isArray(result.content)) {
+    throw new Error("Pi sampling returned malformed content");
+  }
+  const text = [];
+  for (const content of result.content) {
+    if (content?.type === "thinking") continue;
+    if (content?.type !== "text" || typeof content.text !== "string") {
+      throw new Error("Pi sampling returned unsupported non-text content");
+    }
+    text.push(content.text);
+  }
+  if (text.length === 0) throw new Error("Pi sampling returned no text");
+  if (typeof result.model !== "string" || result.model.length === 0) {
+    throw new Error("Pi sampling returned a malformed model identity");
+  }
+  return {
+    text: text.join(""),
+    model: result.model,
+    stopReason: result.stopReason === "length" ? "maxTokens" : "endTurn",
+  };
 }
 
 /**

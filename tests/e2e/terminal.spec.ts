@@ -627,6 +627,7 @@ function conversationSnapshot() {
           prompt: "Use the Project shell.",
           attachments: [],
           artifactContext: null,
+          mcpProvenance: null,
           submittedAtMs: 100,
         },
       ],

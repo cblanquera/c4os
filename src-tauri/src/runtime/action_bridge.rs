@@ -17,11 +17,13 @@ use crate::security::authorization::{
     ApprovalAnswer, AuthorizationToken, CanonicalAction, LiveAuthorityState,
 };
 use crate::security::gateway::{
-    ActionGateway, ActionGatewayError, ApprovalResponse, GatewayProposal, NormalizedActionResult,
+    ActionEffectLease, ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit,
+    GatewayProposal, NormalizedActionResult,
 };
 use crate::security::policy::{ActionFacts, PolicyResolution};
 
 const MAX_BINDING_BYTES: usize = 512 * 1024;
+pub(crate) const MAX_BROKER_MODEL_PAYLOAD_BYTES: usize = 128 * 1024;
 const INTENT_BINDING_ARGUMENT: &str = "c4osRuntimeIntentSha256";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -201,6 +203,13 @@ impl RuntimeAuthorization {
     pub(crate) fn action_id(&self) -> &str {
         &self.action.action_id
     }
+
+    pub(crate) fn is_mcp(&self) -> bool {
+        self.action
+            .plugin_or_mcp_id
+            .as_deref()
+            .is_some_and(|identity| identity.starts_with("mcp:"))
+    }
 }
 
 /// Non-constructible proof that the Action Gateway consumed the exact runtime
@@ -214,6 +223,93 @@ pub struct RuntimeExecutionReceipt {
     process_generation: u64,
     intent_binding_sha256: String,
     result: NormalizedActionResult,
+    model_payload: Option<Value>,
+}
+
+/// Opaque bridge lease retained by the Rust core while a long-running effect
+/// executes outside the coordinator lock. It is neither cloneable nor
+/// serializable and must be consumed exactly once by `complete_effect`.
+pub struct RuntimeActionEffectLease {
+    runtime_id: String,
+    session_id: String,
+    run_id: String,
+    native_request_id: String,
+    process_generation: u64,
+    intent_binding_sha256: String,
+    action_id: String,
+    gateway_lease: ActionEffectLease,
+}
+
+impl RuntimeActionEffectLease {
+    pub(crate) fn action_id(&self) -> &str {
+        &self.action_id
+    }
+
+    pub(crate) fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub(crate) fn take_execution_permit(&mut self) -> Result<ExecutionPermit, RuntimeBridgeError> {
+        self.gateway_lease
+            .take_execution_permit()
+            .map_err(RuntimeBridgeError::Gateway)
+    }
+}
+
+pub struct RuntimeEffectResult {
+    pub normalized: NormalizedActionResult,
+    pub model_payload: Option<Value>,
+    certainty: RuntimeEffectCompletionCertainty,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeEffectCompletionCertainty {
+    Completed,
+    ProvenNotCompleted,
+    Unknown,
+}
+
+impl RuntimeEffectResult {
+    pub fn normalized(normalized: NormalizedActionResult) -> Self {
+        let certainty = match normalized.status {
+            crate::security::gateway::NormalizedActionStatus::Succeeded => {
+                RuntimeEffectCompletionCertainty::Completed
+            }
+            crate::security::gateway::NormalizedActionStatus::UnknownAfterInterruption => {
+                RuntimeEffectCompletionCertainty::Unknown
+            }
+            crate::security::gateway::NormalizedActionStatus::Failed
+            | crate::security::gateway::NormalizedActionStatus::Cancelled
+            | crate::security::gateway::NormalizedActionStatus::Denied => {
+                RuntimeEffectCompletionCertainty::ProvenNotCompleted
+            }
+        };
+        Self {
+            normalized,
+            model_payload: None,
+            certainty,
+        }
+    }
+
+    pub(crate) fn with_certainty(
+        normalized: NormalizedActionResult,
+        model_payload: Option<Value>,
+        certainty: RuntimeEffectCompletionCertainty,
+    ) -> Self {
+        Self {
+            normalized,
+            model_payload,
+            certainty,
+        }
+    }
+
+    pub(crate) fn certainty(&self) -> RuntimeEffectCompletionCertainty {
+        self.certainty
+    }
 }
 
 impl RuntimeExecutionReceipt {
@@ -239,6 +335,14 @@ impl RuntimeExecutionReceipt {
 
     pub(crate) fn normalized_result(&self) -> &NormalizedActionResult {
         &self.result
+    }
+
+    /// Returns the already-redacted payload that may be released back to the
+    /// active model. The payload is never journaled by ActionGateway and can
+    /// only be attached after its exact serialized digest is bound to the
+    /// normalized result.
+    pub(crate) fn model_payload(&self) -> Option<&Value> {
+        self.model_payload.as_ref()
     }
 }
 
@@ -335,6 +439,18 @@ impl<'a> RuntimeActionBridge<'a> {
         now_ms: u64,
         worker_effect: impl FnOnce(crate::security::gateway::ExecutionPermit) -> NormalizedActionResult,
     ) -> Result<RuntimeExecutionReceipt, RuntimeBridgeError> {
+        let mut lease = self.begin_effect(authorization, live, now_ms)?;
+        let permit = lease.take_execution_permit()?;
+        let result = worker_effect(permit);
+        self.complete_effect(lease, RuntimeEffectResult::normalized(result))
+    }
+
+    pub fn begin_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<RuntimeActionEffectLease, RuntimeBridgeError> {
         let bound_action = authorization
             .action
             .arguments
@@ -351,24 +467,71 @@ impl<'a> RuntimeActionBridge<'a> {
             authorization.action.process_generation,
             authorization.intent_binding_sha256.clone(),
         );
-        let result = self.gateway.execute(
+        let action_id = authorization.action.action_id.clone();
+        let gateway_lease = self.gateway.begin_effect(
             &authorization.token,
             &authorization.action,
             live,
             authorization.approval_prompt_id.as_deref(),
             now_ms,
-            worker_effect,
         )?;
-        Ok(RuntimeExecutionReceipt {
+        Ok(RuntimeActionEffectLease {
             runtime_id: receipt_identity.0,
             session_id: receipt_identity.1,
             run_id: receipt_identity.2,
             native_request_id: receipt_identity.3,
             process_generation: receipt_identity.4,
             intent_binding_sha256: receipt_identity.5,
-            result,
+            action_id,
+            gateway_lease,
         })
     }
+
+    pub fn complete_effect(
+        &mut self,
+        mut lease: RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+    ) -> Result<RuntimeExecutionReceipt, RuntimeBridgeError> {
+        self.complete_effect_retryable(&mut lease, result)
+    }
+
+    pub fn complete_effect_retryable(
+        &mut self,
+        lease: &mut RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+    ) -> Result<RuntimeExecutionReceipt, RuntimeBridgeError> {
+        validate_model_payload(&result.normalized, result.model_payload.as_ref())?;
+        self.gateway
+            .complete_effect_retryable(&mut lease.gateway_lease, &result.normalized)?;
+        Ok(RuntimeExecutionReceipt {
+            runtime_id: lease.runtime_id.clone(),
+            session_id: lease.session_id.clone(),
+            run_id: lease.run_id.clone(),
+            native_request_id: lease.native_request_id.clone(),
+            process_generation: lease.process_generation,
+            intent_binding_sha256: lease.intent_binding_sha256.clone(),
+            result: result.normalized,
+            model_payload: result.model_payload,
+        })
+    }
+}
+
+fn validate_model_payload(
+    result: &NormalizedActionResult,
+    payload: Option<&Value>,
+) -> Result<(), RuntimeBridgeError> {
+    let Some(payload) = payload else {
+        return Ok(());
+    };
+    let encoded = serde_json::to_vec(payload).map_err(|_| RuntimeBridgeError::InvalidPayload)?;
+    let digest = sha256(&encoded);
+    if encoded.is_empty()
+        || encoded.len() > MAX_BROKER_MODEL_PAYLOAD_BYTES
+        || result.output_sha256.as_deref() != Some(digest.as_str())
+    {
+        return Err(RuntimeBridgeError::InvalidPayload);
+    }
+    Ok(())
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -409,6 +572,8 @@ pub enum RuntimeBridgeError {
     InvalidProposal,
     #[error("runtime action identity does not match its canonical binding")]
     BindingMismatch,
+    #[error("runtime action model payload is invalid or does not match its normalized digest")]
+    InvalidPayload,
     #[error(transparent)]
     Gateway(#[from] ActionGatewayError),
 }

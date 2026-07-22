@@ -225,6 +225,18 @@ export function conversationPublications(
             ...(attempt.durationMs === null
               ? {}
               : { durationMs: attempt.durationMs }),
+            ...(turn.mcpProvenance === null
+              ? {}
+              : {
+                  mcpProvenance: {
+                    snapshotId: turn.mcpProvenance.snapshotId,
+                    serverCount: turn.mcpProvenance.serverCount,
+                    toolCount: turn.mcpProvenance.toolCount,
+                    omittedToolCount: turn.mcpProvenance.omittedToolCount,
+                    truncated: turn.mcpProvenance.truncated,
+                    tools: turn.mcpProvenance.tools,
+                  },
+                }),
             activities: attempt.activities.map((activity) => ({
               id: `${attempt.attemptId}:${activity.sequence}`,
               kind: activity.kind,
@@ -373,7 +385,10 @@ function runtimePublications(
       value: {
         approvals: snapshot.pendingApprovals.map((approval) => ({
           id: approval.promptId,
-          summary: `Approval required by ${approval.runtimeId}.`,
+          summary:
+            approval.disclosureScope === null
+              ? approval.summary
+              : `${approval.summary} ${approval.disclosureScope}`,
           state: "pending",
         })),
       },

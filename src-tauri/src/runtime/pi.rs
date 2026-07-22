@@ -317,6 +317,37 @@ pub struct PiDispatchAttachment {
     pub content: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiSamplingMessage {
+    pub role: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PiSamplingRequest {
+    pub messages: Vec<PiSamplingMessage>,
+    pub system_prompt: Option<String>,
+    pub max_tokens: u32,
+    pub temperature: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiSamplingResult {
+    pub text: String,
+    pub model: String,
+    pub stop_reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PiSamplingPoll {
+    Pending,
+    Completed(PiSamplingResult),
+    Cancelled,
+    Failed { code: String },
+}
+
 impl PiDispatchAttachment {
     fn validate(&self) -> Result<(), PiAdapterError> {
         validate_id(&self.attachment_id, "attachmentId")?;
@@ -550,6 +581,262 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
             ));
         }
         Ok(response.available)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_sampling_with_credential_operation(
+        &mut self,
+        workspace_id: &str,
+        session_id: &str,
+        turn_id: &str,
+        run_id: &str,
+        correlation_id: &str,
+        request: &PiSamplingRequest,
+        runtime_id: &str,
+        provider_id: &str,
+    ) -> Result<(), PiAdapterError> {
+        self.require_running()?;
+        for (value, field) in [
+            (workspace_id, "workspaceId"),
+            (session_id, "sessionId"),
+            (turn_id, "turnId"),
+            (run_id, "runId"),
+            (correlation_id, "correlationId"),
+            (runtime_id, "runtimeId"),
+            (provider_id, "providerId"),
+        ] {
+            validate_id(value, field)?;
+        }
+        validate_sampling_request(request)?;
+        let session = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| PiAdapterError::State("unknown Pi session".into()))?;
+        if session.workspace_id != workspace_id || session.active_run.is_some() {
+            return Err(PiAdapterError::State(
+                "Pi session scope mismatches or already has an active run".into(),
+            ));
+        }
+        session.active_run = Some(ActiveRun {
+            workspace_id: workspace_id.into(),
+            turn_id: turn_id.into(),
+            run_id: run_id.into(),
+            correlation_id: correlation_id.into(),
+        });
+        let mut payload = Map::from_iter([
+            (
+                "messages".into(),
+                serde_json::to_value(&request.messages)
+                    .map_err(|error| PiAdapterError::Protocol(error.to_string()))?,
+            ),
+            (
+                "maxTokens".into(),
+                Value::Number(serde_json::Number::from(request.max_tokens)),
+            ),
+            ("runtimeId".into(), Value::String(runtime_id.into())),
+            ("providerId".into(), Value::String(provider_id.into())),
+        ]);
+        if let Some(system_prompt) = &request.system_prompt {
+            payload.insert("systemPrompt".into(), Value::String(system_prompt.clone()));
+        }
+        if let Some(temperature) = request.temperature {
+            let temperature = serde_json::Number::from_f64(f64::from(temperature))
+                .ok_or_else(|| PiAdapterError::Protocol("temperature is not finite".into()))?;
+            payload.insert("temperature".into(), Value::Number(temperature));
+        }
+        let response = self.request_with_correlation(
+            "sampling.start",
+            Some(workspace_id),
+            Some(session_id),
+            Some(turn_id),
+            Some(run_id),
+            Value::Object(payload),
+            correlation_id,
+        );
+        if matches!(&response, Err(PiAdapterError::Rejected { .. })) {
+            self.sessions
+                .get_mut(session_id)
+                .expect("sampling session remains bound")
+                .active_run = None;
+        }
+        let response = response?;
+        let fields = response.as_object().ok_or_else(|| {
+            PiAdapterError::Protocol("sampling start response is not an object".into())
+        })?;
+        if fields.len() != 2
+            || fields.get("accepted").and_then(Value::as_bool) != Some(true)
+            || fields.get("runId").and_then(Value::as_str) != Some(run_id)
+        {
+            return Err(PiAdapterError::Protocol(
+                "sampling response did not accept the run".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn poll_sampling(
+        &mut self,
+        workspace_id: &str,
+        session_id: &str,
+        turn_id: &str,
+        run_id: &str,
+        correlation_id: &str,
+    ) -> Result<PiSamplingPoll, PiAdapterError> {
+        self.require_sampling_run(workspace_id, session_id, turn_id, run_id, correlation_id)?;
+        let response = self.request_with_correlation(
+            "sampling.poll",
+            Some(workspace_id),
+            Some(session_id),
+            Some(turn_id),
+            Some(run_id),
+            Value::Object(Map::new()),
+            correlation_id,
+        )?;
+        let fields = response.as_object().ok_or_else(|| {
+            PiAdapterError::Protocol("sampling poll response is not an object".into())
+        })?;
+        let state = fields
+            .get("state")
+            .and_then(Value::as_str)
+            .ok_or_else(|| PiAdapterError::Protocol("sampling poll state is missing".into()))?;
+        let terminal = match state {
+            "pending" if fields.len() == 1 => return Ok(PiSamplingPoll::Pending),
+            "completed" if fields.len() == 2 => {
+                let result: PiSamplingResult =
+                    serde_json::from_value(fields.get("result").cloned().ok_or_else(|| {
+                        PiAdapterError::Protocol("sampling result is missing".into())
+                    })?)
+                    .map_err(|error| PiAdapterError::Protocol(error.to_string()))?;
+                validate_sampling_result(&result)?;
+                PiSamplingPoll::Completed(result)
+            }
+            "cancelled" if fields.len() == 1 => PiSamplingPoll::Cancelled,
+            "failed" if fields.len() == 3 => {
+                let code = fields.get("code").and_then(Value::as_str).ok_or_else(|| {
+                    PiAdapterError::Protocol("sampling failure code is missing".into())
+                })?;
+                validate_id(code, "sampling failure code")?;
+                PiSamplingPoll::Failed { code: code.into() }
+            }
+            _ => {
+                return Err(PiAdapterError::Protocol(
+                    "sampling poll response is invalid".into(),
+                ));
+            }
+        };
+        self.sessions
+            .get_mut(session_id)
+            .expect("sampling session remains bound")
+            .active_run = None;
+        Ok(terminal)
+    }
+
+    pub fn cancel_sampling(
+        &mut self,
+        workspace_id: &str,
+        session_id: &str,
+        turn_id: &str,
+        run_id: &str,
+        correlation_id: &str,
+    ) -> Result<bool, PiAdapterError> {
+        self.require_sampling_run(workspace_id, session_id, turn_id, run_id, correlation_id)?;
+        let response = self.request_with_correlation(
+            "sampling.cancel",
+            Some(workspace_id),
+            Some(session_id),
+            Some(turn_id),
+            Some(run_id),
+            Value::Object(Map::new()),
+            correlation_id,
+        )?;
+        let fields = response.as_object().ok_or_else(|| {
+            PiAdapterError::Protocol("sampling cancel response is not an object".into())
+        })?;
+        let cancelled = fields
+            .get("cancelled")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| PiAdapterError::Protocol("sampling cancel state is missing".into()))?;
+        let already_terminal = fields
+            .get("alreadyTerminal")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| PiAdapterError::Protocol("sampling terminal state is missing".into()))?;
+        if fields.len() != 2 || cancelled == already_terminal {
+            return Err(PiAdapterError::Protocol(
+                "sampling cancel response is contradictory".into(),
+            ));
+        }
+        Ok(cancelled)
+    }
+
+    pub fn close_session(
+        &mut self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<(), PiAdapterError> {
+        self.require_running()?;
+        validate_id(workspace_id, "workspaceId")?;
+        validate_id(session_id, "sessionId")?;
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| PiAdapterError::State("unknown Pi session".into()))?;
+        if session.workspace_id != workspace_id || session.active_run.is_some() {
+            return Err(PiAdapterError::State(
+                "Pi session scope mismatches or still has an active run".into(),
+            ));
+        }
+        let response = self.request(
+            "session.close",
+            Some(workspace_id),
+            Some(session_id),
+            None,
+            None,
+            Value::Object(Map::new()),
+        )?;
+        let fields = response.as_object().ok_or_else(|| {
+            PiAdapterError::Protocol("session close response is not an object".into())
+        })?;
+        if fields.len() != 1 || fields.get("closed").and_then(Value::as_bool) != Some(true) {
+            return Err(PiAdapterError::Protocol(
+                "session close did not acknowledge the exact binding".into(),
+            ));
+        }
+        self.sessions.remove(session_id);
+        Ok(())
+    }
+
+    fn require_sampling_run(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        turn_id: &str,
+        run_id: &str,
+        correlation_id: &str,
+    ) -> Result<(), PiAdapterError> {
+        for (value, field) in [
+            (workspace_id, "workspaceId"),
+            (session_id, "sessionId"),
+            (turn_id, "turnId"),
+            (run_id, "runId"),
+            (correlation_id, "correlationId"),
+        ] {
+            validate_id(value, field)?;
+        }
+        let active = self
+            .sessions
+            .get(session_id)
+            .and_then(|session| session.active_run.as_ref());
+        if !active.is_some_and(|active| {
+            active.workspace_id == workspace_id
+                && active.turn_id == turn_id
+                && active.run_id == run_id
+                && active.correlation_id == correlation_id
+        }) {
+            return Err(PiAdapterError::State(
+                "sampling identity is not active".into(),
+            ));
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -787,8 +1074,12 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
                 "only a successful C4OS effect may complete a Pi tool".into(),
             ));
         }
-        let result = serde_json::to_value(receipt.normalized_result())
-            .map_err(|error| PiAdapterError::Protocol(error.to_string()))?;
+        let result = if let Some(payload) = receipt.model_payload() {
+            payload.clone()
+        } else {
+            serde_json::to_value(receipt.normalized_result())
+                .map_err(|error| PiAdapterError::Protocol(error.to_string()))?
+        };
         validate_value(&result, "tool result", true)?;
         self.resolve_tool_payload(
             session_id,
@@ -846,26 +1137,40 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
 
     pub fn cancel(
         &mut self,
+        workspace_id: &str,
         session_id: &str,
+        turn_id: &str,
         run_id: &str,
         correlation_id: &str,
     ) -> Result<bool, PiAdapterError> {
         self.require_running()?;
+        for (value, field) in [
+            (workspace_id, "workspaceId"),
+            (session_id, "sessionId"),
+            (turn_id, "turnId"),
+            (run_id, "runId"),
+            (correlation_id, "correlationId"),
+        ] {
+            validate_id(value, field)?;
+        }
         let active_matches = self
             .sessions
             .get(session_id)
             .and_then(|binding| binding.active_run.as_ref())
             .is_some_and(|active| {
-                active.run_id == run_id && active.correlation_id == correlation_id
+                active.workspace_id == workspace_id
+                    && active.turn_id == turn_id
+                    && active.run_id == run_id
+                    && active.correlation_id == correlation_id
             });
         if !active_matches {
             return Ok(false);
         }
         let response = self.request_with_correlation(
             "cancel",
-            None,
+            Some(workspace_id),
             Some(session_id),
-            None,
+            Some(turn_id),
             Some(run_id),
             Value::Object(Map::new()),
             correlation_id,
@@ -1260,6 +1565,50 @@ struct PackageManifest {
     #[serde(rename = "type")]
     module_type: String,
     dependencies: BTreeMap<String, String>,
+}
+
+fn validate_sampling_request(request: &PiSamplingRequest) -> Result<(), PiAdapterError> {
+    if request.messages.is_empty()
+        || request.messages.len() > 128
+        || request.max_tokens == 0
+        || request.max_tokens > 1_000_000
+        || request
+            .temperature
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+        || request
+            .system_prompt
+            .as_deref()
+            .is_some_and(|value| value.len() > MAX_STRING_BYTES || value.contains('\0'))
+        || request.messages.iter().any(|message| {
+            !matches!(message.role.as_str(), "user" | "assistant")
+                || message.text.is_empty()
+                || message.text.len() > MAX_STRING_BYTES
+                || message.text.contains('\0')
+        })
+    {
+        return Err(PiAdapterError::Protocol(
+            "sampling request is invalid or exceeds its bounds".into(),
+        ));
+    }
+    let value = serde_json::to_value(&request.messages)
+        .map_err(|error| PiAdapterError::Protocol(error.to_string()))?;
+    validate_value(&value, "sampling messages", false)
+}
+
+fn validate_sampling_result(result: &PiSamplingResult) -> Result<(), PiAdapterError> {
+    if result.text.is_empty()
+        || result.text.len() > MAX_STRING_BYTES
+        || result.text.contains('\0')
+        || result.model.is_empty()
+        || result.model.len() > 512
+        || result.model.contains('\0')
+        || !matches!(result.stop_reason.as_str(), "endTurn" | "maxTokens")
+    {
+        return Err(PiAdapterError::Protocol(
+            "sampling result is invalid or exceeds its bounds".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_health(health: &PiHealth, generation: u64) -> Result<(), PiAdapterError> {

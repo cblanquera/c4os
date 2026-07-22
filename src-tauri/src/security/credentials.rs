@@ -306,6 +306,23 @@ pub enum SecretSurface {
     WorkspaceFile,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CredentialMutationKind {
+    Replaced,
+    Removed,
+}
+
+/// Rust-only invalidation hook for long-lived services that were configured
+/// from an opaque vault reference. Observers receive references and mutation
+/// kinds only; secret bytes never cross this boundary.
+pub trait CredentialMutationObserver: Send + Sync {
+    fn credential_mutated(
+        &self,
+        credential_reference: &CredentialReference,
+        kind: CredentialMutationKind,
+    );
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SecretLeakFinding {
     pub surface: SecretSurface,
@@ -332,6 +349,18 @@ impl Clone for CredentialVault {
 }
 
 impl CredentialVault {
+    pub fn register_mutation_observer(
+        &self,
+        observer: Arc<dyn CredentialMutationObserver>,
+    ) -> CredentialVaultResult<()> {
+        self.inner
+            .observers
+            .lock()
+            .map_err(|_| CredentialVaultError::StateUnavailable)?
+            .push(Arc::downgrade(&observer));
+        Ok(())
+    }
+
     pub fn open_or_create_with_installation_key(
         path: impl Into<PathBuf>,
         key_store: &dyn InstallationKeyStore,
@@ -498,7 +527,10 @@ impl CredentialVault {
         replacement.revision = next_revision;
         self.inner.persist(&candidate)?;
         *state = candidate;
+        drop(state);
         self.inner.revoke_reference(credential_reference)?;
+        self.inner
+            .notify_reference(credential_reference, CredentialMutationKind::Replaced)?;
         Ok(next_generation)
     }
 
@@ -517,7 +549,10 @@ impl CredentialVault {
         candidate.entries.remove(credential_reference);
         self.inner.persist(&candidate)?;
         *state = candidate;
+        drop(state);
         self.inner.revoke_reference(credential_reference)?;
+        self.inner
+            .notify_reference(credential_reference, CredentialMutationKind::Removed)?;
         Ok(next_generation)
     }
 
@@ -752,6 +787,7 @@ impl CredentialVault {
                 persistence: Persistence::SessionOnly,
                 state: Mutex::new(VaultState::empty(vault_id)),
                 leases: Mutex::new(HashMap::new()),
+                observers: Mutex::new(Vec::new()),
                 clock,
                 entropy,
             }),
@@ -773,6 +809,7 @@ impl CredentialVault {
                 persistence,
                 state: Mutex::new(state),
                 leases: Mutex::new(HashMap::new()),
+                observers: Mutex::new(Vec::new()),
                 clock,
                 entropy,
             }),
@@ -950,6 +987,7 @@ struct VaultInner {
     persistence: Persistence,
     state: Mutex<VaultState>,
     leases: Mutex<HashMap<Uuid, ActiveLease>>,
+    observers: Mutex<Vec<Weak<dyn CredentialMutationObserver>>>,
     clock: Arc<dyn MonotonicClock>,
     entropy: Arc<dyn EntropySource>,
 }
@@ -982,6 +1020,29 @@ impl VaultInner {
                 lease.revoked.strong_count() > 0
             }
         });
+        Ok(())
+    }
+
+    fn notify_reference(
+        &self,
+        credential_reference: &CredentialReference,
+        kind: CredentialMutationKind,
+    ) -> CredentialVaultResult<()> {
+        let observers = {
+            let mut observers = self
+                .observers
+                .lock()
+                .map_err(|_| CredentialVaultError::StateUnavailable)?;
+            let active = observers
+                .iter()
+                .filter_map(Weak::upgrade)
+                .collect::<Vec<_>>();
+            observers.retain(|observer| observer.strong_count() > 0);
+            active
+        };
+        for observer in observers {
+            observer.credential_mutated(credential_reference, kind);
+        }
         Ok(())
     }
 }

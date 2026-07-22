@@ -57,6 +57,18 @@ function snapshotPayload() {
         runtimeId,
         correlationId: runCorrelationId,
         promptId,
+        approvalKind: "runtime-effect",
+        summary: "Approval required by opencode-primary.",
+        serverId: null,
+        providerId: null,
+        modelId: null,
+        maxTokens: null,
+        expiresAtMs: null,
+        messageCount: null,
+        inputBytes: null,
+        hasSystemPrompt: null,
+        parentOperation: null,
+        disclosureScope: null,
       },
     ],
   };
@@ -223,6 +235,66 @@ describe("runtime core adapter", () => {
       code: "staleGeneration",
     });
     expect(adapter.currentGeneration).toBe(3);
+  });
+
+  it("publishes an informed MCP sampling approval without private prompt content", async () => {
+    const payload = snapshotPayload();
+    const samplingApproval = {
+      runtimeId: "pi-primary",
+      correlationId: "correlation-sampling",
+      promptId: "approval:sampling-1",
+      approvalKind: "mcp-sampling",
+      summary:
+        "MCP server docs requests up to 256 tokens from provider-openai/gpt-5-mini using 2 bounded text message(s).",
+      serverId: "docs",
+      providerId: "provider-openai",
+      modelId: "gpt-5-mini",
+      maxTokens: 256,
+      expiresAtMs: 1_721_300_010_000,
+      messageCount: 2,
+      inputBytes: 412,
+      hasSystemPrompt: true,
+      parentOperation: "c4os_propose_action",
+      disclosureScope:
+        "Private active-operation text will be disclosed to the selected model provider; credentials remain operation-scoped and hidden.",
+    };
+    const transport: RuntimeCoreTransport = {
+      async invoke(_command, { request }) {
+        return envelope(request, 4, {
+          ...payload,
+          pendingApprovals: [samplingApproval],
+        });
+      },
+    };
+
+    const snapshot = await adapterWithTransport(transport).readSnapshot();
+
+    expect(snapshot.pendingApprovals).toEqual([samplingApproval]);
+    expect(JSON.stringify(snapshot.pendingApprovals)).not.toContain(
+      "private prompt canary",
+    );
+  });
+
+  it("rejects partially populated MCP sampling approval metadata", async () => {
+    const payload = snapshotPayload();
+    const transport: RuntimeCoreTransport = {
+      async invoke(_command, { request }) {
+        return envelope(request, 4, {
+          ...payload,
+          pendingApprovals: [
+            {
+              ...payload.pendingApprovals[0],
+              approvalKind: "mcp-sampling",
+              serverId: "docs",
+            },
+          ],
+        });
+      },
+    };
+
+    await expect(
+      adapterWithTransport(transport).readSnapshot(),
+    ).rejects.toMatchObject({ code: "invalidPayload" });
   });
 
   it("rejects protocol and request-correlation mismatches", async () => {

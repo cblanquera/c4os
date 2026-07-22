@@ -74,7 +74,7 @@ fn extension_transition_atomically_persists_current_state_and_append_only_event(
     let temporary = TempDir::new().expect("temporary home");
     let (database, report) =
         DatabaseActor::start(DatabaseDescriptor::app(temporary.path())).expect("app database");
-    assert_eq!(report.current_version, 7);
+    assert_eq!(report.current_version, 8);
     assert_eq!(database.extension_state_document().unwrap(), None);
 
     database

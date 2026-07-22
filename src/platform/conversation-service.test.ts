@@ -242,6 +242,66 @@ describe("Conversation native boundary", () => {
 
     await expect(adapter.read()).rejects.toThrow("budget");
   });
+
+  it("projects only bounded safe MCP provenance from the native snapshot", async () => {
+    const adapter = createConversationAdapter({
+      async invoke(_command, args) {
+        const request = args.request as Record<string, unknown>;
+        const payload = artifactReplyPayload(5 as StateGeneration);
+        const activeConversation = payload.activeConversation!;
+        return {
+          ...envelope(request, 5),
+          payload: {
+            ...payload,
+            activeConversation: {
+              ...activeConversation,
+              turns: [
+                {
+                  ...activeConversation.turns[0]!,
+                  mcpProvenance: {
+                    snapshotId: `mcp-turn:${"a".repeat(64)}`,
+                    serverCount: 1,
+                    toolCount: 1,
+                    omittedToolCount: 0,
+                    truncated: false,
+                    tools: [
+                      {
+                        serverId: "plugin-server",
+                        sourceKind: "plugin",
+                        sourceId: "com.example.safe-plugin",
+                        toolName: "safe-tool",
+                        credentialReference: "credential-canary",
+                        inputSchema: { secret: "schema-canary" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      },
+    });
+
+    const provenance = (await adapter.read()).activeConversation?.turns[0]
+      ?.mcpProvenance;
+    expect(provenance).toEqual({
+      snapshotId: `mcp-turn:${"a".repeat(64)}`,
+      serverCount: 1,
+      toolCount: 1,
+      omittedToolCount: 0,
+      truncated: false,
+      tools: [
+        {
+          serverId: "plugin-server",
+          sourceKind: "plugin",
+          sourceId: "com.example.safe-plugin",
+          toolName: "safe-tool",
+        },
+      ],
+    });
+    expect(JSON.stringify(provenance)).not.toContain("canary");
+  });
 });
 
 function envelope(request: Record<string, unknown>, generation: number) {
@@ -353,6 +413,7 @@ function artifactReplyPayload(
             ],
             capturedAtMs: 20,
           },
+          mcpProvenance: null,
           submittedAtMs: 20,
         },
       ],

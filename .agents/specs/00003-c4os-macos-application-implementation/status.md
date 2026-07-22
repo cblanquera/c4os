@@ -4,11 +4,11 @@
 
 - Phase: Frozen implementation contract
 - Freeze state: Frozen 2026-07-18
-- Last updated: 2026-07-22
+- Last updated: 2026-07-23
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; Tasks 00001 through 00011 are verified with passed Agent Acceptance. Tasks 00012 through 00015C remain open.
+- Implementation status: Active; Tasks 00001 through 00012 are verified with passed Agent Acceptance. Tasks 00013 through 00015C remain open.
 
 ## Work Items
 
@@ -39,8 +39,8 @@ Research from Specs 00001 and 00002 is inherited through Context. All seven narr
 
 ## Proof Status
 
-Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00011 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining MCP, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
+Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00012 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining onboarding, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
 
 ## Recommended Next Action
 
-Begin Task 00012 as the next isolated MCP lifecycle epoch from the verified Task 00011 checkpoint. Preserve the declarative extension, immutable authority, Action Gateway, runtime-capability, restart-recovery, and no-peer-authority boundaries; close an ID only after every named primary/supporting task and integrated audit passes.
+Start Task 00013 as the next isolated onboarding and Settings integration epoch from the scoped Task 00012 checkpoint. Preserve the declarative extension, immutable authority, Action Gateway, runtime-capability, restart-recovery, and no-peer-authority boundaries; close an ID only after every named primary/supporting task and integrated audit passes.

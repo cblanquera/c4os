@@ -232,6 +232,7 @@ fn first_submission(session_id: &str, suffix: &str) -> FirstSubmission {
         prompt: Some(format!("Implement feature {suffix}")),
         attachments: vec![attachment(&format!("attachment-{suffix}"))],
         skill_context: vec![],
+        mcp_turn: None,
         binding: binding(),
         submitted_at_ms: 20,
     }
@@ -440,6 +441,7 @@ fn fresh_turn_may_capture_current_snapshots_but_not_runtime_identity() {
             attachments: Vec::new(),
             skill_context: Vec::new(),
             reply_context: None,
+            mcp_turn: None,
             context: context.clone(),
             submitted_at_ms: 40,
         })

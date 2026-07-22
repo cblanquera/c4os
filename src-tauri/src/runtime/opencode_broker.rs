@@ -12,13 +12,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
+use sha2::Digest as _;
 use thiserror::Error;
 
+use crate::mcp::{
+    McpTransportKind, McpTurnToolSnapshot, mcp_authority_identity, validate_mcp_input_schema,
+};
+use crate::runtime::action_bridge::RuntimeEffectResult;
 use crate::runtime::broker_worker::{
     AuthenticatedBrokerEvent, AuthenticatedBrokerEventKind, AuthenticatedBrokerMetadata,
     BrokerActionApplication, BrokerActionClassifier, BrokerActionContext, BrokerActionWorker,
-    BrokerApprovalAnswer, BrokerClassificationError, BrokerEffectExecutor, BrokerWorkerError,
-    BrokerWorkerOutcome, ResolvedBrokerAction,
+    BrokerApprovalAnswer, BrokerClassificationError, BrokerDeferredStart, BrokerDeferredTicket,
+    BrokerEffectExecutor, BrokerWorkerError, BrokerWorkerOutcome, ResolvedBrokerAction,
 };
 use crate::runtime::opencode::{C4OS_ACTION_PROPOSAL_TOOL, C4OS_RESOURCE_READ_TOOL};
 use crate::runtime::opencode_native::{NativeBrokerError, OpenCodeNativeCommandDriver};
@@ -69,6 +74,18 @@ pub trait InstalledBrokerFacility: Send {
     fn execute(&mut self, permit: ExecutionPermit) -> NormalizedActionResult;
 }
 
+/// Single core-installed deferred namespace used by long-running broker
+/// facilities such as MCP. The registry remains sealed; only the route data in
+/// a consumed ExecutionPermit can select work after startup.
+pub trait InstalledDeferredBrokerFacility: Send {
+    fn start(&mut self, permit: ExecutionPermit) -> BrokerDeferredStart;
+    fn poll(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult>;
+    fn cancel(&mut self, ticket: &BrokerDeferredTicket) -> bool;
+    /// Cancels and removes a deferred operation when its outer gateway lease
+    /// is being settled independently during runtime teardown.
+    fn abandon(&mut self, ticket: &BrokerDeferredTicket) -> bool;
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum FacilityKey {
     Resource {
@@ -90,6 +107,7 @@ struct FacilityEntry {
 #[derive(Default)]
 struct FacilityRegistryState {
     entries: BTreeMap<FacilityKey, FacilityEntry>,
+    deferred: Option<Box<dyn InstalledDeferredBrokerFacility>>,
     sealed: bool,
 }
 
@@ -146,6 +164,24 @@ impl InstalledBrokerFacilityRegistry {
             classification,
             facility,
         )
+    }
+
+    pub fn install_deferred(
+        &self,
+        facility: Box<dyn InstalledDeferredBrokerFacility>,
+    ) -> Result<(), FacilityRegistryError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| FacilityRegistryError::Unavailable)?;
+        if state.sealed {
+            return Err(FacilityRegistryError::Sealed);
+        }
+        if state.deferred.is_some() {
+            return Err(FacilityRegistryError::Conflict);
+        }
+        state.deferred = Some(facility);
+        Ok(())
     }
 
     fn install(
@@ -293,11 +329,14 @@ impl BrokerActionClassifier for InstalledBrokerFacilityRegistry {
 
     fn resolve_action(
         &mut self,
-        _context: &BrokerActionContext,
+        context: &BrokerActionContext,
         operation: &str,
         target: &str,
         arguments: &Map<String, Value>,
     ) -> Result<ResolvedBrokerAction, BrokerClassificationError> {
+        if operation == "mcp.call-tool" {
+            return resolve_mcp_action(context, target, arguments);
+        }
         self.resolve(
             &FacilityKey::Action {
                 operation: operation.to_owned(),
@@ -308,9 +347,183 @@ impl BrokerActionClassifier for InstalledBrokerFacilityRegistry {
     }
 }
 
+fn resolve_mcp_action(
+    context: &BrokerActionContext,
+    target: &str,
+    arguments: &Map<String, Value>,
+) -> Result<ResolvedBrokerAction, BrokerClassificationError> {
+    validate_arguments(arguments).map_err(|_| BrokerClassificationError::Ambiguous)?;
+    let snapshot = context
+        .mcp_turn
+        .as_ref()
+        .ok_or(BrokerClassificationError::Unsupported)?;
+    let tool = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.target_id == target)
+        .ok_or(BrokerClassificationError::Unsupported)?;
+    validate_mcp_input_schema(&tool.input_schema, Some(&Value::Object(arguments.clone())))
+        .map_err(|_| BrokerClassificationError::Ambiguous)?;
+    if snapshot.workspace_id != context.dispatch.workspace_id
+        || snapshot.session_id != context.dispatch.session_id
+    {
+        return Err(BrokerClassificationError::Unavailable);
+    }
+    let target_version = mcp_target_version(tool)?;
+    let authority_id = mcp_authority_id(tool)?;
+    Ok(ResolvedBrokerAction {
+        surface: match tool.transport_kind {
+            McpTransportKind::Stdio => ActionSurface::Process,
+            McpTransportKind::StreamableHttp => ActionSurface::Network,
+        },
+        effects: BTreeSet::from([ActionEffect::Execute]),
+        scope: match tool.transport_kind {
+            McpTransportKind::Stdio => ActionScope::ExternalLocal,
+            McpTransportKind::StreamableHttp => ActionScope::Remote,
+        },
+        sensitivity: match tool.transport_kind {
+            McpTransportKind::Stdio => ActionSensitivity::Ordinary,
+            McpTransportKind::StreamableHttp => ActionSensitivity::Authenticated,
+        },
+        reversibility: ActionReversibility::Destructive,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: tool.target_id.clone(),
+        target_version,
+        normalized_arguments: serde_json::Map::from_iter([
+            ("serverId".into(), Value::String(tool.server_id.clone())),
+            (
+                "lifecycleGeneration".into(),
+                Value::Number(tool.lifecycle_generation.into()),
+            ),
+            (
+                "definitionSha256".into(),
+                Value::String(tool.definition_sha256.clone()),
+            ),
+            ("toolName".into(), Value::String(tool.tool_name.clone())),
+            (
+                "projectId".into(),
+                Value::String(snapshot.project_id.clone()),
+            ),
+            (
+                "turnId".into(),
+                Value::String(context.dispatch.turn_id.clone()),
+            ),
+            (
+                "inputSchemaSha256".into(),
+                Value::String(tool.input_schema_sha256.clone()),
+            ),
+            (
+                "turnSnapshotSha256".into(),
+                Value::String(snapshot.sha256.clone()),
+            ),
+        ]),
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+        confidence: crate::security::policy::ClassificationConfidence::Ambiguous,
+        risk: crate::security::authorization::CanonicalRisk::High,
+        plugin_or_mcp_id: Some(authority_id),
+    })
+}
+
+fn mcp_target_version(tool: &McpTurnToolSnapshot) -> Result<String, BrokerClassificationError> {
+    hash_mcp_binding(&serde_json::json!({
+        "definitionSha256": tool.definition_sha256,
+        "lifecycleGeneration": tool.lifecycle_generation,
+        "toolName": tool.tool_name,
+        "inputSchemaSha256": tool.input_schema_sha256,
+        "outputSchemaSha256": tool.output_schema_sha256,
+    }))
+}
+
+fn mcp_authority_id(tool: &McpTurnToolSnapshot) -> Result<String, BrokerClassificationError> {
+    mcp_authority_identity(&tool.server_id, &tool.source)
+        .map_err(|_| BrokerClassificationError::Ambiguous)
+}
+
+fn hash_mcp_binding(value: &Value) -> Result<String, BrokerClassificationError> {
+    let encoded = serde_json::to_vec(value).map_err(|_| BrokerClassificationError::Ambiguous)?;
+    let digest = sha2::Sha256::digest(encoded);
+    let mut output = String::with_capacity(71);
+    output.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut output, "{byte:02x}").map_err(|_| BrokerClassificationError::Ambiguous)?;
+    }
+    Ok(output)
+}
+
 impl BrokerEffectExecutor for InstalledBrokerFacilityRegistry {
     fn execute(&mut self, permit: ExecutionPermit) -> NormalizedActionResult {
         self.execute_permit(permit)
+    }
+
+    fn start_deferred(&mut self, permit: ExecutionPermit) -> BrokerDeferredStart {
+        let completed_at_ms = nonzero_time(permit.consumed_at_ms());
+        let is_mcp = route_from_permit(&permit).is_some_and(|(key, _)| {
+            matches!(key, FacilityKey::Action { operation, .. } if operation == "mcp.call-tool")
+        }) && permit
+            .action()
+            .plugin_or_mcp_id
+            .as_deref()
+            .is_some_and(|identity| identity.starts_with("mcp:"));
+        if !is_mcp {
+            return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "deferred-broker-permit-binding-mismatch",
+                completed_at_ms,
+            ));
+        }
+        let Ok(mut state) = self.state.lock() else {
+            return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "deferred-broker-facility-unavailable",
+                completed_at_ms,
+            ));
+        };
+        if !state.sealed {
+            return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "broker-registry-unsealed",
+                completed_at_ms,
+            ));
+        }
+        match state.deferred.as_mut() {
+            Some(facility) => facility.start(permit),
+            None => BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "deferred-broker-facility-uninstalled",
+                completed_at_ms,
+            )),
+        }
+    }
+
+    fn poll_deferred(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+        self.state.lock().ok()?.deferred.as_mut()?.poll(ticket)
+    }
+
+    fn cancel_deferred(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|mut state| {
+                state
+                    .deferred
+                    .as_mut()
+                    .map(|facility| facility.cancel(ticket))
+            })
+            .unwrap_or(false)
+    }
+
+    fn abandon_deferred(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|mut state| {
+                state
+                    .deferred
+                    .as_mut()
+                    .map(|facility| facility.abandon(ticket))
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -666,6 +879,13 @@ pub enum OpenCodeBrokerPumpOutcome {
         correlation_id: String,
         decision: BrokerDecision,
     },
+    EffectRunning {
+        correlation_id: String,
+    },
+    SettledAfterCancellation {
+        correlation_id: String,
+        decision: BrokerDecision,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -754,6 +974,19 @@ impl OpenCodeBrokerPump {
         self.sealed
     }
 
+    pub fn drain_deferred_unknown<A: BrokerActionApplication>(
+        &mut self,
+        application: &mut A,
+        now_ms: u64,
+    ) -> Result<usize, OpenCodeBrokerPumpError> {
+        self.worker
+            .drain_deferred_unknown(application, &mut self.executor, now_ms)
+            .map_err(|error| {
+                self.sealed = true;
+                OpenCodeBrokerPumpError::Worker(error)
+            })
+    }
+
     /// Receives and processes exactly one authenticated descriptor frame.
     pub fn pump_one<A, R>(
         &mut self,
@@ -776,6 +1009,16 @@ impl OpenCodeBrokerPump {
         ) {
             Ok(event) => event,
             Err(error) if transient_channel_error(&error) => {
+                if let Some(outcome) = self
+                    .worker
+                    .poll_deferred(application, &mut self.executor, now_ms)
+                    .map_err(|worker_error| {
+                        self.sealed = true;
+                        OpenCodeBrokerPumpError::Worker(worker_error)
+                    })?
+                {
+                    return self.settle(outcome, None);
+                }
                 return Err(OpenCodeBrokerPumpError::Channel(error));
             }
             Err(error) => {
@@ -793,7 +1036,12 @@ impl OpenCodeBrokerPump {
             Err(_error) if metadata.kind() == AuthenticatedBrokerEventKind::Cancellation => {
                 let outcome = self
                     .worker
-                    .accept_authenticated_cancellation(application, event, now_ms)
+                    .accept_authenticated_cancellation(
+                        application,
+                        &mut self.executor,
+                        event,
+                        now_ms,
+                    )
                     .map_err(|worker_error| {
                         self.sealed = true;
                         OpenCodeBrokerPumpError::Worker(worker_error)
@@ -940,6 +1188,17 @@ impl OpenCodeBrokerPump {
                     decision,
                 })
             }
+            BrokerWorkerOutcome::EffectRunning { correlation_id } => {
+                self.pending.remove(&correlation_id);
+                Ok(OpenCodeBrokerPumpOutcome::EffectRunning { correlation_id })
+            }
+            BrokerWorkerOutcome::SettledAfterCancellation {
+                correlation_id,
+                decision,
+            } => Ok(OpenCodeBrokerPumpOutcome::SettledAfterCancellation {
+                correlation_id,
+                decision,
+            }),
             BrokerWorkerOutcome::ObservedCancellation {
                 correlation_id,
                 decision,
@@ -1022,6 +1281,37 @@ fn resolved(
         explicit_scope_grant: classification.explicit_scope_grant,
         sandbox_allows: classification.sandbox_allows,
         declaration_exceeded: classification.declaration_exceeded,
+        confidence: crate::security::policy::ClassificationConfidence::Known,
+        risk: canonical_risk_for_installed(classification),
+        plugin_or_mcp_id: None,
+    }
+}
+
+fn canonical_risk_for_installed(
+    classification: &InstalledBrokerClassification,
+) -> crate::security::authorization::CanonicalRisk {
+    use crate::security::authorization::CanonicalRisk;
+    if classification.sensitivity == ActionSensitivity::Credential
+        || classification.reversibility == ActionReversibility::Destructive
+        || classification.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                ActionEffect::Execute
+                    | ActionEffect::Publish
+                    | ActionEffect::Reveal
+                    | ActionEffect::Listen
+            )
+        })
+    {
+        CanonicalRisk::High
+    } else if classification
+        .effects
+        .iter()
+        .any(|effect| effect.is_mutating())
+    {
+        CanonicalRisk::Medium
+    } else {
+        CanonicalRisk::Low
     }
 }
 

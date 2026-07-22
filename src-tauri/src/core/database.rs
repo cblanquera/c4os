@@ -32,6 +32,8 @@ pub const MAX_SNAPSHOT_TEXT_BYTES: usize = 4_194_304;
 pub const MAX_RUNTIME_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
 pub const MAX_EXTENSION_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
 pub const MAX_EXTENSION_EVENTS: usize = 1_000_000;
+pub const MAX_MCP_DOCUMENT_BYTES: usize = 8 * 1_024 * 1_024;
+pub const MAX_MCP_EVENTS: usize = 1_000_000;
 pub const MAX_SESSION_DOCUMENT_BYTES: usize = 64 * 1_024 * 1_024;
 pub const MAX_ARTIFACT_DOCUMENT_BYTES: usize = 16 * 1_024 * 1_024;
 pub const MAX_ARTIFACT_UI_DOCUMENT_BYTES: usize = 64 * 1_024;
@@ -44,7 +46,7 @@ pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
-const APP_SCHEMA_VERSION: usize = 7;
+const APP_SCHEMA_VERSION: usize = 8;
 const WORKSPACE_SCHEMA_VERSION: usize = 5;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -377,6 +379,36 @@ pub struct ExtensionEventPage {
     pub next_before_event_id: Option<u64>,
 }
 
+/// Strict MCP service state. One transition replaces this document and
+/// appends its matching immutable event in the same writer transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpStateDocumentRecord {
+    pub generation: u64,
+    pub canonical_document: String,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpEventRecord {
+    pub event_id: u64,
+    pub generation: u64,
+    pub lifecycle_generation: u64,
+    pub operation_id: String,
+    pub server_id: String,
+    pub event_kind: String,
+    pub target: Option<String>,
+    pub result: String,
+    pub canonical_document: String,
+    pub occurred_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpEventPage {
+    pub events: Vec<McpEventRecord>,
+    /// Pass this exclusive event identifier to the next page request.
+    pub next_before_event_id: Option<u64>,
+}
+
 /// Complete strict session JSON. The session domain validates every immutable
 /// child record before create or compare-and-swap.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -617,6 +649,12 @@ enum WriteCommand {
     SaveExtensionTransition {
         state: ExtensionStateDocumentRecord,
         event: ExtensionEventRecord,
+        expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    SaveMcpTransition {
+        state: McpStateDocumentRecord,
+        event: McpEventRecord,
         expected_generation: Option<u64>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
@@ -986,6 +1024,44 @@ impl DatabaseActor {
         let connection = open_read_connection(&self.descriptor.path)?;
         connection.execute_batch("BEGIN DEFERRED")?;
         read_extension_event_page(&connection, before_event_id, query)
+    }
+
+    pub fn save_mcp_transition(
+        &self,
+        state: McpStateDocumentRecord,
+        event: McpEventRecord,
+        expected_generation: Option<u64>,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        self.request(|reply| WriteCommand::SaveMcpTransition {
+            state,
+            event,
+            expected_generation,
+            reply,
+        })
+    }
+
+    pub fn mcp_state_document(&self) -> DatabaseResult<Option<McpStateDocumentRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_mcp_state_document(&connection)
+    }
+
+    pub fn mcp_event_page(
+        &self,
+        before_event_id: Option<u64>,
+        query: SnapshotQuery,
+    ) -> DatabaseResult<McpEventPage> {
+        self.require_app()?;
+        if before_event_id == Some(0) {
+            return Err(DatabaseError::InvalidInput(
+                "MCP event cursor must be positive".into(),
+            ));
+        }
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        read_mcp_event_page(&connection, before_event_id, query)
     }
 
     pub fn save_conversation_state(
@@ -1401,6 +1477,15 @@ fn writer_loop(
             } => reply_result(
                 reply,
                 write_extension_transition(&mut connection, state, event, expected_generation),
+            ),
+            WriteCommand::SaveMcpTransition {
+                state,
+                event,
+                expected_generation,
+                reply,
+            } => reply_result(
+                reply,
+                write_mcp_transition(&mut connection, state, event, expected_generation),
             ),
             WriteCommand::SaveConversationState {
                 record,
@@ -1886,6 +1971,35 @@ fn app_migrations() -> Migrations<'static> {
                 ON extension_events(package_id, event_id DESC);",
         )
         .comment("app-owned ExtensionService state and append-only lifecycle journal"),
+        M::up(
+            "CREATE TABLE mcp_state (
+                singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms > 0)
+            );
+            CREATE TABLE mcp_events (
+                event_id INTEGER PRIMARY KEY NOT NULL CHECK (event_id > 0),
+                generation INTEGER NOT NULL CHECK (generation > 0),
+                lifecycle_generation INTEGER NOT NULL CHECK (lifecycle_generation >= 0),
+                operation_id TEXT NOT NULL,
+                server_id TEXT NOT NULL,
+                event_kind TEXT NOT NULL,
+                target TEXT,
+                result TEXT NOT NULL,
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                occurred_at_ms INTEGER NOT NULL CHECK (occurred_at_ms > 0),
+                CHECK ((server_id = 'mcp-service' AND lifecycle_generation = 0)
+                    OR (server_id <> 'mcp-service' AND lifecycle_generation > 0))
+            );
+            CREATE INDEX mcp_events_generation
+                ON mcp_events(generation DESC, event_id DESC);
+            CREATE INDEX mcp_events_server
+                ON mcp_events(server_id, lifecycle_generation DESC, event_id DESC);",
+        )
+        .comment("app-owned MCP service state and append-only lifecycle journal"),
     ])
 }
 
@@ -2460,6 +2574,8 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
             "runtime_state_documents",
             "extension_state",
             "extension_events",
+            "mcp_state",
+            "mcp_events",
             "durable_generation",
         ],
         DatabaseKind::Workspace { .. } => &[
@@ -2495,6 +2611,7 @@ fn validate_database(connection: &Connection, kind: &DatabaseKind) -> DatabaseRe
         validate_security_journal(connection)?;
         validate_runtime_state_documents(connection)?;
         validate_extension_documents(connection)?;
+        validate_mcp_documents(connection)?;
     } else if let DatabaseKind::Workspace { workspace_id } = kind {
         validate_session_documents(connection, workspace_id)?;
         let _ = read_conversation_state(connection, workspace_id)?;
@@ -2553,6 +2670,32 @@ fn validate_extension_documents(connection: &Connection) -> DatabaseResult<()> {
         }
         _ => Err(DatabaseError::Validation(
             "extension current state and append-only journal are inconsistent".into(),
+        )),
+    }
+}
+
+fn validate_mcp_documents(connection: &Connection) -> DatabaseResult<()> {
+    let state = read_mcp_state_document(connection)?;
+    let event_count: i64 =
+        connection.query_row("SELECT COUNT(*) FROM mcp_events", [], |row| row.get(0))?;
+    if !(0..=MAX_MCP_EVENTS as i64).contains(&event_count) {
+        return Err(DatabaseError::Validation(format!(
+            "MCP event count {event_count} exceeds {MAX_MCP_EVENTS}"
+        )));
+    }
+    let newest_event = read_mcp_event_page(connection, None, SnapshotQuery::new(1)?)?
+        .events
+        .into_iter()
+        .next();
+    match (state, newest_event) {
+        (None, None) => Ok(()),
+        (Some(state), Some(event))
+            if state.generation == event.generation && event.event_id > 0 =>
+        {
+            Ok(())
+        }
+        _ => Err(DatabaseError::Validation(
+            "MCP current state and append-only journal are inconsistent".into(),
         )),
     }
 }
@@ -3301,6 +3444,310 @@ fn write_extension_transition(
     let state_document_sha256 = canonical_document_digest(&state.canonical_document);
     transaction.execute(
         "INSERT INTO extension_state(
+            singleton, generation, canonical_document, document_sha256, updated_at_ms
+         ) VALUES (1, ?1, ?2, ?3, ?4)
+         ON CONFLICT(singleton) DO UPDATE SET
+            generation = excluded.generation,
+            canonical_document = excluded.canonical_document,
+            document_sha256 = excluded.document_sha256,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            generation,
+            state.canonical_document,
+            state_document_sha256,
+            updated_at_ms,
+        ],
+    )?;
+    let durable_generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn read_mcp_state_document(
+    connection: &Connection,
+) -> DatabaseResult<Option<McpStateDocumentRecord>> {
+    let raw = connection
+        .query_row(
+            "SELECT generation, canonical_document, document_sha256, updated_at_ms
+             FROM mcp_state WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(
+        |(generation, canonical_document, stored_digest, updated_at_ms)| {
+            validate_text_field(
+                "MCP canonical document",
+                &canonical_document,
+                MAX_MCP_DOCUMENT_BYTES,
+            )?;
+            if canonical_document.is_empty()
+                || stored_digest != canonical_document_digest(&canonical_document)
+            {
+                return Err(DatabaseError::Validation(
+                    "MCP state document digest mismatch".into(),
+                ));
+            }
+            let generation = generation_to_u64(generation)?;
+            let updated_at_ms = generation_to_u64(updated_at_ms)?;
+            if generation == 0 || updated_at_ms == 0 {
+                return Err(DatabaseError::Validation(
+                    "MCP state generation and timestamp must be positive".into(),
+                ));
+            }
+            Ok(McpStateDocumentRecord {
+                generation,
+                canonical_document,
+                updated_at_ms,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn read_mcp_event_page(
+    connection: &Connection,
+    before_event_id: Option<u64>,
+    query: SnapshotQuery,
+) -> DatabaseResult<McpEventPage> {
+    let cursor = before_event_id
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                DatabaseError::InvalidInput("MCP event cursor exceeds SQLite range".into())
+            })
+        })
+        .transpose()?;
+    let limit = i64::try_from(query.max_records + 1)
+        .map_err(|_| DatabaseError::InvalidInput("MCP event limit overflow".into()))?;
+    let mut statement = connection.prepare(
+        "SELECT event_id, generation, lifecycle_generation, operation_id,
+                server_id, event_kind, target, result, canonical_document,
+                document_sha256, occurred_at_ms
+         FROM mcp_events
+         WHERE (?1 IS NULL OR event_id < ?1)
+         ORDER BY event_id DESC
+         LIMIT ?2",
+    )?;
+    let rows = statement.query_map(params![cursor, limit], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, i64>(10)?,
+        ))
+    })?;
+    let mut events = Vec::new();
+    for row in rows {
+        let (
+            event_id,
+            generation,
+            lifecycle_generation,
+            operation_id,
+            server_id,
+            event_kind,
+            target,
+            result,
+            canonical_document,
+            stored_digest,
+            occurred_at_ms,
+        ) = row?;
+        validate_mcp_event_fields(
+            &operation_id,
+            &server_id,
+            &event_kind,
+            target.as_deref(),
+            &result,
+            &canonical_document,
+        )?;
+        if stored_digest != canonical_document_digest(&canonical_document) {
+            return Err(DatabaseError::Validation(format!(
+                "MCP event {event_id} digest mismatch"
+            )));
+        }
+        let lifecycle_generation = generation_to_u64(lifecycle_generation)?;
+        if (server_id == "mcp-service") != (lifecycle_generation == 0) {
+            return Err(DatabaseError::Validation(
+                "MCP lifecycle generation does not match its server identity".into(),
+            ));
+        }
+        events.push(McpEventRecord {
+            event_id: generation_to_u64(event_id)?,
+            generation: generation_to_u64(generation)?,
+            lifecycle_generation,
+            operation_id,
+            server_id,
+            event_kind,
+            target,
+            result,
+            canonical_document,
+            occurred_at_ms: generation_to_u64(occurred_at_ms)?,
+        });
+    }
+    let next_before_event_id =
+        (events.len() > query.max_records).then(|| events[query.max_records - 1].event_id);
+    events.truncate(query.max_records);
+    Ok(McpEventPage {
+        events,
+        next_before_event_id,
+    })
+}
+
+fn validate_mcp_event_fields(
+    operation_id: &str,
+    server_id: &str,
+    event_kind: &str,
+    target: Option<&str>,
+    result: &str,
+    canonical_document: &str,
+) -> DatabaseResult<()> {
+    for (label, value) in [
+        ("MCP operation_id", operation_id),
+        ("MCP server_id", server_id),
+        ("MCP event_kind", event_kind),
+        ("MCP event result", result),
+    ] {
+        require_nonempty(label, value)?;
+        validate_text_field(label, value, 255)?;
+    }
+    if let Some(target) = target {
+        require_nonempty("MCP event target", target)?;
+        validate_text_field("MCP event target", target, MAX_TEXT_FIELD_BYTES)?;
+    }
+    validate_text_field(
+        "MCP event document",
+        canonical_document,
+        MAX_MCP_DOCUMENT_BYTES,
+    )?;
+    if canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "MCP event document cannot be empty".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_mcp_transition(
+    connection: &mut Connection,
+    state: McpStateDocumentRecord,
+    event: McpEventRecord,
+    expected_generation: Option<u64>,
+) -> DatabaseResult<u64> {
+    validate_text_field(
+        "MCP canonical document",
+        &state.canonical_document,
+        MAX_MCP_DOCUMENT_BYTES,
+    )?;
+    if state.generation == 0 || state.updated_at_ms == 0 || state.canonical_document.is_empty() {
+        return Err(DatabaseError::InvalidInput(
+            "MCP state generation, timestamp, and document must be non-empty".into(),
+        ));
+    }
+    if event.event_id == 0
+        || event.generation != state.generation
+        || (event.server_id == "mcp-service") != (event.lifecycle_generation == 0)
+        || event.occurred_at_ms == 0
+    {
+        return Err(DatabaseError::InvalidInput(
+            "MCP event identity must match the positive state generation".into(),
+        ));
+    }
+    validate_mcp_event_fields(
+        &event.operation_id,
+        &event.server_id,
+        &event.event_kind,
+        event.target.as_deref(),
+        &event.result,
+        &event.canonical_document,
+    )?;
+    let generation = i64::try_from(state.generation)
+        .map_err(|_| DatabaseError::InvalidInput("MCP generation overflow".into()))?;
+    let lifecycle_generation = i64::try_from(event.lifecycle_generation)
+        .map_err(|_| DatabaseError::InvalidInput("MCP lifecycle generation overflow".into()))?;
+    let updated_at_ms = i64::try_from(state.updated_at_ms)
+        .map_err(|_| DatabaseError::InvalidInput("MCP timestamp overflow".into()))?;
+    let event_id = i64::try_from(event.event_id)
+        .map_err(|_| DatabaseError::InvalidInput("MCP event identifier overflow".into()))?;
+    let occurred_at_ms = i64::try_from(event.occurred_at_ms)
+        .map_err(|_| DatabaseError::InvalidInput("MCP event timestamp overflow".into()))?;
+
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current_generation = transaction
+        .query_row(
+            "SELECT generation FROM mcp_state WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(generation_to_u64)
+        .transpose()?;
+    match (current_generation, expected_generation) {
+        (None, None) => {}
+        (Some(current), Some(expected)) if current == expected && state.generation > current => {}
+        (actual, expected) => {
+            return Err(DatabaseError::Conflict(format!(
+                "MCP state expected generation {expected:?}, found {actual:?}"
+            )));
+        }
+    }
+    let previous_event_id = transaction
+        .query_row("SELECT MAX(event_id) FROM mcp_events", [], |row| {
+            row.get::<_, Option<i64>>(0)
+        })?
+        .map(generation_to_u64)
+        .transpose()?
+        .unwrap_or(0);
+    if event.event_id != previous_event_id.saturating_add(1) {
+        return Err(DatabaseError::Conflict(format!(
+            "MCP event expected identifier {}, found {}",
+            previous_event_id.saturating_add(1),
+            event.event_id
+        )));
+    }
+    let event_count: i64 =
+        transaction.query_row("SELECT COUNT(*) FROM mcp_events", [], |row| row.get(0))?;
+    if event_count >= MAX_MCP_EVENTS as i64 {
+        return Err(DatabaseError::Validation(
+            "MCP event journal is full".into(),
+        ));
+    }
+    let event_document_sha256 = canonical_document_digest(&event.canonical_document);
+    transaction.execute(
+        "INSERT INTO mcp_events(
+            event_id, generation, lifecycle_generation, operation_id,
+            server_id, event_kind, target, result, canonical_document,
+            document_sha256, occurred_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            event_id,
+            generation,
+            lifecycle_generation,
+            event.operation_id,
+            event.server_id,
+            event.event_kind,
+            event.target,
+            event.result,
+            event.canonical_document,
+            event_document_sha256,
+            occurred_at_ms,
+        ],
+    )?;
+    let state_document_sha256 = canonical_document_digest(&state.canonical_document);
+    transaction.execute(
+        "INSERT INTO mcp_state(
             singleton, generation, canonical_document, document_sha256, updated_at_ms
          ) VALUES (1, ?1, ?2, ?3, ?4)
          ON CONFLICT(singleton) DO UPDATE SET

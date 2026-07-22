@@ -118,6 +118,19 @@ export type ConversationTurnProjection = {
     readonly detail?: string;
     readonly state: "running" | "completed" | "failed";
   }[];
+  readonly mcpProvenance?: {
+    readonly snapshotId: string;
+    readonly serverCount: number;
+    readonly toolCount: number;
+    readonly omittedToolCount: number;
+    readonly truncated: boolean;
+    readonly tools: readonly {
+      readonly serverId: string;
+      readonly sourceKind: "user" | "plugin";
+      readonly sourceId: string | null;
+      readonly toolName: string;
+    }[];
+  };
 };
 
 export type ConversationProjection = {

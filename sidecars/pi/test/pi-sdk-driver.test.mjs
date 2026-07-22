@@ -34,6 +34,156 @@ test("model preflight resolves the exact local Pi catalog pair without Agent or 
   assert.equal(sdk.providerCalls, 0);
 });
 
+test("SDK sampling forwards exact controls through streamSimple and releases one-shot credentials", async () => {
+  const released = [];
+  const claims = [];
+  const credentialBroker = {
+    claimForOperation: async (identity, provider) => {
+      claims.push([globalThis.structuredClone(identity), provider]);
+      return {
+        get: (requested) =>
+          requested === "openai" ? "operation-credential" : undefined,
+        release: () => released.push(true),
+      };
+    },
+  };
+  const sdk = fakeSdk();
+  sdk.streamSimple = (model, context, options) => {
+    sdk.lastSampling = { model, context, options };
+    return {
+      result: async () => ({
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "private" },
+          { type: "text", text: "sampled" },
+        ],
+        provider: "openai",
+        model: "gpt-4o-mini",
+        responseModel: "gpt-4o-mini-2026-07-01",
+        stopReason: "length",
+      }),
+    };
+  };
+  const driver = new PiSdkDriver({ credentialBroker, sdk });
+  const session = await driver.createSession({
+    ...sessionOptions(),
+    tools: [],
+    beforeToolCall: async () => ({ block: true }),
+    consumeBrokeredResult: () => undefined,
+  });
+  const identity = credentialRunIdentity();
+  const result = await session.sample({
+    messages: [
+      { role: "user", text: "Question" },
+      { role: "assistant", text: "Prior answer" },
+    ],
+    systemPrompt: "System",
+    maxTokens: 99,
+    temperature: 0.2,
+    runIdentity: identity,
+  });
+  assert.deepEqual(result, {
+    text: "sampled",
+    model: "gpt-4o-mini",
+    stopReason: "maxTokens",
+  });
+  assert.equal(sdk.lastSampling.options.apiKey, "operation-credential");
+  assert.equal(sdk.lastSampling.options.maxTokens, 99);
+  assert.equal(sdk.lastSampling.options.temperature, 0.2);
+  assert.equal(sdk.lastSampling.options.maxRetries, 0);
+  assert.equal(sdk.lastSampling.context.systemPrompt, "System");
+  assert.equal(sdk.lastSampling.context.tools.length, 0);
+  assert.equal(sdk.lastSampling.context.messages[0].role, "user");
+  assert.equal(sdk.lastSampling.context.messages[1].role, "assistant");
+  assert.deepEqual(claims, [[identity, "openai"]]);
+  assert.equal(released.length, 1);
+});
+
+test("sampling cancellation waits for native settlement and credential release without mutating Agent messages", async () => {
+  const released = [];
+  const credentialBroker = {
+    claimForOperation: async () => ({
+      get: () => "operation-credential",
+      release: () => released.push(true),
+    }),
+  };
+  const sdk = fakeSdk();
+  let rejectResult;
+  sdk.streamSimple = (_model, _context, options) => {
+    sdk.lastSamplingSignal = options.signal;
+    return {
+      result: () =>
+        new Promise((_resolve, reject) => {
+          rejectResult = reject;
+        }),
+    };
+  };
+  const driver = new PiSdkDriver({ credentialBroker, sdk });
+  const session = await driver.createSession({
+    ...sessionOptions(),
+    tools: [],
+    beforeToolCall: async () => ({ block: true }),
+    consumeBrokeredResult: () => undefined,
+  });
+  const sampling = session.sample({
+    messages: [{ role: "user", text: "Keep this out of Chat state" }],
+    maxTokens: 8,
+    runIdentity: credentialRunIdentity(),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let abortSettled = false;
+  const abort = session.abortSampling().then(() => {
+    abortSettled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sdk.lastSamplingSignal.aborted, true);
+  assert.equal(abortSettled, false);
+  assert.equal(released.length, 0);
+  rejectResult(new Error("native stream acknowledged abort"));
+  await assert.rejects(sampling, /acknowledged abort/);
+  await abort;
+  assert.equal(abortSettled, true);
+  assert.equal(released.length, 1);
+  assert.deepEqual(sdk.lastAgent.options.initialState.messages, []);
+});
+
+test("sampling rejects unsupported native terminal reasons and releases its credential", async () => {
+  const released = [];
+  const credentialBroker = {
+    claimForOperation: async () => ({
+      get: () => "operation-credential",
+      release: () => released.push(true),
+    }),
+  };
+  const sdk = fakeSdk();
+  sdk.streamSimple = () => ({
+    result: async () => ({
+      role: "assistant",
+      content: [{ type: "text", text: "must not be accepted" }],
+      provider: "openai",
+      model: "gpt-4o-mini",
+      responseModel: "gpt-4o-mini",
+      stopReason: "toolUse",
+    }),
+  });
+  const driver = new PiSdkDriver({ credentialBroker, sdk });
+  const session = await driver.createSession({
+    ...sessionOptions(),
+    tools: [],
+    beforeToolCall: async () => ({ block: true }),
+    consumeBrokeredResult: () => undefined,
+  });
+  await assert.rejects(
+    session.sample({
+      messages: [{ role: "user", text: "Question" }],
+      maxTokens: 8,
+      runIdentity: credentialRunIdentity(),
+    }),
+    /unsupported stop reason/,
+  );
+  assert.equal(released.length, 1);
+});
+
 test("test TLS trust routes require the exact C4OS profile, native provider, and base URL", async () => {
   const routes = [
     {
@@ -219,6 +369,49 @@ test("SDK driver exposes only supplied C4OS tools and blocks before every tool b
     sdk.lastAgent.options.initialState.systemPrompt,
     /C4OS owns policy, effects, credentials, and persistence/,
   );
+});
+
+test("dispatch cancellation waits through credential claim and prevents a late native prompt", async () => {
+  const released = [];
+  let deliverCredential;
+  const credentialBroker = {
+    claimForOperation: () =>
+      new Promise((resolve) => {
+        deliverCredential = () =>
+          resolve({
+            get: () => "late-operation-credential",
+            release: () => released.push(true),
+          });
+      }),
+  };
+  const sdk = fakeSdk();
+  const driver = new PiSdkDriver({ credentialBroker, sdk });
+  const session = await driver.createSession({
+    ...sessionOptions(),
+    tools: [],
+    beforeToolCall: async () => ({ block: true }),
+    consumeBrokeredResult: () => undefined,
+  });
+
+  const dispatch = session.dispatch({
+    input: "must-never-reach-prompt",
+    runIdentity: credentialRunIdentity(),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let abortSettled = false;
+  const abort = session.abort().then(() => {
+    abortSettled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(abortSettled, false);
+  assert.equal(sdk.lastAgent.lastPrompt, undefined);
+
+  deliverCredential();
+  await assert.rejects(dispatch, /aborted/i);
+  await abort;
+  assert.equal(abortSettled, true);
+  assert.equal(sdk.lastAgent.lastPrompt, undefined);
+  assert.equal(released.length, 1);
 });
 
 test("SDK driver sends verified image content through the exact native image API", async () => {

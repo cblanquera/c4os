@@ -13,6 +13,16 @@ use c4os_lib::extension::{
         ExtensionSkillInput, MarketplaceSourceInput, SkillInstructionsSnapshot,
     },
 };
+use c4os_lib::mcp::{
+    McpCapabilitySnapshot, McpDefinitionSource, McpEnvironmentBinding, McpEnvironmentSource,
+    McpHeaderBinding, McpHeaderSource, McpInvocationSnapshot, McpInvocationStatus, McpLifecycle,
+    McpPendingTrustApproval, McpResourceReadInput, McpResourceSnapshot, McpScope,
+    McpSecretReference, McpServerDefinitionInput, McpServerMutationInput, McpServerRevocationInput,
+    McpServerSnapshot, McpServiceSnapshot, McpToolCallInput, McpToolSnapshot,
+    McpTransportDefinition, McpTransportKind, McpTrustApprovalAnswer, McpTrustApprovalInput,
+    McpTrustApprovalState, McpTrustRequestInput, McpTrustRequestStatus, McpTrustResponse,
+    McpTrustState, McpWorkingDirectory,
+};
 use protocol::*;
 use std::collections::BTreeMap;
 use std::fs;
@@ -640,6 +650,29 @@ fn terminal_operation_inputs_bind_process_generation_and_reject_controls() {
 }
 
 #[test]
+fn mcp_definition_rejects_renderer_authored_trust() {
+    let forged = serde_json::json!({
+        "expectedGeneration": 1,
+        "serverId": "forged.trust",
+        "displayName": "Forged trust",
+        "scope": { "kind": "application" },
+        "transport": {
+            "kind": "stdio",
+            "command": "/usr/bin/false",
+            "arguments": [],
+            "environment": [],
+            "workingDirectory": { "kind": "c4osHome" },
+            "executableSha256": format!("sha256:{}", "0".repeat(64)),
+        },
+        "trusted": true,
+        "timeoutMs": 30_000,
+        "maxOutputBytes": 1_048_576,
+    });
+
+    assert!(serde_json::from_value::<McpServerDefinitionInput>(forged).is_err());
+}
+
+#[test]
 fn export_bindings() {
     let output = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/generated");
     let config = Config::default()
@@ -711,6 +744,37 @@ fn export_protocol_types(config: &Config) {
     ExtensionKeyRevocationInput::export_all(config).unwrap();
     ExtensionPublisherLinkInput::export_all(config).unwrap();
     SkillInstructionsSnapshot::export_all(config).unwrap();
+    McpServiceSnapshot::export_all(config).unwrap();
+    McpServerSnapshot::export_all(config).unwrap();
+    McpServerDefinitionInput::export_all(config).unwrap();
+    McpTrustRequestInput::export_all(config).unwrap();
+    McpTrustApprovalInput::export_all(config).unwrap();
+    McpTrustApprovalAnswer::export_all(config).unwrap();
+    McpTrustApprovalState::export_all(config).unwrap();
+    McpPendingTrustApproval::export_all(config).unwrap();
+    McpTrustRequestStatus::export_all(config).unwrap();
+    McpTrustResponse::export_all(config).unwrap();
+    McpServerMutationInput::export_all(config).unwrap();
+    McpServerRevocationInput::export_all(config).unwrap();
+    McpToolCallInput::export_all(config).unwrap();
+    McpResourceReadInput::export_all(config).unwrap();
+    McpInvocationSnapshot::export_all(config).unwrap();
+    McpCapabilitySnapshot::export_all(config).unwrap();
+    McpToolSnapshot::export_all(config).unwrap();
+    McpResourceSnapshot::export_all(config).unwrap();
+    McpTransportDefinition::export_all(config).unwrap();
+    McpTransportKind::export_all(config).unwrap();
+    McpDefinitionSource::export_all(config).unwrap();
+    McpScope::export_all(config).unwrap();
+    McpWorkingDirectory::export_all(config).unwrap();
+    McpSecretReference::export_all(config).unwrap();
+    McpEnvironmentBinding::export_all(config).unwrap();
+    McpEnvironmentSource::export_all(config).unwrap();
+    McpHeaderBinding::export_all(config).unwrap();
+    McpHeaderSource::export_all(config).unwrap();
+    McpTrustState::export_all(config).unwrap();
+    McpLifecycle::export_all(config).unwrap();
+    McpInvocationStatus::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

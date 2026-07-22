@@ -4,10 +4,16 @@ pub mod conversation;
 pub mod core;
 pub mod execution;
 pub mod extension;
+pub mod mcp;
 pub mod platform;
 pub mod protocol;
 pub mod runtime;
 pub mod security;
+
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+mod production_mcp_broker_tests;
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+mod production_mcp_sampling_tests;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use execution::environment::TrustedProjectRoot;
@@ -54,7 +60,8 @@ use protocol::{
     ConversationAttachmentSnapshot, ConversationAttemptSnapshot, ConversationBranchApprovalAnswer,
     ConversationBranchApprovalInput, ConversationBranchControlSnapshot, ConversationBranchInput,
     ConversationBranchOperation, ConversationBranchSnapshot, ConversationDraftInput,
-    ConversationDraftSnapshot, ConversationModelSnapshot, ConversationProjectSnapshot,
+    ConversationDraftSnapshot, ConversationMcpProvenanceSnapshot,
+    ConversationMcpToolProvenanceSnapshot, ConversationModelSnapshot, ConversationProjectSnapshot,
     ConversationRetryInput, ConversationSessionSnapshot, ConversationSessionSummarySnapshot,
     ConversationSnapshot, ConversationSubmitInput, ConversationTurnSnapshot, EnvironmentId,
     FoundationSnapshot, PendingConversationSnapshot, PickerGrantId, ProjectId, ProtocolEnvelope,
@@ -62,13 +69,15 @@ use protocol::{
     StateGeneration, TurnId, WorkspaceId, WorkspaceRecentSnapshot, WorkspaceStartSnapshot,
 };
 use runtime::action_bridge::{
-    RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization, RuntimeExecutionReceipt,
+    RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
+    RuntimeEffectCompletionCertainty, RuntimeEffectResult, RuntimeExecutionReceipt,
     RuntimeGatewayDecision,
 };
-use runtime::broker_worker::BrokerActionApplication;
+use runtime::broker_worker::{BrokerActionApplication, BrokerDeferredStart, BrokerDeferredTicket};
 use runtime::capability::{
     AttachmentMediaType, AttachmentRequirement, CapabilityDescriptor, CapabilityKey,
-    DraftRequirements, NumericCapabilityKey, PolicyPreflight, effective_intersection,
+    DraftRequirements, NumericCapabilityKey, PolicyPreflight, PreflightOutcome,
+    effective_intersection,
 };
 use runtime::capability_evidence::{
     CapabilityEvidenceError, CapabilityEvidenceRegistry, CapabilityRouteEpoch,
@@ -81,9 +90,10 @@ use runtime::dispatch::{
     AppliedDispatchEvent, AttachmentPreflightResolution, BrokerDispatchAuthority,
     CoordinatedCancellation, CoordinatedFirstDispatch, CoordinatedRetryDispatch,
     CoordinatedTurnDispatch, DispatchError, DispatchIdentity, FirstDispatchOptions,
-    RetryDispatchOptions, RuntimeDispatchPeer, RuntimeDispatchRegistry, TurnDispatchOptions,
-    coordinate_cancellation, coordinate_first_dispatch, coordinate_polled_events,
-    coordinate_recovery, coordinate_retry_dispatch, coordinate_turn_dispatch,
+    PeerSamplingRequest, PeerSamplingResult, RetryDispatchOptions, RuntimeDispatchPeer,
+    RuntimeDispatchRegistry, TurnDispatchOptions, coordinate_cancellation,
+    coordinate_first_dispatch, coordinate_polled_events, coordinate_recovery,
+    coordinate_retry_dispatch, coordinate_turn_dispatch,
 };
 use runtime::dispatch_authority::{
     AuthoritativeResource, AuthoritativeResources, AuthorityMintIntent, DispatchAuthorityError,
@@ -95,6 +105,7 @@ use runtime::persistence::{
     DeferredSessionRepository, ProviderStateStore, RuntimeControlPlaneStore,
     RuntimePersistenceError, SupervisorStateStore,
 };
+use runtime::pi::PiSamplingMessage;
 use runtime::provider::{ProviderProbe, ProviderProfile, ProviderTestReport};
 use runtime::session::{
     AttachmentSnapshot, FirstSubmission, MAX_REPLY_SOURCE_EXCERPT_BYTES,
@@ -109,7 +120,7 @@ use security::authorization::{
     CanonicalRisk, LiveAuthorityState,
 };
 use security::gateway::{
-    ApprovalResponse, ExecutionPermit, GatewayProposal, NormalizedActionResult,
+    ActionEffectLease, ApprovalResponse, ExecutionPermit, GatewayProposal, NormalizedActionResult,
     NormalizedActionStatus,
 };
 use security::policy::{
@@ -124,7 +135,7 @@ use std::io::Write as _;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak, atomic::AtomicBool};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -226,10 +237,455 @@ fn production_broker_classification(
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct ProductionMcpDeferredJob {
+    result: std::sync::mpsc::Receiver<RuntimeEffectResult>,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Clone, Default)]
+struct ProductionMcpCancellationRegistry {
+    jobs: Arc<Mutex<BTreeMap<String, ProductionMcpCancellationRegistration>>>,
+    quiescing_servers: Arc<Mutex<BTreeSet<String>>>,
+    credential_servers: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct ProductionMcpCancellationRegistration {
+    server_id: String,
+    cancellation: mcp::transport::McpCancellation,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl ProductionMcpCancellationRegistry {
+    fn register(
+        &self,
+        ticket: String,
+        server_id: String,
+        cancellation: mcp::transport::McpCancellation,
+    ) -> Result<(), ()> {
+        let quiescing = self.quiescing_servers.lock().map_err(|_| ())?;
+        if quiescing.contains(&server_id) {
+            return Err(());
+        }
+        let mut jobs = self.jobs.lock().map_err(|_| ())?;
+        if jobs.contains_key(&ticket) {
+            return Err(());
+        }
+        jobs.insert(
+            ticket,
+            ProductionMcpCancellationRegistration {
+                server_id,
+                cancellation,
+            },
+        );
+        Ok(())
+    }
+
+    /// Atomically blocks later registrations before signalling every current
+    /// operation. Lifecycle mutation holds the service mutex while calling
+    /// this, so no execution can cross the quiescing boundary unobserved.
+    fn quiesce_server(&self, server_id: &str) -> usize {
+        let Ok(mut quiescing) = self.quiescing_servers.lock() else {
+            return 0;
+        };
+        quiescing.insert(server_id.to_owned());
+        let cancellations = self
+            .jobs
+            .lock()
+            .map(|jobs| {
+                jobs.values()
+                    .filter(|job| job.server_id == server_id)
+                    .map(|job| job.cancellation.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        drop(quiescing);
+        for cancellation in &cancellations {
+            cancellation.cancel();
+        }
+        cancellations.len()
+    }
+
+    fn allow_server(&self, server_id: &str) {
+        if let Ok(mut quiescing) = self.quiescing_servers.lock() {
+            quiescing.remove(server_id);
+        }
+    }
+
+    fn complete(&self, ticket: &str) {
+        if let Ok(mut jobs) = self.jobs.lock() {
+            jobs.remove(ticket);
+        }
+    }
+
+    fn cancel_ticket(&self, ticket: &str) -> bool {
+        self.jobs
+            .lock()
+            .ok()
+            .and_then(|jobs| jobs.get(ticket).map(|job| job.cancellation.clone()))
+            .is_some_and(|cancellation| {
+                cancellation.cancel();
+                true
+            })
+    }
+
+    fn refresh_credential_bindings(&self, snapshot: &mcp::McpServiceSnapshot) {
+        let mut bindings = BTreeMap::<String, BTreeSet<String>>::new();
+        for server in &snapshot.servers {
+            for reference in mcp_server_vault_references(server) {
+                bindings
+                    .entry(reference)
+                    .or_default()
+                    .insert(server.server_id.clone());
+            }
+        }
+        if let Ok(mut current) = self.credential_servers.lock() {
+            *current = bindings;
+        }
+    }
+
+    fn cancel_credential(&self, credential_reference: &str) -> usize {
+        let servers = self
+            .credential_servers
+            .lock()
+            .ok()
+            .and_then(|bindings| bindings.get(credential_reference).cloned())
+            .unwrap_or_default();
+        servers
+            .iter()
+            .map(|server_id| self.quiesce_server(server_id))
+            .sum()
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn mcp_server_vault_references(server: &mcp::McpServerSnapshot) -> BTreeSet<String> {
+    let mut references = BTreeSet::new();
+    let mut include = |secret: &mcp::McpSecretReference| {
+        if let mcp::McpSecretReference::Vault {
+            credential_reference,
+        } = secret
+        {
+            references.insert(credential_reference.clone());
+        }
+    };
+    match &server.transport {
+        mcp::McpTransportDefinition::Stdio { environment, .. } => {
+            for binding in environment {
+                if let mcp::McpEnvironmentSource::Secret { reference } = &binding.source {
+                    include(reference);
+                }
+            }
+        }
+        mcp::McpTransportDefinition::StreamableHttp {
+            bearer, headers, ..
+        } => {
+            if let Some(bearer) = bearer {
+                include(bearer);
+            }
+            for header in headers {
+                if let mcp::McpHeaderSource::Secret { reference } = &header.source {
+                    include(reference);
+                }
+            }
+        }
+    }
+    references
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct ProductionMcpDeferredFacility<R, A, F>
+where
+    R: mcp::service::McpRepository,
+    A: mcp::service::McpAuthority,
+    F: mcp::transport::McpTransportFactory,
+{
+    service: Arc<tokio::sync::Mutex<mcp::service::McpService<R, A, F>>>,
+    cancellations: ProductionMcpCancellationRegistry,
+    sampling_parents: mcp::production_sampling::McpSamplingParentRegistry,
+    jobs: BTreeMap<String, ProductionMcpDeferredJob>,
+    next_ticket: u64,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl<R, A, F> ProductionMcpDeferredFacility<R, A, F>
+where
+    R: mcp::service::McpRepository,
+    A: mcp::service::McpAuthority,
+    F: mcp::transport::McpTransportFactory,
+{
+    fn new(
+        service: Arc<tokio::sync::Mutex<mcp::service::McpService<R, A, F>>>,
+        cancellations: ProductionMcpCancellationRegistry,
+        sampling_parents: mcp::production_sampling::McpSamplingParentRegistry,
+    ) -> Self {
+        Self {
+            service,
+            cancellations,
+            sampling_parents,
+            jobs: BTreeMap::new(),
+            next_ticket: 1,
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl<R, A, F> runtime::opencode_broker::InstalledDeferredBrokerFacility
+    for ProductionMcpDeferredFacility<R, A, F>
+where
+    R: mcp::service::McpRepository + 'static,
+    A: mcp::service::McpAuthority + 'static,
+    F: mcp::transport::McpTransportFactory + 'static,
+{
+    fn start(&mut self, permit: ExecutionPermit) -> BrokerDeferredStart {
+        if self.jobs.len() >= 128 {
+            return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "mcp-broker-capacity",
+                permit.consumed_at_ms().saturating_add(1),
+            ));
+        }
+        let ticket_value = format!("mcp-job-{}", self.next_ticket);
+        self.next_ticket = self.next_ticket.saturating_add(1).max(1);
+        let ticket = match BrokerDeferredTicket::new(ticket_value.clone()) {
+            Ok(ticket) => ticket,
+            Err(_) => {
+                return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                    "mcp-broker-ticket-invalid",
+                    permit.consumed_at_ms().saturating_add(1),
+                ));
+            }
+        };
+        let cancellation = mcp::transport::McpCancellation::default();
+        let task_cancellation = cancellation.clone();
+        let service = Arc::clone(&self.service);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let started_at_ms = permit.consumed_at_ms();
+        let canonical_target = permit.action().canonical_target.clone();
+        let server_id = permit
+            .action()
+            .arguments
+            .get("resolved")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|resolved| resolved.get("serverId"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let Some(_server_id) = server_id else {
+            return BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+                "mcp-broker-server-binding-invalid",
+                started_at_ms.saturating_add(1),
+            ));
+        };
+        let cancellations = self.cancellations.clone();
+        let sampling_parents = self.sampling_parents.clone();
+        let parent_action = permit.action().clone();
+        let task_ticket = ticket_value.clone();
+        tauri::async_runtime::spawn(async move {
+            let prepared = service
+                .lock()
+                .await
+                .begin_tool_pre_authorized(&permit, started_at_ms);
+            let invocation = match prepared {
+                Ok(prepared) => {
+                    let server_id = prepared.server_id().to_owned();
+                    if cancellations
+                        .register(
+                            task_ticket.clone(),
+                            server_id.clone(),
+                            task_cancellation.clone(),
+                        )
+                        .is_err()
+                    {
+                        task_cancellation.cancel();
+                    }
+                    let parent_guard = sampling_parents.register(&server_id, parent_action);
+                    let raw = match parent_guard {
+                        Ok(_guard) => prepared.execute(task_cancellation).await,
+                        Err(error) => Err(error),
+                    };
+                    service
+                        .lock()
+                        .await
+                        .finish_tool_pre_authorized(prepared, raw, started_at_ms)
+                        .await
+                }
+                Err(error) => Err(error),
+            };
+            cancellations.complete(&task_ticket);
+            let result = production_mcp_effect_result(
+                invocation,
+                canonical_target,
+                started_at_ms.saturating_add(1),
+            );
+            let _ = sender.send(result);
+        });
+        self.jobs
+            .insert(ticket_value, ProductionMcpDeferredJob { result: receiver });
+        BrokerDeferredStart::Started(ticket)
+    }
+
+    fn poll(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+        let job = self.jobs.get(ticket.as_str())?;
+        match job.result.try_recv() {
+            Ok(result) => {
+                self.jobs.remove(ticket.as_str());
+                self.cancellations.complete(ticket.as_str());
+                Some(result)
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.jobs.remove(ticket.as_str());
+                self.cancellations.complete(ticket.as_str());
+                Some(production_mcp_effect_result(
+                    Err(mcp::McpError::StateUnavailable),
+                    "mcp-tool:unknown".into(),
+                    1,
+                ))
+            }
+        }
+    }
+
+    fn cancel(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        self.jobs.contains_key(ticket.as_str()) && self.cancellations.cancel_ticket(ticket.as_str())
+    }
+
+    fn abandon(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        let existed = self.jobs.remove(ticket.as_str()).is_some();
+        let cancelled = self.cancellations.cancel_ticket(ticket.as_str());
+        self.cancellations.complete(ticket.as_str());
+        existed || cancelled
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl<R, A, F> Drop for ProductionMcpDeferredFacility<R, A, F>
+where
+    R: mcp::service::McpRepository,
+    A: mcp::service::McpAuthority,
+    F: mcp::transport::McpTransportFactory,
+{
+    fn drop(&mut self) {
+        for ticket in self.jobs.keys() {
+            let _ = self.cancellations.cancel_ticket(ticket);
+            self.cancellations.complete(ticket);
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn production_mcp_effect_result(
+    invocation: Result<mcp::McpInvocationSnapshot, mcp::McpError>,
+    canonical_target: String,
+    fallback_completed_at_ms: u64,
+) -> RuntimeEffectResult {
+    match invocation {
+        Ok(invocation) => {
+            let mut payload =
+                runtime::opencode_sdk::sanitize_broker_result_payload(invocation.redacted_content);
+            let mut encoded = serde_json::to_vec(&payload).unwrap_or_default();
+            let broker_output_limited = encoded.is_empty()
+                || encoded.len() > runtime::action_bridge::MAX_BROKER_MODEL_PAYLOAD_BYTES;
+            if broker_output_limited {
+                payload = serde_json::json!({
+                    "error": { "code": "broker_output_limit_exceeded" }
+                });
+                encoded = serde_json::to_vec(&payload).unwrap_or_default();
+            }
+            let output_sha256 = sha256_bytes(&encoded);
+            let result_code = if broker_output_limited {
+                "mcp-tool-output-limited"
+            } else {
+                match invocation.status {
+                    mcp::McpInvocationStatus::Succeeded => "mcp-tool-succeeded",
+                    mcp::McpInvocationStatus::Failed => "mcp-tool-failed",
+                    mcp::McpInvocationStatus::Cancelled => "mcp-tool-cancelled",
+                    mcp::McpInvocationStatus::TimedOut => "mcp-tool-timed-out",
+                    mcp::McpInvocationStatus::OutputLimitExceeded => "mcp-tool-output-limited",
+                    mcp::McpInvocationStatus::Denied => "mcp-tool-denied",
+                    mcp::McpInvocationStatus::Stale => "mcp-tool-stale",
+                }
+            };
+            let uncertain = matches!(
+                invocation.status,
+                mcp::McpInvocationStatus::Cancelled | mcp::McpInvocationStatus::TimedOut
+            );
+            RuntimeEffectResult::with_certainty(
+                NormalizedActionResult {
+                    status: if uncertain {
+                        NormalizedActionStatus::UnknownAfterInterruption
+                    } else if invocation.status == mcp::McpInvocationStatus::Succeeded
+                        && !broker_output_limited
+                    {
+                        NormalizedActionStatus::Succeeded
+                    } else {
+                        NormalizedActionStatus::Failed
+                    },
+                    result_code: result_code.into(),
+                    exit_code: None,
+                    changed_targets: vec![canonical_target],
+                    output_sha256: Some(output_sha256),
+                    completed_at_ms: invocation.completed_at_ms.max(1),
+                },
+                Some(payload),
+                if uncertain {
+                    RuntimeEffectCompletionCertainty::Unknown
+                } else {
+                    RuntimeEffectCompletionCertainty::Completed
+                },
+            )
+        }
+        Err(error) => {
+            let (code, certainty) = match error {
+                mcp::McpError::TimedOut => (
+                    "mcp-tool-timed-out",
+                    RuntimeEffectCompletionCertainty::Unknown,
+                ),
+                mcp::McpError::Cancelled
+                | mcp::McpError::Transport(_)
+                | mcp::McpError::Persistence(_)
+                | mcp::McpError::StateUnavailable => (
+                    "mcp-tool-status-unknown",
+                    RuntimeEffectCompletionCertainty::Unknown,
+                ),
+                _ => (
+                    "mcp-tool-rejected",
+                    RuntimeEffectCompletionCertainty::ProvenNotCompleted,
+                ),
+            };
+            let payload = serde_json::json!({ "error": { "code": code } });
+            let encoded = serde_json::to_vec(&payload).unwrap_or_default();
+            RuntimeEffectResult::with_certainty(
+                NormalizedActionResult {
+                    status: if certainty == RuntimeEffectCompletionCertainty::Unknown {
+                        NormalizedActionStatus::UnknownAfterInterruption
+                    } else {
+                        NormalizedActionStatus::Failed
+                    },
+                    result_code: code.into(),
+                    exit_code: None,
+                    changed_targets: Vec::new(),
+                    output_sha256: Some(sha256_bytes(&encoded)),
+                    completed_at_ms: fallback_completed_at_ms.max(1),
+                },
+                Some(payload),
+                certainty,
+            )
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn install_production_broker_facilities(
     bootstrap: &runtime::production::RuntimeProductionBootstrap,
     app: &tauri::AppHandle,
+    mcp: Arc<tokio::sync::Mutex<ProductionMcpService>>,
+    mcp_cancellations: ProductionMcpCancellationRegistry,
+    sampling_parents: mcp::production_sampling::McpSamplingParentRegistry,
 ) -> Result<(), runtime::production::RuntimeProductionError> {
+    bootstrap.install_deferred_broker_facility(Box::new(ProductionMcpDeferredFacility::new(
+        mcp,
+        mcp_cancellations,
+        sampling_parents,
+    )))?;
     bootstrap.install_broker_action(
         "window.focus",
         "main",
@@ -273,10 +729,59 @@ fn initialize_extension_hook_supervisor(
     .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
+type ProductionMcpService = mcp::service::McpService<
+    mcp::database::DatabaseMcpRepository,
+    mcp::authority::ProductionMcpAuthority,
+    mcp::transport::RmcpTransportFactory,
+>;
+
+struct ProductionMcpCredentialObserver {
+    service: Weak<tokio::sync::Mutex<ProductionMcpService>>,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    cancellations: ProductionMcpCancellationRegistry,
+}
+
+impl security::credentials::CredentialMutationObserver for ProductionMcpCredentialObserver {
+    fn credential_mutated(
+        &self,
+        credential_reference: &security::credentials::CredentialReference,
+        kind: security::credentials::CredentialMutationKind,
+    ) {
+        let Some(service) = self.service.upgrade() else {
+            return;
+        };
+        let credential_reference = credential_reference.to_string();
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        self.cancellations.cancel_credential(&credential_reference);
+        let reason = match kind {
+            security::credentials::CredentialMutationKind::Replaced => "credential_replaced",
+            security::credentials::CredentialMutationKind::Removed => "credential_removed",
+        };
+        tauri::async_runtime::spawn(async move {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .and_then(|duration| duration.as_millis().try_into().ok())
+                .unwrap_or(1);
+            let _ = service
+                .lock()
+                .await
+                .invalidate_credential_reference(&credential_reference, reason, now_ms)
+                .await;
+        });
+    }
+}
+
 struct AppCoreState {
     database: Arc<core::database::DatabaseActor>,
     c4os_home: PathBuf,
     bundled_skill_root: PathBuf,
+    mcp: Arc<tokio::sync::Mutex<ProductionMcpService>>,
+    _mcp_credential_observer: Option<Arc<dyn security::credentials::CredentialMutationObserver>>,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    mcp_cancellations: ProductionMcpCancellationRegistry,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    mcp_sampling_approvals: mcp::production_sampling::ProductionMcpSamplingApprovalRegistry,
     extensions: Mutex<extension::service::ExtensionService>,
     hook_supervisor: Mutex<Option<extension::hook::HookSupervisor>>,
     configuration: Mutex<core::services::ManagedAppConfiguration>,
@@ -1065,6 +1570,18 @@ struct RuntimeApprovalSummary {
     runtime_id: String,
     correlation_id: String,
     prompt_id: String,
+    approval_kind: String,
+    summary: String,
+    server_id: Option<String>,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+    max_tokens: Option<u32>,
+    expires_at_ms: Option<u64>,
+    message_count: Option<usize>,
+    input_bytes: Option<usize>,
+    has_system_prompt: Option<bool>,
+    parent_operation: Option<String>,
+    disclosure_scope: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1112,6 +1629,28 @@ struct RuntimePolicyAuthority {
     revocation_epoch: u64,
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Clone)]
+pub(crate) struct RuntimeMcpSamplingIntent {
+    pub context: mcp::transport::McpSamplingContext,
+    pub parent_action: CanonicalAction,
+    pub messages: Vec<PiSamplingMessage>,
+    pub system_prompt: Option<String>,
+    pub max_tokens: u32,
+    pub temperature: Option<f32>,
+    pub request_sha256: String,
+    pub sampling_id: String,
+    pub cancelled: Arc<AtomicBool>,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) struct PreparedRuntimeMcpSampling {
+    pub facts: ActionFacts,
+    pub action: CanonicalAction,
+    pub live: LiveAuthorityState,
+    pub peer: PeerSamplingRequest,
+}
+
 /// Coordinator-held broker transaction used for renderer-triggered approval
 /// continuation. The exact generation remains locked from the CAS check
 /// through gateway mutation and effect settlement, so a stale answer cannot
@@ -1140,6 +1679,7 @@ pub struct FirstRuntimeDispatchIntent {
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
+    pub mcp_turn: Option<mcp::McpTurnSnapshot>,
     pub draft: DraftRequirements,
     pub submitted_at_ms: u64,
     pub preflight_at_ms: u64,
@@ -1153,6 +1693,7 @@ pub struct ConversationFirstDispatchIntent {
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
+    pub mcp_turn: Option<mcp::McpTurnSnapshot>,
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_mode: Option<String>,
@@ -1167,6 +1708,7 @@ pub struct ConversationTurnDispatchIntent {
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
+    pub mcp_turn: Option<mcp::McpTurnSnapshot>,
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_mode: Option<String>,
@@ -1187,6 +1729,7 @@ pub struct TurnRuntimeDispatchIntent {
     pub prompt: Option<String>,
     pub attachments: Vec<AttachmentSnapshot>,
     pub skill_context: Vec<SkillContextSnapshot>,
+    pub mcp_turn: Option<mcp::McpTurnSnapshot>,
     pub reply_context: Option<MessageReplyContextSnapshot>,
     pub draft: DraftRequirements,
     pub submitted_at_ms: u64,
@@ -1194,7 +1737,7 @@ pub struct TurnRuntimeDispatchIntent {
 }
 
 enum ConversationSubmissionDispatch {
-    First(ConversationFirstDispatchIntent),
+    First(Box<ConversationFirstDispatchIntent>),
     Turn(Box<ConversationTurnDispatchIntent>),
 }
 
@@ -1587,6 +2130,302 @@ impl RuntimeApplicationService {
         Ok(coordinator.model_preflight(provider_id, model_id, &layers, draft, now_ms)?)
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    pub(crate) fn prepare_mcp_sampling(
+        &self,
+        intent: &RuntimeMcpSamplingIntent,
+        now_ms: u64,
+    ) -> Result<PreparedRuntimeMcpSampling, RuntimeApplicationError> {
+        let coordinator = self.coordinator()?;
+        let session = coordinator.session(&intent.parent_action.session_id)?;
+        if session.active_attempt_id.as_deref() != Some(intent.parent_action.run_id.as_str()) {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let attempt = session
+            .attempt(&intent.parent_action.run_id)
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        let binding = session
+            .binding()
+            .cloned()
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        if attempt.status.is_terminal()
+            || attempt.context.runtime_kind != runtime::session::RuntimeKind::Pi
+            || attempt.context.workspace_id != intent.parent_action.workspace_id
+            || attempt.context.runtime_id != intent.parent_action.runtime_id
+            || attempt.context.environment.environment_id != intent.parent_action.environment_id
+            || attempt.process_generation != intent.parent_action.process_generation
+            || attempt.correlation_id.is_empty()
+            || intent.context.authority_id
+                != intent
+                    .parent_action
+                    .plugin_or_mcp_id
+                    .clone()
+                    .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?
+        {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let snapshot = coordinator.snapshot(now_ms);
+        let runtime_record = snapshot
+            .runtimes
+            .records
+            .iter()
+            .find(|record| {
+                record.installation.runtime_id == attempt.context.runtime_id
+                    && record.process_generation == attempt.process_generation
+                    && record.lifecycle == runtime::supervisor::RuntimeLifecycle::Ready
+                    && record.health == HealthState::Healthy
+            })
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        let provider = snapshot
+            .providers
+            .providers
+            .iter()
+            .find(|record| record.profile.provider_id == attempt.context.model_route.provider_id)
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        let selected_model_id = provider
+            .selected_model_id
+            .as_deref()
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        let selected_model = provider
+            .models
+            .get(selected_model_id)
+            .filter(|model| model.is_production_ready_at(now_ms))
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        if selected_model.capabilities.route.provider_model_id
+            != attempt.context.model_route.model_id
+        {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let capabilities = self.capabilities()?;
+        let route = capability_route_for_runtime(
+            &coordinator,
+            &capabilities,
+            &runtime_record.installation.runtime_id,
+            &provider.profile.provider_id,
+            selected_model_id,
+            now_ms,
+        )?;
+        let layers = capabilities.layers(&route, now_ms)?;
+        let effective =
+            effective_intersection(&layers, now_ms).map_err(CoordinatorError::Capability)?;
+        if effective.route.provider_id != attempt.context.model_route.provider_id
+            || effective.route.endpoint_id != attempt.context.model_route.endpoint_id
+            || effective.route.provider_model_id != attempt.context.model_route.model_id
+            || effective.route.model_revision != attempt.context.model_route.model_revision
+            || effective
+                .numeric_maximum(NumericCapabilityKey::OutputTokens)
+                .is_none_or(|maximum| u64::from(intent.max_tokens) > maximum)
+            || (intent.temperature.is_some()
+                && !effective.feature_state(CapabilityKey::Temperature).usable())
+        {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let authority = AuthorityMintIntent {
+            workspace_id: attempt.context.workspace_id.clone(),
+            project_id: attempt.context.project_id.clone(),
+            runtime_id: attempt.context.runtime_id.clone(),
+            expected_authority_generation: self.dispatch_authority.generation()?,
+            expected_capability_generation: capabilities.generation(),
+        };
+        let process = {
+            let dispatch = self.dispatch()?;
+            runtime_process_truth(&dispatch.registration(&attempt.context.runtime_id)?)
+        };
+        let minted = self
+            .dispatch_authority
+            .mint_retry_context_for_active_project(
+                &authority,
+                &binding,
+                &effective,
+                capabilities.generation(),
+                &process,
+            )?;
+        if minted.context.workspace_id != attempt.context.workspace_id
+            || minted.context.project_id != attempt.context.project_id
+            || minted.context.runtime_id != attempt.context.runtime_id
+            || minted.context.runtime_kind != attempt.context.runtime_kind
+            || minted.context.adapter != attempt.context.adapter
+            || minted.context.environment != attempt.context.environment
+            || minted.context.model_route != attempt.context.model_route
+            || minted.context.configuration != attempt.context.configuration
+            || minted.context.resources != attempt.context.resources
+            || minted.context.capabilities.version != attempt.context.capabilities.version
+            || minted.process_generation != attempt.process_generation
+        {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let installed_resources = self
+            .dispatch_authority
+            .installed_resource_preflight_for_active_project(&authority, &effective)?;
+        let policy = self
+            .policy_authority
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)?;
+        let estimated_input_tokens = intent
+            .messages
+            .iter()
+            .map(|message| message.text.chars().count() as u64)
+            .sum::<u64>()
+            .saturating_add(
+                intent
+                    .system_prompt
+                    .as_deref()
+                    .map_or(0, |value| value.chars().count() as u64),
+            )
+            .div_ceil(4)
+            .max(1);
+        let draft = DraftRequirements {
+            attachments: Vec::new(),
+            reasoning_mode: None,
+            requires_tools: false,
+            requires_json_schema: false,
+            prefers_streaming: false,
+            estimated_input_tokens,
+            requested_output_tokens: u64::from(intent.max_tokens),
+            installed_resources,
+            policy: PolicyPreflight {
+                snapshot_id: format!(
+                    "policy-{}-{}",
+                    policy.policy_version, policy.revocation_epoch
+                ),
+                version: policy.policy_version,
+                tool_use_allowed: false,
+                attachment_conversion_allowed: false,
+            },
+        };
+        let preflight = coordinator.model_preflight(
+            &provider.profile.provider_id,
+            selected_model_id,
+            &layers,
+            &draft,
+            now_ms,
+        )?;
+        if !matches!(preflight.outcome, PreflightOutcome::Ready { .. }) {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
+        let arguments = serde_json::json!({
+            "requestSha256": intent.request_sha256,
+            "serverId": intent.context.server_id,
+            "authorityId": intent.context.authority_id,
+            "definitionSha256": intent.context.definition_sha256,
+            "lifecycleGeneration": intent.context.lifecycle_generation,
+            "parentRunId": intent.parent_action.run_id,
+            "providerId": provider.profile.provider_id,
+            "modelId": effective.route.provider_model_id,
+            "modelRevision": effective.route.model_revision,
+            "capabilitySha256": effective.raw_evidence_sha256,
+            "maxTokens": intent.max_tokens,
+            "temperature": intent.temperature,
+        });
+        let target_version = sha256_bytes(
+            &serde_json::to_vec(&arguments)
+                .map_err(|_| RuntimeApplicationError::InvalidManagedRuntimeBinding)?,
+        );
+        let canonical_target = format!(
+            "mcp-sampling:{}:{}:{}",
+            intent.context.authority_id,
+            provider.profile.provider_id,
+            effective.route.provider_model_id
+        );
+        let action = CanonicalAction {
+            schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+            action_id: format!("mcp-sampling-{}", intent.sampling_id),
+            tool_call_id: format!("mcp-sampling-call-{}", intent.sampling_id),
+            tool: "mcp.sampling.create-message".into(),
+            arguments,
+            risk: CanonicalRisk::High,
+            requested_authority: BTreeSet::from([
+                "network.execute".into(),
+                "network.publish".into(),
+            ]),
+            canonical_target: canonical_target.clone(),
+            target_version,
+            workspace_id: attempt.context.workspace_id.clone(),
+            session_id: intent.parent_action.session_id.clone(),
+            run_id: format!("mcp-sampling-run-{}", intent.sampling_id),
+            runtime_id: attempt.context.runtime_id.clone(),
+            environment_id: attempt.context.environment.environment_id.clone(),
+            plugin_or_mcp_id: Some(intent.context.authority_id.clone()),
+            process_generation: attempt.process_generation,
+            configuration_version: attempt.context.configuration.version,
+            policy_version: policy.policy_version,
+            revocation_epoch: policy.revocation_epoch,
+        };
+        let facts = ActionFacts {
+            action_kind: "mcp.sampling.create-message".into(),
+            native_tool: action.tool.clone(),
+            surface: ActionSurface::Network,
+            effects: BTreeSet::from([ActionEffect::Execute, ActionEffect::Publish]),
+            scope: ActionScope::Remote,
+            initiator: ActionInitiator::McpServer,
+            sensitivity: ActionSensitivity::Private,
+            reversibility: ActionReversibility::Reversible,
+            confidence: ClassificationConfidence::Known,
+            request_origin: ActionRequestOrigin::McpSampling,
+            repository_state: RepositoryState::NotApplicable,
+            inside_active_project: true,
+            canonical_target,
+            workspace_id: action.workspace_id.clone(),
+            session_id: action.session_id.clone(),
+            runtime_id: action.runtime_id.clone(),
+            environment_id: action.environment_id.clone(),
+            plugin_or_mcp_id: action.plugin_or_mcp_id.clone(),
+            target_resolved: true,
+            authenticated: true,
+            trusted_root: true,
+            explicit_scope_grant: true,
+            sandbox_allows: true,
+            declaration_exceeded: false,
+        };
+        let live = LiveAuthorityState {
+            process_generation: action.process_generation,
+            configuration_version: action.configuration_version,
+            policy_version: policy.policy_version,
+            revocation_epoch: policy.revocation_epoch,
+        };
+        let peer = PeerSamplingRequest {
+            identity: DispatchIdentity {
+                workspace_id: action.workspace_id.clone(),
+                environment_id: action.environment_id.clone(),
+                session_id: format!("mcp-sampling-session-{}", intent.sampling_id),
+                turn_id: format!("mcp-sampling-turn-{}", intent.sampling_id),
+                attempt_id: format!("mcp-sampling-attempt-{}", intent.sampling_id),
+                correlation_id: format!("mcp-sampling-correlation-{}", intent.sampling_id),
+                runtime_id: action.runtime_id.clone(),
+                runtime_kind: runtime::supervisor::RuntimeKind::Pi,
+                adapter_version: attempt.context.adapter.adapter_version.clone(),
+                native_version: attempt.context.adapter.native_version.clone(),
+                process_generation: attempt.process_generation,
+            },
+            model: runtime::dispatch::DispatchModelRoute {
+                provider_id: provider.profile.provider_id.clone(),
+                model_id: effective.route.provider_model_id.clone(),
+                credential_reference: None,
+                credential_lease_id: None,
+            },
+            messages: intent.messages.clone(),
+            system_prompt: intent.system_prompt.clone(),
+            max_tokens: intent.max_tokens,
+            temperature: intent.temperature,
+            timeout_ms: intent.context.timeout_ms,
+            cancelled: Arc::clone(&intent.cancelled),
+        };
+        Ok(PreparedRuntimeMcpSampling {
+            facts,
+            action,
+            live,
+            peer,
+        })
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    pub(crate) fn execute_mcp_sampling(
+        &self,
+        request: &PeerSamplingRequest,
+    ) -> Result<PeerSamplingResult, RuntimeApplicationError> {
+        Ok(self.dispatch()?.sample(request)?)
+    }
+
     /// Publishes a complete process-bound capability batch through one
     /// coordinator and evidence generation transition. No route is visible
     /// until all three typed layers validate for the exact native process.
@@ -1694,6 +2533,134 @@ impl RuntimeApplicationService {
         Ok(coordinator
             .revoke_plugin_authority(plugin_id, now_ms)?
             .value)
+    }
+
+    pub fn revoke_plugin_or_mcp_authority(
+        &self,
+        identity: &str,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        Ok(coordinator
+            .revoke_plugin_or_mcp_authority(identity, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn propose_direct_action(
+        &self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .propose_direct_action(facts, action, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn propose_direct_trust_confirmation(
+        &self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .propose_direct_trust_confirmation(facts, action, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn propose_direct_sampling_confirmation(
+        &self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .propose_direct_sampling_confirmation(facts, action, now_ms)?
+            .value)
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    pub(crate) fn answer_direct_approval_expected(
+        &self,
+        expected_coordinator_generation: u64,
+        prompt_id: &str,
+        answer: ApprovalAnswer,
+        now_ms: u64,
+    ) -> Result<ApprovalResponse, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(&coordinator, expected_coordinator_generation, now_ms)?;
+        Ok(coordinator
+            .answer_direct_approval(prompt_id, answer, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn cancel_direct_action_run(
+        &self,
+        run_id: &str,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .cancel_direct_action_run(run_id, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn begin_direct_action_effect(
+        &self,
+        token: &AuthorizationToken,
+        action: &CanonicalAction,
+        live: LiveAuthorityState,
+        approval_prompt_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<ActionEffectLease, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .begin_direct_action_effect(token, action, live, approval_prompt_id, now_ms)?
+            .value)
+    }
+
+    pub(crate) fn complete_direct_action_effect(
+        &self,
+        lease: ActionEffectLease,
+        result: NormalizedActionResult,
+    ) -> Result<NormalizedActionResult, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .complete_direct_action_effect(lease, result)?
+            .value)
+    }
+
+    pub(crate) fn complete_direct_action_effect_retryable(
+        &self,
+        lease: &mut ActionEffectLease,
+        result: &NormalizedActionResult,
+    ) -> Result<(), RuntimeApplicationError> {
+        self.coordinator()?
+            .complete_direct_action_effect_retryable(lease, result)?;
+        Ok(())
+    }
+
+    pub(crate) fn current_direct_live_authority(
+        &self,
+        process_generation: u64,
+        configuration_version: u64,
+    ) -> Result<LiveAuthorityState, RuntimeApplicationError> {
+        if process_generation == 0 || configuration_version == 0 {
+            return Err(RuntimeApplicationError::InvalidPolicyAuthority);
+        }
+        let authority = self
+            .policy_authority
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)?;
+        Ok(LiveAuthorityState {
+            process_generation,
+            configuration_version,
+            policy_version: authority.policy_version,
+            revocation_epoch: authority.revocation_epoch,
+        })
     }
 
     /// Publishes policy/revocation authority atomically with the coordinator
@@ -2322,6 +3289,12 @@ impl RuntimeApplicationService {
                 prompt: intent.prompt,
                 attachments: intent.attachments,
                 skill_context: intent.skill_context,
+                mcp_turn: intent.mcp_turn.filter(|_| {
+                    draft
+                        .installed_resources
+                        .tool_ids
+                        .contains(runtime::opencode::C4OS_ACTION_PROPOSAL_TOOL)
+                }),
                 draft,
                 submitted_at_ms: intent.submitted_at_ms,
                 preflight_at_ms: intent.submitted_at_ms,
@@ -2454,6 +3427,12 @@ impl RuntimeApplicationService {
                 prompt: intent.prompt,
                 attachments: intent.attachments,
                 skill_context: intent.skill_context,
+                mcp_turn: intent.mcp_turn.filter(|_| {
+                    draft
+                        .installed_resources
+                        .tool_ids
+                        .contains(runtime::opencode::C4OS_ACTION_PROPOSAL_TOOL)
+                }),
                 reply_context: intent.reply_context,
                 draft,
                 submitted_at_ms: intent.submitted_at_ms,
@@ -2692,6 +3671,7 @@ impl RuntimeApplicationService {
                 prompt: intent.prompt,
                 attachments: intent.attachments,
                 skill_context: intent.skill_context,
+                mcp_turn: intent.mcp_turn.clone(),
                 binding: minted.binding,
                 submitted_at_ms: intent.submitted_at_ms,
             },
@@ -2782,6 +3762,7 @@ impl RuntimeApplicationService {
                 attachments: intent.attachments,
                 skill_context: intent.skill_context,
                 reply_context: intent.reply_context,
+                mcp_turn: intent.mcp_turn.clone(),
                 context: minted.context,
                 submitted_at_ms: intent.submitted_at_ms,
             },
@@ -3382,6 +4363,16 @@ impl RuntimeBrokerTransaction<'_> {
         {
             return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
         }
+        let turn = record
+            .turn(&attempt.turn_id)
+            .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
+        if turn.mcp_turn.as_ref().is_some_and(|snapshot| {
+            snapshot.workspace_id != attempt.context.workspace_id
+                || snapshot.project_id != attempt.context.project_id.as_deref().unwrap_or_default()
+                || snapshot.session_id != identity.session_id
+        }) {
+            return Err(RuntimeApplicationError::InvalidManagedRuntimeBinding);
+        }
         let authority = self
             .policy_authority
             .lock()
@@ -3406,6 +4397,7 @@ impl RuntimeBrokerTransaction<'_> {
             policy_version: authority.policy_version,
             revocation_epoch: authority.revocation_epoch,
             eligible_tool_ids,
+            mcp_turn: turn.mcp_turn.clone(),
         })
     }
 
@@ -3474,6 +4466,42 @@ impl BrokerActionApplication for RuntimeBrokerTransaction<'_> {
             .value)
     }
 
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<runtime::action_bridge::RuntimeActionEffectLease, Self::Error> {
+        Ok(self
+            .coordinator
+            .begin_runtime_action_effect(authorization, live, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator
+            .complete_runtime_action_effect(lease, result, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator
+            .complete_runtime_action_effect_retryable(lease, result, now_ms)?
+            .value)
+    }
+
     fn cancel_runtime_run(&mut self, run_id: &str, now_ms: u64) -> Result<(), Self::Error> {
         self.coordinator.cancel_runtime_actions(run_id, now_ms)?;
         Ok(())
@@ -3526,6 +4554,42 @@ impl BrokerActionApplication for RuntimeApplicationService {
             .value)
     }
 
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<runtime::action_bridge::RuntimeActionEffectLease, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .begin_runtime_action_effect(authorization, live, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .complete_runtime_action_effect(lease, result, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .complete_runtime_action_effect_retryable(lease, result, now_ms)?
+            .value)
+    }
+
     fn cancel_runtime_run(&mut self, run_id: &str, now_ms: u64) -> Result<(), Self::Error> {
         self.coordinator()?.cancel_runtime_actions(run_id, now_ms)?;
         Ok(())
@@ -3574,6 +4638,42 @@ impl BrokerActionApplication for Arc<RuntimeApplicationService> {
         Ok(self
             .coordinator()?
             .execute_runtime_action(authorization, live, now_ms, effect)?
+            .value)
+    }
+
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<runtime::action_bridge::RuntimeActionEffectLease, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .begin_runtime_action_effect(authorization, live, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .complete_runtime_action_effect(lease, result, now_ms)?
+            .value)
+    }
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut runtime::action_bridge::RuntimeActionEffectLease,
+        result: runtime::action_bridge::RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        Ok(self
+            .coordinator()?
+            .complete_runtime_action_effect_retryable(lease, result, now_ms)?
             .value)
     }
 
@@ -14558,6 +15658,15 @@ fn conversation_submit(
                     true,
                 ));
             }
+            let mcp_turn = tauri::async_runtime::block_on(async {
+                core.mcp
+                    .lock()
+                    .await
+                    .prepare_turn_snapshot(&workspace_id, &project_id, &session_id, now_ms)
+                    .await
+            })
+            .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+            let mcp_turn = (!mcp_turn.tools.is_empty()).then_some(mcp_turn);
             let draft = conversation
                 .drafts
                 .entry(session_id.clone())
@@ -14600,6 +15709,7 @@ fn conversation_submit(
                 prompt: (!draft.prompt.trim().is_empty()).then(|| draft.prompt.clone()),
                 attachments: draft.attachments.clone(),
                 skill_context: skill_context.clone(),
+                mcp_turn,
                 provider_id: draft.provider_id.clone(),
                 model_id: draft.model_id.clone(),
                 reasoning_mode: draft.reasoning_mode.clone(),
@@ -14663,18 +15773,33 @@ fn conversation_submit(
             else {
                 unreachable!("promotion request returned the promotion state")
             };
-            ConversationSubmissionDispatch::First(ConversationFirstDispatchIntent {
+            let mcp_turn = tauri::async_runtime::block_on(async {
+                core.mcp
+                    .lock()
+                    .await
+                    .prepare_turn_snapshot(
+                        &workspace_id,
+                        &promotion.project_id,
+                        &promotion.session_id,
+                        now_ms,
+                    )
+                    .await
+            })
+            .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+            let mcp_turn = (!mcp_turn.tools.is_empty()).then_some(mcp_turn);
+            ConversationSubmissionDispatch::First(Box::new(ConversationFirstDispatchIntent {
                 workspace_id: workspace_id.clone(),
                 project_id: promotion.project_id.clone(),
                 session_id: promotion.session_id.clone(),
                 prompt: promotion.prompt.clone(),
                 attachments: conversation.pending_attachments.clone(),
                 skill_context: skill_context.clone(),
+                mcp_turn,
                 provider_id: input.provider_id.clone(),
                 model_id: input.model_id.clone(),
                 reasoning_mode: input.reasoning_mode.clone(),
                 submitted_at_ms: now_ms,
-            })
+            }))
         };
         conversation.advance(current_generation)?;
         (intent, current_generation)
@@ -14684,7 +15809,7 @@ fn conversation_submit(
     let dispatch_generation = match dispatch_intent {
         ConversationSubmissionDispatch::First(intent) => core
             .runtime
-            .dispatch_conversation_first(intent)
+            .dispatch_conversation_first(*intent)
             .map(|dispatch| match dispatch {
                 CoordinatedFirstDispatch::Accepted {
                     coordinator_generation,
@@ -15064,9 +16189,16 @@ fn conversation_cancel_attempt(
         native_version: attempt.context.adapter.native_version.clone(),
         process_generation: attempt.process_generation,
     };
-    let generation = core
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let cancellation = core
+        .runtime_production
+        .load(request.correlation_id.clone())?
+        .cancel_dispatch(runtime_generation, &identity, now_ms);
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let cancellation = core
         .runtime
-        .cancel_dispatch(runtime_generation, &identity, now_ms)
+        .cancel_dispatch(runtime_generation, &identity, now_ms);
+    let generation = cancellation
         .map(|outcome| match outcome {
             CoordinatedCancellation::Cancelled {
                 coordinator_generation,
@@ -16941,6 +18073,7 @@ fn project_session_snapshot(
                         .and_then(|reply| reply.artifact_context.as_ref())
                         .map(project_artifact_context_snapshot)
                         .transpose()?,
+                    mcp_provenance: turn.mcp_turn.as_ref().map(project_mcp_provenance),
                     submitted_at_ms: turn.submitted_at_ms,
                 })
             })
@@ -16956,6 +18089,104 @@ fn project_session_snapshot(
             .map(AttemptId::new)
             .transpose()?,
     })
+}
+
+fn project_mcp_provenance(snapshot: &mcp::McpTurnSnapshot) -> ConversationMcpProvenanceSnapshot {
+    let server_count = snapshot
+        .tools
+        .iter()
+        .map(|tool| tool.server_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    ConversationMcpProvenanceSnapshot {
+        snapshot_id: snapshot.snapshot_id.clone(),
+        server_count: u16::try_from(server_count).unwrap_or(u16::MAX),
+        tool_count: u16::try_from(snapshot.tools.len()).unwrap_or(u16::MAX),
+        omitted_tool_count: snapshot.omitted_tool_count,
+        truncated: snapshot.truncated,
+        tools: snapshot
+            .tools
+            .iter()
+            .map(|tool| {
+                let (source_kind, source_id) = match &tool.source {
+                    mcp::McpDefinitionSource::User => ("user", None),
+                    mcp::McpDefinitionSource::Plugin { package_id, .. } => {
+                        ("plugin", Some(package_id.clone()))
+                    }
+                };
+                ConversationMcpToolProvenanceSnapshot {
+                    server_id: tool.server_id.clone(),
+                    source_kind: source_kind.into(),
+                    source_id,
+                    tool_name: tool.tool_name.clone(),
+                }
+            })
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod mcp_provenance_projection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn conversation_projection_exposes_only_safe_mcp_provenance() {
+        let schema_canary = "credential-canary-in-schema";
+        let definition_canary = format!("sha256:{}", "d".repeat(64));
+        let snapshot = mcp::McpTurnSnapshot {
+            snapshot_id: format!("mcp-turn:{}", "a".repeat(64)),
+            service_generation: 7,
+            captured_at_ms: 12,
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "session-1".into(),
+            tools: vec![mcp::McpTurnToolSnapshot {
+                target_id: format!("mcp-tool:{}", "b".repeat(64)),
+                server_id: "plugin-server".into(),
+                source: mcp::McpDefinitionSource::Plugin {
+                    package_id: "com.example.safe-plugin".into(),
+                    declaration_id: "credential-canary-declaration".into(),
+                },
+                lifecycle_generation: 4,
+                definition_sha256: definition_canary.clone(),
+                transport_kind: mcp::McpTransportKind::Stdio,
+                tool_name: "safe-tool".into(),
+                title: Some("Credential canary title".into()),
+                description: Some("Credential canary description".into()),
+                input_schema: json!({ "secret": schema_canary }),
+                input_schema_sha256: format!("sha256:{}", "c".repeat(64)),
+                output_schema_sha256: Some(format!("sha256:{}", "e".repeat(64))),
+            }],
+            truncated: true,
+            omitted_tool_count: 1,
+            sha256: format!("sha256:{}", "f".repeat(64)),
+        };
+
+        let projected = project_mcp_provenance(&snapshot);
+        assert_eq!(projected.server_count, 1);
+        assert_eq!(projected.tool_count, 1);
+        assert_eq!(projected.omitted_tool_count, 1);
+        assert!(projected.truncated);
+        assert_eq!(projected.tools[0].source_kind, "plugin");
+        assert_eq!(
+            projected.tools[0].source_id.as_deref(),
+            Some("com.example.safe-plugin")
+        );
+
+        let serialized = serde_json::to_string(&projected).expect("serialize projection");
+        assert!(serialized.contains("plugin-server"));
+        assert!(serialized.contains("safe-tool"));
+        for canary in [
+            schema_canary,
+            definition_canary.as_str(),
+            "credential-canary-declaration",
+            "Credential canary title",
+            "Credential canary description",
+        ] {
+            assert!(!serialized.contains(canary), "leaked MCP canary: {canary}");
+        }
+    }
 }
 
 fn project_artifact_context_snapshot(
@@ -17633,6 +18864,66 @@ fn message_reply_context(
     })
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn runtime_sampling_approval_summary(
+    approval: mcp::production_sampling::McpSamplingApprovalSummary,
+) -> RuntimeApprovalSummary {
+    RuntimeApprovalSummary {
+        summary: format!(
+            "MCP server {} requests up to {} tokens from {}/{} using {} bounded text message(s).",
+            approval.server_id,
+            approval.max_tokens,
+            approval.provider_id,
+            approval.model_id,
+            approval.message_count,
+        ),
+        runtime_id: approval.runtime_id,
+        correlation_id: approval.correlation_id,
+        prompt_id: approval.prompt_id,
+        approval_kind: "mcp-sampling".into(),
+        server_id: Some(approval.server_id),
+        provider_id: Some(approval.provider_id),
+        model_id: Some(approval.model_id),
+        max_tokens: Some(approval.max_tokens),
+        expires_at_ms: Some(approval.expires_at_ms),
+        message_count: Some(approval.message_count),
+        input_bytes: Some(approval.input_bytes),
+        has_system_prompt: Some(approval.has_system_prompt),
+        parent_operation: Some(approval.parent_operation),
+        disclosure_scope: Some(
+            "Private active-operation text will be disclosed to the selected model provider; credentials remain operation-scoped and hidden."
+                .into(),
+        ),
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+// The approval bridge keeps every exact caller and prompt identity visible.
+#[allow(clippy::too_many_arguments)]
+fn answer_runtime_sampling_approval(
+    runtime: &RuntimeApplicationService,
+    approvals: &mcp::production_sampling::ProductionMcpSamplingApprovalRegistry,
+    request_correlation: protocol::CorrelationId,
+    expected_coordinator_generation: u64,
+    runtime_id: &str,
+    correlation_id: &str,
+    prompt_id: &str,
+    answer: ApprovalAnswer,
+    now_ms: u64,
+) -> Result<bool, ProtocolError> {
+    approvals
+        .answer(
+            runtime,
+            expected_coordinator_generation,
+            runtime_id,
+            correlation_id,
+            prompt_id,
+            answer,
+            now_ms,
+        )
+        .map_err(|_| runtime_production_unavailable(request_correlation))
+}
+
 #[tauri::command]
 fn runtime_core_snapshot(
     core: tauri::State<'_, AppCoreState>,
@@ -17641,24 +18932,78 @@ fn runtime_core_snapshot(
     let correlation_id = request.correlation_id.clone();
     let now_ms =
         current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let (runtime, capability_generation, mut pending_approvals, sampling_approvals) = {
+        let mut attempts = 0usize;
+        loop {
+            let (runtime, capability_generation) = core
+                .runtime
+                .snapshot_with_capability_generation(now_ms)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            let pending_approvals = core
+                .runtime_production
+                .load(request.correlation_id.clone())?
+                .pending_approvals()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .into_iter()
+                .map(|approval| RuntimeApprovalSummary {
+                    summary: format!("Approval required by {}.", approval.runtime_id),
+                    runtime_id: approval.runtime_id,
+                    correlation_id: approval.correlation_id,
+                    prompt_id: approval.prompt_id,
+                    approval_kind: "runtime-effect".into(),
+                    server_id: None,
+                    provider_id: None,
+                    model_id: None,
+                    max_tokens: None,
+                    expires_at_ms: None,
+                    message_count: None,
+                    input_bytes: None,
+                    has_system_prompt: None,
+                    parent_operation: None,
+                    disclosure_scope: None,
+                })
+                .collect::<Vec<_>>();
+            let stable_sampling = core
+                .mcp_sampling_approvals
+                .stable_summaries()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            if let Some((approval_revision, sampling_approvals)) = stable_sampling {
+                let verified_generation = core
+                    .runtime
+                    .snapshot(now_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                    .generation;
+                if verified_generation == runtime.generation
+                    && core.mcp_sampling_approvals.stable_revision() == Some(approval_revision)
+                {
+                    break (
+                        runtime,
+                        capability_generation,
+                        pending_approvals,
+                        sampling_approvals,
+                    );
+                }
+            }
+            attempts = attempts.saturating_add(1);
+            if attempts >= 32 {
+                return Err(workspace_state_unavailable(correlation_id));
+            }
+            std::thread::yield_now();
+        }
+    };
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     let (runtime, capability_generation) = core
         .runtime
         .snapshot_with_capability_generation(now_ms)
-        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     let generation = StateGeneration(runtime.generation);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    let pending_approvals = core
-        .runtime_production
-        .load(request.correlation_id.clone())?
-        .pending_approvals()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-        .into_iter()
-        .map(|approval| RuntimeApprovalSummary {
-            runtime_id: approval.runtime_id,
-            correlation_id: approval.correlation_id,
-            prompt_id: approval.prompt_id,
-        })
-        .collect();
+    pending_approvals.extend(
+        sampling_approvals
+            .into_iter()
+            .map(runtime_sampling_approval_summary),
+    );
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     let pending_approvals = Vec::new();
     let payload = RuntimeCoreSnapshot {
@@ -17812,17 +19157,30 @@ fn runtime_production_answer_approval(
             .generation,
     );
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
-    core.runtime_production
-        .load(request_correlation.clone())?
-        .answer_runtime_approval(
-            request.expected_generation.0,
-            &runtime_id,
-            &correlation_id,
-            &prompt_id,
-            answer,
-            now_ms,
-        )
-        .map_err(|_| runtime_production_unavailable(request_correlation))?;
+    let sampling_answered = answer_runtime_sampling_approval(
+        &core.runtime,
+        &core.mcp_sampling_approvals,
+        request_correlation.clone(),
+        request.expected_generation.0,
+        &runtime_id,
+        &correlation_id,
+        &prompt_id,
+        answer,
+        now_ms,
+    )?;
+    if !sampling_answered {
+        core.runtime_production
+            .load(request_correlation.clone())?
+            .answer_runtime_approval(
+                request.expected_generation.0,
+                &runtime_id,
+                &correlation_id,
+                &prompt_id,
+                answer,
+                now_ms,
+            )
+            .map_err(|_| runtime_production_unavailable(request_correlation))?;
+    }
     let generation = StateGeneration(
         core.runtime
             .snapshot(now_ms)
@@ -17838,6 +19196,759 @@ fn runtime_production_answer_approval(
             prompt_id,
         },
     )
+}
+
+fn require_mcp_input_generation(
+    request: &SnapshotRequest,
+    expected_generation: u64,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation.0 == expected_generation {
+        Ok(())
+    } else {
+        Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidGeneration,
+            "The MCP request generations do not match",
+            false,
+        ))
+    }
+}
+
+fn mcp_boundary_error(
+    error: mcp::McpError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        mcp::McpError::InvalidInput | mcp::McpError::InvalidState => (
+            ProtocolErrorCode::InvalidPayload,
+            "The MCP request is invalid for the current server state",
+            false,
+        ),
+        mcp::McpError::BoundExceeded => (
+            ProtocolErrorCode::PayloadTooLarge,
+            "The MCP request exceeded a bounded limit",
+            false,
+        ),
+        mcp::McpError::Conflict => (
+            ProtocolErrorCode::Conflict,
+            "MCP state changed before the operation completed",
+            true,
+        ),
+        mcp::McpError::Untrusted | mcp::McpError::Denied | mcp::McpError::Revoked => (
+            ProtocolErrorCode::Forbidden,
+            "MCP policy or trust denied the operation",
+            false,
+        ),
+        mcp::McpError::Disabled | mcp::McpError::NotReady => (
+            ProtocolErrorCode::Conflict,
+            "The MCP server is not ready for this operation",
+            true,
+        ),
+        mcp::McpError::UnsupportedProtocol => (
+            ProtocolErrorCode::Unavailable,
+            "The MCP server did not negotiate the required protocol",
+            false,
+        ),
+        mcp::McpError::TimedOut => (
+            ProtocolErrorCode::Unavailable,
+            "The MCP operation timed out",
+            true,
+        ),
+        mcp::McpError::Cancelled => (
+            ProtocolErrorCode::Conflict,
+            "The MCP operation was cancelled",
+            true,
+        ),
+        mcp::McpError::Transport(_)
+        | mcp::McpError::Persistence(_)
+        | mcp::McpError::Credential
+        | mcp::McpError::StateUnavailable => (
+            ProtocolErrorCode::Unavailable,
+            "The native MCP service is unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+fn mcp_snapshot_envelope(
+    request: SnapshotRequest,
+    snapshot: mcp::McpServiceSnapshot,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    let generation = StateGeneration(snapshot.generation);
+    protocol::snapshot_envelope(request, generation, snapshot)
+}
+
+fn mcp_trust_envelope(
+    request: SnapshotRequest,
+    response: mcp::McpTrustResponse,
+) -> Result<ProtocolEnvelope<mcp::McpTrustResponse>, protocol::StructuredCoreError> {
+    let generation = StateGeneration(response.snapshot.generation);
+    protocol::snapshot_envelope(request, generation, response)
+}
+
+fn prepare_mcp_trust(
+    runtime: &RuntimeApplicationService,
+    snapshot: &mcp::McpServiceSnapshot,
+    server: &mcp::McpServerSnapshot,
+    definition_sha256: String,
+    _now_ms: u64,
+) -> Result<(CanonicalAction, ActionFacts), mcp::McpError> {
+    if server.trust != mcp::McpTrustState::Pending
+        || server.lifecycle != mcp::McpLifecycle::Disabled
+    {
+        return Err(mcp::McpError::InvalidState);
+    }
+    let (workspace_id, session_id) = match &server.scope {
+        mcp::McpScope::Application => ("c4os-settings".to_owned(), "mcp-settings".to_owned()),
+        mcp::McpScope::Workspace { workspace_id }
+        | mcp::McpScope::Project { workspace_id, .. }
+        | mcp::McpScope::Chat { workspace_id, .. } => {
+            let session_id = match &server.scope {
+                mcp::McpScope::Chat { session_id, .. } => session_id.clone(),
+                _ => "mcp-settings".to_owned(),
+            };
+            (workspace_id.clone(), session_id)
+        }
+    };
+    let remote = matches!(
+        server.transport,
+        mcp::McpTransportDefinition::StreamableHttp { .. }
+    );
+    let credential_bound = match &server.transport {
+        mcp::McpTransportDefinition::Stdio { environment, .. } => environment
+            .iter()
+            .any(|binding| !matches!(binding.source, mcp::McpEnvironmentSource::Literal { .. })),
+        mcp::McpTransportDefinition::StreamableHttp { .. } => true,
+    };
+    let live = runtime
+        .current_direct_live_authority(server.lifecycle_generation, snapshot.generation)
+        .map_err(|_| mcp::McpError::StateUnavailable)?;
+    let action_id = format!("mcp-trust-{}", Uuid::new_v4().as_simple());
+    let target = format!("mcp-definition:{}:{definition_sha256}", server.server_id);
+    let identity = format!(
+        "mcp-{}",
+        sha256_bytes(server.server_id.as_bytes()).trim_start_matches("sha256:")
+    );
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-{action_id}"),
+        tool: "mcp.definition.trust".into(),
+        arguments: serde_json::json!({
+            "definitionSha256": definition_sha256.clone(),
+            "serverId": server.server_id,
+            "transportKind": server.transport.kind(),
+        }),
+        risk: CanonicalRisk::High,
+        requested_authority: BTreeSet::from(["mcp-definition-trust".into()]),
+        canonical_target: target.clone(),
+        target_version: definition_sha256.clone(),
+        workspace_id: workspace_id.clone(),
+        session_id: session_id.clone(),
+        run_id: format!("mcp-trust-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: Some(identity.clone()),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| mcp::McpError::InvalidState)?;
+    let facts = ActionFacts {
+        action_kind: action.tool.clone(),
+        native_tool: action.tool.clone(),
+        surface: if remote {
+            ActionSurface::Network
+        } else {
+            ActionSurface::Process
+        },
+        effects: BTreeSet::from([ActionEffect::Control]),
+        scope: if remote {
+            ActionScope::Remote
+        } else {
+            ActionScope::ExternalLocal
+        },
+        initiator: ActionInitiator::User,
+        sensitivity: if credential_bound {
+            ActionSensitivity::Credential
+        } else {
+            ActionSensitivity::Ordinary
+        },
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: target,
+        workspace_id,
+        session_id,
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: Some(identity),
+        target_resolved: true,
+        authenticated: remote,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((action, facts))
+}
+
+// Trust execution keeps the reviewed definition, action, token, and prompt
+// identities separate at the final effect boundary.
+#[allow(clippy::too_many_arguments)]
+async fn execute_mcp_trust(
+    core: &AppCoreState,
+    server_id: String,
+    service_generation: u64,
+    definition_sha256: String,
+    action_binding_sha256: String,
+    action: CanonicalAction,
+    token: AuthorizationToken,
+    approval_prompt_id: &str,
+    now_ms: u64,
+) -> Result<mcp::McpTrustResponse, mcp::McpError> {
+    {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        let server = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == server_id)
+            .ok_or(mcp::McpError::Conflict)?;
+        let pending = server
+            .pending_trust_approval
+            .as_ref()
+            .ok_or(mcp::McpError::Conflict)?;
+        if snapshot.generation != service_generation
+            || service.definition_sha256(&server_id)? != definition_sha256
+            || pending.prompt_id != approval_prompt_id
+            || pending.action_binding_sha256 != action_binding_sha256
+        {
+            return Err(mcp::McpError::Conflict);
+        }
+    }
+    let live = core
+        .runtime
+        .current_direct_live_authority(action.process_generation, action.configuration_version)
+        .map_err(|_| mcp::McpError::StateUnavailable)?;
+    let lease = core
+        .runtime
+        .begin_direct_action_effect(&token, &action, live, Some(approval_prompt_id), now_ms)
+        .map_err(|_| mcp::McpError::Denied)?;
+    let trust_result = core.mcp.lock().await.trust_server(
+        &mcp::McpServerMutationInput {
+            expected_generation: service_generation,
+            server_id: server_id.clone(),
+        },
+        approval_prompt_id,
+        &action_binding_sha256,
+        &definition_sha256,
+        now_ms,
+    );
+    let normalized = match &trust_result {
+        Ok(_) => NormalizedActionResult {
+            status: NormalizedActionStatus::Succeeded,
+            result_code: "mcp-definition-trusted".into(),
+            exit_code: None,
+            changed_targets: vec![action.canonical_target.clone()],
+            output_sha256: Some(definition_sha256.clone()),
+            completed_at_ms: now_ms.max(1),
+        },
+        Err(_) => NormalizedActionResult {
+            status: NormalizedActionStatus::Failed,
+            result_code: "mcp-definition-trust-failed".into(),
+            exit_code: None,
+            changed_targets: Vec::new(),
+            output_sha256: None,
+            completed_at_ms: now_ms.max(1),
+        },
+    };
+    core.runtime
+        .complete_direct_action_effect(lease, normalized)
+        .map_err(|_| mcp::McpError::StateUnavailable)?;
+    let snapshot = trust_result?;
+    Ok(mcp::McpTrustResponse {
+        snapshot,
+        status: mcp::McpTrustRequestStatus::Trusted,
+        server_id,
+        definition_sha256,
+        prompt_id: None,
+        prompt_expires_at_ms: None,
+    })
+}
+
+#[tauri::command]
+async fn mcp_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let snapshot = core.mcp.lock().await.snapshot();
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_save_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerDefinitionInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let server_id = input.server_id.clone();
+    let snapshot = core
+        .mcp
+        .lock()
+        .await
+        .upsert_server(input, mcp::McpDefinitionSource::User, now_ms)
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        core.mcp_cancellations.allow_server(&server_id);
+        core.mcp_cancellations
+            .refresh_credential_bindings(&snapshot);
+    }
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_request_trust(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpTrustRequestInput,
+) -> Result<ProtocolEnvelope<mcp::McpTrustResponse>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (snapshot, server, definition_sha256) = {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        if snapshot.generation != input.expected_generation {
+            return Err(mcp_boundary_error(
+                mcp::McpError::Conflict,
+                request.correlation_id,
+            ));
+        }
+        let server = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == input.server_id)
+            .cloned()
+            .ok_or_else(|| {
+                mcp_boundary_error(mcp::McpError::InvalidInput, request.correlation_id.clone())
+            })?;
+        let definition_sha256 = service
+            .definition_sha256(&input.server_id)
+            .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+        (snapshot, server, definition_sha256)
+    };
+    if server.trust == mcp::McpTrustState::Trusted {
+        return mcp_trust_envelope(
+            request,
+            mcp::McpTrustResponse {
+                snapshot,
+                status: mcp::McpTrustRequestStatus::Trusted,
+                server_id: input.server_id,
+                definition_sha256,
+                prompt_id: None,
+                prompt_expires_at_ms: None,
+            },
+        );
+    }
+    if let Some(approval) = server.pending_trust_approval.as_ref()
+        && approval.state == mcp::McpTrustApprovalState::Pending
+        && approval.expires_at_ms > now_ms
+        && approval.definition_sha256 == definition_sha256
+    {
+        return mcp_trust_envelope(
+            request,
+            mcp::McpTrustResponse {
+                snapshot,
+                status: mcp::McpTrustRequestStatus::PendingApproval,
+                server_id: input.server_id,
+                definition_sha256,
+                prompt_id: Some(approval.prompt_id.clone()),
+                prompt_expires_at_ms: Some(approval.expires_at_ms),
+            },
+        );
+    }
+    let recovering = server.pending_trust_approval.is_some();
+    let (action, facts) = prepare_mcp_trust(
+        &core.runtime,
+        &snapshot,
+        &server,
+        definition_sha256.clone(),
+        now_ms,
+    )
+    .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+    let proposal = if recovering {
+        core.runtime.coordinator().and_then(|mut coordinator| {
+            coordinator
+                .requeue_interrupted_direct_approval(&facts, action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+    } else {
+        core.runtime
+            .propose_direct_trust_confirmation(&facts, action.clone(), now_ms)
+    }
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            let snapshot = if let Some(approval) = server.pending_trust_approval {
+                core.mcp
+                    .lock()
+                    .await
+                    .clear_trust_approval(
+                        &mcp::McpServerMutationInput {
+                            expected_generation: snapshot.generation,
+                            server_id: input.server_id.clone(),
+                        },
+                        &approval.prompt_id,
+                        "policy_denied",
+                        now_ms,
+                    )
+                    .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?
+            } else {
+                snapshot
+            };
+            mcp_trust_envelope(
+                request,
+                mcp::McpTrustResponse {
+                    snapshot,
+                    status: mcp::McpTrustRequestStatus::Denied,
+                    server_id: input.server_id,
+                    definition_sha256,
+                    prompt_id: None,
+                    prompt_expires_at_ms: None,
+                },
+            )
+        }
+        GatewayProposal::Authorized { .. } => {
+            Err(workspace_state_unavailable(request.correlation_id))
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            let prompt_id = prompt.prompt_id.clone();
+            let expires_at_ms = prompt.expires_at_ms;
+            let action_binding_sha256 = prompt
+                .action
+                .binding_digest()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let snapshot = core
+                .mcp
+                .lock()
+                .await
+                .record_trust_approval(
+                    &mcp::McpServerMutationInput {
+                        expected_generation: snapshot.generation,
+                        server_id: input.server_id.clone(),
+                    },
+                    mcp::McpPendingTrustApproval {
+                        prompt_id: prompt_id.clone(),
+                        definition_sha256: definition_sha256.clone(),
+                        action_binding_sha256,
+                        action_configuration_version: action.configuration_version,
+                        requested_at_ms: prompt.created_at_ms,
+                        expires_at_ms,
+                        state: mcp::McpTrustApprovalState::Pending,
+                    },
+                    now_ms,
+                )
+                .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+            mcp_trust_envelope(
+                request,
+                mcp::McpTrustResponse {
+                    snapshot,
+                    status: mcp::McpTrustRequestStatus::PendingApproval,
+                    server_id: input.server_id,
+                    definition_sha256,
+                    prompt_id: Some(prompt_id),
+                    prompt_expires_at_ms: Some(expires_at_ms),
+                },
+            )
+        }
+    }
+}
+
+#[tauri::command]
+async fn mcp_answer_trust(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpTrustApprovalInput,
+) -> Result<ProtocolEnvelope<mcp::McpTrustResponse>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (snapshot, pending) = {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        let pending = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == input.server_id)
+            .and_then(|server| server.pending_trust_approval.clone())
+            .ok_or_else(|| {
+                mcp_boundary_error(mcp::McpError::Conflict, request.correlation_id.clone())
+            })?;
+        (snapshot, pending)
+    };
+    if snapshot.generation != input.expected_generation
+        || pending.prompt_id != input.prompt_id
+        || pending.state != mcp::McpTrustApprovalState::Pending
+        || pending.expires_at_ms <= now_ms
+    {
+        return Err(mcp_boundary_error(
+            mcp::McpError::Conflict,
+            request.correlation_id,
+        ));
+    }
+    let answer = match input.answer {
+        mcp::McpTrustApprovalAnswer::Allow => ApprovalAnswer::Allow,
+        mcp::McpTrustApprovalAnswer::Deny => ApprovalAnswer::Deny,
+    };
+    let response = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .answer_direct_approval(&input.prompt_id, answer, now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let response_binding = match &response {
+        ApprovalResponse::Denied { prompt } | ApprovalResponse::Authorized { prompt, .. } => prompt
+            .action
+            .binding_digest()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?,
+    };
+    if response_binding != pending.action_binding_sha256 {
+        return Err(workspace_state_unavailable(request.correlation_id));
+    }
+    match response {
+        ApprovalResponse::Denied { .. } => {
+            let snapshot = core
+                .mcp
+                .lock()
+                .await
+                .clear_trust_approval(
+                    &mcp::McpServerMutationInput {
+                        expected_generation: snapshot.generation,
+                        server_id: input.server_id.clone(),
+                    },
+                    &input.prompt_id,
+                    "user_denied",
+                    now_ms,
+                )
+                .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+            mcp_trust_envelope(
+                request,
+                mcp::McpTrustResponse {
+                    snapshot,
+                    status: mcp::McpTrustRequestStatus::Denied,
+                    server_id: input.server_id,
+                    definition_sha256: pending.definition_sha256,
+                    prompt_id: None,
+                    prompt_expires_at_ms: None,
+                },
+            )
+        }
+        ApprovalResponse::Authorized { prompt, token } => {
+            let response = execute_mcp_trust(
+                &core,
+                input.server_id,
+                snapshot.generation,
+                pending.definition_sha256,
+                pending.action_binding_sha256,
+                prompt.action,
+                token,
+                &input.prompt_id,
+                now_ms,
+            )
+            .await
+            .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+            mcp_trust_envelope(request, response)
+        }
+    }
+}
+
+#[tauri::command]
+async fn mcp_test_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerMutationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut service = core.mcp.lock().await;
+    let previous_generation = service.snapshot().generation;
+    let snapshot = match service.test_server(&input, now_ms).await {
+        Ok(snapshot) => snapshot,
+        Err(_error)
+            if service.snapshot().generation > previous_generation
+                && service.snapshot().servers.iter().any(|server| {
+                    server.server_id == input.server_id
+                        && server.lifecycle == mcp::McpLifecycle::Failed
+                }) =>
+        {
+            service.snapshot()
+        }
+        Err(error) => {
+            return Err(mcp_boundary_error(error, request.correlation_id.clone()));
+        }
+    };
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_enable_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerMutationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut service = core.mcp.lock().await;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.allow_server(&input.server_id);
+    let previous_generation = service.snapshot().generation;
+    let snapshot = match service.enable_server(&input, now_ms).await {
+        Ok(snapshot) => snapshot,
+        Err(_error)
+            if service.snapshot().generation > previous_generation
+                && service.snapshot().servers.iter().any(|server| {
+                    server.server_id == input.server_id
+                        && server.lifecycle == mcp::McpLifecycle::Failed
+                }) =>
+        {
+            service.snapshot()
+        }
+        Err(error) => {
+            return Err(mcp_boundary_error(error, request.correlation_id.clone()));
+        }
+    };
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_recover_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerMutationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut service = core.mcp.lock().await;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.allow_server(&input.server_id);
+    let previous_generation = service.snapshot().generation;
+    let snapshot = match service.recover_server(&input, now_ms).await {
+        Ok(snapshot) => snapshot,
+        Err(_error)
+            if service.snapshot().generation > previous_generation
+                && service.snapshot().servers.iter().any(|server| {
+                    server.server_id == input.server_id
+                        && server.lifecycle == mcp::McpLifecycle::Failed
+                }) =>
+        {
+            service.snapshot()
+        }
+        Err(error) => {
+            return Err(mcp_boundary_error(error, request.correlation_id.clone()));
+        }
+    };
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_disable_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerMutationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut service = core.mcp.lock().await;
+    if service.snapshot().generation != input.expected_generation {
+        return Err(mcp_boundary_error(
+            mcp::McpError::Conflict,
+            request.correlation_id,
+        ));
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_server(&input.server_id);
+    let snapshot = service
+        .disable_server(&input, now_ms)
+        .await
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_revoke_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerRevocationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut service = core.mcp.lock().await;
+    if service.snapshot().generation != input.expected_generation {
+        return Err(mcp_boundary_error(
+            mcp::McpError::Conflict,
+            request.correlation_id,
+        ));
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_server(&input.server_id);
+    let snapshot = service
+        .revoke_server(&input, now_ms)
+        .await
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+    mcp_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+async fn mcp_delete_server(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: mcp::McpServerMutationInput,
+) -> Result<ProtocolEnvelope<mcp::McpServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_mcp_input_generation(&request, input.expected_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .mcp
+        .lock()
+        .await
+        .delete_server(&input, now_ms)
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        core.mcp_cancellations.allow_server(&input.server_id);
+        core.mcp_cancellations
+            .refresh_credential_bindings(&snapshot);
+    }
+    mcp_snapshot_envelope(request, snapshot)
 }
 
 fn current_time_ms() -> Result<u64, std::io::Error> {
@@ -17999,22 +20110,31 @@ fn start_runtime_production_initialization(
     app: tauri::AppHandle,
     resource_dir: PathBuf,
     c4os_home: PathBuf,
+    credential_vault: Option<security::credentials::CredentialVault>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     runtime: Arc<RuntimeApplicationService>,
+    mcp: Arc<tokio::sync::Mutex<ProductionMcpService>>,
+    mcp_cancellations: ProductionMcpCancellationRegistry,
+    sampling_parents: mcp::production_sampling::McpSamplingParentRegistry,
     managed: Arc<ManagedProductionRuntime>,
 ) -> Result<(), std::io::Error> {
     thread::Builder::new()
         .name("c4os-production-runtime-initialization".into())
         .spawn(move || {
             let initialize = || -> Result<Arc<ProductionRuntimeApplication>, String> {
-                let vault = CredentialServiceState::initialize(&c4os_home)
-                    .map_err(|error| error.to_string())?
-                    .vault();
-                let bootstrap =
-                    runtime::production::RuntimeProductionBootstrap::new(resource_dir, vault)
-                        .map_err(|error| error.to_string())?;
-                install_production_broker_facilities(&bootstrap, &app)
-                    .map_err(|error| error.to_string())?;
+                let bootstrap = runtime::production::RuntimeProductionBootstrap::new(
+                    resource_dir,
+                    credential_vault,
+                )
+                .map_err(|error| error.to_string())?;
+                install_production_broker_facilities(
+                    &bootstrap,
+                    &app,
+                    Arc::clone(&mcp),
+                    mcp_cancellations,
+                    sampling_parents,
+                )
+                .map_err(|error| error.to_string())?;
 
                 let workspace_binding = active_workspace
                     .lock()
@@ -18188,6 +20308,9 @@ pub fn run() {
             .map_err(|error| std::io::Error::other(error.to_string()))?;
             let platform_snapshot = platform.initial_snapshot(initial_theme);
             let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
+            let credential_vault = CredentialServiceState::initialize(&c4os_home)
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+                .vault();
             let application_resource_dir = app.path().resource_dir()?;
             let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
             let (database, _) = core::database::DatabaseActor::start(
@@ -18268,6 +20391,61 @@ pub fn run() {
                 ConversationApplicationState::default()
             };
             let active_workspace = Arc::new(Mutex::new(active_workspace));
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let mcp_sampling_broker = Arc::new(
+                mcp::production_sampling::ProductionMcpSamplingBroker::new(Arc::clone(&runtime)),
+            );
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let mcp_sampling_approvals = mcp_sampling_broker.approvals();
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let mcp_sampling_parents = mcp_sampling_broker.parents();
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let mcp_transport_factory = Arc::new(
+                mcp::transport::RmcpTransportFactory::with_sampling(mcp_sampling_broker),
+            );
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            let mcp_transport_factory = Arc::new(mcp::transport::RmcpTransportFactory::default());
+            let mcp = Arc::new(tokio::sync::Mutex::new(
+                ProductionMcpService::restore(
+                    Arc::new(mcp::database::DatabaseMcpRepository::new(
+                        Arc::clone(&database),
+                        credential_vault.clone(),
+                    )),
+                    Arc::new(
+                        mcp::authority::ProductionMcpAuthority::new(
+                            c4os_home.clone(),
+                            credential_vault.clone(),
+                            Arc::clone(&active_workspace),
+                            Arc::clone(&runtime),
+                        )
+                        .map_err(|error| std::io::Error::other(error.to_string()))?,
+                    ),
+                    mcp_transport_factory,
+                    now_ms,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?,
+            ));
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            let mcp_cancellations = ProductionMcpCancellationRegistry::default();
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            if let Ok(service) = mcp.try_lock() {
+                mcp_cancellations.refresh_credential_bindings(&service.snapshot());
+            }
+            let mcp_credential_observer = credential_vault
+                .as_ref()
+                .map(|vault| {
+                    let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
+                        Arc::new(ProductionMcpCredentialObserver {
+                            service: Arc::downgrade(&mcp),
+                            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                            cancellations: mcp_cancellations.clone(),
+                        });
+                    vault
+                        .register_mutation_observer(Arc::clone(&observer))
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
+                    Ok::<_, std::io::Error>(observer)
+                })
+                .transpose()?;
             let artifact_operation = Arc::new(Mutex::new(()));
             let artifact = Arc::new(Mutex::new(ArtifactApplicationState::default()));
             let terminal = Arc::new(Mutex::new(TerminalSupervisor::new()));
@@ -18287,6 +20465,12 @@ pub fn run() {
                 database,
                 c4os_home: c4os_home.clone(),
                 bundled_skill_root: application_resource_dir.join("skills"),
+                mcp: Arc::clone(&mcp),
+                _mcp_credential_observer: mcp_credential_observer,
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                mcp_cancellations: mcp_cancellations.clone(),
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                mcp_sampling_approvals: mcp_sampling_approvals.clone(),
                 extensions: Mutex::new(extensions),
                 hook_supervisor: Mutex::new(hook_supervisor),
                 configuration: Mutex::new(configuration),
@@ -18322,8 +20506,12 @@ pub fn run() {
                 app.handle().clone(),
                 runtime_resource_dir,
                 c4os_home,
+                credential_vault,
                 active_workspace,
                 runtime,
+                mcp,
+                mcp_cancellations,
+                mcp_sampling_parents,
                 runtime_production,
             )?;
             let fallback_app = app.handle().clone();
@@ -18366,6 +20554,16 @@ pub fn run() {
             extension_review_hook,
             extension_load_skill,
             extension_publisher_link,
+            mcp_snapshot,
+            mcp_save_server,
+            mcp_request_trust,
+            mcp_answer_trust,
+            mcp_test_server,
+            mcp_enable_server,
+            mcp_recover_server,
+            mcp_disable_server,
+            mcp_revoke_server,
+            mcp_delete_server,
             foundation_snapshot,
             workspace_start_snapshot,
             conversation_snapshot,

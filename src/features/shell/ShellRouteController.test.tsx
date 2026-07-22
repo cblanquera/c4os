@@ -168,6 +168,7 @@ function conversationSubmitSnapshot(
           prompt: "The Reply target active when submit began",
           attachments: [],
           artifactContext: null,
+          mcpProvenance: null,
           submittedAtMs: 1,
         },
         {
@@ -175,6 +176,7 @@ function conversationSubmitSnapshot(
           prompt: "The newer local Reply target",
           attachments: [],
           artifactContext: null,
+          mcpProvenance: null,
           submittedAtMs: 2,
         },
       ],

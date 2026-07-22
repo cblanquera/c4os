@@ -26,7 +26,7 @@ fn set<T: Ord>(values: impl IntoIterator<Item = T>) -> BTreeSet<T> {
 fn app_database(temp: &TempDir) -> (DatabaseDescriptor, Arc<DatabaseActor>) {
     let descriptor = DatabaseDescriptor::app(temp.path());
     let (database, report) = DatabaseActor::start(descriptor.clone()).expect("app database");
-    assert_eq!(report.current_version, 7);
+    assert_eq!(report.current_version, 8);
     (descriptor, Arc::new(database))
 }
 
@@ -273,6 +273,57 @@ fn allow_is_persisted_before_one_effect_and_replay_is_denied() {
             .expect("append-only transitions")
             .len()
             >= 6
+    );
+}
+
+#[test]
+fn split_effect_lease_keeps_the_durable_barrier_open_until_async_completion() {
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temp);
+    let mut gateway = ActionGateway::new(
+        PolicyConfiguration {
+            preset: ApprovalPreset::ApproveSafeActions,
+            ..PolicyConfiguration::default()
+        },
+        Arc::clone(&database),
+    );
+    let action = action(ActionEffect::Read, "action-split", "run-split");
+    let token = match gateway
+        .propose(&facts(ActionEffect::Read), action.clone(), 15)
+        .expect("proposal")
+    {
+        GatewayProposal::Authorized { token, .. } => token,
+        other => panic!("expected authorization, found {other:?}"),
+    };
+
+    let lease = gateway
+        .begin_effect(&token, &action, live(&action), None, 16)
+        .expect("durable effect start");
+    let open = database
+        .security_records(SnapshotQuery::new(20).expect("query"))
+        .expect("open effect records");
+    assert!(open.iter().any(|record| {
+        record.record_kind == "action-intent" && record.state == "effect-started"
+    }));
+    assert!(
+        !open
+            .iter()
+            .any(|record| record.record_kind == "action-result")
+    );
+
+    gateway
+        .complete_effect(lease, success(17))
+        .expect("durable effect completion");
+    let completed = database
+        .security_records(SnapshotQuery::new(20).expect("query"))
+        .expect("completed effect records");
+    assert!(completed.iter().any(|record| {
+        record.record_kind == "action-intent" && record.state == "effect-finished"
+    }));
+    assert!(
+        completed
+            .iter()
+            .any(|record| { record.record_kind == "action-result" && record.state == "succeeded" })
     );
 }
 
@@ -533,6 +584,135 @@ fn interrupted_approval_requeue_requires_a_fresh_answer_even_when_policy_allows(
 }
 
 #[test]
+fn trust_confirmation_requires_an_answer_for_every_preset_and_preserves_deny() {
+    for (index, preset) in [
+        ApprovalPreset::AskForApproval,
+        ApprovalPreset::ApproveSafeActions,
+        ApprovalPreset::ApproveForMe,
+        ApprovalPreset::Custom,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let temp = TempDir::new().expect("temporary directory");
+        let (_, database) = app_database(&temp);
+        let mut gateway = ActionGateway::new(
+            PolicyConfiguration {
+                preset,
+                ..PolicyConfiguration::default()
+            },
+            database,
+        );
+        let action = action(
+            ActionEffect::Modify,
+            &format!("action-trust-{index}"),
+            &format!("run-trust-{index}"),
+        );
+        let proposal = gateway
+            .propose_trust_confirmation(&facts(ActionEffect::Modify), action, 56)
+            .expect("trust confirmation proposal");
+        let GatewayProposal::PendingApproval { resolution, .. } = proposal else {
+            panic!("trust confirmation must require an explicit answer");
+        };
+        assert_eq!(resolution.decision, PolicyDecision::Ask);
+        if preset == ApprovalPreset::ApproveForMe {
+            assert_eq!(
+                resolution.controlling_sources,
+                vec![DecisionSource::ExplicitTrustConfirmation]
+            );
+        }
+    }
+
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temp);
+    let mut gateway = ActionGateway::new(
+        PolicyConfiguration {
+            preset: ApprovalPreset::ApproveForMe,
+            ..PolicyConfiguration::default()
+        },
+        database,
+    );
+    let action = action(
+        ActionEffect::Modify,
+        "action-trust-denied",
+        "run-trust-denied",
+    );
+    let mut denied_facts = facts(ActionEffect::Modify);
+    denied_facts.sandbox_allows = false;
+    assert!(matches!(
+        gateway
+            .propose_trust_confirmation(&denied_facts, action, 57)
+            .expect("trust denial"),
+        GatewayProposal::Denied { .. }
+    ));
+}
+
+#[test]
+fn sampling_confirmation_requires_an_answer_for_every_preset_and_preserves_deny() {
+    for (index, preset) in [
+        ApprovalPreset::AskForApproval,
+        ApprovalPreset::ApproveSafeActions,
+        ApprovalPreset::ApproveForMe,
+        ApprovalPreset::Custom,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let temp = TempDir::new().expect("temporary directory");
+        let (_, database) = app_database(&temp);
+        let mut gateway = ActionGateway::new(
+            PolicyConfiguration {
+                preset,
+                ..PolicyConfiguration::default()
+            },
+            database,
+        );
+        let mut action = action(
+            ActionEffect::Read,
+            &format!("action-sampling-{index}"),
+            &format!("run-sampling-{index}"),
+        );
+        action.arguments = serde_json::json!({ "maxTokens": 256 });
+        let proposal = gateway
+            .propose_sampling_confirmation(&facts(ActionEffect::Read), action, 58)
+            .expect("sampling confirmation proposal");
+        let GatewayProposal::PendingApproval { resolution, .. } = proposal else {
+            panic!("sampling confirmation must require an explicit answer");
+        };
+        assert_eq!(resolution.decision, PolicyDecision::Ask);
+        if preset == ApprovalPreset::ApproveForMe {
+            assert_eq!(
+                resolution.controlling_sources,
+                vec![DecisionSource::ExplicitSamplingConfirmation]
+            );
+        }
+    }
+
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, database) = app_database(&temp);
+    let mut gateway = ActionGateway::new(
+        PolicyConfiguration {
+            preset: ApprovalPreset::ApproveForMe,
+            ..PolicyConfiguration::default()
+        },
+        database,
+    );
+    let action = action(
+        ActionEffect::Read,
+        "action-sampling-denied",
+        "run-sampling-denied",
+    );
+    let mut denied_facts = facts(ActionEffect::Read);
+    denied_facts.sandbox_allows = false;
+    assert!(matches!(
+        gateway
+            .propose_sampling_confirmation(&denied_facts, action, 59)
+            .expect("sampling denial"),
+        GatewayProposal::Denied { .. }
+    ));
+}
+
+#[test]
 fn issued_token_restores_by_exact_digests_and_interrupted_effect_becomes_unknown() {
     let temp = TempDir::new().expect("temporary directory");
     let (_, database) = app_database(&temp);
@@ -723,7 +903,7 @@ fn executor_result_digest_is_validated_before_any_result_is_journaled() {
 }
 
 #[test]
-fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority() {
+fn plugin_or_mcp_revocation_is_exact_durable_and_cancels_only_matching_open_authority() {
     let temp = TempDir::new().expect("temporary directory");
     let (_, database) = app_database(&temp);
     let policy = PolicyConfiguration {
@@ -732,12 +912,12 @@ fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority()
     };
     let mut gateway = ActionGateway::new(policy.clone(), Arc::clone(&database));
     let mut plugin_a = action(ActionEffect::Read, "action-plugin-a", "run-plugin-a");
-    plugin_a.plugin_or_mcp_id = Some("plugin.a".into());
+    plugin_a.plugin_or_mcp_id = Some("mcp.a".into());
     let mut facts_a = facts(ActionEffect::Read);
     facts_a.plugin_or_mcp_id = plugin_a.plugin_or_mcp_id.clone();
     let token_a = match gateway.propose(&facts_a, plugin_a.clone(), 200).unwrap() {
         GatewayProposal::Authorized { token, .. } => token,
-        other => panic!("expected Plugin A authorization, found {other:?}"),
+        other => panic!("expected MCP A authorization, found {other:?}"),
     };
     let mut plugin_b = action(ActionEffect::Read, "action-plugin-b", "run-plugin-b");
     plugin_b.plugin_or_mcp_id = Some("plugin.b".into());
@@ -747,7 +927,7 @@ fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority()
         GatewayProposal::Authorized { token, .. } => token,
         other => panic!("expected Plugin B authorization, found {other:?}"),
     };
-    assert_eq!(gateway.revoke_plugin("plugin.a", 202).unwrap(), 1);
+    assert_eq!(gateway.revoke_plugin_or_mcp("mcp.a", 202).unwrap(), 1);
     assert!(matches!(
         gateway.execute(
             &token_a,
@@ -794,12 +974,12 @@ fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority()
     let (_, prompt_database) = app_database(&prompt_temp);
     let mut prompts = ActionGateway::new(PolicyConfiguration::default(), prompt_database);
     let mut modify_a = action(ActionEffect::Modify, "modify-plugin-a", "modify-run-a");
-    modify_a.plugin_or_mcp_id = Some("plugin.a".into());
+    modify_a.plugin_or_mcp_id = Some("mcp.a".into());
     let mut modify_facts_a = facts(ActionEffect::Modify);
     modify_facts_a.plugin_or_mcp_id = modify_a.plugin_or_mcp_id.clone();
     let prompt_a = match prompts.propose(&modify_facts_a, modify_a, 210).unwrap() {
         GatewayProposal::PendingApproval { prompt, .. } => prompt,
-        other => panic!("expected Plugin A prompt, found {other:?}"),
+        other => panic!("expected MCP A prompt, found {other:?}"),
     };
     let mut modify_b = action(ActionEffect::Modify, "modify-plugin-b", "modify-run-b");
     modify_b.plugin_or_mcp_id = Some("plugin.b".into());
@@ -809,7 +989,7 @@ fn plugin_revocation_is_exact_durable_and_cancels_only_matching_open_authority()
         GatewayProposal::PendingApproval { prompt, .. } => prompt,
         other => panic!("expected Plugin B prompt, found {other:?}"),
     };
-    assert_eq!(prompts.revoke_plugin("plugin.a", 212).unwrap(), 1);
+    assert_eq!(prompts.revoke_plugin_or_mcp("mcp.a", 212).unwrap(), 1);
     assert_eq!(
         prompts
             .approval_queue()

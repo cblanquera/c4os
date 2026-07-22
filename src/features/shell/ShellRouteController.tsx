@@ -119,6 +119,7 @@ import type {
   SessionId,
 } from "../../platform/protocol";
 import { NativePlatformSettingsContent } from "../platform";
+import { ProductionRuntimeApprovalCenter } from "../runtime";
 import {
   PluginSettings,
   SkillSettings,
@@ -130,6 +131,13 @@ import {
   type SkillSettingsSnapshot,
   type SkillView,
 } from "../settings/extensions";
+import {
+  McpSettings,
+  projectMcpSettingsSnapshot,
+  type McpSettingsActions,
+  type McpSettingsSnapshot,
+  type McpVisibleState,
+} from "../settings/mcp";
 import {
   activateExtensionUpdate,
   addExtensionMarketplace,
@@ -152,6 +160,19 @@ import {
   type SkillInstructionsSnapshot,
   type SkillQualifiedIdentity,
 } from "../../platform/extension-service";
+import {
+  answerMcpTrust,
+  deleteMcpServer,
+  disableMcpServer,
+  enableMcpServer,
+  recoverMcpServer,
+  readMcpSnapshot,
+  requestMcpTrust,
+  revokeMcpServer,
+  saveMcpServer,
+  testMcpServer,
+  type McpServiceSnapshot,
+} from "../../platform/mcp-service";
 import {
   selectComposerDraft,
   selectComposerProjection,
@@ -206,6 +227,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const composerProjection = useAppSelector(selectComposerProjection);
   const settingsReturn = useAppSelector(selectSettingsReturnState);
   const extensionSettings = useExtensionSettings(route, navigate, dispatch);
+  const mcpSettings = useMcpSettings(route);
   const qaEnabled = useAppSelector((state) => state.shellQa.enabled);
   const viewportWidth = useViewportWidth();
   const overlayPanel = viewportWidth <= 992;
@@ -2058,7 +2080,10 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           runtime: turn.runtimeLabel ?? "Runtime",
           adapter: turn.adapterLabel ?? "Adapter",
           environment: turn.environmentLabel ?? "Local",
-          capabilitySummary: "Run-bound effective snapshot",
+          capabilitySummary:
+            turn.mcpProvenance === undefined
+              ? "Run-bound effective snapshot"
+              : mcpCapabilitySummary(turn.mcpProvenance),
           isExpanded: provenanceExpanded.has(turn.id),
         },
         ...(hasWorkActivity
@@ -2550,6 +2575,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
         sessions={sessions}
         settings={settings}
         extensionSettings={extensionSettings}
+        mcpSettings={mcpSettings}
         workspace={workspace}
       />
     );
@@ -2578,6 +2604,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   return (
     <>
       {shellContent}
+      <ProductionRuntimeApprovalCenter />
       <ConversationFileDropOverlay
         isChatActive={
           route === "/chat" &&
@@ -2601,6 +2628,189 @@ interface ExtensionSettingsProjection {
   readonly skills: SkillSettingsSnapshot;
   readonly pluginActions: PluginSettingsActions;
   readonly skillActions: SkillSettingsActions;
+}
+
+interface McpSettingsProjection {
+  readonly snapshot: McpSettingsSnapshot;
+  readonly actions: McpSettingsActions;
+}
+
+function useMcpSettings(route: ShellRoutePath): McpSettingsProjection {
+  const [snapshot, setSnapshot] = useState<McpServiceSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  const [pendingStates, setPendingStates] = useState<
+    Readonly<Record<string, McpVisibleState>>
+  >({});
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setSnapshot(await readMcpSnapshot());
+    } catch (failure) {
+      setError(mcpMessage(failure));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (route !== "/settings/mcp") return;
+    let cancelled = false;
+    void readMcpSnapshot()
+      .then((next) => {
+        if (!cancelled) {
+          setError(null);
+          setSnapshot(next);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (!cancelled) setError(mcpMessage(failure));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route]);
+
+  useEffect(() => {
+    if (route !== "/settings/mcp" || snapshot === null) return;
+    const nextDeadline = snapshot.servers
+      .map((server) => server.nextRestartAtMs)
+      .filter((deadline): deadline is number => deadline !== null)
+      .filter((deadline) => deadline > clockMs)
+      .sort((left, right) => left - right)[0];
+    if (nextDeadline === undefined) return;
+    const timer = window.setTimeout(
+      () => setClockMs(Date.now()),
+      Math.max(1, nextDeadline - Date.now() + 1),
+    );
+    return () => window.clearTimeout(timer);
+  }, [clockMs, route, snapshot]);
+
+  const mutate = useCallback(
+    async (
+      operation: () => Promise<McpServiceSnapshot>,
+      rethrow = false,
+      pending?: { readonly serverId: string; readonly state: McpVisibleState },
+    ) => {
+      setError(null);
+      if (pending !== undefined) {
+        setPendingStates((current) => ({
+          ...current,
+          [pending.serverId]: pending.state,
+        }));
+      }
+      try {
+        setSnapshot(await operation());
+      } catch (failure) {
+        setError(mcpMessage(failure));
+        if (rethrow) throw failure;
+      } finally {
+        if (pending !== undefined) {
+          setPendingStates((current) => {
+            const next = { ...current };
+            delete next[pending.serverId];
+            return next;
+          });
+          setClockMs(Date.now());
+        }
+      }
+    },
+    [],
+  );
+
+  const actions = useMemo<McpSettingsActions>(
+    () => ({
+      onDelete: (serverId) => mutate(() => deleteMcpServer(serverId), true),
+      onDisable: (serverId) =>
+        mutate(() => disableMcpServer(serverId), false, {
+          serverId,
+          state: "disabled",
+        }),
+      onEnableForNextTurn: (serverId) =>
+        mutate(() => enableMcpServer(serverId), false, {
+          serverId,
+          state: "connecting",
+        }),
+      onAnswerTrust: (serverId, promptId, answer) =>
+        mutate(() =>
+          answerMcpTrust(serverId, promptId, answer).then(
+            (response) => response.snapshot,
+          ),
+        ),
+      onRequestTrust: (serverId) =>
+        mutate(() =>
+          requestMcpTrust(serverId).then((response) => response.snapshot),
+        ),
+      onRecover: (serverId) =>
+        mutate(() => recoverMcpServer(serverId), false, {
+          serverId,
+          state: "restarting",
+        }),
+      onRetry: refresh,
+      onRevoke: (serverId, reason) =>
+        mutate(() => revokeMcpServer(serverId, reason), false, {
+          serverId,
+          state: "revoked",
+        }),
+      onSave: (input) => mutate(() => saveMcpServer(input), true),
+      onTest: (serverId) =>
+        mutate(() => testMcpServer(serverId), false, {
+          serverId,
+          state: "testing",
+        }),
+    }),
+    [mutate, refresh],
+  );
+
+  if (error !== null && snapshot === null) {
+    return {
+      actions,
+      snapshot: { status: "error", message: error, retryable: true },
+    };
+  }
+  if (snapshot === null || loading) {
+    return {
+      actions,
+      snapshot: {
+        status: "loading",
+        message: "Loading supervised MCP server definitions…",
+      },
+    };
+  }
+  return {
+    actions,
+    snapshot: {
+      ...projectMcpSettingsSnapshot(snapshot, clockMs),
+      servers: projectMcpSettingsSnapshot(snapshot, clockMs).servers.map(
+        (server) => {
+          const pendingState = pendingStates[server.id];
+          return pendingState === undefined
+            ? server
+            : {
+                ...server,
+                state: pendingState,
+                canConfigure: false,
+                canDelete: false,
+                canDisable: ["testing", "connecting", "restarting"].includes(
+                  pendingState,
+                ),
+                canEnable: false,
+                canRecover: false,
+                canRevoke: pendingState !== "revoked",
+                canRequestTrust: false,
+                canTest: false,
+              };
+        },
+      ),
+      ...(error === null ? {} : { operationError: error }),
+    },
+  };
 }
 
 function useExtensionSettings(
@@ -3053,6 +3263,12 @@ function extensionMessage(error: unknown): string {
     : "The native Extension service could not complete the request.";
 }
 
+function mcpMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "The native MCP service could not complete the request.";
+}
+
 function useViewportWidth(): number {
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 
@@ -3080,6 +3296,7 @@ interface ProjectedRouteContentProps {
   readonly conversation: ConversationState;
   readonly settings: SettingsState;
   readonly extensionSettings: ExtensionSettingsProjection;
+  readonly mcpSettings: McpSettingsProjection;
 }
 
 /** Renders only state already present in authoritative projections. */
@@ -3091,6 +3308,7 @@ function ProjectedRouteContent({
   conversation,
   settings,
   extensionSettings,
+  mcpSettings,
 }: ProjectedRouteContentProps): ReactNode {
   if (route === "/settings/providers") {
     return <NativePlatformSettingsContent />;
@@ -3110,6 +3328,15 @@ function ProjectedRouteContent({
       <SkillSettings
         actions={extensionSettings.skillActions}
         snapshot={extensionSettings.skills}
+      />
+    );
+  }
+
+  if (route === "/settings/mcp") {
+    return (
+      <McpSettings
+        actions={mcpSettings.actions}
+        snapshot={mcpSettings.snapshot}
       />
     );
   }
@@ -3331,6 +3558,38 @@ function modelCapabilities(model: {
   if (model.supportsReasoning) capabilities.push("reasoning");
   if (model.supportsAudio) capabilities.push("audio");
   return capabilities;
+}
+
+function mcpCapabilitySummary(provenance: {
+  readonly snapshotId: string;
+  readonly serverCount: number;
+  readonly toolCount: number;
+  readonly omittedToolCount: number;
+  readonly truncated: boolean;
+  readonly tools: readonly {
+    readonly serverId: string;
+    readonly sourceKind: "user" | "plugin";
+    readonly sourceId: string | null;
+    readonly toolName: string;
+  }[];
+}): string {
+  const visible = provenance.tools.slice(0, 3).map((tool) => {
+    const source =
+      tool.sourceKind === "plugin"
+        ? `Plugin ${tool.sourceId ?? "unknown"}`
+        : "User configuration";
+    return `${source} · ${tool.serverId}/${tool.toolName}`;
+  });
+  const hiddenCaptured = Math.max(0, provenance.toolCount - visible.length);
+  const snapshotLabel = provenance.snapshotId.slice("mcp-turn:".length, 12 + 9);
+  return [
+    `Run-bound MCP snapshot ${snapshotLabel} · ${provenance.toolCount} captured ${provenance.toolCount === 1 ? "tool" : "tools"} from ${provenance.serverCount} ${provenance.serverCount === 1 ? "server" : "servers"}`,
+    ...visible,
+    ...(hiddenCaptured === 0 ? [] : [`+${hiddenCaptured} more captured`]),
+    ...(provenance.truncated
+      ? [`${provenance.omittedToolCount} omitted by catalog bound`]
+      : []),
+  ].join(" · ");
 }
 
 function formatCompactNumber(value: number): string {

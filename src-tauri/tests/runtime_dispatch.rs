@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use c4os_lib::artifact::{
@@ -32,14 +33,16 @@ use c4os_lib::runtime::dispatch::{
     CoordinatedFirstDispatch, CoordinatedRetryDispatch, CoordinatedTurnDispatch, DispatchError,
     DispatchEventCategory, DispatchIdentity, DispatchModelRoute, FirstDispatchOptions,
     InstalledAttachmentConverterDescriptor, PeerDispatchError, PeerDispatchEvent,
-    PeerDispatchRequest, PiDispatchCredentialIssuer, PiDispatchPeer,
+    PeerDispatchRequest, PeerSamplingRequest, PiDispatchCredentialIssuer, PiDispatchPeer,
     ProductionOpenCodeDispatchPeer, ProductionPiDispatchPeer, RetryDispatchOptions,
     RuntimeDispatchPeer, RuntimeDispatchRegistry, RuntimePeerRegistration, TurnDispatchOptions,
     coordinate_cancellation, coordinate_first_dispatch, coordinate_polled_events,
     coordinate_recovery, coordinate_retry_dispatch, coordinate_turn_dispatch,
 };
 use c4os_lib::runtime::opencode_native::sha256_bytes;
-use c4os_lib::runtime::pi::{PI_NATIVE_VERSION, PiAdapter, PiSidecarManifest, PiSidecarRunner};
+use c4os_lib::runtime::pi::{
+    PI_NATIVE_VERSION, PiAdapter, PiSamplingMessage, PiSidecarManifest, PiSidecarRunner,
+};
 use c4os_lib::runtime::provider::{
     ModelRoute, PROVIDER_SCHEMA_VERSION, ProviderConnectionEvidence, ProviderDiscovery,
     ProviderEndpoint, ProviderKind, ProviderProbe, ProviderProbeFailure, ProviderProfile,
@@ -459,6 +462,7 @@ fn first_submission(process_generation: u64) -> CoordinatedFirstSubmission {
             prompt: Some("Implement the coordinator".into()),
             attachments: vec![],
             skill_context: vec![],
+            mcp_turn: None,
             binding: binding(),
             submitted_at_ms: NOW + 10,
         },
@@ -887,6 +891,7 @@ fn turn_request(
             attachments: Vec::new(),
             skill_context: Vec::new(),
             reply_context: None,
+            mcp_turn: None,
             context,
             submitted_at_ms: created_at_ms,
         },
@@ -1902,6 +1907,12 @@ fn pi_cancellation_health() -> Value {
 #[derive(Default)]
 struct PiRouteCaptureControl {
     native_model_routes: Vec<Value>,
+    sampling_result_model: Option<String>,
+    mismatched_sampling_ack: bool,
+    reject_sampling_start: bool,
+    fail_session_close: bool,
+    keep_sampling_pending: bool,
+    terminations: usize,
 }
 
 struct PiRouteCaptureRunner {
@@ -1936,6 +1947,57 @@ impl PiSidecarRunner for PiRouteCaptureRunner {
                     "persistence": "c4os-authoritative"
                 })
             }
+            "sampling.start" if self.control.lock().unwrap().reject_sampling_start => {
+                return Ok(vec![
+                    serde_json::to_string(&json!({
+                        "schemaVersion": 1,
+                        "kind": "response",
+                        "requestId": request["requestId"],
+                        "correlationId": request["correlationId"],
+                        "processGeneration": request["processGeneration"],
+                        "status": "error",
+                        "error": { "code": "sampling-rejected", "message": "fixture rejection" }
+                    }))
+                    .unwrap(),
+                ]);
+            }
+            "sampling.start" => json!({
+                "accepted": true,
+                "runId": if self.control.lock().unwrap().mismatched_sampling_ack {
+                    json!("wrong-run")
+                } else {
+                    request["runId"].clone()
+                }
+            }),
+            "sampling.poll" => {
+                let control = self.control.lock().unwrap();
+                if control.keep_sampling_pending {
+                    json!({ "state": "pending" })
+                } else {
+                    let model = control.sampling_result_model.clone().unwrap_or_else(|| {
+                        control.native_model_routes.last().unwrap()["modelId"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned()
+                    });
+                    json!({
+                        "state": "completed",
+                        "result": {
+                            "text": "sampled answer",
+                            "model": model,
+                            "stopReason": "endTurn"
+                        }
+                    })
+                }
+            }
+            "sampling.cancel" => json!({
+                "cancelled": true,
+                "alreadyTerminal": false
+            }),
+            "session.close" if self.control.lock().unwrap().fail_session_close => {
+                return Err("fixture session close failure".into());
+            }
+            "session.close" => json!({ "closed": true }),
             "shutdown" => json!({ "stopped": true }),
             _ => return Err(format!("unexpected Pi operation: {operation}")),
         };
@@ -1958,6 +2020,7 @@ impl PiSidecarRunner for PiRouteCaptureRunner {
     }
 
     fn terminate(&mut self) -> Result<(), String> {
+        self.control.lock().unwrap().terminations += 1;
         Ok(())
     }
 }
@@ -2064,8 +2127,42 @@ fn pi_route_request(
         input: "Create the exact native Pi session".into(),
         eligible_tool_ids: BTreeSet::from(["c4os_propose_action".into()]),
         broker_authority: None,
+        mcp_turn: None,
         direct_attachments: Vec::new(),
         attachments: Vec::new(),
+    }
+}
+
+fn pi_sampling_request(cancelled: bool) -> PeerSamplingRequest {
+    PeerSamplingRequest {
+        identity: DispatchIdentity {
+            workspace_id: "workspace-1".into(),
+            environment_id: "local".into(),
+            session_id: "sampling-session-1".into(),
+            turn_id: "sampling-turn-1".into(),
+            attempt_id: "sampling-attempt-1".into(),
+            correlation_id: "sampling-correlation-1".into(),
+            runtime_id: "pi-primary".into(),
+            runtime_kind: RuntimeKind::Pi,
+            adapter_version: "1.0.0".into(),
+            native_version: PI_NATIVE_VERSION.into(),
+            process_generation: 7,
+        },
+        model: DispatchModelRoute {
+            provider_id: "openai-team-a".into(),
+            model_id: "openai/gpt-4o-mini".into(),
+            credential_reference: None,
+            credential_lease_id: None,
+        },
+        messages: vec![PiSamplingMessage {
+            role: "user".into(),
+            text: "Question".into(),
+        }],
+        system_prompt: None,
+        max_tokens: 8,
+        temperature: None,
+        timeout_ms: 1_000,
+        cancelled: Arc::new(AtomicBool::new(cancelled)),
     }
 }
 
@@ -2124,6 +2221,74 @@ fn pi_credential_route_rejects_provider_prefix_mismatch_before_native_session_cr
 }
 
 #[test]
+fn pi_sampling_rejects_pre_cancelled_work_before_native_session_or_credential_delivery() {
+    let (mut peer, control) = pi_route_capture_peer("openai-team-a", "openai");
+
+    assert!(matches!(
+        peer.sample(&pi_sampling_request(true)),
+        Err(PeerDispatchError::Cancellation)
+    ));
+    assert!(control.lock().unwrap().native_model_routes.is_empty());
+}
+
+#[test]
+fn pi_sampling_uses_a_fresh_session_and_rejects_native_model_substitution() {
+    let (mut peer, control) = pi_route_capture_peer("openai-team-a", "openai");
+    control.lock().unwrap().sampling_result_model = Some("substituted-model".into());
+
+    assert!(matches!(
+        peer.sample(&pi_sampling_request(false)),
+        Err(PeerDispatchError::Sampling)
+    ));
+    assert_eq!(control.lock().unwrap().native_model_routes.len(), 1);
+}
+
+#[test]
+fn pi_sampling_quarantines_an_ambiguous_native_start_ack() {
+    let (mut peer, control) = pi_route_capture_peer("openai-team-a", "openai");
+    control.lock().unwrap().mismatched_sampling_ack = true;
+
+    assert!(matches!(
+        peer.sample(&pi_sampling_request(false)),
+        Err(PeerDispatchError::Sampling)
+    ));
+    assert_eq!(control.lock().unwrap().terminations, 1);
+    assert!(matches!(peer.readiness(), Err(PeerDispatchError::NotReady)));
+}
+
+#[test]
+fn pi_sampling_quarantines_when_cleanup_close_is_not_confirmed() {
+    let (mut peer, control) = pi_route_capture_peer("openai-team-a", "openai");
+    {
+        let mut control = control.lock().unwrap();
+        control.reject_sampling_start = true;
+        control.fail_session_close = true;
+    }
+
+    assert!(matches!(
+        peer.sample(&pi_sampling_request(false)),
+        Err(PeerDispatchError::Sampling)
+    ));
+    assert_eq!(control.lock().unwrap().terminations, 1);
+    assert!(matches!(peer.readiness(), Err(PeerDispatchError::NotReady)));
+}
+
+#[test]
+fn pi_sampling_quarantines_when_cancelled_work_never_settles() {
+    let (mut peer, control) = pi_route_capture_peer("openai-team-a", "openai");
+    control.lock().unwrap().keep_sampling_pending = true;
+    let mut request = pi_sampling_request(false);
+    request.timeout_ms = 1;
+
+    assert!(matches!(
+        peer.sample(&request),
+        Err(PeerDispatchError::Cancellation)
+    ));
+    assert_eq!(control.lock().unwrap().terminations, 1);
+    assert!(matches!(peer.readiness(), Err(PeerDispatchError::NotReady)));
+}
+
+#[test]
 fn pi_false_cancellation_retains_exact_peer_binding_until_true_cancellation() {
     const PI_GENERATION: u64 = 7;
 
@@ -2168,6 +2333,7 @@ fn pi_false_cancellation_retains_exact_peer_binding_until_true_cancellation() {
         input: "Propose a brokered read".into(),
         eligible_tool_ids: BTreeSet::from(["c4os_read_resource".into()]),
         broker_authority: None,
+        mcp_turn: None,
         direct_attachments: vec![],
         attachments: vec![],
     };

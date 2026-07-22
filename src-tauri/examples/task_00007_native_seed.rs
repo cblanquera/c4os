@@ -11,6 +11,7 @@ use c4os_lib::core::services::{
     create_workspace_from_project, restore_app_configuration, save_app_configuration,
 };
 use c4os_lib::core::workspace::{C4osHomeLayout, WorkspaceLockOwner};
+use c4os_lib::mcp::{McpDefinitionSource, McpTransportKind, McpTurnSnapshot, McpTurnToolSnapshot};
 use c4os_lib::runtime::capability::{
     CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityEvidence, CapabilityKey,
     CapabilityLayer, CapabilityState, ModelLifecycle, RouteIdentity,
@@ -24,6 +25,7 @@ use c4os_lib::runtime::session::{
 };
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
@@ -32,7 +34,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let home_path = acceptance_home_argument()?;
+    let (home_path, include_mcp_provenance) = acceptance_arguments()?;
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)?
         .as_millis()
@@ -142,6 +144,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         prompt: Some("Verify the production-composed native Chat golden path.".into()),
         attachments: Vec::new(),
         skill_context: Vec::new(),
+        mcp_turn: include_mcp_provenance
+            .then(|| {
+                acceptance_mcp_turn(
+                    &workspace_id.to_string(),
+                    &project_id.to_string(),
+                    &session,
+                    now_ms + 2,
+                )
+            })
+            .transpose()?,
         binding: acceptance_binding(&workspace_id.to_string(), &project_id.to_string(), now_ms)?,
         submitted_at_ms: now_ms + 2,
     })?;
@@ -201,11 +213,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn acceptance_home_argument() -> Result<PathBuf, Box<dyn Error>> {
-    let path = std::env::args_os()
-        .nth(1)
+fn acceptance_arguments() -> Result<(PathBuf, bool), Box<dyn Error>> {
+    let mut arguments = std::env::args_os().skip(1);
+    let path = arguments
+        .next()
         .map(PathBuf::from)
-        .ok_or("usage: task_00007_native_seed <empty-absolute-mode-0700-directory>")?;
+        .ok_or(
+            "usage: task_00007_native_seed <empty-absolute-mode-0700-directory> [--with-mcp-provenance]",
+        )?;
+    let include_mcp_provenance = match arguments.next() {
+        None => false,
+        Some(value) if value == OsStr::new("--with-mcp-provenance") => true,
+        Some(_) => return Err("unknown task_00007_native_seed option".into()),
+    };
+    if arguments.next().is_some() {
+        return Err("too many task_00007_native_seed arguments".into());
+    }
     if !path.is_absolute() {
         return Err("acceptance home must be absolute".into());
     }
@@ -228,7 +251,91 @@ fn acceptance_home_argument() -> Result<PathBuf, Box<dyn Error>> {
     if !permitted {
         return Err("acceptance home must remain under the system temporary root".into());
     }
-    Ok(canonical)
+    Ok((canonical, include_mcp_provenance))
+}
+
+fn acceptance_mcp_turn(
+    workspace_id: &str,
+    project_id: &str,
+    session_id: &str,
+    captured_at_ms: u64,
+) -> Result<McpTurnSnapshot, Box<dyn Error>> {
+    let input_schema = serde_json::json!({
+        "type": "object",
+        "properties": { "message": { "type": "string" } },
+        "required": ["message"],
+        "additionalProperties": false,
+    });
+    let input_schema_sha256 = json_digest(&input_schema)?;
+    let definition_sha256 = digest('d');
+    let route = serde_json::json!({
+        "serverId": "task-00012-stdio",
+        "source": McpDefinitionSource::User,
+        "lifecycleGeneration": 3,
+        "definitionSha256": definition_sha256,
+        "toolName": "echo",
+        "inputSchemaSha256": input_schema_sha256,
+        "outputSchemaSha256": null,
+        "workspaceId": workspace_id,
+        "projectId": project_id,
+        "sessionId": session_id,
+    });
+    let target_id = format!(
+        "mcp-tool:{}",
+        json_digest(&route)?.trim_start_matches("sha256:")
+    );
+    let tool = McpTurnToolSnapshot {
+        target_id,
+        server_id: "task-00012-stdio".into(),
+        source: McpDefinitionSource::User,
+        lifecycle_generation: 3,
+        definition_sha256,
+        transport_kind: McpTransportKind::Stdio,
+        tool_name: "echo".into(),
+        title: Some("Echo".into()),
+        description: Some("Returns one bounded acceptance message.".into()),
+        input_schema,
+        input_schema_sha256,
+        output_schema_sha256: None,
+    };
+    let catalog = serde_json::json!({
+        "serviceGeneration": 7,
+        "capturedAtMs": captured_at_ms,
+        "workspaceId": workspace_id,
+        "projectId": project_id,
+        "sessionId": session_id,
+        "tools": [&tool],
+        "truncated": false,
+        "omittedToolCount": 0,
+    });
+    let sha256 = json_digest(&catalog)?;
+    let snapshot = McpTurnSnapshot {
+        snapshot_id: format!("mcp-turn:{}", sha256.trim_start_matches("sha256:")),
+        service_generation: 7,
+        captured_at_ms,
+        workspace_id: workspace_id.into(),
+        project_id: project_id.into(),
+        session_id: session_id.into(),
+        tools: vec![tool],
+        truncated: false,
+        omitted_tool_count: 0,
+        sha256,
+    };
+    snapshot.validate()?;
+    Ok(snapshot)
+}
+
+fn json_digest(value: &serde_json::Value) -> Result<String, Box<dyn Error>> {
+    use sha2::{Digest as _, Sha256};
+
+    let digest = Sha256::digest(serde_json::to_vec(value)?);
+    Ok(format!(
+        "sha256:{}",
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
 }
 
 fn acceptance_binding(

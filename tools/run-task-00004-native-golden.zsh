@@ -234,7 +234,7 @@ C4OS_NATIVE_TLS_KEY="$C4OS_TLS_LEAF_KEY" \
 C4OS_NATIVE_PROVIDER_CREDENTIAL_FILE="$C4OS_PROVIDER_CREDENTIAL_FILE" \
 C4OS_NATIVE_PROVIDER_EVIDENCE="$C4OS_PROVIDER_EVIDENCE" \
   /usr/bin/python3 -c \
-    'import os, sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' \
+    'import os, sys; os.getpgrp() == os.getpid() or os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' \
     "$C4OS_CARGO_EXECUTABLE" test --test runtime_production \
     packaged_production_peers_complete_the_app_owned_native_golden_paths \
     -- --ignored --exact --test-threads=1 &

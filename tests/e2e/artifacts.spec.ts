@@ -631,6 +631,7 @@ function conversationSnapshot() {
           prompt: "Open the trusted artifact and keep Chat available.",
           attachments: [],
           artifactContext: null,
+          mcpProvenance: null,
           submittedAtMs: 100,
         },
       ],

@@ -16,8 +16,10 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::mcp::McpTurnSnapshot;
 use crate::runtime::action_bridge::{
-    RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization, RuntimeExecutionReceipt,
+    RuntimeActionEffectLease, RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
+    RuntimeEffectCompletionCertainty, RuntimeEffectResult, RuntimeExecutionReceipt,
     RuntimeGatewayDecision, RuntimeIntentIdentity,
 };
 use crate::runtime::dispatch::DispatchIdentity;
@@ -145,6 +147,7 @@ pub struct BrokerActionContext {
     pub configuration_version: u64,
     pub policy_version: u64,
     pub revocation_epoch: u64,
+    pub mcp_turn: Option<McpTurnSnapshot>,
 }
 
 impl BrokerActionContext {
@@ -172,6 +175,11 @@ impl BrokerActionContext {
             || self.request_origin == ActionRequestOrigin::Unknown
         {
             return Err(BrokerWorkerError::InvalidTrustedContext);
+        }
+        if let Some(mcp_turn) = &self.mcp_turn {
+            mcp_turn
+                .validate()
+                .map_err(|_| BrokerWorkerError::InvalidTrustedContext)?;
         }
         Ok(())
     }
@@ -208,6 +216,9 @@ pub struct ResolvedBrokerAction {
     pub explicit_scope_grant: bool,
     pub sandbox_allows: bool,
     pub declaration_exceeded: bool,
+    pub confidence: ClassificationConfidence,
+    pub risk: CanonicalRisk,
+    pub plugin_or_mcp_id: Option<String>,
 }
 
 impl ResolvedBrokerAction {
@@ -219,6 +230,7 @@ impl ResolvedBrokerAction {
             || self.sensitivity == ActionSensitivity::Unknown
             || self.reversibility == ActionReversibility::Unknown
             || self.repository_state == RepositoryState::Unknown
+            || self.risk == CanonicalRisk::Unknown
             || self.canonical_target.trim().is_empty()
             || self.canonical_target.chars().any(char::is_control)
             || self.target_version.trim().is_empty()
@@ -310,6 +322,27 @@ pub trait BrokerActionApplication {
     where
         F: FnOnce(ExecutionPermit) -> NormalizedActionResult;
 
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<RuntimeActionEffectLease, Self::Error>;
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error>;
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error>;
+
     fn cancel_runtime_run(&mut self, run_id: &str, now_ms: u64) -> Result<(), Self::Error>;
 }
 
@@ -318,6 +351,48 @@ pub trait BrokerActionApplication {
 /// single-use authorization.
 pub trait BrokerEffectExecutor {
     fn execute(&mut self, permit: ExecutionPermit) -> NormalizedActionResult;
+
+    fn start_deferred(&mut self, _permit: ExecutionPermit) -> BrokerDeferredStart {
+        BrokerDeferredStart::Rejected(NormalizedActionResult::denied(
+            "deferred-broker-facility-unavailable",
+            1,
+        ))
+    }
+
+    fn poll_deferred(&mut self, _ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+        None
+    }
+
+    fn cancel_deferred(&mut self, _ticket: &BrokerDeferredTicket) -> bool {
+        false
+    }
+
+    fn abandon_deferred(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        self.cancel_deferred(ticket)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct BrokerDeferredTicket(String);
+
+impl BrokerDeferredTicket {
+    /// Creates the opaque ticket returned by a core-installed deferred
+    /// facility. The worker still validates and owns the ticket lifecycle.
+    pub fn new(value: String) -> Result<Self, BrokerWorkerError> {
+        if !safe_identifier(&value) {
+            return Err(BrokerWorkerError::InvalidDeferredTicket);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub enum BrokerDeferredStart {
+    Started(BrokerDeferredTicket),
+    Rejected(NormalizedActionResult),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -327,6 +402,13 @@ pub enum BrokerWorkerOutcome {
         prompt_id: String,
     },
     Respond {
+        correlation_id: String,
+        decision: BrokerDecision,
+    },
+    EffectRunning {
+        correlation_id: String,
+    },
+    SettledAfterCancellation {
         correlation_id: String,
         decision: BrokerDecision,
     },
@@ -353,6 +435,13 @@ pub enum RuntimeBrokerWorkerOutcome {
         reason_code: String,
     },
     Executed {
+        native_request_id: String,
+        receipt: RuntimeExecutionReceipt,
+    },
+    EffectRunning {
+        native_request_id: String,
+    },
+    SettledAfterCancellation {
         native_request_id: String,
         receipt: RuntimeExecutionReceipt,
     },
@@ -395,10 +484,28 @@ struct PendingRuntimeApproval {
     intent: RuntimeIntentIdentity,
 }
 
+struct PendingBrokerEffect {
+    ticket: BrokerDeferredTicket,
+    lease: RuntimeActionEffectLease,
+    intent: RuntimeIntentIdentity,
+    context: BrokerActionContext,
+    proposal: BrokerProposal,
+    response_cancelled: bool,
+}
+
+struct PendingRuntimeEffect {
+    ticket: BrokerDeferredTicket,
+    lease: RuntimeActionEffectLease,
+    intent: RuntimeIntentIdentity,
+    run_terminal: bool,
+}
+
 pub struct BrokerActionWorker<C> {
     classifier: C,
     pending: BTreeMap<String, PendingBrokerApproval>,
     pending_runtime: BTreeMap<String, PendingRuntimeApproval>,
+    pending_effects: BTreeMap<String, PendingBrokerEffect>,
+    pending_runtime_effects: BTreeMap<String, PendingRuntimeEffect>,
     terminal: BTreeSet<String>,
     max_pending: usize,
     max_terminal: usize,
@@ -427,6 +534,8 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             classifier,
             pending: BTreeMap::new(),
             pending_runtime: BTreeMap::new(),
+            pending_effects: BTreeMap::new(),
+            pending_runtime_effects: BTreeMap::new(),
             terminal: BTreeSet::new(),
             max_pending,
             max_terminal,
@@ -435,7 +544,10 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
     }
 
     pub fn pending_count(&self) -> usize {
-        self.pending.len() + self.pending_runtime.len()
+        self.pending.len()
+            + self.pending_runtime.len()
+            + self.pending_effects.len()
+            + self.pending_runtime_effects.len()
     }
 
     pub(crate) fn pending_runtime_approval_prompt(&self, native_request_id: &str) -> Option<&str> {
@@ -463,6 +575,9 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         context.validate()?;
         let native_request_id = intent.native_request_id.clone();
         if self.pending_runtime.contains_key(&native_request_id)
+            || self
+                .pending_runtime_effects
+                .contains_key(&native_request_id)
             || self.terminal.contains(&native_request_id)
         {
             return Ok(runtime_denied(
@@ -474,7 +589,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             self.sealed_at_capacity = true;
             return Ok(runtime_denied(&native_request_id, "broker-worker-capacity"));
         }
-        if self.pending_runtime.len() >= self.max_pending {
+        if self.pending_count() >= self.max_pending {
             self.record_terminal(&native_request_id);
             return Ok(runtime_denied(
                 &native_request_id,
@@ -615,7 +730,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
                 self.accept_proposal(application, executor, proposal, context, now_ms)
             }
             BrokerEvent::Cancelled(proposal) => {
-                self.accept_cancellation(application, proposal, now_ms)
+                self.accept_cancellation(application, executor, proposal, now_ms)
             }
         }
     }
@@ -675,6 +790,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
                     pending.intent,
                     *authorization,
                     &pending.context,
+                    Some(pending.proposal),
                     now_ms,
                 )
             }
@@ -717,18 +833,20 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
     /// dispatch mapping was concurrently retired. The broker transport already
     /// wrote the cancellation result, and this method can only burn pending
     /// core state; it cannot authorize or execute an effect.
-    pub fn accept_authenticated_cancellation<A>(
+    pub fn accept_authenticated_cancellation<A, E>(
         &mut self,
         application: &mut A,
+        executor: &mut E,
         event: AuthenticatedBrokerEvent,
         now_ms: u64,
     ) -> Result<BrokerWorkerOutcome, BrokerWorkerError>
     where
         A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
     {
         match event.into_inner() {
             BrokerEvent::Cancelled(proposal) => {
-                self.accept_cancellation(application, proposal, now_ms)
+                self.accept_cancellation(application, executor, proposal, now_ms)
             }
             BrokerEvent::Proposal(_) => Err(BrokerWorkerError::ExpectedCancellation),
         }
@@ -747,6 +865,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         E: BrokerEffectExecutor,
     {
         if self.pending.contains_key(&proposal.correlation_id)
+            || self.pending_effects.contains_key(&proposal.correlation_id)
             || self.terminal.contains(&proposal.correlation_id)
         {
             return Ok(respond_denied(
@@ -768,7 +887,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
                 error.reason_code(),
             ));
         }
-        if self.pending.len() >= self.max_pending {
+        if self.pending_count() >= self.max_pending {
             self.record_terminal(&proposal.correlation_id);
             return Ok(respond_denied(
                 &proposal.correlation_id,
@@ -825,20 +944,44 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
                 intent,
                 *authorization,
                 &context,
+                Some(proposal),
                 now_ms,
             ),
         }
     }
 
-    fn accept_cancellation<A>(
+    fn accept_cancellation<A, E>(
         &mut self,
         application: &mut A,
+        executor: &mut E,
         proposal: BrokerProposal,
         now_ms: u64,
     ) -> Result<BrokerWorkerOutcome, BrokerWorkerError>
     where
         A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
     {
+        if let Some(pending) = self.pending_effects.get_mut(&proposal.correlation_id) {
+            if pending.proposal.tool != proposal.tool
+                || pending.proposal.session_id != proposal.session_id
+                || pending.proposal.message_id != proposal.message_id
+                || pending.proposal.process_generation != proposal.process_generation
+            {
+                return Ok(BrokerWorkerOutcome::ObservedCancellation {
+                    correlation_id: proposal.correlation_id,
+                    decision: denied("stale-runtime-identity"),
+                });
+            }
+            pending.response_cancelled = true;
+            let _ = executor.cancel_deferred(&pending.ticket);
+            let cancellation =
+                application.cancel_runtime_run(&pending.context.dispatch.attempt_id, now_ms);
+            cancellation.map_err(|_| BrokerWorkerError::Application)?;
+            return Ok(BrokerWorkerOutcome::ObservedCancellation {
+                correlation_id: proposal.correlation_id,
+                decision: BrokerDecision::Cancelled,
+            });
+        }
         let Some(pending) = self.pending.get(&proposal.correlation_id).cloned() else {
             let decision = if self.terminal.contains(&proposal.correlation_id) {
                 denied("broker-request-replayed")
@@ -941,7 +1084,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             initiator: ActionInitiator::Runtime,
             sensitivity: resolved.sensitivity,
             reversibility: resolved.reversibility,
-            confidence: ClassificationConfidence::Known,
+            confidence: resolved.confidence,
             request_origin: context.request_origin,
             repository_state: resolved.repository_state,
             inside_active_project: resolved.inside_active_project,
@@ -950,7 +1093,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             session_id: context.dispatch.session_id.clone(),
             runtime_id: context.dispatch.runtime_id.clone(),
             environment_id: context.dispatch.environment_id.clone(),
-            plugin_or_mcp_id: None,
+            plugin_or_mcp_id: resolved.plugin_or_mcp_id.clone(),
             target_resolved: true,
             authenticated: true,
             trusted_root: resolved.trusted_root,
@@ -964,7 +1107,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             tool_call_id: intent.native_request_id.clone(),
             tool: intent.native_tool.clone(),
             arguments,
-            risk: canonical_risk(&resolved),
+            risk: resolved.risk,
             requested_authority: requested_authority(&resolved),
             canonical_target: resolved.canonical_target,
             target_version: resolved.target_version,
@@ -973,7 +1116,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             run_id: context.dispatch.attempt_id.clone(),
             runtime_id: context.dispatch.runtime_id.clone(),
             environment_id: context.dispatch.environment_id.clone(),
-            plugin_or_mcp_id: None,
+            plugin_or_mcp_id: resolved.plugin_or_mcp_id.clone(),
             process_generation: context.dispatch.process_generation,
             configuration_version: context.configuration_version,
             policy_version: context.policy_version,
@@ -1065,7 +1208,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             initiator: ActionInitiator::Runtime,
             sensitivity: resolved.sensitivity,
             reversibility: resolved.reversibility,
-            confidence: ClassificationConfidence::Known,
+            confidence: resolved.confidence,
             request_origin: context.request_origin,
             repository_state: resolved.repository_state,
             inside_active_project: resolved.inside_active_project,
@@ -1074,7 +1217,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             session_id: context.dispatch.session_id.clone(),
             runtime_id: context.dispatch.runtime_id.clone(),
             environment_id: context.dispatch.environment_id.clone(),
-            plugin_or_mcp_id: None,
+            plugin_or_mcp_id: resolved.plugin_or_mcp_id.clone(),
             target_resolved: true,
             authenticated: true,
             trusted_root: resolved.trusted_root,
@@ -1088,7 +1231,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             tool_call_id: proposal.correlation_id.clone(),
             tool: proposal.tool.clone(),
             arguments,
-            risk: canonical_risk(&resolved),
+            risk: resolved.risk,
             requested_authority: requested_authority(&resolved),
             canonical_target: resolved.canonical_target,
             target_version: resolved.target_version,
@@ -1097,7 +1240,7 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             run_id: context.dispatch.attempt_id.clone(),
             runtime_id: context.dispatch.runtime_id.clone(),
             environment_id: context.dispatch.environment_id.clone(),
-            plugin_or_mcp_id: None,
+            plugin_or_mcp_id: resolved.plugin_or_mcp_id.clone(),
             process_generation: context.dispatch.process_generation,
             configuration_version: context.configuration_version,
             policy_version: context.policy_version,
@@ -1117,12 +1260,24 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         intent: RuntimeIntentIdentity,
         authorization: RuntimeAuthorization,
         context: &BrokerActionContext,
+        proposal: Option<BrokerProposal>,
         now_ms: u64,
     ) -> Result<BrokerWorkerOutcome, BrokerWorkerError>
     where
         A: BrokerActionApplication,
         E: BrokerEffectExecutor,
     {
+        if authorization.is_mcp() {
+            return self.start_deferred_authorized(
+                application,
+                executor,
+                intent,
+                authorization,
+                context,
+                proposal.ok_or(BrokerWorkerError::ReceiptBindingMismatch)?,
+                now_ms,
+            );
+        }
         let correlation_id = intent.native_request_id.clone();
         let receipt = application
             .execute_runtime_action(authorization, context.live_authority(), now_ms, |permit| {
@@ -1150,6 +1305,129 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         })
     }
 
+    // The deferred lease keeps every exact authority binding explicit.
+    #[allow(clippy::too_many_arguments)]
+    fn start_deferred_authorized<A, E>(
+        &mut self,
+        application: &mut A,
+        executor: &mut E,
+        intent: RuntimeIntentIdentity,
+        authorization: RuntimeAuthorization,
+        context: &BrokerActionContext,
+        proposal: BrokerProposal,
+        now_ms: u64,
+    ) -> Result<BrokerWorkerOutcome, BrokerWorkerError>
+    where
+        A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
+    {
+        let correlation_id = intent.native_request_id.clone();
+        if self.pending_count() >= self.max_pending {
+            self.record_terminal(&correlation_id);
+            return Ok(BrokerWorkerOutcome::Respond {
+                correlation_id,
+                decision: denied("pending-effect-capacity"),
+            });
+        }
+        let mut lease = application
+            .begin_runtime_action_effect(authorization, context.live_authority(), now_ms)
+            .map_err(|_| BrokerWorkerError::Application)?;
+        let permit = lease
+            .take_execution_permit()
+            .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+        match executor.start_deferred(permit) {
+            BrokerDeferredStart::Started(ticket) => {
+                self.pending_effects.insert(
+                    correlation_id.clone(),
+                    PendingBrokerEffect {
+                        ticket,
+                        lease,
+                        intent,
+                        context: context.clone(),
+                        proposal,
+                        response_cancelled: false,
+                    },
+                );
+                Ok(BrokerWorkerOutcome::EffectRunning { correlation_id })
+            }
+            BrokerDeferredStart::Rejected(normalized) => {
+                let receipt = application
+                    .complete_runtime_action_effect(
+                        lease,
+                        RuntimeEffectResult::normalized(normalized),
+                        now_ms.saturating_add(1),
+                    )
+                    .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+                if !receipt.matches_runtime_tool(
+                    &intent.runtime_id,
+                    &intent.session_id,
+                    &intent.run_id,
+                    &intent.native_request_id,
+                    intent.process_generation,
+                ) {
+                    return Err(BrokerWorkerError::ReceiptBindingMismatch);
+                }
+                let decision = decision_from_receipt(&receipt);
+                self.record_terminal(&correlation_id);
+                Ok(BrokerWorkerOutcome::Respond {
+                    correlation_id,
+                    decision,
+                })
+            }
+        }
+    }
+
+    pub fn poll_deferred<A, E>(
+        &mut self,
+        application: &mut A,
+        executor: &mut E,
+        now_ms: u64,
+    ) -> Result<Option<BrokerWorkerOutcome>, BrokerWorkerError>
+    where
+        A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
+    {
+        let Some(correlation_id) = self.pending_effects.keys().next().cloned() else {
+            return Ok(None);
+        };
+        let Some(result) = self
+            .pending_effects
+            .get(&correlation_id)
+            .and_then(|pending| executor.poll_deferred(&pending.ticket))
+        else {
+            return Ok(None);
+        };
+        let pending = self
+            .pending_effects
+            .remove(&correlation_id)
+            .ok_or(BrokerWorkerError::EffectStatusUnknown)?;
+        let receipt = application
+            .complete_runtime_action_effect(pending.lease, result, now_ms)
+            .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+        if !receipt.matches_runtime_tool(
+            &pending.intent.runtime_id,
+            &pending.intent.session_id,
+            &pending.intent.run_id,
+            &pending.intent.native_request_id,
+            pending.intent.process_generation,
+        ) {
+            return Err(BrokerWorkerError::ReceiptBindingMismatch);
+        }
+        let decision = decision_from_receipt(&receipt);
+        self.record_terminal(&correlation_id);
+        Ok(Some(if pending.response_cancelled {
+            BrokerWorkerOutcome::SettledAfterCancellation {
+                correlation_id,
+                decision,
+            }
+        } else {
+            BrokerWorkerOutcome::Respond {
+                correlation_id,
+                decision,
+            }
+        }))
+    }
+
     fn execute_runtime_authorized<A, E>(
         &mut self,
         application: &mut A,
@@ -1163,6 +1441,16 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         A: BrokerActionApplication,
         E: BrokerEffectExecutor,
     {
+        if authorization.is_mcp() {
+            return self.start_runtime_deferred_authorized(
+                application,
+                executor,
+                intent,
+                authorization,
+                context,
+                now_ms,
+            );
+        }
         let native_request_id = intent.native_request_id.clone();
         let receipt = application
             .execute_runtime_action(authorization, context.live_authority(), now_ms, |permit| {
@@ -1189,6 +1477,232 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
         })
     }
 
+    fn start_runtime_deferred_authorized<A, E>(
+        &mut self,
+        application: &mut A,
+        executor: &mut E,
+        intent: RuntimeIntentIdentity,
+        authorization: RuntimeAuthorization,
+        context: &BrokerActionContext,
+        now_ms: u64,
+    ) -> Result<RuntimeBrokerWorkerOutcome, BrokerWorkerError>
+    where
+        A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
+    {
+        let native_request_id = intent.native_request_id.clone();
+        if self.pending_count() >= self.max_pending {
+            self.record_terminal(&native_request_id);
+            return Ok(runtime_denied(
+                &native_request_id,
+                "pending-effect-capacity",
+            ));
+        }
+        let mut lease = application
+            .begin_runtime_action_effect(authorization, context.live_authority(), now_ms)
+            .map_err(|_| BrokerWorkerError::Application)?;
+        let permit = lease
+            .take_execution_permit()
+            .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+        match executor.start_deferred(permit) {
+            BrokerDeferredStart::Started(ticket) => {
+                self.pending_runtime_effects.insert(
+                    native_request_id.clone(),
+                    PendingRuntimeEffect {
+                        ticket,
+                        lease,
+                        intent,
+                        run_terminal: false,
+                    },
+                );
+                Ok(RuntimeBrokerWorkerOutcome::EffectRunning { native_request_id })
+            }
+            BrokerDeferredStart::Rejected(normalized) => {
+                let receipt = application
+                    .complete_runtime_action_effect(
+                        lease,
+                        RuntimeEffectResult::normalized(normalized),
+                        now_ms.saturating_add(1),
+                    )
+                    .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+                Ok(RuntimeBrokerWorkerOutcome::Executed {
+                    native_request_id,
+                    receipt,
+                })
+            }
+        }
+    }
+
+    pub fn poll_runtime_deferred<A, E>(
+        &mut self,
+        application: &mut A,
+        executor: &mut E,
+        now_ms: u64,
+    ) -> Result<Option<RuntimeBrokerWorkerOutcome>, BrokerWorkerError>
+    where
+        A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
+    {
+        let Some(native_request_id) = self.pending_runtime_effects.keys().next().cloned() else {
+            return Ok(None);
+        };
+        let Some(result) = self
+            .pending_runtime_effects
+            .get(&native_request_id)
+            .and_then(|pending| executor.poll_deferred(&pending.ticket))
+        else {
+            return Ok(None);
+        };
+        let pending = self
+            .pending_runtime_effects
+            .remove(&native_request_id)
+            .ok_or(BrokerWorkerError::EffectStatusUnknown)?;
+        let receipt = application
+            .complete_runtime_action_effect(pending.lease, result, now_ms)
+            .map_err(|_| BrokerWorkerError::EffectStatusUnknown)?;
+        if !receipt.matches_runtime_tool(
+            &pending.intent.runtime_id,
+            &pending.intent.session_id,
+            &pending.intent.run_id,
+            &pending.intent.native_request_id,
+            pending.intent.process_generation,
+        ) {
+            return Err(BrokerWorkerError::ReceiptBindingMismatch);
+        }
+        self.record_terminal(&native_request_id);
+        Ok(Some(if pending.run_terminal {
+            RuntimeBrokerWorkerOutcome::SettledAfterCancellation {
+                native_request_id,
+                receipt,
+            }
+        } else {
+            RuntimeBrokerWorkerOutcome::Executed {
+                native_request_id,
+                receipt,
+            }
+        }))
+    }
+
+    /// Signals every deferred Pi effect owned by one exact Run Attempt while
+    /// retaining its lease for late durable settlement. The native run may
+    /// already be terminal, so completion must never be delivered back to Pi.
+    pub fn cancel_runtime_deferred_for_run<E>(&mut self, executor: &mut E, run_id: &str) -> usize
+    where
+        E: BrokerEffectExecutor,
+    {
+        let mut signalled = 0_usize;
+        for pending in self
+            .pending_runtime_effects
+            .values_mut()
+            .filter(|pending| pending.intent.run_id == run_id)
+        {
+            pending.run_terminal = true;
+            if executor.cancel_deferred(&pending.ticket) {
+                signalled = signalled.saturating_add(1);
+            }
+        }
+        signalled
+    }
+
+    /// Cancels every outstanding deferred facility operation and consumes its
+    /// Action Gateway effect lease as an explicit unknown result. Production
+    /// runtime shutdown and quarantine call this before dropping the broker
+    /// worker so an `effect-started` record is never abandoned in memory.
+    pub fn drain_deferred_unknown<A, E>(
+        &mut self,
+        application: &mut A,
+        executor: &mut E,
+        now_ms: u64,
+    ) -> Result<usize, BrokerWorkerError>
+    where
+        A: BrokerActionApplication,
+        E: BrokerEffectExecutor,
+    {
+        let mut drained = 0_usize;
+        let mut failure = None;
+
+        let correlation_ids = self.pending_effects.keys().cloned().collect::<Vec<_>>();
+        for correlation_id in correlation_ids {
+            let Some(mut pending) = self.pending_effects.remove(&correlation_id) else {
+                continue;
+            };
+            let _ = executor.cancel_deferred(&pending.ticket);
+            match application.complete_runtime_action_effect_retryable(
+                &mut pending.lease,
+                interrupted_effect_result(now_ms),
+                now_ms,
+            ) {
+                Ok(receipt)
+                    if receipt.matches_runtime_tool(
+                        &pending.intent.runtime_id,
+                        &pending.intent.session_id,
+                        &pending.intent.run_id,
+                        &pending.intent.native_request_id,
+                        pending.intent.process_generation,
+                    ) =>
+                {
+                    let _ = executor.abandon_deferred(&pending.ticket);
+                    self.record_terminal(&correlation_id);
+                    drained = drained.saturating_add(1);
+                }
+                Ok(_) => {
+                    failure.get_or_insert(BrokerWorkerError::ReceiptBindingMismatch);
+                    let _ = executor.abandon_deferred(&pending.ticket);
+                    self.record_terminal(&correlation_id);
+                    drained = drained.saturating_add(1);
+                }
+                Err(_) => {
+                    failure.get_or_insert(BrokerWorkerError::EffectStatusUnknown);
+                    self.pending_effects.insert(correlation_id, pending);
+                }
+            };
+        }
+
+        let native_request_ids = self
+            .pending_runtime_effects
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for native_request_id in native_request_ids {
+            let Some(mut pending) = self.pending_runtime_effects.remove(&native_request_id) else {
+                continue;
+            };
+            let _ = executor.cancel_deferred(&pending.ticket);
+            match application.complete_runtime_action_effect_retryable(
+                &mut pending.lease,
+                interrupted_effect_result(now_ms),
+                now_ms,
+            ) {
+                Ok(receipt)
+                    if receipt.matches_runtime_tool(
+                        &pending.intent.runtime_id,
+                        &pending.intent.session_id,
+                        &pending.intent.run_id,
+                        &pending.intent.native_request_id,
+                        pending.intent.process_generation,
+                    ) =>
+                {
+                    let _ = executor.abandon_deferred(&pending.ticket);
+                    self.record_terminal(&native_request_id);
+                    drained = drained.saturating_add(1);
+                }
+                Ok(_) => {
+                    failure.get_or_insert(BrokerWorkerError::ReceiptBindingMismatch);
+                    let _ = executor.abandon_deferred(&pending.ticket);
+                    self.record_terminal(&native_request_id);
+                    drained = drained.saturating_add(1);
+                }
+                Err(_) => {
+                    failure.get_or_insert(BrokerWorkerError::EffectStatusUnknown);
+                    self.pending_runtime_effects
+                        .insert(native_request_id, pending);
+                }
+            };
+        }
+
+        failure.map_or(Ok(drained), Err)
+    }
+
     fn record_terminal(&mut self, correlation_id: &str) {
         if self.terminal.len() < self.max_terminal {
             self.terminal.insert(correlation_id.to_owned());
@@ -1196,6 +1710,21 @@ impl<C: BrokerActionClassifier> BrokerActionWorker<C> {
             self.sealed_at_capacity = true;
         }
     }
+}
+
+fn interrupted_effect_result(now_ms: u64) -> RuntimeEffectResult {
+    RuntimeEffectResult::with_certainty(
+        NormalizedActionResult {
+            status: NormalizedActionStatus::UnknownAfterInterruption,
+            result_code: "runtime-effect-status-unknown".into(),
+            exit_code: None,
+            changed_targets: Vec::new(),
+            output_sha256: None,
+            completed_at_ms: now_ms.max(1),
+        },
+        None,
+        RuntimeEffectCompletionCertainty::Unknown,
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -1407,28 +1936,6 @@ fn requested_authority(resolved: &ResolvedBrokerAction) -> BTreeSet<String> {
         .collect()
 }
 
-fn canonical_risk(resolved: &ResolvedBrokerAction) -> CanonicalRisk {
-    if resolved.sensitivity == ActionSensitivity::Credential
-        || resolved.reversibility == ActionReversibility::Destructive
-        || resolved.scope == ActionScope::System
-        || resolved.effects.iter().any(|effect| {
-            matches!(
-                effect,
-                ActionEffect::Delete
-                    | ActionEffect::Publish
-                    | ActionEffect::Reveal
-                    | ActionEffect::Listen
-            )
-        })
-    {
-        CanonicalRisk::High
-    } else if resolved.effects.iter().any(|effect| effect.is_mutating()) {
-        CanonicalRisk::Medium
-    } else {
-        CanonicalRisk::Low
-    }
-}
-
 fn action_id(binding_sha256: &str) -> String {
     let digest = binding_sha256
         .strip_prefix("sha256:")
@@ -1443,14 +1950,18 @@ fn decision_from_receipt(receipt: &RuntimeExecutionReceipt) -> BrokerDecision {
         NormalizedActionStatus::Denied => denied(&result.result_code),
         NormalizedActionStatus::Succeeded
         | NormalizedActionStatus::Failed
-        | NormalizedActionStatus::UnknownAfterInterruption => BrokerDecision::Result(json!({
-            "status": result.status,
-            "resultCode": result.result_code,
-            "exitCode": result.exit_code,
-            "changedTargetCount": result.changed_targets.len(),
-            "outputSha256": result.output_sha256,
-            "completedAtMs": result.completed_at_ms,
-        })),
+        | NormalizedActionStatus::UnknownAfterInterruption => {
+            BrokerDecision::Result(receipt.model_payload().cloned().unwrap_or_else(|| {
+                json!({
+                    "status": result.status,
+                    "resultCode": result.result_code,
+                    "exitCode": result.exit_code,
+                    "changedTargetCount": result.changed_targets.len(),
+                    "outputSha256": result.output_sha256,
+                    "completedAtMs": result.completed_at_ms,
+                })
+            }))
+        }
     }
 }
 
@@ -1551,4 +2062,6 @@ pub enum BrokerWorkerError {
     ReceiptBindingMismatch,
     #[error("authenticated broker event was not a cancellation")]
     ExpectedCancellation,
+    #[error("deferred broker ticket is invalid")]
+    InvalidDeferredTicket,
 }

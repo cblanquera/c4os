@@ -1,0 +1,113 @@
+.production-runtime-approval__backdrop {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-canvas, #101214) 62%, transparent);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.production-runtime-approval {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d8dde3);
+  border-radius: 16px;
+  box-shadow: 0 24px 72px rgb(0 0 0 / 28%);
+  color: var(--color-text, #15191e);
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 560px;
+  overflow: auto;
+  padding: 24px;
+  width: 100%;
+}
+
+.production-runtime-approval__eyebrow {
+  color: var(--color-text-muted, #59636e);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.production-runtime-approval h2,
+.production-runtime-approval p {
+  margin-top: 0;
+}
+
+.production-runtime-approval__disclosure {
+  background: var(--color-surface-subtle, #f3f5f7);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.production-runtime-approval__details {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.production-runtime-approval__details div {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(130px, 0.65fr) 1fr;
+}
+
+.production-runtime-approval__details dt {
+  color: var(--color-text-muted, #59636e);
+  font-weight: 600;
+}
+
+.production-runtime-approval__details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.production-runtime-approval__error {
+  color: var(--color-danger, #a61b1b);
+}
+
+.production-runtime-approval__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.production-runtime-approval__actions button {
+  border: 1px solid var(--color-border, #c8ced6);
+  border-radius: 9px;
+  cursor: pointer;
+  min-height: 40px;
+  padding: 0 18px;
+}
+
+.production-runtime-approval__actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.production-runtime-approval__actions .production-runtime-approval__allow {
+  background: var(--color-accent, #1769e0);
+  border-color: transparent;
+  color: #fff;
+}
+
+@media (max-width: 560px) {
+  .production-runtime-approval__backdrop {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .production-runtime-approval__details div {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .production-runtime-approval *,
+  .production-runtime-approval *::before,
+  .production-runtime-approval *::after {
+    scroll-behavior: auto !important;
+  }
+}

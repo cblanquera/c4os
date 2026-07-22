@@ -797,7 +797,30 @@ pub struct ConversationTurnSnapshot {
     pub prompt: Option<String>,
     pub attachments: Vec<ConversationAttachmentSnapshot>,
     pub artifact_context: Option<ConversationArtifactContextSnapshot>,
+    pub mcp_provenance: Option<ConversationMcpProvenanceSnapshot>,
     pub submitted_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationMcpProvenanceSnapshot {
+    pub snapshot_id: String,
+    pub server_count: u16,
+    pub tool_count: u16,
+    pub omitted_tool_count: u32,
+    pub truncated: bool,
+    pub tools: Vec<ConversationMcpToolProvenanceSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConversationMcpToolProvenanceSnapshot {
+    pub server_id: String,
+    pub source_kind: String,
+    pub source_id: Option<String>,
+    pub tool_name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

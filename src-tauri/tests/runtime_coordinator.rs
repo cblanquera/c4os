@@ -5,9 +5,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use c4os_lib::core::database::{DatabaseActor, DatabaseDescriptor};
+use c4os_lib::core::database::{DatabaseActor, DatabaseDescriptor, SnapshotQuery};
 use c4os_lib::runtime::action_bridge::{
-    RuntimeActionProposal, RuntimeApprovalDecision, RuntimeGatewayDecision, RuntimeIntentIdentity,
+    RuntimeActionProposal, RuntimeApprovalDecision, RuntimeEffectResult, RuntimeGatewayDecision,
+    RuntimeIntentIdentity,
 };
 use c4os_lib::runtime::capability::{
     CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityEvidence, CapabilityKey,
@@ -28,7 +29,7 @@ use c4os_lib::runtime::session::{
     ConfigurationSnapshot, ExecutionEnvironmentBinding, FirstSubmission, ModelRouteSnapshot,
     ResourceSnapshot, RetryRequest, RunAttemptStatus, RunEventKind, RunEventRecord,
     SessionLifecycle, SessionRecord, SessionRepository, SessionRepositoryError, SessionService,
-    TerminalAttemptOutcome, capability_snapshot_from_effective_descriptor,
+    SideEffectState, TerminalAttemptOutcome, capability_snapshot_from_effective_descriptor,
 };
 use c4os_lib::runtime::supervisor::{
     HealthState, OPENCODE_NATIVE_VERSION, RUNTIME_PROTOCOL_VERSION, RuntimeInstallation,
@@ -389,6 +390,7 @@ fn first_submission(process_generation: u64) -> FirstSubmission {
         prompt: Some("Implement the coordinator".into()),
         attachments: vec![],
         skill_context: vec![],
+        mcp_turn: None,
         binding: binding(),
         submitted_at_ms: NOW + 10,
     }
@@ -481,12 +483,22 @@ fn live(process_generation: u64) -> LiveAuthorityState {
 }
 
 fn coordinator(root: &Path) -> RuntimeCoordinator<MemoryRepository> {
+    coordinator_with_database(root).0
+}
+
+fn coordinator_with_database(
+    root: &Path,
+) -> (RuntimeCoordinator<MemoryRepository>, Arc<DatabaseActor>) {
     let (database, _) = DatabaseActor::start(DatabaseDescriptor::app(root)).unwrap();
-    RuntimeCoordinator::new(
-        ProviderService::new(),
-        RuntimeSupervisor::pinned(),
-        SessionService::new(MemoryRepository::default()),
-        ActionGateway::new(PolicyConfiguration::default(), Arc::new(database)),
+    let database = Arc::new(database);
+    (
+        RuntimeCoordinator::new(
+            ProviderService::new(),
+            RuntimeSupervisor::pinned(),
+            SessionService::new(MemoryRepository::default()),
+            ActionGateway::new(PolicyConfiguration::default(), Arc::clone(&database)),
+        ),
+        database,
     )
 }
 
@@ -750,6 +762,170 @@ fn full_runtime_call_graph_is_coordinated_with_one_monotonic_generation() {
         *generations.last().unwrap()
     );
     assert!(generations.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn late_exact_effect_completion_records_gateway_result_but_preserves_terminal_unknown() {
+    let temporary = TempDir::new().unwrap();
+    let (mut coordinator, database) = coordinator_with_database(temporary.path());
+    coordinator.save_provider(profile(), 0).unwrap();
+    coordinator
+        .test_provider(
+            "provider-openrouter",
+            1,
+            NOW,
+            &mut FixtureProbe(ProviderDiscovery {
+                checked_at_ms: NOW,
+                models: vec![provider_route()],
+                recommended_model_id: Some("claude-sonnet".into()),
+                connection_evidence: None,
+            }),
+        )
+        .unwrap();
+    coordinator
+        .register_runtime(installation(temporary.path()), NOW + 1)
+        .unwrap();
+    let process_generation = coordinator
+        .start_runtime("opencode-primary", NOW + 2)
+        .unwrap()
+        .value;
+    coordinator
+        .record_runtime_health(
+            "opencode-primary",
+            process_generation,
+            HealthState::Healthy,
+            NOW + 3,
+        )
+        .unwrap();
+    coordinator
+        .create_provisional("session-1", NOW + 4)
+        .unwrap();
+    coordinator
+        .submit_first(CoordinatedFirstSubmission {
+            submission: first_submission(process_generation),
+            provider_id: "provider-openrouter".into(),
+            selected_model_id: "claude-sonnet".into(),
+            capability_layers: layers(),
+            draft: draft(),
+            preflight_at_ms: NOW + 5,
+        })
+        .unwrap();
+
+    let action_id = "action-late-completion";
+    let native_request_id = "call-late-completion";
+    let mut late_action = action(process_generation);
+    late_action.action_id = action_id.into();
+    late_action.tool_call_id = native_request_id.into();
+    late_action.run_id = "attempt-1".into();
+    let intent = RuntimeIntentIdentity {
+        binding_sha256: digest('c'),
+        workspace_id: "workspace-1".into(),
+        session_id: "session-1".into(),
+        turn_id: "turn-1".into(),
+        run_id: "attempt-1".into(),
+        correlation_id: "correlation-1".into(),
+        runtime_id: "opencode-primary".into(),
+        process_generation,
+        native_request_id: native_request_id.into(),
+        native_tool: "write_file".into(),
+    };
+    let proposed = coordinator
+        .propose_runtime_action(
+            RuntimeActionProposal::new(intent, action_facts(), late_action).unwrap(),
+            NOW + 16,
+        )
+        .unwrap();
+    let RuntimeGatewayDecision::PendingApproval { prompt_id, .. } = proposed.value else {
+        panic!("late effect fixture must retain explicit approval");
+    };
+    let approved = coordinator
+        .answer_runtime_approval(&prompt_id, ApprovalAnswer::Allow, NOW + 17)
+        .unwrap();
+    let RuntimeApprovalDecision::Authorized(authorization) = approved.value else {
+        panic!("approval must yield exact authorization");
+    };
+    let lease = coordinator
+        .begin_runtime_action_effect(*authorization, live(process_generation), NOW + 18)
+        .unwrap()
+        .value;
+    let started = coordinator.session("session-1").unwrap();
+    assert_eq!(
+        started.attempt("attempt-1").unwrap().side_effects,
+        vec![SideEffectState::Started {
+            action_id: action_id.into(),
+            idempotent: false,
+        }]
+    );
+
+    let terminal = coordinator
+        .finish_attempt(
+            "session-1",
+            &identity("attempt-1", "correlation-1", process_generation),
+            TerminalAttemptOutcome::Interrupted {
+                reason_code: "worker-channel-closed".into(),
+            },
+            NOW + 19,
+        )
+        .unwrap()
+        .value;
+    assert!(matches!(
+        terminal.attempt("attempt-1").unwrap().status,
+        RunAttemptStatus::Interrupted { .. }
+    ));
+    assert_eq!(terminal.active_attempt_id, None);
+    assert_eq!(
+        terminal.attempt("attempt-1").unwrap().side_effects,
+        vec![SideEffectState::Unknown {
+            action_id: action_id.into(),
+        }]
+    );
+
+    let receipt = coordinator
+        .complete_runtime_action_effect(
+            lease,
+            RuntimeEffectResult::normalized(NormalizedActionResult {
+                status: NormalizedActionStatus::Succeeded,
+                result_code: "late-worker-completed".into(),
+                exit_code: None,
+                changed_targets: vec!["workspace:/project/README.md".into()],
+                output_sha256: Some(digest('3')),
+                completed_at_ms: NOW + 20,
+            }),
+            NOW + 20,
+        )
+        .unwrap()
+        .value;
+    assert_eq!(receipt.result().status, NormalizedActionStatus::Succeeded);
+    assert_eq!(receipt.result().result_code, "late-worker-completed");
+
+    let recovered = coordinator.session("session-1").unwrap();
+    assert!(matches!(
+        recovered.attempt("attempt-1").unwrap().status,
+        RunAttemptStatus::Interrupted { .. }
+    ));
+    assert_eq!(
+        recovered.attempt("attempt-1").unwrap().side_effects,
+        vec![SideEffectState::Unknown {
+            action_id: action_id.into(),
+        }]
+    );
+
+    let records = database
+        .security_records(SnapshotQuery::new(50).unwrap())
+        .unwrap();
+    let result_records = records
+        .iter()
+        .filter(|record| record.action_id == action_id && record.record_kind == "action-result")
+        .collect::<Vec<_>>();
+    assert_eq!(result_records.len(), 1);
+    assert_eq!(result_records[0].state, "succeeded");
+    assert_eq!(result_records[0].recorded_at_ms, NOW + 20);
+    let intent_records = records
+        .iter()
+        .filter(|record| record.action_id == action_id && record.record_kind == "action-intent")
+        .collect::<Vec<_>>();
+    assert_eq!(intent_records.len(), 1);
+    assert_eq!(intent_records[0].state, "effect-finished");
 }
 
 #[test]

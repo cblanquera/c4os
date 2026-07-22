@@ -8,18 +8,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use c4os_lib::core::database::{DatabaseActor, DatabaseDescriptor};
+use c4os_lib::mcp::{McpDefinitionSource, McpTransportKind, McpTurnSnapshot, McpTurnToolSnapshot};
 use c4os_lib::runtime::action_bridge::{
-    RuntimeActionBridge, RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
-    RuntimeExecutionReceipt, RuntimeGatewayDecision,
+    RuntimeActionBridge, RuntimeActionEffectLease, RuntimeActionProposal, RuntimeApprovalDecision,
+    RuntimeAuthorization, RuntimeEffectResult, RuntimeExecutionReceipt, RuntimeGatewayDecision,
 };
-use c4os_lib::runtime::broker_worker::{BrokerActionApplication, BrokerActionContext};
+use c4os_lib::runtime::broker_worker::{
+    BrokerActionApplication, BrokerActionContext, BrokerDeferredStart, BrokerDeferredTicket,
+};
 use c4os_lib::runtime::dispatch::DispatchIdentity;
 use c4os_lib::runtime::opencode::{C4OS_ACTION_PROPOSAL_TOOL, C4OS_RESOURCE_READ_TOOL};
 use c4os_lib::runtime::opencode_broker::{
     ActiveBrokerContextResolver, AuthenticatedAssistantMessageEvidence, BrokerContextRegistryError,
     FacilityRegistryError, InstalledBrokerClassification, InstalledBrokerFacility,
-    InstalledBrokerFacilityRegistry, OpenCodeBrokerPump, OpenCodeBrokerPumpConfig,
-    OpenCodeBrokerPumpError, OpenCodeBrokerPumpOutcome,
+    InstalledBrokerFacilityRegistry, InstalledDeferredBrokerFacility, OpenCodeBrokerPump,
+    OpenCodeBrokerPumpConfig, OpenCodeBrokerPumpError, OpenCodeBrokerPumpOutcome,
 };
 use c4os_lib::runtime::opencode_sdk::{BrokerDecision, OpenCodeSdkBroker};
 use c4os_lib::runtime::supervisor::RuntimeKind;
@@ -32,6 +35,7 @@ use c4os_lib::security::policy::{
     ActionSurface, PolicyConfiguration, RepositoryState,
 };
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 const TIMEOUT: Duration = Duration::from_secs(1);
@@ -61,6 +65,7 @@ fn context() -> BrokerActionContext {
         configuration_version: 7,
         policy_version: 9,
         revocation_epoch: 2,
+        mcp_turn: None,
     }
 }
 
@@ -70,6 +75,94 @@ fn resolver() -> ActiveBrokerContextResolver {
         .activate(context(), 1, 1_000)
         .expect("activate broker context");
     resolver
+}
+
+fn resolver_for(context: BrokerActionContext) -> ActiveBrokerContextResolver {
+    let resolver = ActiveBrokerContextResolver::new();
+    resolver
+        .activate(context, 1, 1_000)
+        .expect("activate broker context");
+    resolver
+}
+
+fn sha256_value(value: &Value) -> String {
+    let mut digest = String::from("sha256:");
+    for byte in Sha256::digest(serde_json::to_vec(value).expect("test JSON")) {
+        use std::fmt::Write as _;
+        write!(&mut digest, "{byte:02x}").expect("write digest");
+    }
+    digest
+}
+
+fn mcp_turn_snapshot() -> McpTurnSnapshot {
+    let input_schema = json!({
+        "type": "object",
+        "properties": { "value": { "type": "string" } },
+        "required": ["value"],
+        "additionalProperties": false,
+    });
+    let input_schema_sha256 = sha256_value(&input_schema);
+    let definition_sha256 = format!("sha256:{}", "a".repeat(64));
+    let route = json!({
+        "serverId": "fixture",
+        "source": McpDefinitionSource::User,
+        "lifecycleGeneration": 3,
+        "definitionSha256": definition_sha256,
+        "toolName": "echo",
+        "inputSchemaSha256": input_schema_sha256,
+        "outputSchemaSha256": null,
+        "workspaceId": "workspace-1",
+        "projectId": "project-1",
+        "sessionId": "session-1",
+    });
+    let tool = McpTurnToolSnapshot {
+        target_id: format!(
+            "mcp-tool:{}",
+            sha256_value(&route).trim_start_matches("sha256:")
+        ),
+        server_id: "fixture".into(),
+        source: McpDefinitionSource::User,
+        lifecycle_generation: 3,
+        definition_sha256,
+        transport_kind: McpTransportKind::Stdio,
+        tool_name: "echo".into(),
+        title: Some("Echo".into()),
+        description: None,
+        input_schema,
+        input_schema_sha256,
+        output_schema_sha256: None,
+    };
+    let catalog = json!({
+        "serviceGeneration": 7,
+        "capturedAtMs": 10,
+        "workspaceId": "workspace-1",
+        "projectId": "project-1",
+        "sessionId": "session-1",
+        "tools": [&tool],
+        "truncated": false,
+        "omittedToolCount": 0,
+    });
+    let sha256 = sha256_value(&catalog);
+    let snapshot = McpTurnSnapshot {
+        snapshot_id: format!("mcp-turn:{}", sha256.trim_start_matches("sha256:")),
+        service_generation: 7,
+        captured_at_ms: 10,
+        workspace_id: "workspace-1".into(),
+        project_id: "project-1".into(),
+        session_id: "session-1".into(),
+        tools: vec![tool],
+        truncated: false,
+        omitted_tool_count: 0,
+        sha256,
+    };
+    snapshot.validate().expect("valid MCP turn snapshot");
+    snapshot
+}
+
+fn mcp_context() -> BrokerActionContext {
+    let mut context = context();
+    context.mcp_turn = Some(mcp_turn_snapshot());
+    context
 }
 
 fn assistant_evidence(message_id: &str) -> AuthenticatedAssistantMessageEvidence {
@@ -142,6 +235,56 @@ impl InstalledBrokerFacility for TestFacility {
     }
 }
 
+#[derive(Default)]
+struct DeferredFacilityState {
+    starts: usize,
+    cancellations: usize,
+    ready: bool,
+}
+
+struct TestDeferredFacility {
+    state: Arc<Mutex<DeferredFacilityState>>,
+}
+
+impl InstalledDeferredBrokerFacility for TestDeferredFacility {
+    fn start(&mut self, _permit: ExecutionPermit) -> BrokerDeferredStart {
+        let mut state = self.state.lock().expect("deferred state");
+        state.starts += 1;
+        BrokerDeferredStart::Started(
+            BrokerDeferredTicket::new(format!("opencode-mcp-ticket-{}", state.starts))
+                .expect("valid ticket"),
+        )
+    }
+
+    fn poll(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+        let mut state = self.state.lock().expect("deferred state");
+        if !state.ready || !ticket.as_str().starts_with("opencode-mcp-ticket-") {
+            return None;
+        }
+        state.ready = false;
+        Some(RuntimeEffectResult::normalized(NormalizedActionResult {
+            status: NormalizedActionStatus::Succeeded,
+            result_code: "mcp-tool-succeeded".into(),
+            exit_code: None,
+            changed_targets: vec!["mcp-tool:fixture".into()],
+            output_sha256: Some(format!("sha256:{}", "b".repeat(64))),
+            completed_at_ms: 30,
+        }))
+    }
+
+    fn cancel(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        if !ticket.as_str().starts_with("opencode-mcp-ticket-") {
+            return false;
+        }
+        self.state.lock().expect("deferred state").cancellations += 1;
+        true
+    }
+
+    fn abandon(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        self.cancel(ticket)
+    }
+}
+
 struct TestApplication {
     _temporary: TempDir,
     gateway: ActionGateway,
@@ -200,6 +343,39 @@ impl BrokerActionApplication for TestApplication {
     {
         RuntimeActionBridge::new(&mut self.gateway)
             .execute(authorization, live, now_ms, effect)
+            .map_err(|_| ())
+    }
+
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<RuntimeActionEffectLease, Self::Error> {
+        RuntimeActionBridge::new(&mut self.gateway)
+            .begin_effect(authorization, live, now_ms)
+            .map_err(|_| ())
+    }
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        _now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        RuntimeActionBridge::new(&mut self.gateway)
+            .complete_effect(lease, result)
+            .map_err(|_| ())
+    }
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        _now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        RuntimeActionBridge::new(&mut self.gateway)
+            .complete_effect_retryable(lease, result)
             .map_err(|_| ())
     }
 
@@ -1025,4 +1201,94 @@ fn approval_resume_rejects_refreshed_live_authority_context() {
     let response = peer.response();
     assert_eq!(response["status"], "denied");
     assert_eq!(response["reasonCode"], "stale-runtime-identity");
+}
+
+#[test]
+fn queued_cancellation_wins_ready_deferred_completion_and_never_writes_twice() {
+    let (broker, mut peer) = BrokerFixture::pair();
+    let state = Arc::new(Mutex::new(DeferredFacilityState::default()));
+    let registry = InstalledBrokerFacilityRegistry::new();
+    registry
+        .install_deferred(Box::new(TestDeferredFacility {
+            state: Arc::clone(&state),
+        }))
+        .expect("install deferred MCP facility");
+    let mut pump = OpenCodeBrokerPump::attach_authenticated(
+        broker,
+        registry,
+        OpenCodeBrokerPumpConfig {
+            receive_timeout: Duration::from_millis(20),
+            ..config()
+        },
+    )
+    .expect("broker pump");
+    let trusted = mcp_context();
+    let target = trusted.mcp_turn.as_ref().unwrap().tools[0]
+        .target_id
+        .clone();
+    let mut resolver = resolver_for(trusted);
+    let mut application = TestApplication::new();
+
+    peer.proposal(
+        "request-deferred-cancel",
+        C4OS_ACTION_PROPOSAL_TOOL,
+        json!({
+            "operation": "mcp.call-tool",
+            "target": target,
+            "arguments": { "value": "hello" },
+        }),
+    );
+    let pending = pump
+        .pump_one(&mut application, &mut resolver, 10)
+        .expect("pending MCP approval");
+    let OpenCodeBrokerPumpOutcome::PendingApproval { prompt_id, .. } = pending else {
+        panic!("MCP action must retain explicit approval");
+    };
+    let started = pump
+        .answer_approval(
+            &mut application,
+            &mut resolver,
+            "request-deferred-cancel",
+            &prompt_id,
+            ApprovalAnswer::Allow,
+            20,
+        )
+        .expect("start deferred MCP effect");
+    assert!(matches!(
+        started,
+        OpenCodeBrokerPumpOutcome::EffectRunning { ref correlation_id }
+            if correlation_id == "request-deferred-cancel"
+    ));
+    assert_eq!(pump.pending_count(), 0);
+    assert!(pump.pending_approval_descriptors().is_empty());
+    assert_eq!(state.lock().expect("deferred state").starts, 1);
+
+    state.lock().expect("deferred state").ready = true;
+    peer.cancel("request-deferred-cancel", C4OS_ACTION_PROPOSAL_TOOL);
+    let cancelled = pump
+        .pump_one(&mut application, &mut resolver, 21)
+        .expect("queued cancellation");
+    assert!(matches!(
+        cancelled,
+        OpenCodeBrokerPumpOutcome::ObservedCancellation {
+            ref correlation_id,
+            decision: BrokerDecision::Cancelled,
+        } if correlation_id == "request-deferred-cancel"
+    ));
+    assert_eq!(application.cancellations, 1);
+    assert_eq!(state.lock().expect("deferred state").cancellations, 1);
+    let response = peer.response();
+    assert_eq!(response["status"], "cancelled");
+
+    let settled = pump
+        .pump_one(&mut application, &mut resolver, 30)
+        .expect("administrative late settlement");
+    assert!(matches!(
+        settled,
+        OpenCodeBrokerPumpOutcome::SettledAfterCancellation {
+            ref correlation_id,
+            decision: BrokerDecision::Result(_),
+        } if correlation_id == "request-deferred-cancel"
+    ));
+    peer.assert_no_response();
 }

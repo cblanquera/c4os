@@ -81,7 +81,7 @@ impl CanonicalAction {
             || self
                 .plugin_or_mcp_id
                 .as_deref()
-                .is_some_and(|value| !is_safe_persisted_identifier(value))
+                .is_some_and(|value| !is_safe_plugin_or_mcp_identity(value))
             || !is_bounded_canonical_value(&self.canonical_target)
             || !is_bounded_canonical_value(&self.target_version)
             || serde_json::to_vec(&self.arguments).map_or(true, |arguments| {
@@ -107,6 +107,13 @@ fn is_safe_persisted_identifier(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'@'))
+}
+
+fn is_safe_plugin_or_mcp_identity(value: &str) -> bool {
+    if let Some(digest) = value.strip_prefix("mcp:") {
+        return digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit());
+    }
+    is_safe_persisted_identifier(value)
 }
 
 fn is_bounded_canonical_value(value: &str) -> bool {
@@ -265,7 +272,7 @@ pub struct LiveAuthorityState {
 }
 
 /// In-memory state machine over persistence-ready authorization records.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AuthorizationLedger {
     records: BTreeMap<String, AuthorizationRecord>,
 }
@@ -442,8 +449,12 @@ impl AuthorizationLedger {
     }
 
     pub fn revoke_plugin(&mut self, plugin_id: &str, now_ms: u64) -> usize {
+        self.revoke_plugin_or_mcp(plugin_id, now_ms)
+    }
+
+    pub fn revoke_plugin_or_mcp(&mut self, identity: &str, now_ms: u64) -> usize {
         mutate_issued(&mut self.records, now_ms, |record| {
-            (record.action.plugin_or_mcp_id.as_deref() == Some(plugin_id)).then_some(
+            (record.action.plugin_or_mcp_id.as_deref() == Some(identity)).then_some(
                 AuthorizationState::Revoked {
                     revoked_at_ms: now_ms,
                 },
@@ -655,7 +666,7 @@ pub enum ApprovalQueueError {
 /// Approval prompts serialize within one run while each independent run keeps
 /// its own ready prompt. `visible_queue` merges all runs by stable sequence so
 /// the renderer can show independent-run queue state without granting authority.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ApprovalQueue {
     next_sequence: u64,
     prompts: BTreeMap<String, ApprovalPromptRecord>,
@@ -873,6 +884,28 @@ impl ApprovalQueue {
         Ok(record)
     }
 
+    /// Builds the exact terminal approval record without mutating the live
+    /// queue. Callers can include it in an atomic durable batch and commit the
+    /// in-memory transition only after that batch succeeds.
+    pub fn completion_record(
+        &self,
+        prompt_id: &str,
+        now_ms: u64,
+    ) -> Result<ApprovalPromptRecord, ApprovalQueueError> {
+        let mut record = self
+            .prompts
+            .get(prompt_id)
+            .ok_or(ApprovalQueueError::NotFound)?
+            .clone();
+        if !matches!(record.state, ApprovalPromptState::Approved { .. }) {
+            return Err(ApprovalQueueError::NotApproved);
+        }
+        record.state = ApprovalPromptState::Completed {
+            completed_at_ms: now_ms,
+        };
+        Ok(record)
+    }
+
     pub fn cancel_run(&mut self, run_id: &str, now_ms: u64) -> usize {
         let ids = self.run_queues.remove(run_id).unwrap_or_default();
         let mut count = 0;
@@ -890,12 +923,16 @@ impl ApprovalQueue {
     }
 
     pub fn cancel_plugin(&mut self, plugin_id: &str, now_ms: u64) -> usize {
+        self.cancel_plugin_or_mcp(plugin_id, now_ms)
+    }
+
+    pub fn cancel_plugin_or_mcp(&mut self, identity: &str, now_ms: u64) -> usize {
         let matches = self
             .prompts
             .values()
             .filter(|record| {
                 record.state.is_open()
-                    && record.action.plugin_or_mcp_id.as_deref() == Some(plugin_id)
+                    && record.action.plugin_or_mcp_id.as_deref() == Some(identity)
             })
             .map(|record| (record.prompt_id.clone(), record.action.run_id.clone()))
             .collect::<Vec<_>>();

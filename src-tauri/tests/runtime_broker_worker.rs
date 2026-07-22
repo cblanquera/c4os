@@ -8,25 +8,29 @@ use std::time::Duration;
 
 use c4os_lib::core::database::{DatabaseActor, DatabaseDescriptor};
 use c4os_lib::runtime::action_bridge::{
-    RuntimeActionBridge, RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
-    RuntimeExecutionReceipt, RuntimeGatewayDecision, RuntimeIntentIdentity,
+    RuntimeActionBridge, RuntimeActionEffectLease, RuntimeActionProposal, RuntimeApprovalDecision,
+    RuntimeAuthorization, RuntimeEffectResult, RuntimeExecutionReceipt, RuntimeGatewayDecision,
+    RuntimeIntentIdentity,
 };
 use c4os_lib::runtime::broker_worker::{
     AuthenticatedBrokerEvent, BrokerActionApplication, BrokerActionClassifier, BrokerActionContext,
-    BrokerActionWorker, BrokerApprovalAnswer, BrokerClassificationError, BrokerEffectExecutor,
-    BrokerWorkerOutcome, ResolvedBrokerAction, RuntimeBrokerWorkerOutcome,
+    BrokerActionWorker, BrokerApprovalAnswer, BrokerClassificationError, BrokerDeferredStart,
+    BrokerDeferredTicket, BrokerEffectExecutor, BrokerWorkerError, BrokerWorkerOutcome,
+    ResolvedBrokerAction, RuntimeBrokerApprovalAnswer, RuntimeBrokerWorkerOutcome,
 };
 use c4os_lib::runtime::dispatch::DispatchIdentity;
 use c4os_lib::runtime::opencode::{C4OS_ACTION_PROPOSAL_TOOL, C4OS_RESOURCE_READ_TOOL};
 use c4os_lib::runtime::opencode_sdk::{BrokerDecision, OpenCodeSdkBroker, OpenCodeSdkError};
 use c4os_lib::runtime::supervisor::RuntimeKind;
-use c4os_lib::security::authorization::{ApprovalAnswer, CanonicalAction, LiveAuthorityState};
+use c4os_lib::security::authorization::{
+    ApprovalAnswer, CanonicalAction, CanonicalRisk, LiveAuthorityState,
+};
 use c4os_lib::security::gateway::{
     ActionGateway, ExecutionPermit, NormalizedActionResult, NormalizedActionStatus,
 };
 use c4os_lib::security::policy::{
     ActionEffect, ActionRequestOrigin, ActionReversibility, ActionScope, ActionSensitivity,
-    ActionSurface, PolicyConfiguration, RepositoryState,
+    ActionSurface, ClassificationConfidence, PolicyConfiguration, RepositoryState,
 };
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -62,6 +66,7 @@ fn context() -> BrokerActionContext {
         configuration_version: 7,
         policy_version: 9,
         revocation_epoch: 2,
+        mcp_turn: None,
     }
 }
 
@@ -124,6 +129,37 @@ impl FixtureClassifier {
             explicit_scope_grant: false,
             sandbox_allows: !matches!(self.mode, ClassifierMode::SandboxDenied),
             declaration_exceeded: false,
+            confidence: ClassificationConfidence::Known,
+            risk: CanonicalRisk::Medium,
+            plugin_or_mcp_id: None,
+        })
+    }
+
+    fn mcp_action(&self) -> Result<ResolvedBrokerAction, BrokerClassificationError> {
+        if matches!(self.mode, ClassifierMode::Ambiguous) {
+            return Err(BrokerClassificationError::Ambiguous);
+        }
+        Ok(ResolvedBrokerAction {
+            surface: ActionSurface::Process,
+            effects: set([ActionEffect::Execute]),
+            scope: ActionScope::ExternalLocal,
+            sensitivity: ActionSensitivity::Ordinary,
+            reversibility: ActionReversibility::Destructive,
+            repository_state: RepositoryState::NotApplicable,
+            inside_active_project: false,
+            canonical_target: "mcp-tool:fixture-echo".into(),
+            target_version: format!("sha256:{}", "8".repeat(64)),
+            normalized_arguments: Map::from_iter([
+                ("serverId".into(), Value::String("fixture".into())),
+                ("toolName".into(), Value::String("echo".into())),
+            ]),
+            trusted_root: false,
+            explicit_scope_grant: false,
+            sandbox_allows: !matches!(self.mode, ClassifierMode::SandboxDenied),
+            declaration_exceeded: false,
+            confidence: ClassificationConfidence::Known,
+            risk: CanonicalRisk::High,
+            plugin_or_mcp_id: Some(format!("mcp:{}", "9".repeat(64))),
         })
     }
 
@@ -146,6 +182,9 @@ impl FixtureClassifier {
             explicit_scope_grant: false,
             sandbox_allows: !matches!(self.mode, ClassifierMode::SandboxDenied),
             declaration_exceeded: false,
+            confidence: ClassificationConfidence::Known,
+            risk: CanonicalRisk::Low,
+            plugin_or_mcp_id: None,
         })
     }
 }
@@ -170,10 +209,17 @@ impl BrokerActionClassifier for FixtureClassifier {
         target: &str,
         arguments: &Map<String, Value>,
     ) -> Result<ResolvedBrokerAction, BrokerClassificationError> {
-        if operation != "window.focus" || target != "main" || !arguments.is_empty() {
-            return Err(BrokerClassificationError::Unsupported);
+        if operation == "mcp.call-tool"
+            && target == "mcp-tool:fixture-echo"
+            && arguments.get("value").and_then(Value::as_str) == Some("hello")
+            && arguments.len() == 1
+        {
+            return self.mcp_action();
         }
-        self.action()
+        if operation == "window.focus" && target == "main" && arguments.is_empty() {
+            return self.action();
+        }
+        Err(BrokerClassificationError::Unsupported)
     }
 }
 
@@ -182,6 +228,8 @@ struct TestApplication {
     gateway: ActionGateway,
     proposed: Vec<RuntimeActionProposal>,
     cancel_calls: usize,
+    completed_statuses: Vec<NormalizedActionStatus>,
+    fail_retryable_once: bool,
 }
 
 impl TestApplication {
@@ -194,6 +242,8 @@ impl TestApplication {
             gateway: ActionGateway::new(PolicyConfiguration::default(), Arc::new(database)),
             proposed: Vec::new(),
             cancel_calls: 0,
+            completed_statuses: Vec::new(),
+            fail_retryable_once: false,
         }
     }
 }
@@ -238,6 +288,45 @@ impl BrokerActionApplication for TestApplication {
             .map_err(|_| ())
     }
 
+    fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<RuntimeActionEffectLease, Self::Error> {
+        RuntimeActionBridge::new(&mut self.gateway)
+            .begin_effect(authorization, live, now_ms)
+            .map_err(|_| ())
+    }
+
+    fn complete_runtime_action_effect(
+        &mut self,
+        lease: RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        _now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        self.completed_statuses.push(result.normalized.status);
+        RuntimeActionBridge::new(&mut self.gateway)
+            .complete_effect(lease, result)
+            .map_err(|_| ())
+    }
+
+    fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        _now_ms: u64,
+    ) -> Result<RuntimeExecutionReceipt, Self::Error> {
+        if self.fail_retryable_once {
+            self.fail_retryable_once = false;
+            return Err(());
+        }
+        self.completed_statuses.push(result.normalized.status);
+        RuntimeActionBridge::new(&mut self.gateway)
+            .complete_effect_retryable(lease, result)
+            .map_err(|_| ())
+    }
+
     fn cancel_runtime_run(&mut self, run_id: &str, now_ms: u64) -> Result<(), Self::Error> {
         self.cancel_calls += 1;
         self.gateway.cancel_run(run_id, now_ms).map_err(|_| ())?;
@@ -249,6 +338,59 @@ impl BrokerActionApplication for TestApplication {
 struct TestExecutor {
     calls: usize,
     actions: Vec<CanonicalAction>,
+}
+
+#[derive(Default)]
+struct DeferredTestExecutor {
+    starts: usize,
+    cancellations: usize,
+    abandonments: usize,
+    ready: bool,
+}
+
+impl BrokerEffectExecutor for DeferredTestExecutor {
+    fn execute(&mut self, _permit: ExecutionPermit) -> NormalizedActionResult {
+        panic!("MCP effects must use the deferred facility path")
+    }
+
+    fn start_deferred(&mut self, _permit: ExecutionPermit) -> BrokerDeferredStart {
+        self.starts += 1;
+        BrokerDeferredStart::Started(
+            BrokerDeferredTicket::new(format!("fixture-ticket-{}", self.starts))
+                .expect("valid deferred ticket"),
+        )
+    }
+
+    fn poll_deferred(&mut self, ticket: &BrokerDeferredTicket) -> Option<RuntimeEffectResult> {
+        if !self.ready || !ticket.as_str().starts_with("fixture-ticket-") {
+            return None;
+        }
+        self.ready = false;
+        Some(RuntimeEffectResult::normalized(NormalizedActionResult {
+            status: NormalizedActionStatus::Succeeded,
+            result_code: "mcp-tool-succeeded".into(),
+            exit_code: None,
+            changed_targets: vec!["mcp-tool:fixture-echo".into()],
+            output_sha256: Some(format!("sha256:{}", "a".repeat(64))),
+            completed_at_ms: 30,
+        }))
+    }
+
+    fn cancel_deferred(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        if !ticket.as_str().starts_with("fixture-ticket-") {
+            return false;
+        }
+        self.cancellations += 1;
+        true
+    }
+
+    fn abandon_deferred(&mut self, ticket: &BrokerDeferredTicket) -> bool {
+        if !ticket.as_str().starts_with("fixture-ticket-") {
+            return false;
+        }
+        self.abandonments += 1;
+        true
+    }
 }
 
 impl BrokerEffectExecutor for TestExecutor {
@@ -346,6 +488,28 @@ fn action_payload() -> Value {
 
 fn read_payload() -> Value {
     json!({"resource": "workspace.summary", "selector": "active"})
+}
+
+fn mcp_payload() -> Value {
+    json!({
+        "operation": "mcp.call-tool",
+        "target": "mcp-tool:fixture-echo",
+        "arguments": { "value": "hello" },
+    })
+}
+
+fn pi_mcp_context(native_request_id: &str) -> BrokerActionContext {
+    let mut context = pi_context();
+    context.native_message_id = native_request_id.into();
+    context
+}
+
+fn pi_mcp_intent(native_request_id: &str, digest_seed: char) -> RuntimeIntentIdentity {
+    let mut intent = pi_intent();
+    intent.binding_sha256 = format!("sha256:{}", digest_seed.to_string().repeat(64));
+    intent.native_request_id = native_request_id.into();
+    intent.native_tool = C4OS_ACTION_PROPOSAL_TOOL.into();
+    intent
 }
 
 fn reason(outcome: &BrokerWorkerOutcome) -> Option<&str> {
@@ -794,4 +958,172 @@ fn authenticated_transport_rejects_process_substitution_before_worker_state() {
         AuthenticatedBrokerEvent::receive(&mut broker, TIMEOUT),
         Err(OpenCodeSdkError::InvalidFrame)
     ));
+}
+
+#[test]
+fn deferred_pi_effect_capacity_and_late_cancellation_settlement_are_fail_closed() {
+    let mut worker = BrokerActionWorker::with_capacity(
+        FixtureClassifier {
+            mode: ClassifierMode::Normal,
+        },
+        1,
+        4,
+    )
+    .expect("bounded deferred worker");
+    let mut application = TestApplication::new();
+    let mut executor = DeferredTestExecutor::default();
+    let first_context = pi_mcp_context("pi-mcp-1");
+
+    let first = worker
+        .accept_runtime_intent(
+            &mut application,
+            &mut executor,
+            pi_mcp_intent("pi-mcp-1", 'a'),
+            mcp_payload(),
+            first_context.clone(),
+            10,
+        )
+        .expect("first MCP proposal");
+    let started = match first {
+        RuntimeBrokerWorkerOutcome::PendingApproval { prompt_id, .. } => worker
+            .answer_runtime_intent_approval(
+                &mut application,
+                &mut executor,
+                RuntimeBrokerApprovalAnswer {
+                    native_request_id: "pi-mcp-1",
+                    prompt_id: &prompt_id,
+                    answer: ApprovalAnswer::Allow,
+                    current_context: &first_context,
+                    now_ms: 20,
+                },
+            )
+            .expect("start approved deferred MCP effect"),
+        already_started @ RuntimeBrokerWorkerOutcome::EffectRunning { .. } => already_started,
+        RuntimeBrokerWorkerOutcome::Denied { reason_code, .. } => {
+            panic!("MCP execution was denied before deferred start: {reason_code}")
+        }
+        _ => panic!("MCP execution must be authorized or await explicit approval"),
+    };
+    assert!(matches!(
+        started,
+        RuntimeBrokerWorkerOutcome::EffectRunning { ref native_request_id }
+            if native_request_id == "pi-mcp-1"
+    ));
+    assert_eq!(executor.starts, 1);
+    assert_eq!(worker.pending_count(), 1);
+
+    let second = worker
+        .accept_runtime_intent(
+            &mut application,
+            &mut executor,
+            pi_mcp_intent("pi-mcp-2", 'b'),
+            mcp_payload(),
+            pi_mcp_context("pi-mcp-2"),
+            21,
+        )
+        .expect("capacity denial");
+    assert!(matches!(
+        second,
+        RuntimeBrokerWorkerOutcome::Denied {
+            ref native_request_id,
+            ref reason_code,
+        } if native_request_id == "pi-mcp-2" && reason_code == "pending-approval-capacity"
+    ));
+    assert_eq!(application.proposed.len(), 1);
+    assert_eq!(executor.starts, 1, "capacity denial must precede job start");
+
+    application
+        .cancel_runtime_run("run-1", 22)
+        .expect("terminalize exact run");
+    assert_eq!(
+        worker.cancel_runtime_deferred_for_run(&mut executor, "run-1"),
+        1
+    );
+    assert_eq!(executor.cancellations, 1);
+    executor.ready = true;
+    let settled = worker
+        .poll_runtime_deferred(&mut application, &mut executor, 30)
+        .expect("late deferred settlement")
+        .expect("ready late result");
+    let RuntimeBrokerWorkerOutcome::SettledAfterCancellation {
+        native_request_id,
+        receipt,
+    } = settled
+    else {
+        panic!("a terminal Pi run must receive administrative settlement only");
+    };
+    assert_eq!(native_request_id, "pi-mcp-1");
+    assert_eq!(receipt.result().status, NormalizedActionStatus::Succeeded);
+    assert_eq!(worker.pending_count(), 0);
+}
+
+#[test]
+fn runtime_shutdown_drain_retries_unknown_settlement_without_losing_the_effect_lease() {
+    let mut worker = BrokerActionWorker::with_capacity(
+        FixtureClassifier {
+            mode: ClassifierMode::Normal,
+        },
+        2,
+        4,
+    )
+    .expect("bounded deferred worker");
+    let mut application = TestApplication::new();
+    let mut executor = DeferredTestExecutor::default();
+    let trusted_context = pi_mcp_context("pi-mcp-drain");
+    let proposal = worker
+        .accept_runtime_intent(
+            &mut application,
+            &mut executor,
+            pi_mcp_intent("pi-mcp-drain", 'd'),
+            mcp_payload(),
+            trusted_context.clone(),
+            10,
+        )
+        .expect("MCP proposal");
+    let started = match proposal {
+        RuntimeBrokerWorkerOutcome::PendingApproval { prompt_id, .. } => worker
+            .answer_runtime_intent_approval(
+                &mut application,
+                &mut executor,
+                RuntimeBrokerApprovalAnswer {
+                    native_request_id: "pi-mcp-drain",
+                    prompt_id: &prompt_id,
+                    answer: ApprovalAnswer::Allow,
+                    current_context: &trusted_context,
+                    now_ms: 20,
+                },
+            )
+            .expect("start approved effect"),
+        already_started @ RuntimeBrokerWorkerOutcome::EffectRunning { .. } => already_started,
+        _ => panic!("unexpected MCP proposal outcome"),
+    };
+    assert!(matches!(
+        started,
+        RuntimeBrokerWorkerOutcome::EffectRunning { .. }
+    ));
+    assert_eq!(worker.pending_count(), 1);
+
+    application.fail_retryable_once = true;
+    assert!(matches!(
+        worker.drain_deferred_unknown(&mut application, &mut executor, 29),
+        Err(BrokerWorkerError::EffectStatusUnknown)
+    ));
+    assert_eq!(worker.pending_count(), 1);
+    assert_eq!(executor.cancellations, 1);
+    assert_eq!(executor.abandonments, 0);
+    assert!(application.completed_statuses.is_empty());
+
+    assert_eq!(
+        worker
+            .drain_deferred_unknown(&mut application, &mut executor, 30)
+            .expect("drain deferred effect"),
+        1
+    );
+    assert_eq!(executor.cancellations, 2);
+    assert_eq!(executor.abandonments, 1);
+    assert_eq!(worker.pending_count(), 0);
+    assert_eq!(
+        application.completed_statuses,
+        vec![NormalizedActionStatus::UnknownAfterInterruption]
+    );
 }

@@ -687,6 +687,76 @@ fn reject_secret_surface(value: &Value, depth: usize) -> Result<(), OpenCodeSdkE
     }
 }
 
+/// Produces a bounded payload that is safe for the authenticated broker
+/// result channel. MCP peers may use credential-shaped field names for
+/// ordinary data, but those names cannot cross the OpenCode descriptor even
+/// after their values were redacted. Replace the complete field with a stable
+/// opaque marker and apply the same conservative value scan used by the final
+/// writer.
+pub fn sanitize_broker_result_payload(value: Value) -> Value {
+    sanitize_broker_result_value(value, 0)
+}
+
+fn sanitize_broker_result_value(value: Value, depth: usize) -> Value {
+    if depth > 16 {
+        return Value::String("<redacted-depth-limit>".into());
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => value,
+        Value::String(value) => {
+            if secret_like_value(&value) {
+                Value::String("<redacted>".into())
+            } else if value.len() > 63 * 1024 {
+                let mut end = 63 * 1024;
+                while !value.is_char_boundary(end) {
+                    end = end.saturating_sub(1);
+                }
+                Value::String(format!("{}<truncated>", &value[..end]))
+            } else {
+                Value::String(value)
+            }
+        }
+        Value::Array(values) => {
+            let truncated = values.len() > 1_024;
+            let mut sanitized = values
+                .into_iter()
+                .take(if truncated { 1_023 } else { 1_024 })
+                .map(|value| sanitize_broker_result_value(value, depth + 1))
+                .collect::<Vec<_>>();
+            if truncated {
+                sanitized.push(serde_json::json!({ "truncatedItems": true }));
+            }
+            Value::Array(sanitized)
+        }
+        Value::Object(values) => {
+            let truncated = values.len() > 1_024;
+            let mut sanitized = serde_json::Map::new();
+            for (key, value) in values
+                .into_iter()
+                .take(if truncated { 1_023 } else { 1_024 })
+            {
+                if secret_key(&key) {
+                    let digest = Sha256::digest(key.as_bytes());
+                    let mut hex = String::with_capacity(16);
+                    for byte in &digest[..8] {
+                        let _ = write!(hex, "{byte:02x}");
+                    }
+                    sanitized.insert(
+                        format!("redacted_field_{hex}"),
+                        Value::String("<redacted>".into()),
+                    );
+                } else {
+                    sanitized.insert(key, sanitize_broker_result_value(value, depth + 1));
+                }
+            }
+            if truncated {
+                sanitized.insert("truncatedFields".into(), Value::Bool(true));
+            }
+            Value::Object(sanitized)
+        }
+    }
+}
+
 fn secret_key(value: &str) -> bool {
     matches!(
         value

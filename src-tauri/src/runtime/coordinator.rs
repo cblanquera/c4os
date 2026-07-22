@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::runtime::action_bridge::{
-    RuntimeActionBridge, RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization,
-    RuntimeBridgeError, RuntimeExecutionReceipt, RuntimeGatewayDecision, RuntimeIntentIdentity,
+    RuntimeActionBridge, RuntimeActionEffectLease, RuntimeActionProposal, RuntimeApprovalDecision,
+    RuntimeAuthorization, RuntimeBridgeError, RuntimeEffectCompletionCertainty,
+    RuntimeEffectResult, RuntimeExecutionReceipt, RuntimeGatewayDecision, RuntimeIntentIdentity,
 };
 use crate::runtime::capability::{
     CapabilityDescriptor, CapabilityError, DraftRequirements, PreflightOutcome,
@@ -34,8 +35,8 @@ use crate::security::authorization::{
     ApprovalAnswer, AuthorizationToken, CanonicalAction, LiveAuthorityState,
 };
 use crate::security::gateway::{
-    ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit, GatewayProposal,
-    NormalizedActionResult,
+    ActionEffectLease, ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit,
+    GatewayProposal, NormalizedActionResult,
 };
 use crate::security::policy::{ActionFacts, PolicyResolution, resolve_policy};
 
@@ -544,6 +545,30 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(proposal)
     }
 
+    pub(crate) fn propose_direct_trust_confirmation(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
+        let proposal = self
+            .action_gateway
+            .propose_trust_confirmation(facts, action, now_ms)?;
+        self.operation(proposal)
+    }
+
+    pub(crate) fn propose_direct_sampling_confirmation(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
+        let proposal = self
+            .action_gateway
+            .propose_sampling_confirmation(facts, action, now_ms)?;
+        self.operation(proposal)
+    }
+
     pub(crate) fn answer_direct_approval(
         &mut self,
         prompt_id: &str,
@@ -580,6 +605,39 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(result)
     }
 
+    pub(crate) fn begin_direct_action_effect(
+        &mut self,
+        token: &AuthorizationToken,
+        action: &CanonicalAction,
+        live: LiveAuthorityState,
+        approval_prompt_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<ActionEffectLease>, CoordinatorError> {
+        let lease =
+            self.action_gateway
+                .begin_effect(token, action, live, approval_prompt_id, now_ms)?;
+        self.operation(lease)
+    }
+
+    pub(crate) fn complete_direct_action_effect(
+        &mut self,
+        lease: ActionEffectLease,
+        result: NormalizedActionResult,
+    ) -> Result<CoordinatorOperation<NormalizedActionResult>, CoordinatorError> {
+        let result = self.action_gateway.complete_effect(lease, result)?;
+        self.operation(result)
+    }
+
+    pub(crate) fn complete_direct_action_effect_retryable(
+        &mut self,
+        lease: &mut ActionEffectLease,
+        result: &NormalizedActionResult,
+    ) -> Result<CoordinatorOperation<()>, CoordinatorError> {
+        self.action_gateway
+            .complete_effect_retryable(lease, result)?;
+        self.operation(())
+    }
+
     pub fn answer_runtime_approval(
         &mut self,
         prompt_id: &str,
@@ -598,6 +656,24 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         now_ms: u64,
         effect: impl FnOnce(ExecutionPermit) -> NormalizedActionResult,
     ) -> Result<CoordinatorOperation<RuntimeExecutionReceipt>, CoordinatorError> {
+        let mut lease = self
+            .begin_runtime_action_effect(authorization, live, now_ms)?
+            .value;
+        let permit = lease.take_execution_permit()?;
+        let result = effect(permit);
+        self.complete_runtime_action_effect(
+            lease,
+            RuntimeEffectResult::normalized(result),
+            now_ms.saturating_add(1),
+        )
+    }
+
+    pub fn begin_runtime_action_effect(
+        &mut self,
+        authorization: RuntimeAuthorization,
+        live: LiveAuthorityState,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<RuntimeActionEffectLease>, CoordinatorError> {
         let (session_id, run_id, runtime_id, process_generation) = {
             let (session_id, run_id, runtime_id, process_generation) =
                 authorization.active_run_identity();
@@ -633,38 +709,92 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             },
             now_ms,
         )?;
-        let receipt = RuntimeActionBridge::new(&mut self.action_gateway).execute(
+        let lease = match RuntimeActionBridge::new(&mut self.action_gateway).begin_effect(
             authorization,
             live,
             now_ms,
-            effect,
-        )?;
-        let terminal_effect = match receipt.result().status {
-            crate::security::gateway::NormalizedActionStatus::Succeeded => {
-                SideEffectState::Completed { action_id }
-            }
-            crate::security::gateway::NormalizedActionStatus::UnknownAfterInterruption => {
-                SideEffectState::Unknown { action_id }
-            }
-            crate::security::gateway::NormalizedActionStatus::Failed
-            | crate::security::gateway::NormalizedActionStatus::Cancelled
-            | crate::security::gateway::NormalizedActionStatus::Denied => {
-                SideEffectState::ProvenNotCompleted {
-                    action_id,
-                    idempotent: false,
-                }
+        ) {
+            Ok(lease) => lease,
+            Err(error) => {
+                self.sessions.set_side_effect_state(
+                    &session_id,
+                    &AttemptIdentity {
+                        attempt_id: run_id,
+                        correlation_id: attempt.correlation_id.clone(),
+                        process_generation,
+                    },
+                    SideEffectState::ProvenNotCompleted {
+                        action_id,
+                        idempotent: false,
+                    },
+                    now_ms.saturating_add(1),
+                )?;
+                return Err(error.into());
             }
         };
-        self.sessions.set_side_effect_state(
-            &session_id,
-            &AttemptIdentity {
-                attempt_id: run_id,
-                correlation_id: attempt.correlation_id.clone(),
-                process_generation,
-            },
-            terminal_effect,
-            now_ms.saturating_add(1),
-        )?;
+        self.operation(lease)
+    }
+
+    pub fn complete_runtime_action_effect(
+        &mut self,
+        mut lease: RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<RuntimeExecutionReceipt>, CoordinatorError> {
+        self.complete_runtime_action_effect_retryable(&mut lease, result, completed_at_ms)
+    }
+
+    pub fn complete_runtime_action_effect_retryable(
+        &mut self,
+        lease: &mut RuntimeActionEffectLease,
+        result: RuntimeEffectResult,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<RuntimeExecutionReceipt>, CoordinatorError> {
+        let run_id = lease.run_id().to_owned();
+        let session_id = lease.session_id().to_owned();
+        let action_id = lease.action_id().to_owned();
+        let session = self.sessions.session(&session_id)?;
+        let attempt = session
+            .attempt(&run_id)
+            .ok_or(CoordinatorError::BindingMismatch)?;
+        let active_started = session.active_attempt_id.as_deref() == Some(run_id.as_str())
+            && attempt.side_effects.iter().any(|state| {
+                matches!(state, SideEffectState::Started { action_id: current, .. } if current == &action_id)
+            });
+        let terminal_unknown = attempt.status.is_terminal()
+            && attempt.side_effects.iter().any(|state| {
+                matches!(state, SideEffectState::Unknown { action_id: current } if current == &action_id)
+            });
+        if !active_started && !terminal_unknown {
+            return Err(CoordinatorError::BindingMismatch);
+        }
+        let certainty = result.certainty();
+        let receipt = RuntimeActionBridge::new(&mut self.action_gateway)
+            .complete_effect_retryable(lease, result)?;
+        if active_started {
+            let terminal_effect = match certainty {
+                RuntimeEffectCompletionCertainty::Completed => {
+                    SideEffectState::Completed { action_id }
+                }
+                RuntimeEffectCompletionCertainty::Unknown => SideEffectState::Unknown { action_id },
+                RuntimeEffectCompletionCertainty::ProvenNotCompleted => {
+                    SideEffectState::ProvenNotCompleted {
+                        action_id,
+                        idempotent: false,
+                    }
+                }
+            };
+            self.sessions.set_side_effect_state(
+                &session.session_id,
+                &AttemptIdentity {
+                    attempt_id: run_id,
+                    correlation_id: attempt.correlation_id.clone(),
+                    process_generation: attempt.process_generation,
+                },
+                terminal_effect,
+                completed_at_ms,
+            )?;
+        }
         self.operation(receipt)
     }
 
@@ -691,6 +821,18 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         let revoked = self
             .action_gateway
             .revoke_plugin(plugin_id, now_ms)
+            .map_err(RuntimeBridgeError::Gateway)?;
+        self.operation(revoked)
+    }
+
+    pub fn revoke_plugin_or_mcp_authority(
+        &mut self,
+        identity: &str,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<usize>, CoordinatorError> {
+        let revoked = self
+            .action_gateway
+            .revoke_plugin_or_mcp(identity, now_ms)
             .map_err(RuntimeBridgeError::Gateway)?;
         self.operation(revoked)
     }

@@ -10,7 +10,10 @@ use thiserror::Error;
 
 use crate::RuntimeApplicationService;
 use crate::runtime::capability_evidence::CapabilityRouteEpoch;
-use crate::runtime::dispatch::{DispatchError, DispatchEventCategory, RuntimeDispatchRegistry};
+use crate::runtime::dispatch::{
+    CoordinatedCancellation, DispatchError, DispatchEventCategory, DispatchIdentity,
+    RuntimeDispatchRegistry,
+};
 use crate::runtime::production::{
     CoreProductionWorker, PreparedCoreProductionPeer, ProductionProviderRoute,
     ProductionRuntimeBinding, RuntimeProductionBootstrap,
@@ -115,6 +118,21 @@ pub trait ProductionRuntimeWorker: Send {
 
     fn pending_approval_descriptors(&self) -> Vec<(String, String)> {
         Vec::new()
+    }
+
+    fn cancel_deferred_actions(
+        &mut self,
+        _identity: &DispatchIdentity,
+    ) -> Result<usize, RuntimeProductionApplicationError> {
+        Ok(0)
+    }
+
+    fn drain_deferred_actions(
+        &mut self,
+        _application: &Arc<RuntimeApplicationService>,
+        _now_ms: u64,
+    ) -> Result<usize, RuntimeProductionApplicationError> {
+        Ok(0)
     }
 
     fn answer_approval(
@@ -421,6 +439,31 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
         }
     }
 
+    /// Terminalizes one exact run and then signals any retained deferred Pi
+    /// effect while holding the same host mutex used by the production pump.
+    /// A late completion can therefore settle only after the worker records
+    /// that the native run must not receive another tool response.
+    pub fn cancel_dispatch(
+        &self,
+        expected_coordinator_generation: u64,
+        identity: &DispatchIdentity,
+        requested_at_ms: u64,
+    ) -> Result<CoordinatedCancellation, RuntimeProductionApplicationError> {
+        let mut active = self
+            .active
+            .lock()
+            .map_err(|_| RuntimeProductionApplicationError::Unavailable)?;
+        let outcome = self.application.cancel_dispatch(
+            expected_coordinator_generation,
+            identity,
+            requested_at_ms,
+        )?;
+        if let Some(runtime) = active.get_mut(&identity.runtime_id) {
+            runtime.worker.cancel_deferred_actions(identity)?;
+        }
+        Ok(outcome)
+    }
+
     pub fn pump_runtime_once_expected(
         &self,
         expected_coordinator_generation: u64,
@@ -488,12 +531,12 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
         stopped_at_ms: u64,
     ) -> Result<u64, RuntimeProductionApplicationError> {
         let (process_generation, attached, native_stopped) = {
-            let active = self
+            let mut active = self
                 .active
                 .lock()
                 .map_err(|_| RuntimeProductionApplicationError::Unavailable)?;
             let active = active
-                .get(runtime_id)
+                .get_mut(runtime_id)
                 .ok_or(RuntimeProductionApplicationError::NotActive)?;
             (
                 active.worker.binding().process_generation(),
@@ -504,6 +547,22 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
         let reserved_generation = self
             .application
             .reserve_runtime_operation(expected_coordinator_generation, stopped_at_ms)?;
+        let drain_result = {
+            let mut active = self
+                .active
+                .lock()
+                .map_err(|_| RuntimeProductionApplicationError::Unavailable)?;
+            let runtime = active
+                .get_mut(runtime_id)
+                .ok_or(RuntimeProductionApplicationError::NotActive)?;
+            runtime
+                .worker
+                .drain_deferred_actions(&self.application, stopped_at_ms)
+        };
+        // On failure `?` keeps the worker entry and its retryable effect lease
+        // intact. A later shutdown attempt can durably settle Unknown before
+        // native teardown; no authority handle is discarded.
+        drain_result?;
         if !native_stopped {
             let cleanup = self.application.dispatch().and_then(|mut registry| {
                 registry
@@ -524,16 +583,21 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
             }
             runtime.revoke_after_native_stop();
         }
+        let completion_generation = self
+            .application
+            .snapshot(stopped_at_ms)?
+            .generation
+            .max(reserved_generation);
         let stopped = if attached {
             self.application.finish_managed_runtime_shutdown(
-                reserved_generation,
+                completion_generation,
                 runtime_id,
                 process_generation,
                 stopped_at_ms,
             )?
         } else {
             self.application.abort_managed_runtime_start(
-                reserved_generation,
+                completion_generation,
                 runtime_id,
                 process_generation,
                 stopped_at_ms,
@@ -621,6 +685,13 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
         let process_generation = runtime.worker.binding().process_generation();
         let attached = runtime.attached;
         let native_stopped = runtime.native_stopped;
+        if let Err(error) = runtime
+            .worker
+            .drain_deferred_actions(&self.application, stopped_at_ms)
+        {
+            runtime.worker.revoke_transient_credentials();
+            return Err(error);
+        }
         // A fatal generation can no longer be trusted to authenticate any
         // request, even when descendant cleanup subsequently fails. Revoke
         // its session-only credential before attempting native teardown.
@@ -703,8 +774,11 @@ impl<B> Drop for RuntimeProductionApplication<B> {
             return;
         };
         let runtimes = std::mem::take(active);
-        for (runtime_id, active) in runtimes {
+        for (runtime_id, mut active) in runtimes {
             let process_generation = active.worker.binding().process_generation();
+            let _ = active
+                .worker
+                .drain_deferred_actions(&self.application, stopped_at_ms);
             let cleanup_succeeded = active.native_stopped
                 || self
                     .application
@@ -792,6 +866,28 @@ impl ProductionRuntimeWorker for CoreProductionWorker {
         CoreProductionWorker::revoke_transient_credentials(self);
     }
 
+    fn cancel_deferred_actions(
+        &mut self,
+        identity: &DispatchIdentity,
+    ) -> Result<usize, RuntimeProductionApplicationError> {
+        match self {
+            Self::OpenCode(_) => Ok(0),
+            Self::Pi(worker) => Ok(worker.cancel_deferred_action(identity)?),
+        }
+    }
+
+    fn drain_deferred_actions(
+        &mut self,
+        application: &Arc<RuntimeApplicationService>,
+        now_ms: u64,
+    ) -> Result<usize, RuntimeProductionApplicationError> {
+        let mut application = Arc::clone(application);
+        match self {
+            Self::OpenCode(worker) => Ok(worker.drain_deferred_unknown(&mut application, now_ms)?),
+            Self::Pi(worker) => Ok(worker.drain_deferred_actions(&mut application, now_ms)?),
+        }
+    }
+
     fn pump(
         &mut self,
         application: &Arc<RuntimeApplicationService>,
@@ -826,6 +922,48 @@ impl ProductionRuntimeWorker for CoreProductionWorker {
             }
             Self::Pi(worker) => {
                 let mut processed = 0_usize;
+                let mut shared_application = Arc::clone(application);
+                if let Some(settlement) = worker
+                    .poll_deferred_action(&mut shared_application, now_ms)
+                    .map_err(|_| {
+                        RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                    })?
+                {
+                    if settlement.settled_after_cancellation() {
+                        worker
+                            .settle_deferred_after_cancellation(settlement)
+                            .map_err(|_| {
+                                RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                            })?;
+                        return Ok(processed.saturating_add(1));
+                    }
+                    let identity = settlement.identity.clone();
+                    let expected_generation = application
+                        .snapshot(now_ms)
+                        .map_err(|_| {
+                            RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                        })?
+                        .generation;
+                    let mut transaction = application
+                        .begin_runtime_broker_transaction(expected_generation, now_ms)
+                        .map_err(|_| {
+                            RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                        })?;
+                    let mut registry = transaction.dispatch().map_err(|_| {
+                        RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                    })?;
+                    return match worker.settle_action_approval(&mut registry, settlement) {
+                        Ok(_) => Ok(processed.saturating_add(1)),
+                        Err(crate::runtime::production::RuntimeProductionError::PiToolResolutionFailed) => {
+                            drop(registry);
+                            transaction
+                                .record_pi_fallback_cancellation(&identity, now_ms)
+                                .map_err(|_| RuntimeProductionApplicationError::PiToolSettlementGenerationFatal)?;
+                            Err(crate::runtime::production::RuntimeProductionError::PiToolResolutionFailed.into())
+                        }
+                        Err(_) => Err(RuntimeProductionApplicationError::PiToolSettlementGenerationFatal),
+                    };
+                }
                 if !worker.has_pending_action_intents() {
                     let expected_generation = application
                         .snapshot(now_ms)
@@ -845,7 +983,19 @@ impl ProductionRuntimeWorker for CoreProductionWorker {
                     let mut action_intents = Vec::new();
                     for applied in events {
                         if matches!(
-                            applied.event.peer.category,
+                            &applied.event.peer.category,
+                            DispatchEventCategory::Completed
+                                | DispatchEventCategory::Cancelled
+                                | DispatchEventCategory::Error { .. }
+                        ) {
+                            worker
+                                .cancel_deferred_action(&applied.event.peer.identity)
+                                .map_err(|_| {
+                                    RuntimeProductionApplicationError::PiToolSettlementGenerationFatal
+                                })?;
+                        }
+                        if matches!(
+                            &applied.event.peer.category,
                             DispatchEventCategory::PiActionIntent(_)
                         ) {
                             action_intents.push(applied.event);
@@ -1112,6 +1262,7 @@ mod tests {
                 pumps: Arc::new(Mutex::new(0)),
                 shutdowns: Arc::new(Mutex::new(0)),
                 revocations: None,
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1171,6 +1322,7 @@ mod tests {
         pumps: Arc<Mutex<usize>>,
         shutdowns: Arc<Mutex<usize>>,
         revocations: Option<Arc<Mutex<usize>>>,
+        drains: Option<Arc<Mutex<usize>>>,
         invalidate_attach: Option<Arc<RuntimeApplicationService>>,
         fail_pump_runtime: Option<String>,
         fatal_pump_runtime: Option<String>,
@@ -1205,6 +1357,7 @@ mod tests {
                 binding: self.binding.clone(),
                 pumps: Arc::clone(&self.pumps),
                 revocations: self.revocations.clone(),
+                drains: self.drains.clone(),
                 fail_pump_runtime: self.fail_pump_runtime.clone(),
                 fatal_pump_runtime: self.fatal_pump_runtime.clone(),
             }))
@@ -1215,6 +1368,7 @@ mod tests {
         binding: ProductionRuntimeBinding,
         pumps: Arc<Mutex<usize>>,
         revocations: Option<Arc<Mutex<usize>>>,
+        drains: Option<Arc<Mutex<usize>>>,
         fail_pump_runtime: Option<String>,
         fatal_pump_runtime: Option<String>,
     }
@@ -1228,6 +1382,18 @@ mod tests {
             if let Some(revocations) = &self.revocations {
                 *revocations.lock().unwrap() += 1;
             }
+        }
+
+        fn drain_deferred_actions(
+            &mut self,
+            _application: &Arc<RuntimeApplicationService>,
+            _now_ms: u64,
+        ) -> Result<usize, RuntimeProductionApplicationError> {
+            if let Some(drains) = &self.drains {
+                *drains.lock().unwrap() += 1;
+                return Ok(1);
+            }
+            Ok(0)
         }
 
         fn pump(
@@ -1288,6 +1454,7 @@ mod tests {
         reject: bool,
         shutdowns: Arc<Mutex<usize>>,
         revocations: Option<Arc<Mutex<usize>>>,
+        drains: Option<Arc<Mutex<usize>>>,
         invalidate_attach: Option<Arc<RuntimeApplicationService>>,
         fail_pump_runtime: Option<String>,
         fatal_pump_runtime: Option<String>,
@@ -1311,6 +1478,7 @@ mod tests {
                 pumps: Arc::clone(&self.pumps),
                 shutdowns: Arc::clone(&self.shutdowns),
                 revocations: self.revocations.clone(),
+                drains: self.drains.clone(),
                 invalidate_attach: self.invalidate_attach.clone(),
                 fail_pump_runtime: self.fail_pump_runtime.clone(),
                 fatal_pump_runtime: self.fatal_pump_runtime.clone(),
@@ -1602,6 +1770,7 @@ mod tests {
         let application = setup_service(&temporary);
         let captured = Arc::new(Mutex::new(Vec::new()));
         let pumps = Arc::new(Mutex::new(0));
+        let drains = Arc::new(Mutex::new(0));
         let host = RuntimeProductionApplication::with_backend(
             Arc::clone(&application),
             FakeBackend {
@@ -1610,6 +1779,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::new(Mutex::new(0)),
                 revocations: None,
+                drains: Some(Arc::clone(&drains)),
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1658,6 +1828,7 @@ mod tests {
 
         host.shutdown_runtime(ready.generation, "pi-primary", NOW + 4)
             .unwrap();
+        assert_eq!(*drains.lock().unwrap(), 1);
         assert_eq!(host.active_runtime_count().unwrap(), 0);
         let stopped = application.snapshot(NOW + 4).unwrap();
         let record = stopped
@@ -1683,6 +1854,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::new(Mutex::new(0)),
                 revocations: None,
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1720,6 +1892,7 @@ mod tests {
                 reject: true,
                 shutdowns: Arc::new(Mutex::new(0)),
                 revocations: None,
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1756,6 +1929,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: None,
+                drains: None,
                 invalidate_attach: Some(Arc::clone(&application)),
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1803,6 +1977,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: Some(Arc::clone(&revocations)),
+                drains: None,
                 invalidate_attach: Some(Arc::clone(&application)),
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1845,6 +2020,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: Some(Arc::clone(&revocations)),
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1888,6 +2064,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: Some(Arc::clone(&revocations)),
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: Some("pi-cleanup-fail".into()),
@@ -1919,6 +2096,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: None,
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
@@ -1960,6 +2138,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: Some(Arc::clone(&revocations)),
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: Some("pi-primary".into()),
@@ -2000,6 +2179,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::clone(&shutdowns),
                 revocations: Some(Arc::clone(&revocations)),
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: None,
                 fatal_pump_runtime: Some("pi-primary".into()),
@@ -2048,6 +2228,7 @@ mod tests {
                 reject: false,
                 shutdowns: Arc::new(Mutex::new(0)),
                 revocations: None,
+                drains: None,
                 invalidate_attach: None,
                 fail_pump_runtime: Some("pi-primary".into()),
                 fatal_pump_runtime: None,

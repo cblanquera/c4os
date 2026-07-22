@@ -65,6 +65,37 @@ pub struct ExecutionPermit {
     consumed_at_ms: u64,
 }
 
+/// Opaque proof that one exact authorization was consumed and its durable
+/// `effect-started` barrier was committed. Long-running native facilities may
+/// hold this lease while the actual effect runs, then consume it exactly once
+/// when recording the normalized terminal result.
+#[derive(Debug)]
+pub struct ActionEffectLease {
+    permit: Option<ExecutionPermit>,
+    action: CanonicalAction,
+    approval_prompt_id: Option<String>,
+    settled: bool,
+}
+
+impl ActionEffectLease {
+    pub fn action(&self) -> &CanonicalAction {
+        &self.action
+    }
+
+    pub fn authorization_id(&self) -> &str {
+        self.permit
+            .as_ref()
+            .map(ExecutionPermit::authorization_id)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn take_execution_permit(&mut self) -> Result<ExecutionPermit, ActionGatewayError> {
+        self.permit
+            .take()
+            .ok_or(ActionGatewayError::MissingAuthorization)
+    }
+}
+
 impl ExecutionPermit {
     fn from_consumption(consumption: AuthorizationConsumption) -> Self {
         Self {
@@ -833,12 +864,138 @@ impl ActionGateway {
         }
     }
 
+    /// Requires an explicit user confirmation for a trust-granting action.
+    /// Policy Deny remains final; an otherwise-Allow resolution is tightened
+    /// to Ask with an auditable dedicated decision source.
+    pub fn propose_trust_confirmation(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, ActionGatewayError> {
+        validate_fact_binding(facts, &action)?;
+        validate_no_inline_credentials(&action.arguments)?;
+        let intent_id = format!("{}:intent", action.action_id);
+        self.repository.save_intent(
+            &intent_id,
+            "proposed",
+            &PersistedIntent::proposed(&action, facts)?,
+            &action,
+            now_ms,
+        )?;
+
+        let mut resolution = resolve_policy(facts, &self.policy, now_ms);
+        if resolution.decision == PolicyDecision::Allow {
+            let source = DecisionSource::ExplicitTrustConfirmation;
+            resolution.decision = PolicyDecision::Ask;
+            resolution.controlling_sources = vec![source.clone()];
+            resolution.contributions.push(DecisionContribution {
+                decision: PolicyDecision::Ask,
+                source,
+            });
+        }
+        let decision_id = format!("{}:decision", action.action_id);
+        self.repository.save_decision(
+            &decision_id,
+            policy_state(resolution.decision),
+            &PersistedDecision::new(&action, &resolution, now_ms)?,
+            &action,
+            now_ms,
+        )?;
+
+        match resolution.decision {
+            PolicyDecision::Deny => {
+                let result = NormalizedActionResult::denied("policy-denied", now_ms);
+                self.persist_result(&action, &result)?;
+                Ok(GatewayProposal::Denied { resolution })
+            }
+            PolicyDecision::Ask => {
+                let prompt_id = format!("approval:{}", Uuid::new_v4().as_simple());
+                let prompt = self
+                    .approvals
+                    .enqueue(prompt_id, action, now_ms, self.approval_ttl_ms)
+                    .map_err(ActionGatewayError::Approval)?
+                    .clone();
+                self.repository.save_approval(&prompt)?;
+                Ok(GatewayProposal::PendingApproval {
+                    prompt: Box::new(prompt),
+                    resolution,
+                })
+            }
+            PolicyDecision::Allow => Err(ActionGatewayError::Serialization),
+        }
+    }
+
+    /// Requires an explicit user confirmation before an MCP server may ask a
+    /// configured model to generate content. Policy Deny remains final; an
+    /// otherwise-Allow resolution is tightened to Ask with a dedicated audit
+    /// source rather than being mislabeled as a trust grant.
+    pub fn propose_sampling_confirmation(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, ActionGatewayError> {
+        validate_fact_binding(facts, &action)?;
+        validate_no_inline_credentials(&action.arguments)?;
+        let intent_id = format!("{}:intent", action.action_id);
+        self.repository.save_intent(
+            &intent_id,
+            "proposed",
+            &PersistedIntent::proposed(&action, facts)?,
+            &action,
+            now_ms,
+        )?;
+        let mut resolution = resolve_policy(facts, &self.policy, now_ms);
+        if resolution.decision == PolicyDecision::Allow {
+            let source = DecisionSource::ExplicitSamplingConfirmation;
+            resolution.decision = PolicyDecision::Ask;
+            resolution.controlling_sources = vec![source.clone()];
+            resolution.contributions.push(DecisionContribution {
+                decision: PolicyDecision::Ask,
+                source,
+            });
+        }
+        let decision_id = format!("{}:decision", action.action_id);
+        self.repository.save_decision(
+            &decision_id,
+            policy_state(resolution.decision),
+            &PersistedDecision::new(&action, &resolution, now_ms)?,
+            &action,
+            now_ms,
+        )?;
+        match resolution.decision {
+            PolicyDecision::Deny => {
+                let result = NormalizedActionResult::denied("policy-denied", now_ms);
+                self.persist_result(&action, &result)?;
+                Ok(GatewayProposal::Denied { resolution })
+            }
+            PolicyDecision::Ask => {
+                let prompt_id = format!("approval:{}", Uuid::new_v4().as_simple());
+                let prompt = self
+                    .approvals
+                    .enqueue(prompt_id, action, now_ms, self.approval_ttl_ms)
+                    .map_err(ActionGatewayError::Approval)?
+                    .clone();
+                self.repository.save_approval(&prompt)?;
+                Ok(GatewayProposal::PendingApproval {
+                    prompt: Box::new(prompt),
+                    resolution,
+                })
+            }
+            PolicyDecision::Allow => Err(ActionGatewayError::Serialization),
+        }
+    }
+
     pub fn answer_approval(
         &mut self,
         prompt_id: &str,
         answer: ApprovalAnswer,
         now_ms: u64,
     ) -> Result<ApprovalResponse, ActionGatewayError> {
+        let approvals_checkpoint = self.approvals.clone();
+        let authorizations_checkpoint = self.authorizations.clone();
+        let approval_origins_checkpoint = self.approval_origins.clone();
         let before = self.approval_states();
         let answered = self.approvals.answer(prompt_id, answer, now_ms);
         let prompt = match answered {
@@ -846,11 +1003,14 @@ impl ActionGateway {
             Err(error) => {
                 // Expiry is a durable state transition even though the answer
                 // itself fails. Other errors leave the record unchanged.
-                self.persist_changed_approvals(&before)?;
+                if let Err(persistence) = self.persist_changed_approvals(&before) {
+                    self.approvals = approvals_checkpoint;
+                    return Err(persistence);
+                }
                 return Err(ActionGatewayError::Approval(error));
             }
         };
-        match answer {
+        let response = (|| match answer {
             ApprovalAnswer::Deny => {
                 let result = NormalizedActionResult::denied("user-denied", now_ms);
                 let mut records = self.changed_approval_records(&before)?;
@@ -895,7 +1055,13 @@ impl ActionGateway {
                     token,
                 })
             }
+        })();
+        if response.is_err() {
+            self.approvals = approvals_checkpoint;
+            self.authorizations = authorizations_checkpoint;
+            self.approval_origins = approval_origins_checkpoint;
         }
+        response
     }
 
     pub fn execute(
@@ -907,6 +1073,23 @@ impl ActionGateway {
         now_ms: u64,
         effect: impl FnOnce(ExecutionPermit) -> NormalizedActionResult,
     ) -> Result<NormalizedActionResult, ActionGatewayError> {
+        let mut lease =
+            self.begin_effect(token, attempted_action, live, approval_prompt_id, now_ms)?;
+        let permit = lease.take_execution_permit()?;
+        let result = effect(permit);
+        self.complete_effect(lease, result)
+    }
+
+    /// Consumes an exact single-use authorization and commits the durable
+    /// pre-effect barrier without running the effect inline.
+    pub fn begin_effect(
+        &mut self,
+        token: &AuthorizationToken,
+        attempted_action: &CanonicalAction,
+        live: LiveAuthorityState,
+        approval_prompt_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<ActionEffectLease, ActionGatewayError> {
         match self.approval_origins.get(&token.authorization_id) {
             Some(expected_prompt_id) if approval_prompt_id != Some(expected_prompt_id.as_str()) => {
                 return Err(ActionGatewayError::BindingMismatch);
@@ -980,14 +1163,55 @@ impl ActionGateway {
         self.repository
             .save_batch(vec![authorization_transition, effect_started])?;
 
-        let result = effect(permit);
+        Ok(ActionEffectLease {
+            action,
+            permit: Some(permit),
+            approval_prompt_id: approval_prompt_id.map(str::to_owned),
+            settled: false,
+        })
+    }
+
+    /// Consumes a pre-effect lease and durably records the normalized result
+    /// plus `effect-finished` (and approval completion when applicable).
+    pub fn complete_effect(
+        &mut self,
+        mut lease: ActionEffectLease,
+        result: NormalizedActionResult,
+    ) -> Result<NormalizedActionResult, ActionGatewayError> {
+        self.complete_effect_retryable(&mut lease, &result)?;
+        Ok(result)
+    }
+
+    /// Persists completion without consuming the lease on failure. Runtime
+    /// teardown uses this to retry a failed journal write while preserving the
+    /// only authority handle for the already-started effect.
+    pub fn complete_effect_retryable(
+        &mut self,
+        lease: &mut ActionEffectLease,
+        result: &NormalizedActionResult,
+    ) -> Result<(), ActionGatewayError> {
+        if lease.settled {
+            return Err(ActionGatewayError::MissingAuthorization);
+        }
+        self.complete_effect_records(lease.action(), lease.approval_prompt_id.as_deref(), result)?;
+        lease.settled = true;
+        Ok(())
+    }
+
+    fn complete_effect_records(
+        &mut self,
+        action: &CanonicalAction,
+        approval_prompt_id: Option<&str>,
+        result: &NormalizedActionResult,
+    ) -> Result<(), ActionGatewayError> {
+        let intent_id = format!("{}:intent", action.action_id);
         let result_id = format!("{}:result", action.action_id);
-        let result_payload = PersistedResult::from_result(&action, &result)?;
+        let result_payload = PersistedResult::from_result(action, result)?;
         let mut completed_records = vec![
             self.repository.journal_record(
                 "action-result",
                 &result_id,
-                &action,
+                action,
                 action_status(result.status),
                 &result_payload,
                 result.completed_at_ms,
@@ -995,22 +1219,31 @@ impl ActionGateway {
             self.repository.journal_record(
                 "action-intent",
                 &intent_id,
-                &action,
+                action,
                 "effect-finished",
-                &PersistedIntent::finished(&action, result.completed_at_ms)?,
+                &PersistedIntent::finished(action, result.completed_at_ms)?,
                 result.completed_at_ms,
             )?,
         ];
-        if let Some(prompt_id) = approval_prompt_id {
+        let completed_approval = if let Some(prompt_id) = approval_prompt_id {
             let prompt = self
                 .approvals
-                .complete(prompt_id, result.completed_at_ms)
-                .map_err(ActionGatewayError::Approval)?
-                .clone();
+                .completion_record(prompt_id, result.completed_at_ms)
+                .map_err(ActionGatewayError::Approval)?;
             completed_records.push(self.repository.approval_record(&prompt)?);
-        }
+            Some((prompt_id, prompt))
+        } else {
+            None
+        };
         self.repository.save_batch(completed_records)?;
-        Ok(result)
+        if let Some((prompt_id, expected)) = completed_approval {
+            let committed = self
+                .approvals
+                .complete(prompt_id, result.completed_at_ms)
+                .map_err(ActionGatewayError::Approval)?;
+            debug_assert_eq!(committed, &expected);
+        }
+        Ok(())
     }
 
     pub fn cancel_run(&mut self, run_id: &str, now_ms: u64) -> Result<usize, ActionGatewayError> {
@@ -1048,17 +1281,27 @@ impl ActionGateway {
         plugin_id: &str,
         now_ms: u64,
     ) -> Result<usize, ActionGatewayError> {
-        if plugin_id.trim().is_empty() {
+        self.revoke_plugin_or_mcp(plugin_id, now_ms)
+    }
+
+    /// Revokes authority derived from one exact Plugin or MCP identity. The
+    /// caller terminates that worker only after this durable transition.
+    pub fn revoke_plugin_or_mcp(
+        &mut self,
+        identity: &str,
+        now_ms: u64,
+    ) -> Result<usize, ActionGatewayError> {
+        if identity.trim().is_empty() {
             return Err(ActionGatewayError::BindingMismatch);
         }
         let authorization_states = self.authorization_states();
         let approval_states = self.approval_states();
-        let mut authorizations = self.authorizations.revoke_plugin(plugin_id, now_ms);
-        let approvals = self.approvals.cancel_plugin(plugin_id, now_ms);
+        let mut authorizations = self.authorizations.revoke_plugin_or_mcp(identity, now_ms);
+        let approvals = self.approvals.cancel_plugin_or_mcp(identity, now_ms);
         let mut records = self.changed_authorization_records(&authorization_states)?;
         for authorization in self.restored_authorizations.values_mut() {
             if authorization.state == AuthorizationState::Issued
-                && authorization.action_binding.plugin_or_mcp_id.as_deref() == Some(plugin_id)
+                && authorization.action_binding.plugin_or_mcp_id.as_deref() == Some(identity)
             {
                 authorization.state = AuthorizationState::Revoked {
                     revoked_at_ms: now_ms,
@@ -1577,7 +1820,11 @@ fn validate_no_inline_credentials(value: &serde_json::Value) -> Result<(), Actio
                         let opaque_reference = normalized.ends_with("reference")
                             || normalized.ends_with("referenceid")
                             || normalized.ends_with("hash");
-                        (credential_field && !opaque_reference) || contains_inline(value)
+                        let numeric_token_measure = value.is_number()
+                            && (normalized.ends_with("tokens")
+                                || normalized.ends_with("tokencount"));
+                        (credential_field && !opaque_reference && !numeric_token_measure)
+                            || contains_inline(value)
                     })
             }
             serde_json::Value::Array(values) => values.iter().any(contains_inline),

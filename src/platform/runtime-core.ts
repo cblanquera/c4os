@@ -65,6 +65,18 @@ export type ProductionRuntimePendingApproval = {
   readonly runtimeId: RuntimeId;
   readonly correlationId: CorrelationId;
   readonly promptId: ApprovalId;
+  readonly approvalKind: "runtime-effect" | "mcp-sampling";
+  readonly summary: string;
+  readonly serverId: string | null;
+  readonly providerId: string | null;
+  readonly modelId: string | null;
+  readonly maxTokens: number | null;
+  readonly expiresAtMs: number | null;
+  readonly messageCount: number | null;
+  readonly inputBytes: number | null;
+  readonly hasSystemPrompt: boolean | null;
+  readonly parentOperation: string | null;
+  readonly disclosureScope: string | null;
 };
 
 export type ActivatedProductionRuntime = {
@@ -245,6 +257,18 @@ export function readRuntimeReviewSnapshot(): Promise<RuntimeCoreSnapshot> {
                 runtimeId: "opencode-primary",
                 correlationId: "correlation-approval-review",
                 promptId: "approval:runtime-review",
+                approvalKind: "runtime-effect",
+                summary: "Approval required by opencode-primary.",
+                serverId: null,
+                providerId: null,
+                modelId: null,
+                maxTokens: null,
+                expiresAtMs: null,
+                messageCount: null,
+                inputBytes: null,
+                hasSystemPrompt: null,
+                parentOperation: null,
+                disclosureScope: null,
               },
             ],
           },
@@ -474,15 +498,103 @@ function parsePendingApproval(raw: unknown): ProductionRuntimePendingApproval {
     "runtimeId",
     "correlationId",
     "promptId",
+    "approvalKind",
+    "summary",
+    "serverId",
+    "providerId",
+    "modelId",
+    "maxTokens",
+    "expiresAtMs",
+    "messageCount",
+    "inputBytes",
+    "hasSystemPrompt",
+    "parentOperation",
+    "disclosureScope",
   ]);
-  return {
+  const approvalKind = enumValue(value.approvalKind, [
+    "runtime-effect",
+    "mcp-sampling",
+  ]);
+  const sampling = approvalKind === "mcp-sampling";
+  const parsed = {
     runtimeId: identifier(value.runtimeId, "runtime ID") as RuntimeId,
     correlationId: identifier(
       value.correlationId,
       "approval correlation ID",
     ) as CorrelationId,
     promptId: identifier(value.promptId, "approval prompt ID") as ApprovalId,
+    approvalKind,
+    summary: textValue(value.summary, "approval summary", 2_048),
+    serverId:
+      value.serverId === null
+        ? null
+        : identifier(value.serverId, "MCP server ID"),
+    providerId:
+      value.providerId === null
+        ? null
+        : identifier(value.providerId, "provider ID"),
+    modelId:
+      value.modelId === null ? null : identifier(value.modelId, "model ID"),
+    maxTokens:
+      value.maxTokens === null
+        ? null
+        : boundedInteger(
+            value.maxTokens,
+            "maximum output tokens",
+            1_000_000,
+            1,
+          ),
+    expiresAtMs:
+      value.expiresAtMs === null
+        ? null
+        : boundedInteger(
+            value.expiresAtMs,
+            "approval expiry",
+            Number.MAX_SAFE_INTEGER,
+            1,
+          ),
+    messageCount:
+      value.messageCount === null
+        ? null
+        : boundedInteger(value.messageCount, "sampling message count", 128, 1),
+    inputBytes:
+      value.inputBytes === null
+        ? null
+        : boundedInteger(value.inputBytes, "sampling input bytes", 512 * 1_024),
+    hasSystemPrompt:
+      value.hasSystemPrompt === null
+        ? null
+        : booleanValue(value.hasSystemPrompt, "sampling system prompt state"),
+    parentOperation:
+      value.parentOperation === null
+        ? null
+        : identifier(value.parentOperation, "sampling parent operation"),
+    disclosureScope:
+      value.disclosureScope === null
+        ? null
+        : textValue(value.disclosureScope, "sampling disclosure scope", 2_048),
   };
+  const samplingFields = [
+    parsed.serverId,
+    parsed.providerId,
+    parsed.modelId,
+    parsed.maxTokens,
+    parsed.expiresAtMs,
+    parsed.messageCount,
+    parsed.inputBytes,
+    parsed.hasSystemPrompt,
+    parsed.parentOperation,
+    parsed.disclosureScope,
+  ];
+  if (
+    samplingFields.some((field) => (sampling ? field === null : field !== null))
+  ) {
+    throw boundary(
+      "invalidPayload",
+      "The runtime approval detail binding is invalid.",
+    );
+  }
+  return parsed;
 }
 
 function parseProvider(raw: unknown): RuntimeProviderSummary {

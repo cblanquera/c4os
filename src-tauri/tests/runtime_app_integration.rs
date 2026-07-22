@@ -765,6 +765,7 @@ fn coordinator_recovery_becomes_durable_only_through_the_bound_workspace_databas
         prompt: Some("Recover this run".into()),
         attachments: vec![],
         skill_context: vec![],
+        mcp_turn: None,
         binding: binding(),
         submitted_at_ms: NOW + 1,
     })
@@ -1452,6 +1453,7 @@ fn application_dispatch_derives_active_project_scope_from_workspace_process_auth
                 prompt: Some("Use the native provider route".into()),
                 attachments: Vec::new(),
                 skill_context: Vec::new(),
+                mcp_turn: None,
                 draft: DraftRequirements {
                     attachments: Vec::new(),
                     reasoning_mode: None,

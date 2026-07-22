@@ -263,6 +263,139 @@ test("session create is C4OS-scoped and missing restart state is explicitly degr
   assert.equal(wrongWorkspace.payload.code, "scope_mismatch");
 });
 
+test("sampling uses a fresh bounded text-only job with poll, cancellation, and no Chat events", async () => {
+  const { sidecar, driver, events } = fixture();
+  await createSession(sidecar, []);
+  const accepted = await sidecar.handle(
+    samplingRequest("sampling.start", {
+      messages: [
+        { role: "user", text: "Question" },
+        { role: "assistant", text: "Earlier answer" },
+      ],
+      systemPrompt: "Answer directly",
+      maxTokens: 64,
+      temperature: 0.25,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+    }),
+  );
+  assert.equal(accepted.status, "ok");
+  assert.equal(accepted.payload.accepted, true);
+  await settle();
+  const completed = await sidecar.handle(
+    samplingRequest("sampling.poll", {}),
+  );
+  assert.deepEqual(completed.payload, {
+    state: "completed",
+    result: {
+      text: "sampled answer",
+      model: "gpt-4o-mini",
+      stopReason: "endTurn",
+    },
+  });
+  assert.deepEqual(driver.lastSampling, {
+    messages: [
+      { role: "user", text: "Question" },
+      { role: "assistant", text: "Earlier answer" },
+    ],
+    systemPrompt: "Answer directly",
+    maxTokens: 64,
+    temperature: 0.25,
+    runIdentity: {
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      turnId: "sampling-turn-1",
+      runId: "sampling-run-1",
+      correlationId: "sampling-correlation-1",
+      processGeneration: 7,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+    },
+  });
+  assert.equal(events.length, 0);
+  const closed = await sidecar.handle(
+    request("session.close", {}, {
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+    }),
+  );
+  assert.equal(closed.payload.closed, true);
+
+  const held = fixture();
+  await createSession(held.sidecar, []);
+  held.driver.holdSampling = true;
+  await held.sidecar.handle(
+    samplingRequest("sampling.start", {
+      messages: [{ role: "user", text: "Hold" }],
+      maxTokens: 8,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+    }),
+  );
+  const pending = await held.sidecar.handle(
+    samplingRequest("sampling.poll", {}),
+  );
+  assert.equal(pending.payload.state, "pending");
+  const wrongWorkspace = await held.sidecar.handle({
+    ...samplingRequest("sampling.poll", {}),
+    workspaceId: "workspace-2",
+  });
+  assert.equal(wrongWorkspace.status, "error");
+  assert.equal(wrongWorkspace.payload.code, "scope_mismatch");
+  const wrongTurn = await held.sidecar.handle({
+    ...samplingRequest("sampling.cancel", {}),
+    turnId: "sampling-turn-2",
+  });
+  assert.equal(wrongTurn.payload.cancelled, false);
+  assert.equal(held.driver.samplingAborts, 0);
+  const concurrentDispatch = await held.sidecar.handle(dispatchRequest("hello"));
+  assert.equal(concurrentDispatch.status, "error");
+  assert.equal(concurrentDispatch.payload.code, "session_busy");
+  assert.equal(held.driver.lastDispatch, undefined);
+  const cancelled = await held.sidecar.handle(
+    samplingRequest("sampling.cancel", {}),
+  );
+  assert.equal(cancelled.payload.cancelled, true);
+  assert.equal(held.driver.samplingAborts, 1);
+  const terminal = await held.sidecar.handle(
+    samplingRequest("sampling.poll", {}),
+  );
+  assert.equal(terminal.payload.state, "cancelled");
+});
+
+test("sampling rejects unsupported controls and non-text shapes before driver dispatch", async () => {
+  for (const payload of [
+    {
+      messages: [{ role: "user", text: "Question" }],
+      maxTokens: 8,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+      tools: [],
+    },
+    {
+      messages: [{ role: "tool", text: "No" }],
+      maxTokens: 8,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+    },
+    {
+      messages: [{ role: "user", text: "" }],
+      maxTokens: 8,
+      runtimeId: "pi-production",
+      providerId: "provider-openai",
+    },
+  ]) {
+    const { sidecar, driver } = fixture();
+    await createSession(sidecar, []);
+    const rejected = await sidecar.handle(
+      samplingRequest("sampling.start", payload),
+    );
+    assert.equal(rejected.status, "error");
+    assert.equal(rejected.payload.code, "invalid_sampling");
+    assert.equal(driver.samplingCalls, 0);
+  }
+});
+
 test("session create requires a bounded unique canonical eligible tool scope", async () => {
   for (const eligibleTools of [
     undefined,
@@ -486,12 +619,17 @@ test("cancel is idempotent, rejects late events, and aborts the SDK run", async 
   const { sidecar, events, driver } = fixture();
   await createSession(sidecar);
   await sidecar.handle(dispatchRequest("hold"));
+  const mismatched = await sidecar.handle(
+    request("cancel", {}, { ...identity(), turnId: "turn-other" }),
+  );
+  assert.equal(mismatched.payload.cancelled, false);
+  assert.equal(driver.aborts, 0);
   const first = await sidecar.handle(
-    request("cancel", {}, { sessionId: "session-1", runId: "run-1" }),
+    request("cancel", {}, identity()),
   );
   assert.equal(first.payload.cancelled, true);
   const second = await sidecar.handle(
-    request("cancel", {}, { sessionId: "session-1", runId: "run-1" }),
+    request("cancel", {}, identity()),
   );
   assert.equal(second.payload.cancelled, false);
   assert.equal(driver.aborts, 1);
@@ -590,7 +728,10 @@ test("session close and shutdown release driver state and reject future work", a
   const { sidecar, driver } = fixture();
   await createSession(sidecar);
   const closed = await sidecar.handle(
-    request("session.close", {}, { sessionId: "session-1" }),
+    request("session.close", {}, {
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+    }),
   );
   assert.equal(closed.payload.closed, true);
   assert.equal(driver.disposals, 1);
@@ -620,6 +761,8 @@ class FakePiDriver {
     this.aborts = 0;
     this.disposals = 0;
     this.shutdowns = 0;
+    this.samplingCalls = 0;
+    this.samplingAborts = 0;
     this.modelPreflights = [];
     this.availableModels = new Set(["openai\u0000gpt-4o-mini"]);
   }
@@ -665,6 +808,24 @@ class FakePiDriver {
         this.aborts += 1;
         held?.();
       },
+      sample: async (sampling) => {
+        this.samplingCalls += 1;
+        this.lastSampling = globalThis.structuredClone(sampling);
+        if (this.holdSampling) {
+          await new Promise((resolve) => {
+            this.releaseSampling = resolve;
+          });
+        }
+        return {
+          text: "sampled answer",
+          model: "gpt-4o-mini",
+          stopReason: "endTurn",
+        };
+      },
+      abortSampling: async () => {
+        this.samplingAborts += 1;
+        this.releaseSampling?.();
+      },
       dispose: async () => {
         this.disposals += 1;
         held?.();
@@ -675,6 +836,16 @@ class FakePiDriver {
   async shutdown() {
     this.shutdowns += 1;
   }
+}
+
+function samplingRequest(operation, payload) {
+  return request(operation, payload, {
+    workspaceId: "workspace-1",
+    sessionId: "session-1",
+    turnId: "sampling-turn-1",
+    runId: "sampling-run-1",
+    correlationId: "sampling-correlation-1",
+  });
 }
 
 async function createSession(sidecar, eligibleTools = C4OS_TOOL_NAMES) {

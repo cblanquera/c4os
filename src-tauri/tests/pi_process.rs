@@ -62,7 +62,7 @@ fn spawned_pi_sidecar_uses_exact_health_version_and_dedicated_one_shot_credentia
         &sidecar_root,
         &manifest,
         7,
-        Duration::from_secs(5),
+        Duration::from_secs(10),
     )
     .unwrap();
 

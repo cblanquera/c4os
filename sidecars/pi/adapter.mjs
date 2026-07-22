@@ -26,6 +26,9 @@ const OPERATIONS = new Set([
   "session.resume",
   "session.close",
   "dispatch",
+  "sampling.start",
+  "sampling.poll",
+  "sampling.cancel",
   "tool.resolve",
   "cancel",
   "shutdown",
@@ -69,6 +72,7 @@ export class C4osPiSidecar {
   #status = "ready";
   #sequence = 0;
   #sessions = new Map();
+  #samplingJobs = new Map();
   #pendingTools = new Map();
   #brokeredResults = new Map();
   #staleEventsRejected = 0;
@@ -229,6 +233,12 @@ export class C4osPiSidecar {
         return this.#closeSession(request);
       case "dispatch":
         return this.#dispatch(request);
+      case "sampling.start":
+        return this.#startSampling(request);
+      case "sampling.poll":
+        return this.#pollSampling(request);
+      case "sampling.cancel":
+        return this.#cancelSampling(request);
       case "tool.resolve":
         return this.#resolveTool(request);
       case "cancel":
@@ -382,13 +392,19 @@ export class C4osPiSidecar {
   }
 
   async #closeSession(request) {
-    this.#requireScope(request, ["sessionId"]);
+    this.#requireScope(request, ["workspaceId", "sessionId"]);
     const session = this.#sessions.get(request.sessionId);
     if (!session) return { closed: false };
-    if (session.state === "running")
+    if (session.workspaceId !== request.workspaceId) {
+      throw new ProtocolFault(
+        "scope_mismatch",
+        "Session is bound to another Workspace",
+      );
+    }
+    if (session.state !== "idle")
       throw new ProtocolFault(
         "session_busy",
-        "Cancel the active run before closing its Pi session",
+        "Cancel the active operation before closing its Pi session",
       );
     await session.driverSession.dispose?.();
     this.#sessions.delete(request.sessionId);
@@ -403,10 +419,10 @@ export class C4osPiSidecar {
       "runId",
     ]);
     const session = this.#sessionFor(request);
-    if (session.state === "running")
+    if (session.state !== "idle")
       throw new ProtocolFault(
         "session_busy",
-        "Pi session already has an active run",
+        "Pi session already has an active operation",
       );
     const input = request.payload.input;
     if (
@@ -454,6 +470,140 @@ export class C4osPiSidecar {
     session.activeRun = identity;
     void this.#runDispatch(session, identity, input, attachments);
     return { accepted: true, runId: request.runId };
+  }
+
+  #startSampling(request) {
+    this.#requireScope(request, [
+      "workspaceId",
+      "sessionId",
+      "turnId",
+      "runId",
+    ]);
+    const session = this.#sessionFor(request);
+    if (session.state !== "idle") {
+      throw new ProtocolFault(
+        "session_busy",
+        "Pi session already has an active operation",
+      );
+    }
+    if (
+      Object.hasOwn(request.payload, "credentialLeaseId") ||
+      Object.hasOwn(request.payload, "credentialReference")
+    ) {
+      throw new ProtocolFault(
+        "credential_handle_forbidden",
+        "Sampling may not serialize a credential handle",
+      );
+    }
+    const runtimeId = request.payload.runtimeId;
+    const providerId = request.payload.providerId;
+    if ((runtimeId === undefined) !== (providerId === undefined)) {
+      throw new ProtocolFault(
+        "invalid_credential_operation",
+        "Credential operation identity must be complete",
+      );
+    }
+    if (runtimeId !== undefined) {
+      requireId(runtimeId, "runtimeId");
+      requireId(providerId, "providerId");
+    }
+    const sampling = validateSamplingPayload(request.payload);
+    const identity = Object.freeze({
+      workspaceId: request.workspaceId,
+      sessionId: request.sessionId,
+      turnId: request.turnId,
+      runId: request.runId,
+      correlationId: request.correlationId,
+      processGeneration: this.#generation,
+      ...(runtimeId === undefined ? {} : { runtimeId, providerId }),
+    });
+    const key = samplingKey(request.sessionId, request.runId);
+    if (this.#samplingJobs.has(key)) {
+      throw new ProtocolFault(
+        "sampling_exists",
+        "Sampling identity is already active",
+      );
+    }
+    const job = { identity, state: "pending" };
+    this.#samplingJobs.set(key, job);
+    session.state = "sampling";
+    session.activeRun = identity;
+    void this.#runSampling(session, job, sampling);
+    return { accepted: true, runId: request.runId };
+  }
+
+  async #runSampling(session, job, sampling) {
+    try {
+      const result = await session.driverSession.sample({
+        ...sampling,
+        runIdentity: job.identity,
+      });
+      if (job.state === "pending") {
+        job.state = "completed";
+        job.result = validateSamplingResult(result);
+      }
+    } catch (error) {
+      if (job.state === "pending") {
+        job.state = "failed";
+        job.error = safeDiagnosticMessage(error);
+      }
+    } finally {
+      if (sameRun(session.activeRun, job.identity)) {
+        session.state = "idle";
+        session.activeRun = undefined;
+      }
+    }
+  }
+
+  #pollSampling(request) {
+    this.#requireScope(request, [
+      "workspaceId",
+      "sessionId",
+      "turnId",
+      "runId",
+    ]);
+    this.#sessionFor(request);
+    const key = samplingKey(request.sessionId, request.runId);
+    const job = this.#samplingJobs.get(key);
+    if (!job || !sameRun(job.identity, request)) {
+      throw new ProtocolFault(
+        "stale_sampling",
+        "Sampling poll does not match an active result",
+      );
+    }
+    if (job.state === "pending") return { state: "pending" };
+    this.#samplingJobs.delete(key);
+    if (job.state === "completed") {
+      return { state: "completed", result: job.result };
+    }
+    if (job.state === "cancelled") return { state: "cancelled" };
+    return { state: "failed", code: "pi_sampling_failed", message: job.error };
+  }
+
+  async #cancelSampling(request) {
+    this.#requireScope(request, [
+      "workspaceId",
+      "sessionId",
+      "turnId",
+      "runId",
+    ]);
+    this.#sessionFor(request);
+    const key = samplingKey(request.sessionId, request.runId);
+    const job = this.#samplingJobs.get(key);
+    if (!job || !sameRun(job.identity, request)) {
+      return { cancelled: false, alreadyTerminal: true };
+    }
+    if (job.state !== "pending") {
+      return { cancelled: false, alreadyTerminal: true };
+    }
+    job.state = "cancelled";
+    const session = this.#sessions.get(request.sessionId);
+    await session?.driverSession.abortSampling?.();
+    if (session && sameRun(session.activeRun, job.identity)) {
+      session.state = "idle";
+      session.activeRun = undefined;
+    }
+    return { cancelled: true, alreadyTerminal: false };
   }
 
   async #runDispatch(session, identity, input, attachments) {
@@ -539,12 +689,25 @@ export class C4osPiSidecar {
   }
 
   async #cancel(request) {
-    this.#requireScope(request, ["sessionId", "runId"]);
+    this.#requireScope(request, [
+      "workspaceId",
+      "sessionId",
+      "turnId",
+      "runId",
+    ]);
     const session = this.#sessions.get(request.sessionId);
+    const requestedRun = {
+      processGeneration: request.processGeneration,
+      workspaceId: request.workspaceId,
+      sessionId: request.sessionId,
+      turnId: request.turnId,
+      runId: request.runId,
+      correlationId: request.correlationId,
+    };
     if (
       !session ||
       session.state !== "running" ||
-      session.activeRun?.runId !== request.runId
+      !sameRun(session.activeRun, requestedRun)
     ) {
       return { cancelled: false, alreadyTerminal: true };
     }
@@ -574,6 +737,9 @@ export class C4osPiSidecar {
   async #shutdown() {
     for (const [sessionId, session] of this.#sessions) {
       if (session.state === "running") await session.driverSession.abort?.();
+      if (session.state === "sampling") {
+        await session.driverSession.abortSampling?.();
+      }
       await session.driverSession.dispose?.();
       this.#sessions.delete(sessionId);
     }
@@ -582,6 +748,7 @@ export class C4osPiSidecar {
     }
     this.#pendingTools.clear();
     this.#brokeredResults.clear();
+    this.#samplingJobs.clear();
     await this.#driver.shutdown?.();
     this.#status = "stopped";
     return { stopped: true };
@@ -638,6 +805,103 @@ export class C4osPiSidecar {
     };
     this.#emitLine(envelope);
   }
+}
+
+function validateSamplingPayload(payload) {
+  const allowed = new Set([
+    "runtimeId",
+    "providerId",
+    "messages",
+    "systemPrompt",
+    "maxTokens",
+    "temperature",
+  ]);
+  if (Object.keys(payload).some((key) => !allowed.has(key))) {
+    throw new ProtocolFault(
+      "invalid_sampling",
+      "Sampling payload contains an unsupported field",
+    );
+  }
+  if (
+    !Array.isArray(payload.messages) ||
+    payload.messages.length === 0 ||
+    payload.messages.length > 128 ||
+    !Number.isSafeInteger(payload.maxTokens) ||
+    payload.maxTokens < 1 ||
+    payload.maxTokens > 1_000_000 ||
+    (payload.temperature !== undefined &&
+      (typeof payload.temperature !== "number" ||
+        !Number.isFinite(payload.temperature) ||
+        payload.temperature < 0 ||
+        payload.temperature > 1)) ||
+    (payload.systemPrompt !== undefined &&
+      (typeof payload.systemPrompt !== "string" ||
+        Buffer.byteLength(payload.systemPrompt, "utf8") > 64 * 1024))
+  ) {
+    throw new ProtocolFault(
+      "invalid_sampling",
+      "Sampling controls are invalid or exceed their bounds",
+    );
+  }
+  const messages = payload.messages.map((message) => {
+    if (
+      !message ||
+      typeof message !== "object" ||
+      Array.isArray(message) ||
+      Object.keys(message).some((key) => !["role", "text"].includes(key)) ||
+      !["user", "assistant"].includes(message.role) ||
+      typeof message.text !== "string" ||
+      message.text.length === 0 ||
+      Buffer.byteLength(message.text, "utf8") > 64 * 1024
+    ) {
+      throw new ProtocolFault(
+        "invalid_sampling",
+        "Sampling messages must contain bounded role-labelled text",
+      );
+    }
+    return { role: message.role, text: message.text };
+  });
+  return {
+    messages,
+    ...(payload.systemPrompt === undefined
+      ? {}
+      : { systemPrompt: payload.systemPrompt }),
+    maxTokens: payload.maxTokens,
+    ...(payload.temperature === undefined
+      ? {}
+      : { temperature: payload.temperature }),
+  };
+}
+
+function validateSamplingResult(result) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    Object.keys(result).some(
+      (key) => !["text", "model", "stopReason"].includes(key),
+    ) ||
+    typeof result.text !== "string" ||
+    Buffer.byteLength(result.text, "utf8") > 64 * 1024 ||
+    typeof result.model !== "string" ||
+    result.model.length === 0 ||
+    Buffer.byteLength(result.model, "utf8") > 512 ||
+    !["endTurn", "maxTokens"].includes(result.stopReason)
+  ) {
+    throw new ProtocolFault(
+      "invalid_sampling_result",
+      "Pi sampling returned an unsupported result",
+    );
+  }
+  return {
+    text: result.text,
+    model: result.model,
+    stopReason: result.stopReason,
+  };
+}
+
+function samplingKey(sessionId, runId) {
+  return `${sessionId}\u0000${runId}`;
 }
 
 function normalizeNativeEvent(nativeEvent) {
@@ -874,7 +1138,9 @@ function sameRun(left, right) {
     left &&
     right &&
     left.processGeneration === right.processGeneration &&
+    left.workspaceId === right.workspaceId &&
     left.sessionId === right.sessionId &&
+    left.turnId === right.turnId &&
     left.runId === right.runId &&
     left.correlationId === right.correlationId,
   );

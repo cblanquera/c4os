@@ -13,7 +13,7 @@ use c4os_lib::runtime::opencode_sdk::{
     BrokerDecision, BrokerEvent, OPENCODE_BROKER_FD_ENV, OPENCODE_PROCESS_GENERATION_ENV,
     OPENCODE_SDK_PLUGIN_VERSION, OPENCODE_SDK_TOOL_IDS, OPENCODE_TEST_TLS_TRUST_FD_ENV,
     OpenCodeSdkBroker, OpenCodeSdkError, OpenCodeSdkIntegrity, materialize_opencode_sdk_plugin,
-    prepare_opencode_sdk_launch,
+    prepare_opencode_sdk_launch, sanitize_broker_result_payload,
 };
 use serde_json::{Value, json};
 
@@ -307,6 +307,48 @@ fn rejects_generation_tampering_secret_payloads_and_secret_results() {
         1,
         "failed responses remain correlated"
     );
+}
+
+#[test]
+fn sanitized_mcp_results_cross_the_final_descriptor_without_secret_shaped_fields() {
+    let (mut broker, mut worker) = OpenCodeSdkBroker::authenticated_pair(10).unwrap();
+    write_frame(
+        &mut worker,
+        &proposal(
+            "correlation-sanitized-result",
+            "c4os_read_resource",
+            10,
+            json!({ "resource": "workspace.summary" }),
+        ),
+    );
+    broker.receive(TIMEOUT).unwrap();
+
+    let sanitized = sanitize_broker_result_payload(json!({
+        "password": "must-not-cross",
+        "nested": {
+            "token": "also-must-not-cross",
+            "ordinary": "safe-value",
+        },
+    }));
+    let encoded = serde_json::to_string(&sanitized).unwrap();
+    assert!(!encoded.contains("must-not-cross"));
+    assert!(!encoded.contains("password"));
+    assert!(!encoded.contains("token"));
+
+    broker
+        .respond(
+            "correlation-sanitized-result",
+            BrokerDecision::Result(sanitized),
+            TIMEOUT,
+        )
+        .expect("sanitized result must pass the final descriptor guard");
+    let response = read_frame(&worker);
+    assert_eq!(response["status"], "result");
+    let encoded = serde_json::to_string(&response).unwrap();
+    assert!(!encoded.contains("must-not-cross"));
+    assert!(!encoded.contains("password"));
+    assert!(!encoded.contains("token"));
+    assert_eq!(broker.pending_count(), 0);
 }
 
 #[test]

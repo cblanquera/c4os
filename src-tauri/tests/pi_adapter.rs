@@ -5,8 +5,9 @@ use c4os_lib::runtime::action_bridge::{
 };
 use c4os_lib::runtime::pi::{
     PI_MAX_IMAGE_BYTES, PI_MAX_LINE_BYTES, PI_NATIVE_VERSION, PiAdapter, PiAdapterError,
-    PiAdapterState, PiDispatchAttachment, PiLaunchSpec, PiModelRoute, PiSidecarManifest,
-    PiSidecarRunner, PiToolDecision, c4os_tool_names,
+    PiAdapterState, PiDispatchAttachment, PiLaunchSpec, PiModelRoute, PiSamplingMessage,
+    PiSamplingPoll, PiSamplingRequest, PiSidecarManifest, PiSidecarRunner, PiToolDecision,
+    c4os_tool_names,
 };
 use c4os_lib::security::authorization::{
     ApprovalAnswer, CANONICAL_ACTION_SCHEMA_VERSION, CanonicalAction, CanonicalRisk,
@@ -727,13 +728,36 @@ fn cancellation_is_idempotent_and_late_events_are_rejected() {
         )
         .unwrap();
     assert!(
+        !adapter
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-other",
+                "run-1",
+                "correlation-run-1",
+            )
+            .unwrap()
+    );
+    assert!(
         adapter
-            .cancel("session-1", "run-1", "correlation-run-1")
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-1",
+                "run-1",
+                "correlation-run-1",
+            )
             .unwrap()
     );
     assert!(
         !adapter
-            .cancel("session-1", "run-1", "correlation-run-1")
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-1",
+                "run-1",
+                "correlation-run-1",
+            )
             .unwrap()
     );
     adapter.runner_mut().poll_lines.push_back(event_line(
@@ -765,19 +789,37 @@ fn rejected_cancellation_retains_the_exact_active_run_binding() {
     adapter.runner_mut().cancel_returns_false = true;
     assert!(
         !adapter
-            .cancel("session-1", "run-1", "correlation-run-1")
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-1",
+                "run-1",
+                "correlation-run-1",
+            )
             .unwrap()
     );
 
     adapter.runner_mut().cancel_returns_false = false;
     assert!(
         adapter
-            .cancel("session-1", "run-1", "correlation-run-1")
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-1",
+                "run-1",
+                "correlation-run-1",
+            )
             .unwrap()
     );
     assert!(
         !adapter
-            .cancel("session-1", "run-1", "correlation-run-1")
+            .cancel(
+                "workspace-1",
+                "session-1",
+                "turn-1",
+                "run-1",
+                "correlation-run-1",
+            )
             .unwrap()
     );
 }
@@ -815,6 +857,106 @@ fn terminal_event_releases_session_for_a_new_correlated_run() {
             "quiet",
         )
         .unwrap();
+}
+
+#[test]
+fn sampling_requires_the_exact_workspace_turn_run_and_correlation_binding() {
+    let mut adapter = started_adapter(FakeRunner::default());
+    create_session(&mut adapter);
+    adapter
+        .start_sampling_with_credential_operation(
+            "workspace-1",
+            "session-1",
+            "sampling-turn-1",
+            "sampling-run-1",
+            "sampling-correlation-1",
+            &PiSamplingRequest {
+                messages: vec![PiSamplingMessage {
+                    role: "user".into(),
+                    text: "Question".into(),
+                }],
+                system_prompt: None,
+                max_tokens: 8,
+                temperature: None,
+            },
+            "pi-primary",
+            "provider-openai",
+        )
+        .unwrap();
+
+    assert!(matches!(
+        adapter.poll_sampling(
+            "workspace-2",
+            "session-1",
+            "sampling-turn-1",
+            "sampling-run-1",
+            "sampling-correlation-1",
+        ),
+        Err(PiAdapterError::State(_))
+    ));
+    assert!(matches!(
+        adapter.cancel_sampling(
+            "workspace-1",
+            "session-1",
+            "sampling-turn-2",
+            "sampling-run-1",
+            "sampling-correlation-1",
+        ),
+        Err(PiAdapterError::State(_))
+    ));
+    assert_eq!(
+        adapter
+            .poll_sampling(
+                "workspace-1",
+                "session-1",
+                "sampling-turn-1",
+                "sampling-run-1",
+                "sampling-correlation-1",
+            )
+            .unwrap(),
+        PiSamplingPoll::Completed(c4os_lib::runtime::pi::PiSamplingResult {
+            text: "sampled answer".into(),
+            model: "gpt-4o-mini".into(),
+            stop_reason: "endTurn".into(),
+        })
+    );
+    adapter.close_session("workspace-1", "session-1").unwrap();
+}
+
+#[test]
+fn ambiguous_sampling_start_ack_keeps_the_native_run_bound_until_shutdown() {
+    let mut adapter = started_adapter(FakeRunner {
+        mismatched_sampling_start: true,
+        ..FakeRunner::default()
+    });
+    create_session(&mut adapter);
+    assert!(matches!(
+        adapter.start_sampling_with_credential_operation(
+            "workspace-1",
+            "session-1",
+            "sampling-turn-1",
+            "sampling-run-1",
+            "sampling-correlation-1",
+            &PiSamplingRequest {
+                messages: vec![PiSamplingMessage {
+                    role: "user".into(),
+                    text: "Question".into(),
+                }],
+                system_prompt: None,
+                max_tokens: 8,
+                temperature: None,
+            },
+            "pi-primary",
+            "provider-openai",
+        ),
+        Err(PiAdapterError::Protocol(_))
+    ));
+    assert!(matches!(
+        adapter.close_session("workspace-1", "session-1"),
+        Err(PiAdapterError::State(_))
+    ));
+    adapter.shutdown().unwrap();
+    assert_eq!(adapter.runner().terminations, 1);
 }
 
 #[test]
@@ -911,6 +1053,7 @@ struct FakeRunner {
     cancel_returns_false: bool,
     missing_model: bool,
     mismatched_model_preflight: bool,
+    mismatched_sampling_start: bool,
 }
 
 impl FakeRunner {
@@ -952,7 +1095,28 @@ impl PiSidecarRunner for FakeRunner {
                 "nativeSessionId": "native-session-1",
                 "persistence": "c4os-authoritative"
             }),
+            "session.close" => json!({ "closed": true }),
             "dispatch" => json!({ "accepted": true, "runId": request["runId"] }),
+            "sampling.start" => json!({
+                "accepted": true,
+                "runId": if self.mismatched_sampling_start {
+                    json!("wrong-run")
+                } else {
+                    request["runId"].clone()
+                }
+            }),
+            "sampling.poll" => json!({
+                "state": "completed",
+                "result": {
+                    "text": "sampled answer",
+                    "model": "gpt-4o-mini",
+                    "stopReason": "endTurn"
+                }
+            }),
+            "sampling.cancel" => json!({
+                "cancelled": true,
+                "alreadyTerminal": false
+            }),
             "tool.resolve" => json!({ "resolved": true, "executedBySidecar": false }),
             "cancel" => json!({
                 "cancelled": !self.cancel_returns_false,

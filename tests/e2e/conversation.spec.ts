@@ -255,6 +255,7 @@ function conversationSnapshot(state: ConversationState) {
               prompt: "Build the **image preview** and keep it safe.",
               attachments: [attachment],
               artifactContext: null,
+              mcpProvenance: null,
               submittedAtMs: 100,
             },
           ],
