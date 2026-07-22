@@ -1193,7 +1193,7 @@ fn run_proof(
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
             macos_version: command_output("sw_vers", &["-productVersion"]),
-            tauri: "2.11.2",
+            tauri: "2.11.5",
             objc2_web_kit: "0.3.2",
             permission_decision: "Prompt",
             page_ipc_handler: false,

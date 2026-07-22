@@ -19,6 +19,11 @@ import {
 } from "./conversation-service";
 import type { ArtifactBreadcrumbSnapshot as GeneratedArtifactBreadcrumbSnapshot } from "../generated/ArtifactBreadcrumbSnapshot";
 import type { ArtifactApprovalInput as GeneratedArtifactApprovalInput } from "../generated/ArtifactApprovalInput";
+import type { ArtifactBrowserIdentityInput as GeneratedArtifactBrowserIdentityInput } from "../generated/ArtifactBrowserIdentityInput";
+import type { ArtifactBrowserNavigateInput as GeneratedArtifactBrowserNavigateInput } from "../generated/ArtifactBrowserNavigateInput";
+import type { ArtifactBrowserOpenInput as GeneratedArtifactBrowserOpenInput } from "../generated/ArtifactBrowserOpenInput";
+import type { ArtifactBrowserSnapshot as GeneratedArtifactBrowserSnapshot } from "../generated/ArtifactBrowserSnapshot";
+import type { ArtifactBrowserViewportInput as GeneratedArtifactBrowserViewportInput } from "../generated/ArtifactBrowserViewportInput";
 import type { ArtifactContextExpandInput as GeneratedArtifactContextExpandInput } from "../generated/ArtifactContextExpandInput";
 import type { ArtifactFileDraftInput as GeneratedArtifactFileDraftInput } from "../generated/ArtifactFileDraftInput";
 import type { ArtifactFileConflictInput as GeneratedArtifactFileConflictInput } from "../generated/ArtifactFileConflictInput";
@@ -145,6 +150,55 @@ export type ArtifactTerminalSnapshot = Omit<
   "phase"
 > & { readonly phase: ArtifactTerminalPhase };
 
+export const BROWSER_PHASES = [
+  "queued",
+  "loading",
+  "ready",
+  "error",
+  "recovery",
+] as const;
+const BROWSER_PENDING_OPERATIONS = [
+  "open",
+  "back",
+  "forward",
+  "refresh",
+  "reply-navigation",
+  "website-navigation",
+  "clear-data",
+] as const;
+
+export type ArtifactBrowserPhase = (typeof BROWSER_PHASES)[number];
+export type ArtifactBrowserEnvironmentScope =
+  "all-browsers" | "per-project" | "per-chat-session" | "none";
+export type ArtifactBrowserPendingOperation =
+  | "open"
+  | "back"
+  | "forward"
+  | "refresh"
+  | "reply-navigation"
+  | "website-navigation"
+  | "clear-data";
+
+export type ArtifactBrowserSnapshot = Omit<
+  Readonly<GeneratedArtifactBrowserSnapshot>,
+  | "environmentScope"
+  | "notices"
+  | "pendingOperation"
+  | "pendingTargetUrl"
+  | "phase"
+> & {
+  readonly environmentScope: ArtifactBrowserEnvironmentScope;
+  readonly pendingOperation: ArtifactBrowserPendingOperation | null;
+  readonly pendingTargetUrl: string | null;
+  readonly notices: readonly {
+    readonly id: string;
+    readonly kind: "information" | "permission" | "warning" | "error";
+    readonly message: string;
+    readonly title: string;
+  }[];
+  readonly phase: ArtifactBrowserPhase;
+};
+
 export type ArtifactProviderStateSnapshot =
   | (Omit<
       Extract<
@@ -160,6 +214,13 @@ export type ArtifactProviderStateSnapshot =
       >,
       "value"
     > & { readonly value: ArtifactFolderSnapshot })
+  | (Omit<
+      Extract<
+        GeneratedArtifactProviderStateSnapshot,
+        { readonly type: "browser" }
+      >,
+      "value"
+    > & { readonly value: ArtifactBrowserSnapshot })
   | (Omit<
       Extract<
         GeneratedArtifactProviderStateSnapshot,
@@ -283,6 +344,20 @@ export type ArtifactTerminalOutputAckInput = Omit<
   Readonly<GeneratedArtifactTerminalOutputAckInput>,
   "artifactId"
 > & { readonly artifactId: ArtifactId };
+export type ArtifactBrowserOpenInput =
+  Readonly<GeneratedArtifactBrowserOpenInput>;
+export type ArtifactBrowserNavigateInput = Omit<
+  Readonly<GeneratedArtifactBrowserNavigateInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+export type ArtifactBrowserViewportInput = Omit<
+  Readonly<GeneratedArtifactBrowserViewportInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
+export type ArtifactBrowserIdentityInput = Omit<
+  Readonly<GeneratedArtifactBrowserIdentityInput>,
+  "artifactId"
+> & { readonly artifactId: ArtifactId };
 
 export type ArtifactCommand =
   | "artifact_snapshot"
@@ -291,6 +366,13 @@ export type ArtifactCommand =
   | "artifact_terminal_resize"
   | "artifact_terminal_stop"
   | "artifact_terminal_ack_output"
+  | "artifact_open_browser"
+  | "artifact_navigate_browser"
+  | "artifact_clear_browser_data"
+  | "artifact_mount_browser"
+  | "artifact_resize_browser"
+  | "artifact_focus_native_browser"
+  | "artifact_detach_browser"
   | "artifact_open_file"
   | "artifact_open_folder"
   | "artifact_focus"
@@ -332,6 +414,27 @@ export interface ArtifactAdapter {
   ): Promise<ArtifactWorkspaceSnapshot>;
   acknowledgeTerminalOutput(
     input: ArtifactTerminalOutputAckInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  openBrowser(
+    input: ArtifactBrowserOpenInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  navigateBrowser(
+    input: ArtifactBrowserNavigateInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  clearBrowserData(
+    input: ArtifactBrowserIdentityInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  mountBrowser(
+    input: ArtifactBrowserViewportInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  resizeBrowser(
+    input: ArtifactBrowserViewportInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  focusNativeBrowser(
+    input: ArtifactBrowserIdentityInput,
+  ): Promise<ArtifactWorkspaceSnapshot>;
+  detachBrowser(
+    input: ArtifactBrowserIdentityInput,
   ): Promise<ArtifactWorkspaceSnapshot>;
   openFile(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot>;
   openFolder(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot>;
@@ -408,6 +511,48 @@ class NativeArtifactAdapter implements ArtifactAdapter {
     input: ArtifactTerminalOutputAckInput,
   ): Promise<ArtifactWorkspaceSnapshot> {
     return this.invoke("artifact_terminal_ack_output", { input });
+  }
+
+  openBrowser(
+    input: ArtifactBrowserOpenInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_open_browser", { input });
+  }
+
+  navigateBrowser(
+    input: ArtifactBrowserNavigateInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_navigate_browser", { input });
+  }
+
+  clearBrowserData(
+    input: ArtifactBrowserIdentityInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_clear_browser_data", { input });
+  }
+
+  mountBrowser(
+    input: ArtifactBrowserViewportInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_mount_browser", { input });
+  }
+
+  resizeBrowser(
+    input: ArtifactBrowserViewportInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_resize_browser", { input });
+  }
+
+  focusNativeBrowser(
+    input: ArtifactBrowserIdentityInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_focus_native_browser", { input });
+  }
+
+  detachBrowser(
+    input: ArtifactBrowserIdentityInput,
+  ): Promise<ArtifactWorkspaceSnapshot> {
+    return this.invoke("artifact_detach_browser", { input });
   }
 
   openFile(pickerGrantId: PickerGrantId): Promise<ArtifactWorkspaceSnapshot> {
@@ -606,6 +751,21 @@ export const stopTerminalArtifact = (input: ArtifactTerminalOperationInput) =>
 export const acknowledgeTerminalArtifactOutput = (
   input: ArtifactTerminalOutputAckInput,
 ) => nativeAdapter.acknowledgeTerminalOutput(input);
+export const openBrowserArtifact = (input: ArtifactBrowserOpenInput) =>
+  nativeAdapter.openBrowser(input);
+export const navigateBrowserArtifact = (input: ArtifactBrowserNavigateInput) =>
+  nativeAdapter.navigateBrowser(input);
+export const clearBrowserArtifactData = (input: ArtifactBrowserIdentityInput) =>
+  nativeAdapter.clearBrowserData(input);
+export const mountBrowserArtifact = (input: ArtifactBrowserViewportInput) =>
+  nativeAdapter.mountBrowser(input);
+export const resizeBrowserArtifact = (input: ArtifactBrowserViewportInput) =>
+  nativeAdapter.resizeBrowser(input);
+export const focusNativeBrowserArtifact = (
+  input: ArtifactBrowserIdentityInput,
+) => nativeAdapter.focusNativeBrowser(input);
+export const detachBrowserArtifact = (input: ArtifactBrowserIdentityInput) =>
+  nativeAdapter.detachBrowser(input);
 export const openFileArtifact = (pickerGrantId: PickerGrantId) =>
   nativeAdapter.openFile(pickerGrantId);
 export const openFolderArtifact = (pickerGrantId: PickerGrantId) =>
@@ -699,10 +859,13 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
   if (
     (providerState.type === "file" && providerType !== "file") ||
     (providerState.type === "folder" && providerType !== "folder") ||
+    (providerState.type === "browser" && providerType !== "browser") ||
     (providerState.type === "terminal" && providerType !== "terminal") ||
     (providerState.type === "file" &&
       (providerVersion !== 1 || stateSchemaVersion !== 1)) ||
     (providerState.type === "folder" &&
+      (providerVersion !== 1 || stateSchemaVersion !== 1)) ||
+    (providerState.type === "browser" &&
       (providerVersion !== 1 || stateSchemaVersion !== 1)) ||
     (providerState.type === "terminal" &&
       (providerVersion !== 1 || stateSchemaVersion !== 1))
@@ -721,6 +884,7 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
   const supportedKnownVersion =
     (providerType === "file" ||
       providerType === "folder" ||
+      providerType === "browser" ||
       providerType === "terminal") &&
     providerVersion === 1 &&
     stateSchemaVersion === 1;
@@ -740,8 +904,18 @@ function parseArtifact(raw: unknown): ArtifactSnapshot {
           : providerState.value.phase === "queued"
             ? pendingApprovalId === null
             : true
-        : pendingApprovalId === null;
-  if (!approvalStateIsConsistent) {
+        : providerState.type === "browser"
+          ? pendingApprovalId === null ||
+            providerState.value.phase === "queued" ||
+            providerState.value.phase === "ready" ||
+            providerState.value.phase === "error" ||
+            providerState.value.phase === "recovery"
+          : pendingApprovalId === null;
+  const browserApprovalOperationIsConsistent =
+    providerState.type !== "browser" ||
+    (pendingApprovalId !== null) ===
+      (providerState.value.pendingOperation !== null);
+  if (!approvalStateIsConsistent || !browserApprovalOperationIsConsistent) {
     throw boundary(
       "invalidPayload",
       "Artifact approval state is inconsistent.",
@@ -920,6 +1094,104 @@ function parseProviderState(raw: unknown): ArtifactProviderStateSnapshot {
         selectedEntryId: nullableIdentifier(
           folder.selectedEntryId,
           "Folder selection",
+        ),
+      },
+    };
+  }
+  if (type === "browser") {
+    const browser = record(value.value, "Browser provider state");
+    const phase = browser.phase;
+    const pendingOperation = browser.pendingOperation;
+    const pendingTargetUrl =
+      browser.pendingTargetUrl === null
+        ? null
+        : browserDisplayUrl(browser.pendingTargetUrl);
+    if (
+      typeof phase !== "string" ||
+      !BROWSER_PHASES.includes(phase as ArtifactBrowserPhase)
+    ) {
+      throw boundary("invalidPayload", "Browser phase is invalid.");
+    }
+    if (
+      pendingOperation !== null &&
+      !BROWSER_PENDING_OPERATIONS.includes(
+        pendingOperation as ArtifactBrowserPendingOperation,
+      )
+    ) {
+      throw boundary("invalidPayload", "Browser pending operation is invalid.");
+    }
+    if (
+      (pendingTargetUrl !== null) !==
+      (pendingOperation !== null && pendingOperation !== "clear-data")
+    ) {
+      throw boundary(
+        "invalidPayload",
+        "Browser pending target is inconsistent.",
+      );
+    }
+    const environmentScope = browser.environmentScope;
+    if (
+      environmentScope !== "all-browsers" &&
+      environmentScope !== "per-project" &&
+      environmentScope !== "per-chat-session" &&
+      environmentScope !== "none"
+    ) {
+      throw boundary("invalidPayload", "Browser Environment scope is invalid.");
+    }
+    return {
+      type,
+      value: {
+        currentUrl: browserDisplayUrl(browser.currentUrl),
+        pageTitle: safeBrowserText(
+          browser.pageTitle,
+          "Browser page title",
+          512,
+        ),
+        phase: phase as ArtifactBrowserPhase,
+        pendingOperation:
+          pendingOperation as ArtifactBrowserPendingOperation | null,
+        pendingTargetUrl,
+        refreshing: booleanValue(browser.refreshing, "Browser refresh state"),
+        canGoBack: booleanValue(browser.canGoBack, "Browser back state"),
+        canGoForward: booleanValue(
+          browser.canGoForward,
+          "Browser forward state",
+        ),
+        controllerGeneration: positive(
+          browser.controllerGeneration,
+          "Browser controller generation",
+        ),
+        mountGeneration: positive(
+          browser.mountGeneration,
+          "Browser mount generation",
+        ),
+        environmentScope,
+        notices: array(browser.notices, 32, "Browser notices").map(
+          (rawNotice) => {
+            const notice = record(rawNotice, "Browser notice");
+            const kind = notice.kind;
+            if (
+              kind !== "information" &&
+              kind !== "permission" &&
+              kind !== "warning" &&
+              kind !== "error"
+            ) {
+              throw boundary(
+                "invalidPayload",
+                "Browser notice kind is invalid.",
+              );
+            }
+            return {
+              id: identifier(notice.id, "Browser notice ID"),
+              kind,
+              title: safeBrowserText(notice.title, "Browser notice title", 512),
+              message: safeBrowserText(
+                notice.message,
+                "Browser notice message",
+                8_192,
+              ),
+            };
+          },
         ),
       },
     };
@@ -1188,6 +1460,46 @@ function textAllowEmpty(
     throw boundary("invalidPayload", `${label} is invalid.`);
   }
   return value;
+}
+
+function safeBrowserText(
+  value: unknown,
+  label: string,
+  maximum: number,
+): string {
+  const result = text(value, label, maximum);
+  if (
+    [...result].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    })
+  ) {
+    throw boundary("invalidPayload", `${label} is unsafe.`);
+  }
+  return result;
+}
+
+function browserDisplayUrl(value: unknown): string {
+  const displayUrl = safeBrowserText(value, "Browser current URL", 8_192);
+  let parsed: URL;
+  try {
+    parsed = new URL(displayUrl);
+  } catch {
+    throw boundary("invalidPayload", "Browser current URL is invalid.");
+  }
+  const authority = displayUrl.split("://", 2).at(1)?.split(/[/?#]/u, 1)[0];
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.hostname.length === 0 ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    authority?.includes("@") === true ||
+    parsed.search.length > 0 ||
+    parsed.hash.length > 0
+  ) {
+    throw boundary("invalidPayload", "Browser current URL is unsafe.");
+  }
+  return displayUrl;
 }
 
 function nullableText(value: unknown, label: string): string | null {

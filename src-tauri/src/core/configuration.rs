@@ -860,6 +860,76 @@ impl ConfigurationService {
     }
 }
 
+/// Resolves one immutable effective snapshot across independently persisted
+/// configuration authorities. Unlike `ConfigurationService::from_last_known_good`,
+/// app and Workspace generations may overlap because they are allocated by
+/// separate durable coordinators; scope identity, canonical content, and each
+/// positive generation remain validated before precedence is applied.
+pub fn resolve_effective_snapshot_from_last_known_good(
+    records: impl IntoIterator<Item = LastKnownGoodDocument>,
+    managed_ceilings: ManagedCeilings,
+    security_constraints: SecurityConstraints,
+) -> Result<EffectiveConfigurationSnapshot, ConfigurationDiagnostic> {
+    let mut scopes = BTreeMap::new();
+    let mut maximum_generation = 0;
+
+    for persisted in records {
+        if persisted.activated_generation == 0 {
+            return Err(ConfigurationDiagnostic {
+                scope: persisted.scope,
+                path: persisted.path,
+                key: Some("activated_generation".to_owned()),
+                code: ConfigurationDiagnosticCode::InvalidValue,
+                message: "persisted configuration generation must be positive".to_owned(),
+            });
+        }
+        if scopes.contains_key(&persisted.scope) {
+            return Err(ConfigurationDiagnostic {
+                scope: persisted.scope,
+                path: persisted.path,
+                key: None,
+                code: ConfigurationDiagnosticCode::InvalidValue,
+                message: "persisted configuration contains a duplicate scope".to_owned(),
+            });
+        }
+
+        let validated = validate_scope_document(
+            persisted.scope,
+            persisted.path.clone(),
+            &persisted.canonical_toml,
+        )?;
+        if validated.canonical_toml != persisted.canonical_toml {
+            return Err(ConfigurationDiagnostic {
+                scope: persisted.scope,
+                path: persisted.path,
+                key: None,
+                code: ConfigurationDiagnosticCode::InvalidValue,
+                message: "persisted configuration is not canonical".to_owned(),
+            });
+        }
+
+        maximum_generation = maximum_generation.max(persisted.activated_generation);
+        let source_fingerprint = fingerprint(persisted.canonical_toml.as_bytes());
+        scopes.insert(
+            persisted.scope,
+            ActiveScope {
+                document: validated.document,
+                record: persisted,
+                source_fingerprint,
+            },
+        );
+    }
+
+    Ok(EffectiveConfigurationSnapshot {
+        generation: maximum_generation,
+        configuration: Arc::new(resolve_effective(
+            &scopes,
+            &managed_ceilings,
+            &security_constraints,
+        )),
+    })
+}
+
 /// Compensates a UI file replacement after its SQLite LKG publication fails.
 /// The replacement is conditional on the failed write still owning the path;
 /// a newer external edit is preserved and reported as a conflict.

@@ -4,6 +4,13 @@ export {
   UNKNOWN_ARTIFACT_PROVIDER,
 } from "./registry";
 export type { ArtifactProviderRegistry } from "./registry";
+export { BrowserArtifact } from "./browser/BrowserArtifact";
+export { BROWSER_ARTIFACT_PROVIDER } from "./browser/provider";
+export type {
+  BrowserArtifactModel,
+  BrowserViewportFocusIntent,
+  BrowserViewportLifecycleEvent,
+} from "./browser/browser-types";
 export type * from "./types";
 export { ArtifactShell } from "./ui/ArtifactShell";
 export type { ArtifactShellProps } from "./ui/ArtifactShell";

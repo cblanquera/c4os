@@ -1,20 +1,20 @@
 {
   "status": "passed",
-  "started_unix_ms": 1784375049615,
-  "finished_unix_ms": 1784375057631,
+  "started_unix_ms": 1784656905947,
+  "finished_unix_ms": 1784656914090,
   "target": {
     "os": "macos",
     "arch": "aarch64",
-    "macos_version": "26.5.1",
-    "tauri": "2.11.2",
+    "macos_version": "26.5.2",
+    "tauri": "2.11.5",
     "objc2_web_kit": "0.3.2",
     "permission_decision": "Prompt",
     "page_ipc_handler": false,
     "custom_profile_path": false
   },
   "profile_ids": {
-    "profileA": "4141414141414141933f4b34de404141",
-    "profileB": "4242424242424242903c4837dd434242"
+    "profileA": "4141414141414141bd0696c4de404141",
+    "profileB": "4242424242424242be0595c7dd434242"
   },
   "checks": [
     {
@@ -183,12 +183,27 @@
   "reports": [
     {
       "c4osBridge": false,
-      "cookie": "",
+      "cookie": "proof_cookie=alpha",
       "geolocationApi": true,
-      "indexedDb": null,
-      "localStorage": null,
+      "indexedDb": "alpha",
+      "localStorage": "alpha",
       "mediaApi": true,
-      "phase": "profile-a-after-clear",
+      "phase": "profile-a-write",
+      "secretLeaked": false,
+      "sessionStorage": "alpha",
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=alpha",
+      "geolocationApi": true,
+      "indexedDb": "alpha",
+      "localStorage": "alpha",
+      "mediaApi": true,
+      "phase": "profile-a-read",
       "secretLeaked": false,
       "sessionStorage": null,
       "tauriGlobal": false,
@@ -197,9 +212,53 @@
       "wryIpc": false
     },
     {
-      "geolocationRequested": true,
-      "mediaRequested": true,
-      "phase": "permission-exercise-permission-attempt"
+      "c4osBridge": false,
+      "cookie": "",
+      "geolocationApi": true,
+      "indexedDb": null,
+      "localStorage": null,
+      "mediaApi": true,
+      "phase": "ephemeral-read",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "outcome": "error-1",
+      "phase": "permission-exercise-geolocation-outcome"
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=bravo",
+      "geolocationApi": true,
+      "indexedDb": "bravo",
+      "localStorage": "bravo",
+      "mediaApi": true,
+      "phase": "profile-b-after-clear",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
+    },
+    {
+      "c4osBridge": false,
+      "cookie": "proof_cookie=bravo",
+      "geolocationApi": true,
+      "indexedDb": "bravo",
+      "localStorage": "bravo",
+      "mediaApi": true,
+      "phase": "profile-b-read",
+      "secretLeaked": false,
+      "sessionStorage": null,
+      "tauriGlobal": false,
+      "tauriInternals": false,
+      "webkitMessageHandlers": false,
+      "wryIpc": false
     },
     {
       "c4osBridge": false,
@@ -235,66 +294,6 @@
       "c4osBridge": false,
       "cookie": "proof_cookie=alpha",
       "geolocationApi": true,
-      "indexedDb": "alpha",
-      "localStorage": "alpha",
-      "mediaApi": true,
-      "phase": "profile-a-write",
-      "secretLeaked": false,
-      "sessionStorage": "alpha",
-      "tauriGlobal": false,
-      "tauriInternals": false,
-      "webkitMessageHandlers": false,
-      "wryIpc": false
-    },
-    {
-      "c4osBridge": false,
-      "cookie": "proof_cookie=bravo",
-      "geolocationApi": true,
-      "indexedDb": "bravo",
-      "localStorage": "bravo",
-      "mediaApi": true,
-      "phase": "profile-b-after-clear",
-      "secretLeaked": false,
-      "sessionStorage": null,
-      "tauriGlobal": false,
-      "tauriInternals": false,
-      "webkitMessageHandlers": false,
-      "wryIpc": false
-    },
-    {
-      "c4osBridge": false,
-      "cookie": "proof_cookie=bravo",
-      "geolocationApi": true,
-      "indexedDb": "bravo",
-      "localStorage": "bravo",
-      "mediaApi": true,
-      "phase": "profile-b-read",
-      "secretLeaked": false,
-      "sessionStorage": null,
-      "tauriGlobal": false,
-      "tauriInternals": false,
-      "webkitMessageHandlers": false,
-      "wryIpc": false
-    },
-    {
-      "c4osBridge": false,
-      "cookie": "proof_cookie=alpha",
-      "geolocationApi": true,
-      "indexedDb": "alpha",
-      "localStorage": "alpha",
-      "mediaApi": true,
-      "phase": "profile-a-read",
-      "secretLeaked": false,
-      "sessionStorage": null,
-      "tauriGlobal": false,
-      "tauriInternals": false,
-      "webkitMessageHandlers": false,
-      "wryIpc": false
-    },
-    {
-      "c4osBridge": false,
-      "cookie": "proof_cookie=alpha",
-      "geolocationApi": true,
       "indexedDb": null,
       "localStorage": "alpha",
       "mediaApi": true,
@@ -307,8 +306,9 @@
       "wryIpc": false
     },
     {
-      "outcome": "error-1",
-      "phase": "permission-exercise-geolocation-outcome"
+      "geolocationRequested": true,
+      "mediaRequested": true,
+      "phase": "permission-exercise-permission-attempt"
     },
     {
       "c4osBridge": false,
@@ -317,7 +317,7 @@
       "indexedDb": null,
       "localStorage": null,
       "mediaApi": true,
-      "phase": "ephemeral-read",
+      "phase": "profile-a-after-clear",
       "secretLeaked": false,
       "sessionStorage": null,
       "tauriGlobal": false,
@@ -334,22 +334,22 @@
         "width": 900.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4141414141414141933f4b34de404141",
+      "store": "persistent:4141414141414141bd0696c4de404141",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -358,22 +358,22 @@
         "width": 900.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4242424242424242903c4837dd434242",
+      "store": "persistent:4242424242424242be0595c7dd434242",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -382,22 +382,22 @@
         "width": 900.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4141414141414141933f4b34de404141",
+      "store": "persistent:4141414141414141bd0696c4de404141",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -406,46 +406,22 @@
         "width": 900.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4242424242424242903c4837dd434242",
+      "store": "persistent:4242424242424242be0595c7dd434242",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
-    },
-    {
-      "focus": true,
-      "frame": {
-        "height": 680.0,
-        "width": 900.0
-      },
-      "kind": "native-child-attached",
-      "store": "ephemeral",
-      "superview": true
-    },
-    {
-      "decision": "allow",
-      "kind": "navigation-allowed",
-      "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
-    },
-    {
-      "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
-    },
-    {
-      "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -461,15 +437,15 @@
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -478,33 +454,57 @@
         "width": 900.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4141414141414141933f4b34de404141",
+      "store": "ephemeral",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
+    },
+    {
+      "focus": true,
+      "frame": {
+        "height": 680.0,
+        "width": 900.0
+      },
+      "kind": "native-child-attached",
+      "store": "persistent:4141414141414141bd0696c4de404141",
+      "superview": true
+    },
+    {
+      "decision": "allow",
+      "kind": "navigation-allowed",
+      "scheme": "http",
+      "url": "http://127.0.0.1:53729/"
+    },
+    {
+      "kind": "page-loading",
+      "url": "http://127.0.0.1:53729/"
+    },
+    {
+      "kind": "page-loaded",
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "decision": "cancel",
       "kind": "popup-intercepted",
-      "url": "http://127.0.0.1:49585/popup"
+      "url": "http://127.0.0.1:53729/popup"
     },
     {
       "decision": "cancel",
       "kind": "download-intercepted",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/download"
+      "url": "http://127.0.0.1:53729/download"
     },
     {
       "captureType": "camera-and-microphone",
@@ -521,22 +521,22 @@
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/force-navigation-error"
+      "url": "http://127.0.0.1:53729/force-navigation-error"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/force-navigation-error"
+      "url": "http://127.0.0.1:53729/force-navigation-error"
     },
     {
       "error": "redacted-navigation-error",
       "kind": "page-error",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "callbackPathExercised": "deterministic delegate-path invocation",
       "generationInvalidated": true,
       "kind": "web-content-process-terminated",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "child": {
@@ -562,22 +562,22 @@
         "width": 1040.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4141414141414141933f4b34de404141",
+      "store": "persistent:4141414141414141bd0696c4de404141",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "focus": true,
@@ -586,22 +586,22 @@
         "width": 1040.0
       },
       "kind": "native-child-attached",
-      "store": "persistent:4242424242424242903c4837dd434242",
+      "store": "persistent:4242424242424242be0595c7dd434242",
       "superview": true
     },
     {
       "decision": "allow",
       "kind": "navigation-allowed",
       "scheme": "http",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loading",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     },
     {
       "kind": "page-loaded",
-      "url": "http://127.0.0.1:49585/"
+      "url": "http://127.0.0.1:53729/"
     }
   ]
 }

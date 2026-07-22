@@ -1,4 +1,5 @@
 pub mod artifact;
+pub mod browser;
 pub mod conversation;
 pub mod core;
 pub mod execution;
@@ -35,27 +36,29 @@ use platform::{
 };
 use protocol::{
     ArtifactApprovalAnswer, ArtifactApprovalInput, ArtifactBreadcrumbSnapshot,
-    ArtifactContextExpandInput, ArtifactFileConflictInput, ArtifactFileConflictResolution,
-    ArtifactFileDraftInput, ArtifactFileSnapshot, ArtifactFileStateSnapshot,
-    ArtifactFolderEntrySnapshot, ArtifactFolderListingSnapshot, ArtifactFolderNavigateInput,
-    ArtifactFolderSelectInput, ArtifactFolderSnapshot, ArtifactHistorySnapshot,
-    ArtifactMutationInput, ArtifactOpenInput, ArtifactProviderStateSnapshot, ArtifactReplyInput,
-    ArtifactResourceVersionSnapshot, ArtifactShellStatusSnapshot, ArtifactSnapshot,
-    ArtifactTerminalOperationInput, ArtifactTerminalOutputAckInput, ArtifactTerminalResizeInput,
-    ArtifactTerminalRunInput, ArtifactTerminalSnapshot, ArtifactTerminalStdinInput,
-    ArtifactWorkspaceSnapshot, AttachmentId, AttemptId, ConversationActivitySnapshot,
-    ConversationArtifactCapabilitySnapshot, ConversationArtifactContextSegmentSnapshot,
-    ConversationArtifactContextSnapshot, ConversationAttachmentPreviewInput,
-    ConversationAttachmentPreviewSnapshot, ConversationAttachmentSnapshot,
-    ConversationAttemptSnapshot, ConversationBranchApprovalAnswer, ConversationBranchApprovalInput,
-    ConversationBranchControlSnapshot, ConversationBranchInput, ConversationBranchOperation,
-    ConversationBranchSnapshot, ConversationDraftInput, ConversationDraftSnapshot,
-    ConversationModelSnapshot, ConversationProjectSnapshot, ConversationRetryInput,
-    ConversationSessionSnapshot, ConversationSessionSummarySnapshot, ConversationSnapshot,
-    ConversationSubmitInput, ConversationTurnSnapshot, EnvironmentId, FoundationSnapshot,
-    PendingConversationSnapshot, PickerGrantId, ProjectId, ProtocolEnvelope, ProtocolError,
-    ProtocolErrorCode, RequestId, RuntimeId, SessionId, SnapshotRequest, StateGeneration, TurnId,
-    WorkspaceId, WorkspaceRecentSnapshot, WorkspaceStartSnapshot,
+    ArtifactBrowserIdentityInput, ArtifactBrowserNavigateInput, ArtifactBrowserNavigationIntent,
+    ArtifactBrowserNoticeSnapshot, ArtifactBrowserOpenInput, ArtifactBrowserSnapshot,
+    ArtifactBrowserViewportInput, ArtifactContextExpandInput, ArtifactFileConflictInput,
+    ArtifactFileConflictResolution, ArtifactFileDraftInput, ArtifactFileSnapshot,
+    ArtifactFileStateSnapshot, ArtifactFolderEntrySnapshot, ArtifactFolderListingSnapshot,
+    ArtifactFolderNavigateInput, ArtifactFolderSelectInput, ArtifactFolderSnapshot,
+    ArtifactHistorySnapshot, ArtifactMutationInput, ArtifactOpenInput,
+    ArtifactProviderStateSnapshot, ArtifactReplyInput, ArtifactResourceVersionSnapshot,
+    ArtifactShellStatusSnapshot, ArtifactSnapshot, ArtifactTerminalOperationInput,
+    ArtifactTerminalOutputAckInput, ArtifactTerminalResizeInput, ArtifactTerminalRunInput,
+    ArtifactTerminalSnapshot, ArtifactTerminalStdinInput, ArtifactWorkspaceSnapshot, AttachmentId,
+    AttemptId, ConversationActivitySnapshot, ConversationArtifactCapabilitySnapshot,
+    ConversationArtifactContextSegmentSnapshot, ConversationArtifactContextSnapshot,
+    ConversationAttachmentPreviewInput, ConversationAttachmentPreviewSnapshot,
+    ConversationAttachmentSnapshot, ConversationAttemptSnapshot, ConversationBranchApprovalAnswer,
+    ConversationBranchApprovalInput, ConversationBranchControlSnapshot, ConversationBranchInput,
+    ConversationBranchOperation, ConversationBranchSnapshot, ConversationDraftInput,
+    ConversationDraftSnapshot, ConversationModelSnapshot, ConversationProjectSnapshot,
+    ConversationRetryInput, ConversationSessionSnapshot, ConversationSessionSummarySnapshot,
+    ConversationSnapshot, ConversationSubmitInput, ConversationTurnSnapshot, EnvironmentId,
+    FoundationSnapshot, PendingConversationSnapshot, PickerGrantId, ProjectId, ProtocolEnvelope,
+    ProtocolError, ProtocolErrorCode, RequestId, RuntimeId, SessionId, SnapshotRequest,
+    StateGeneration, TurnId, WorkspaceId, WorkspaceRecentSnapshot, WorkspaceStartSnapshot,
 };
 use runtime::action_bridge::{
     RuntimeActionProposal, RuntimeApprovalDecision, RuntimeAuthorization, RuntimeExecutionReceipt,
@@ -111,7 +114,7 @@ use security::gateway::{
 use security::policy::{
     ActionEffect, ActionFacts, ActionInitiator, ActionRequestOrigin, ActionReversibility,
     ActionScope, ActionSensitivity, ActionSurface, ClassificationConfidence, PolicyConfiguration,
-    RepositoryState,
+    PolicyDecision, RepositoryState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -242,13 +245,15 @@ fn install_production_broker_facilities(
 
 struct AppCoreState {
     database: Arc<core::database::DatabaseActor>,
-    _configuration: Mutex<core::services::ManagedAppConfiguration>,
+    configuration: Mutex<core::services::ManagedAppConfiguration>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation_operation: Mutex<()>,
     artifact_operation: Arc<Mutex<()>>,
     conversation: Mutex<ConversationApplicationState>,
     artifact: Arc<Mutex<ArtifactApplicationState>>,
     terminal: Arc<Mutex<TerminalSupervisor>>,
+    browser_profiles: Mutex<browser::profile::BrowserProfileRegistry>,
+    browser_events: Arc<Mutex<browser::native::NativeBrowserEventQueue>>,
     _terminal_reconciliation: TerminalReconciliationDriver,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     runtime_production: Arc<ManagedProductionRuntime>,
@@ -278,12 +283,92 @@ struct NativeConversationBranchState {
 struct ArtifactApplicationState {
     pending_writes: BTreeMap<String, PendingArtifactWrite>,
     pending_terminal_actions: BTreeMap<String, PendingArtifactTerminalAction>,
+    pending_browser_actions: BTreeMap<String, PendingArtifactBrowserAction>,
+    browser_native_requests: BTreeMap<String, PendingNativeBrowserRequest>,
+    browser_ephemeral_clear_operations: BTreeMap<String, String>,
+    browser_targets: BTreeMap<String, BrowserTransientTarget>,
+    browser_pending_navigation: BTreeMap<String, browser::native::NativeBrowserAction>,
+    browser_mount_generations: BTreeMap<String, u64>,
+    browser_mounted_artifacts: BTreeSet<String>,
+    browser_active_identity: Option<browser::native::NativeBrowserIdentity>,
+    browser_notices: BTreeMap<String, Vec<ArtifactBrowserNoticeSnapshot>>,
     terminal_event_cursors: BTreeMap<(String, String, u64), u64>,
     terminal_ack_cursors: BTreeMap<String, u64>,
     terminal_output_lines: BTreeMap<String, Vec<u8>>,
     terminal_redacted_output_lines: BTreeSet<String>,
     terminal_sensitive_output_lines: BTreeSet<String>,
     terminal_cleanup_sessions: BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct BrowserTransientTarget {
+    target: artifact::BrowserNavigationTarget,
+}
+
+#[derive(Clone)]
+struct PendingNativeBrowserRequest {
+    artifact_id: String,
+    record_revision: u64,
+    scope: ActiveArtifactScope,
+    controller_generation: u64,
+    mount_generation: u64,
+    display_url: String,
+    navigation_sha256: String,
+    observed_at_ms: u64,
+}
+
+#[derive(Clone)]
+struct PendingPersistentBrowserClear {
+    scope: browser::profile::PersistentProfileScope,
+    profile_id: String,
+    registry_generation: u64,
+    data_generation: u64,
+}
+
+#[derive(Clone)]
+struct PendingArtifactBrowserAction {
+    artifact_id: String,
+    record_revision: u64,
+    scope: ActiveArtifactScope,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+    payload: PendingArtifactBrowserPayload,
+}
+
+#[derive(Clone)]
+enum PendingArtifactBrowserPayload {
+    Open {
+        target: artifact::BrowserNavigationTarget,
+    },
+    Navigate {
+        intent: artifact::BrowserNavigationIntent,
+        navigation_sha256: String,
+        controller_generation: u64,
+        mount_generation: u64,
+    },
+    NavigateTo {
+        target: artifact::BrowserNavigationTarget,
+        controller_generation: u64,
+        mount_generation: u64,
+    },
+    Recover {
+        target: artifact::BrowserNavigationTarget,
+        controller_generation: u64,
+        mount_generation: u64,
+    },
+    NativeRequest {
+        request_id: String,
+        controller_generation: u64,
+        mount_generation: u64,
+        navigation_sha256: String,
+    },
+    ClearData {
+        environment: artifact::BrowserEnvironmentReference,
+        persistent: Option<PendingPersistentBrowserClear>,
+        operation_id: String,
+        controller_generation: u64,
+        mount_generation: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -487,6 +572,16 @@ struct DurableArtifactReplyCapture {
     resource_version: ArtifactResourceVersionSnapshot,
     selected_text: Option<String>,
     selected_entry_id: Option<String>,
+    #[serde(default)]
+    browser_page_context: Option<DurableBrowserPageContext>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DurableBrowserPageContext {
+    selected_text: Option<String>,
+    visible_text: Option<String>,
+    extracted_content: Option<String>,
 }
 
 impl Default for DurableConversationDraft {
@@ -801,6 +896,23 @@ fn validate_durable_conversation_document(
                         .as_ref()
                         .is_none_or(|value| !value.trim().is_empty() && value.len() <= 512)
                     && !(capture.selected_text.is_some() && capture.selected_entry_id.is_some())
+                    && capture.browser_page_context.as_ref().is_none_or(|page| {
+                        capture.selected_text.is_none()
+                            && capture.selected_entry_id.is_none()
+                            && [
+                                page.selected_text.as_ref(),
+                                page.visible_text.as_ref(),
+                                page.extracted_content.as_ref(),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .all(|value| {
+                                !value.trim().is_empty()
+                                    && value.len()
+                                        <= browser::native::MAX_NATIVE_BROWSER_CONTEXT_FIELD_BYTES
+                                    && !value.contains('\0')
+                            })
+                    })
             })
             && attachment_reference_ledger(
                 &normalized_draft.attachments,
@@ -4490,9 +4602,27 @@ fn new_artifact_record(
     operation_kind: &str,
     now_ms: u64,
 ) -> Result<artifact::ArtifactRecord, ProtocolError> {
+    new_artifact_record_with_id(
+        scope,
+        format!("artifact-{}", Uuid::new_v4().as_simple()),
+        provider,
+        state,
+        operation_kind,
+        now_ms,
+    )
+}
+
+fn new_artifact_record_with_id(
+    scope: &ActiveArtifactScope,
+    artifact_id: String,
+    provider: artifact::ArtifactProviderDescriptor,
+    state: artifact::ArtifactState,
+    operation_kind: &str,
+    now_ms: u64,
+) -> Result<artifact::ArtifactRecord, ProtocolError> {
     let mut record = artifact::ArtifactRecord {
         schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
-        artifact_id: format!("artifact-{}", Uuid::new_v4().as_simple()),
+        artifact_id,
         workspace_id: scope.workspace_id.clone(),
         project_id: scope.project_id.clone(),
         session_id: scope.session_id.clone(),
@@ -4566,6 +4696,7 @@ fn artifact_history_kind(kind: artifact::ArtifactHistoryKind) -> &'static str {
         artifact::ArtifactHistoryKind::ConflictObserved => "conflictObserved",
         artifact::ArtifactHistoryKind::RecoveryChanged => "recoveryChanged",
         artifact::ArtifactHistoryKind::NavigationChanged => "navigationChanged",
+        artifact::ArtifactHistoryKind::ReplySubmitted => "replySubmitted",
         artifact::ArtifactHistoryKind::Converted => "converted",
         artifact::ArtifactHistoryKind::CommandQueued => "commandQueued",
         artifact::ArtifactHistoryKind::CommandStarted => "commandStarted",
@@ -4615,6 +4746,10 @@ fn artifact_status(
                 &record.state,
                 artifact::ArtifactState::Terminal(terminal)
                     if matches!(&terminal.status, artifact::TerminalCommandStatus::Recovery { .. })
+            ) || matches!(
+                &record.state,
+                artifact::ArtifactState::Browser(browser)
+                    if matches!(&browser.phase, artifact::BrowserPhase::Recovery { .. })
             );
             let terminal_failure = match &record.state {
                 artifact::ArtifactState::Terminal(terminal) => {
@@ -4628,6 +4763,13 @@ fn artifact_status(
                 }
                 _ => None,
             };
+            let browser_failure = match &record.state {
+                artifact::ArtifactState::Browser(browser) => {
+                    matches!(&browser.phase, artifact::BrowserPhase::Error { .. })
+                        .then(|| "The Browser operation could not be completed.".to_owned())
+                }
+                _ => None,
+            };
             if recovery {
                 ArtifactShellStatusSnapshot {
                     kind: "recovery".into(),
@@ -4636,10 +4778,13 @@ fn artifact_status(
                             "The Terminal command was retained after its live process could not be recovered."
                                 .into()
                         }
+                        artifact::ArtifactState::Browser(_) => {
+                            "The Browser controller is ready to recover.".into()
+                        }
                         _ => "The draft was retained after the save could not complete.".into(),
                     }),
                 }
-            } else if let Some(message) = terminal_failure {
+            } else if let Some(message) = terminal_failure.or(browser_failure) {
                 ArtifactShellStatusSnapshot {
                     kind: "error".into(),
                     message: Some(message),
@@ -4650,6 +4795,10 @@ fn artifact_status(
                     message: Some(match &record.state {
                         artifact::ArtifactState::Terminal(_) => {
                             "Approval is required before this Terminal operation can continue."
+                                .into()
+                        }
+                        artifact::ArtifactState::Browser(_) => {
+                            "Approval is required before this Browser operation can continue."
                                 .into()
                         }
                         _ => "Approval is required before saving this File.".into(),
@@ -4748,10 +4897,26 @@ fn file_protocol_state(
     }
 }
 
+fn browser_protocol_title(browser: &artifact::BrowserArtifactState) -> String {
+    browser
+        .current_title()
+        .map(str::to_owned)
+        .or_else(|| {
+            artifact::BrowserNavigationTarget::parse(browser.current_display_url())
+                .ok()
+                .and_then(|target| target.navigation_url().host_str().map(str::to_owned))
+        })
+        .unwrap_or_else(|| "Browser".into())
+}
+
 fn artifact_protocol_snapshot(
     record: artifact::ArtifactRecord,
     pending_approval_id: Option<String>,
+    browser_pending_operation: Option<String>,
+    browser_pending_target_url: Option<String>,
     project_name: &str,
+    browser_mount_generation: Option<u64>,
+    browser_notices: Vec<ArtifactBrowserNoticeSnapshot>,
 ) -> Result<ArtifactSnapshot, ProtocolError> {
     let resource_version = artifact_resource_snapshot(record.resource_version());
     let history = record
@@ -4824,6 +4989,30 @@ fn artifact_protocol_snapshot(
                     .selection
                     .as_ref()
                     .map(|selection| selection.entry_id.clone()),
+            }),
+        ),
+        artifact::ArtifactState::Browser(browser) => (
+            browser_protocol_title(browser),
+            ArtifactProviderStateSnapshot::Browser(ArtifactBrowserSnapshot {
+                current_url: browser.current_display_url().to_owned(),
+                page_title: browser_protocol_title(browser),
+                phase: browser.phase.phase().into(),
+                refreshing: matches!(browser.phase, artifact::BrowserPhase::Loading { .. })
+                    && browser.controller_event_sequence > 1,
+                can_go_back: browser.can_go_back(),
+                can_go_forward: browser.can_go_forward(),
+                controller_generation: browser.controller_generation,
+                mount_generation: browser_mount_generation.unwrap_or(1),
+                environment_scope: match browser.environment.scope {
+                    artifact::BrowserEnvironmentScope::AppWide => "all-browsers",
+                    artifact::BrowserEnvironmentScope::WorkspaceProject => "per-project",
+                    artifact::BrowserEnvironmentScope::Chat => "per-chat-session",
+                    artifact::BrowserEnvironmentScope::None => "none",
+                }
+                .into(),
+                pending_operation: browser_pending_operation,
+                pending_target_url: browser_pending_target_url,
+                notices: browser_notices,
             }),
         ),
         artifact::ArtifactState::Terminal(terminal) => {
@@ -4940,6 +5129,607 @@ fn artifact_protocol_snapshot(
     })
 }
 
+fn browser_notice_from_native_event(
+    event: &browser::native::NativeBrowserEvent,
+) -> Option<ArtifactBrowserNoticeSnapshot> {
+    let (kind, title, message) = match &event.kind {
+        browser::native::NativeBrowserEventKind::PopupBlocked { .. } => (
+            "warning",
+            "Popup blocked",
+            "A new-window request was blocked. Browser sub-tabs are not available.",
+        ),
+        browser::native::NativeBrowserEventKind::DownloadBlocked { .. } => (
+            "warning",
+            "Download blocked",
+            "A website download was blocked because no approved download target exists.",
+        ),
+        browser::native::NativeBrowserEventKind::FormSubmissionBlocked { .. } => (
+            "warning",
+            "Form submission blocked",
+            "This Browser build does not replay POST form submissions across the authorization boundary.",
+        ),
+        browser::native::NativeBrowserEventKind::MediaPermissionPrompt { origin, permission } => {
+            return Some(ArtifactBrowserNoticeSnapshot {
+                id: format!(
+                    "browser-notice-{}-{}",
+                    event.controller_generation, event.notice_sequence
+                ),
+                kind: "permission".into(),
+                title: format!("{permission} requested"),
+                message: format!(
+                    "{origin} requested {permission}. WebKit and macOS own the permission prompt."
+                ),
+            });
+        }
+        browser::native::NativeBrowserEventKind::MediaPermissionDenied { origin, permission } => {
+            return Some(ArtifactBrowserNoticeSnapshot {
+                id: format!(
+                    "browser-notice-{}-{}",
+                    event.controller_generation, event.notice_sequence
+                ),
+                kind: "warning".into(),
+                title: format!("{permission} denied"),
+                message: format!(
+                    "C4OS policy denied {permission} for {origin}; no WebKit device grant was issued."
+                ),
+            });
+        }
+        browser::native::NativeBrowserEventKind::ControllerFailed { .. } => (
+            "error",
+            "Browser unavailable",
+            "The native Browser controller could not complete the operation.",
+        ),
+        _ => return None,
+    };
+    Some(ArtifactBrowserNoticeSnapshot {
+        id: format!(
+            "browser-notice-{}-{}",
+            event.controller_generation, event.notice_sequence
+        ),
+        kind: kind.into(),
+        title: title.into(),
+        message: message.into(),
+    })
+}
+
+fn complete_browser_profile_clear(
+    core: &AppCoreState,
+    profile_id: &str,
+    operation_id: &str,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let mut registry = core
+        .browser_profiles
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let snapshot = registry.snapshot();
+    let Some(profile) = snapshot
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+    else {
+        return Ok(());
+    };
+    let browser::profile::PersistentProfileLifecycle::ClearPending {
+        operation_id: pending_operation,
+        target_data_generation,
+    } = &profile.lifecycle
+    else {
+        return Ok(());
+    };
+    if pending_operation != operation_id {
+        return Err(workspace_state_unavailable(correlation_id));
+    }
+    registry
+        .complete_clear(
+            snapshot.generation,
+            &profile.scope,
+            operation_id,
+            *target_data_generation,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    Ok(())
+}
+
+fn reconcile_native_browser_events(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let (events, dropped, dropped_state_identities) = {
+        let mut queue = core
+            .browser_events
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let dropped = queue.take_dropped();
+        let dropped_state_identities = queue.take_dropped_state_identities();
+        (queue.drain(), dropped, dropped_state_identities)
+    };
+    let dropped_state_identity_set = dropped_state_identities
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for (artifact_id, controller_generation, _mount_generation) in &dropped_state_identities {
+        let Some(document) = scope
+            .database
+            .artifact_document(artifact_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        else {
+            continue;
+        };
+        let mut record = deserialize_artifact_record(document, correlation_id.clone())?;
+        let artifact::ArtifactState::Browser(browser_state) = &mut record.state else {
+            continue;
+        };
+        if browser_state.controller_generation != *controller_generation {
+            continue;
+        }
+        let observed_at_ms = current_time_ms()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .max(browser_state.version.observed_at_ms);
+        browser_state
+            .begin_recovery(
+                artifact::BrowserRecoveryCode::ControllerRecreated,
+                observed_at_ms,
+            )
+            .and_then(|_| {
+                browser_state.install_controller_generation(
+                    browser_state.controller_generation.saturating_add(1),
+                    observed_at_ms,
+                )
+            })
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let expected_revision = record.record_revision;
+        advance_artifact_record(
+            &mut record,
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            observed_at_ms,
+        )?;
+        persist_artifact_record_to_database(
+            &scope.database,
+            &record,
+            Some(expected_revision),
+            correlation_id.clone(),
+        )?;
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let mount = state
+            .browser_mount_generations
+            .entry(artifact_id.clone())
+            .or_insert(1);
+        *mount = mount.saturating_add(1).max(1);
+        state.browser_mounted_artifacts.remove(artifact_id);
+        let notices = state
+            .browser_notices
+            .entry(artifact_id.clone())
+            .or_default();
+        notices.push(ArtifactBrowserNoticeSnapshot {
+            id: format!("browser-event-overflow-{controller_generation}"),
+            kind: "error".into(),
+            title: "Browser controller recovered".into(),
+            message: "Native Browser events exceeded their bound, so C4OS replaced the controller generation before accepting more state."
+                .into(),
+        });
+        if notices.len() > 32 {
+            let excess = notices.len() - 32;
+            notices.drain(..excess);
+        }
+    }
+    if dropped > 0 {
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        for notices in state.browser_notices.values_mut() {
+            notices.push(ArtifactBrowserNoticeSnapshot {
+                id: format!("browser-event-overflow-{dropped}"),
+                kind: "error".into(),
+                title: "Browser event recovery required".into(),
+                message: "The native Browser event bound was exceeded; reopen the focused Browser."
+                    .into(),
+            });
+            if notices.len() > 32 {
+                let excess = notices.len() - 32;
+                notices.drain(..excess);
+            }
+        }
+    }
+    for event in events {
+        if dropped_state_identity_set.contains(&(
+            event.artifact_id.clone(),
+            event.controller_generation,
+            event.mount_generation,
+        )) {
+            continue;
+        }
+        match &event.kind {
+            browser::native::NativeBrowserEventKind::DataCleared {
+                profile_id,
+                operation_id,
+            } => {
+                complete_browser_profile_clear(
+                    core,
+                    profile_id,
+                    operation_id,
+                    correlation_id.clone(),
+                )?;
+                continue;
+            }
+            browser::native::NativeBrowserEventKind::DataClearFailed { .. } => {
+                continue;
+            }
+            browser::native::NativeBrowserEventKind::EphemeralDataCleared {
+                artifact_id,
+                operation_id,
+            } => {
+                let expected = core
+                    .artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                    .browser_ephemeral_clear_operations
+                    .remove(artifact_id);
+                if expected.as_deref() != Some(operation_id) {
+                    continue;
+                }
+                let Some(document) = scope
+                    .database
+                    .artifact_document(artifact_id)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                else {
+                    continue;
+                };
+                let mut record = deserialize_artifact_record(document, correlation_id.clone())?;
+                let artifact::ArtifactState::Browser(browser_state) = &mut record.state else {
+                    continue;
+                };
+                browser_state
+                    .clear_ephemeral_environment(event.observed_at_ms)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let expected_revision = record.record_revision;
+                advance_artifact_record(
+                    &mut record,
+                    artifact::ArtifactHistoryKind::RecoveryChanged,
+                    event.observed_at_ms,
+                )?;
+                persist_artifact_record_to_database(
+                    &scope.database,
+                    &record,
+                    Some(expected_revision),
+                    correlation_id.clone(),
+                )?;
+                let mut state = core
+                    .artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let mount = state
+                    .browser_mount_generations
+                    .entry(artifact_id.clone())
+                    .or_insert(1);
+                *mount = mount.saturating_add(1).max(1);
+                state.browser_mounted_artifacts.remove(artifact_id);
+                if state
+                    .browser_active_identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.artifact_id == artifact_id.as_str())
+                {
+                    state.browser_active_identity = None;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(notice) = browser_notice_from_native_event(&event) {
+            let mut state = core
+                .artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            let notices = state
+                .browser_notices
+                .entry(event.artifact_id.clone())
+                .or_default();
+            notices.push(notice);
+            if notices.len() > 32 {
+                let excess = notices.len() - 32;
+                notices.drain(..excess);
+            }
+        }
+        let Some(document) = scope
+            .database
+            .artifact_document(&event.artifact_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        else {
+            continue;
+        };
+        let mut record = deserialize_artifact_record(document, correlation_id.clone())?;
+        let artifact::ArtifactState::Browser(browser_state) = &mut record.state else {
+            continue;
+        };
+        if browser_state.controller_generation != event.controller_generation {
+            continue;
+        }
+        if let browser::native::NativeBrowserEventKind::NavigationRequested {
+            request_id,
+            display_url,
+            navigation_sha256,
+        } = &event.kind
+        {
+            let mut state = core
+                .artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            let identity = browser::native::NativeBrowserIdentity {
+                artifact_id: event.artifact_id.clone(),
+                controller_generation: event.controller_generation,
+                mount_generation: event.mount_generation,
+            };
+            if state.browser_active_identity.as_ref() == Some(&identity) {
+                if state.browser_native_requests.len() == 64
+                    && let Some(oldest_key) = state.browser_native_requests.keys().next().cloned()
+                {
+                    state.browser_native_requests.remove(&oldest_key);
+                }
+                state.browser_native_requests.insert(
+                    request_id.clone(),
+                    PendingNativeBrowserRequest {
+                        artifact_id: event.artifact_id.clone(),
+                        record_revision: record.record_revision,
+                        scope: scope.clone(),
+                        controller_generation: event.controller_generation,
+                        mount_generation: event.mount_generation,
+                        display_url: display_url.clone(),
+                        navigation_sha256: navigation_sha256.clone(),
+                        observed_at_ms: event.observed_at_ms,
+                    },
+                );
+            }
+            continue;
+        }
+        let mut history_kind = None;
+        match &event.kind {
+            browser::native::NativeBrowserEventKind::NavigationStarted {
+                display_url,
+                navigation_sha256,
+                kind,
+            } => {
+                let Some(sequence) = event.state_event_sequence else {
+                    continue;
+                };
+                let target = artifact::BrowserNavigationTarget::parse(display_url)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let metadata = artifact::BrowserControllerEventMeta::new(
+                    event.controller_generation,
+                    sequence,
+                    event.observed_at_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                browser_state
+                    .start_navigation_bound(metadata, &target, *kind, navigation_sha256)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                history_kind = Some(artifact::ArtifactHistoryKind::NavigationChanged);
+            }
+            browser::native::NativeBrowserEventKind::NavigationFinished {
+                display_url,
+                navigation_sha256,
+                kind,
+                title,
+                ..
+            } => {
+                let Some(sequence) = event.state_event_sequence else {
+                    continue;
+                };
+                let target = artifact::BrowserNavigationTarget::parse(display_url)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let metadata = artifact::BrowserControllerEventMeta::new(
+                    event.controller_generation,
+                    sequence,
+                    event.observed_at_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                browser_state
+                    .mark_ready_bound(
+                        metadata,
+                        &target,
+                        *kind,
+                        navigation_sha256,
+                        title.as_deref(),
+                    )
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                history_kind = Some(artifact::ArtifactHistoryKind::ResourceRefreshed);
+            }
+            browser::native::NativeBrowserEventKind::NavigationBlocked => {
+                let Some(sequence) = event.state_event_sequence else {
+                    continue;
+                };
+                let metadata = artifact::BrowserControllerEventMeta::new(
+                    event.controller_generation,
+                    sequence,
+                    event.observed_at_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                browser_state
+                    .cancel_navigation(metadata)
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                history_kind = Some(artifact::ArtifactHistoryKind::NavigationChanged);
+            }
+            browser::native::NativeBrowserEventKind::NavigationFailed { .. } => {
+                let Some(sequence) = event.state_event_sequence else {
+                    continue;
+                };
+                let metadata = artifact::BrowserControllerEventMeta::new(
+                    event.controller_generation,
+                    sequence,
+                    event.observed_at_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                browser_state
+                    .fail_from_controller(
+                        metadata,
+                        artifact::BrowserErrorCode::NavigationFailed,
+                        true,
+                    )
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                history_kind = Some(artifact::ArtifactHistoryKind::RecoveryChanged);
+            }
+            browser::native::NativeBrowserEventKind::WebContentProcessTerminated { .. } => {
+                let Some(sequence) = event.state_event_sequence else {
+                    continue;
+                };
+                let metadata = artifact::BrowserControllerEventMeta::new(
+                    event.controller_generation,
+                    sequence,
+                    event.observed_at_ms,
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                browser_state
+                    .recover_from_controller(
+                        metadata,
+                        artifact::BrowserRecoveryCode::WebContentProcessTerminated,
+                    )
+                    .and_then(|_| {
+                        browser_state.install_controller_generation(
+                            event.controller_generation.saturating_add(1),
+                            event.observed_at_ms,
+                        )
+                    })
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let mut state = core
+                    .artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                let mount = state
+                    .browser_mount_generations
+                    .entry(event.artifact_id.clone())
+                    .or_insert(1);
+                *mount = mount.saturating_add(1).max(1);
+                history_kind = Some(artifact::ArtifactHistoryKind::RecoveryChanged);
+            }
+            browser::native::NativeBrowserEventKind::ControllerFailed { .. } => {
+                let transition = match browser_state.phase {
+                    artifact::BrowserPhase::Queued { .. } => browser_state.fail_before_controller(
+                        artifact::BrowserErrorCode::ControllerUnavailable,
+                        true,
+                        event.observed_at_ms,
+                    ),
+                    _ => browser_state.begin_recovery(
+                        artifact::BrowserRecoveryCode::ControllerRecreated,
+                        event.observed_at_ms,
+                    ),
+                };
+                transition.map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                history_kind = Some(artifact::ArtifactHistoryKind::RecoveryChanged);
+            }
+            _ => {}
+        }
+        if let Some(kind) = history_kind {
+            let expected_revision = record.record_revision;
+            let rebind_native_request = matches!(
+                &event.kind,
+                browser::native::NativeBrowserEventKind::NavigationBlocked
+            );
+            advance_artifact_record(&mut record, kind, event.observed_at_ms)?;
+            persist_artifact_record_to_database(
+                &scope.database,
+                &record,
+                Some(expected_revision),
+                correlation_id.clone(),
+            )?;
+            if rebind_native_request {
+                let mut state = core
+                    .artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+                for request in state
+                    .browser_native_requests
+                    .values_mut()
+                    .filter(|request| {
+                        request.artifact_id.as_str() == event.artifact_id.as_str()
+                            && request.controller_generation == event.controller_generation
+                            && request.mount_generation == event.mount_generation
+                            && request.record_revision == expected_revision
+                    })
+                {
+                    request.record_revision = record.record_revision;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reconcile_browser_profile_generations(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    records: &mut [artifact::ArtifactRecord],
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let profiles = core
+        .browser_profiles
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .snapshot()
+        .profiles;
+    let now_ms =
+        current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    for record in records {
+        let artifact::ArtifactState::Browser(browser_state) = &mut record.state else {
+            continue;
+        };
+        let Some(profile_scope) =
+            persistent_profile_scope_for_reference(&browser_state.environment)
+        else {
+            continue;
+        };
+        let Some(profile) = profiles.iter().find(|profile| {
+            profile.scope == profile_scope
+                && matches!(
+                    profile.lifecycle,
+                    browser::profile::PersistentProfileLifecycle::Ready
+                )
+        }) else {
+            continue;
+        };
+        if profile.data_generation <= browser_state.environment.generation {
+            continue;
+        }
+        let observed_at_ms = now_ms.max(browser_state.version.observed_at_ms);
+        browser_state
+            .rebind_cleared_environment(profile.data_generation, observed_at_ms)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let expected_revision = record.record_revision;
+        advance_artifact_record(
+            record,
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            observed_at_ms,
+        )?;
+        persist_artifact_record_to_database(
+            &scope.database,
+            record,
+            Some(expected_revision),
+            correlation_id.clone(),
+        )?;
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let mount = state
+            .browser_mount_generations
+            .entry(record.artifact_id.clone())
+            .or_insert(1);
+        *mount = mount.saturating_add(1).max(1);
+        state.browser_mounted_artifacts.remove(&record.artifact_id);
+        if state
+            .browser_active_identity
+            .as_ref()
+            .is_some_and(|identity| identity.artifact_id == record.artifact_id.as_str())
+        {
+            state.browser_active_identity = None;
+        }
+    }
+    Ok(())
+}
+
 fn build_artifact_workspace_snapshot(
     core: &AppCoreState,
     correlation_id: protocol::CorrelationId,
@@ -4989,6 +5779,15 @@ fn build_artifact_workspace_snapshot(
         let scope = active_artifact_scope(core, correlation_id.clone())?;
         let now_ms =
             current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        reconcile_native_browser_events(core, &scope, correlation_id.clone())?;
+        records = scope
+            .database
+            .artifact_documents_for_session(&scope.session_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .into_iter()
+            .map(|document| deserialize_artifact_record(document, correlation_id.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        reconcile_browser_profile_generations(core, &scope, &mut records, correlation_id.clone())?;
         reconcile_active_terminal_records(core, &scope, &mut records, correlation_id.clone())?;
         for record in &mut records {
             if record.workspace_id == workspace_id
@@ -5011,13 +5810,30 @@ fn build_artifact_workspace_snapshot(
                 )?;
             }
         }
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        for record in &records {
+            if matches!(record.state, artifact::ArtifactState::Browser(_)) {
+                state
+                    .browser_mount_generations
+                    .entry(record.artifact_id.clone())
+                    .or_insert(1);
+            }
+        }
     }
-    let pending_by_artifact = {
+    let (
+        pending_by_artifact,
+        browser_pending_operations,
+        browser_mount_generations,
+        browser_notices,
+    ) = {
         let state = core
             .artifact
             .lock()
             .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-        state
+        let pending = state
             .pending_writes
             .iter()
             .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone()))
@@ -5027,7 +5843,47 @@ fn build_artifact_workspace_snapshot(
                     .iter()
                     .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone())),
             )
-            .collect::<BTreeMap<_, _>>()
+            .chain(
+                state
+                    .pending_browser_actions
+                    .iter()
+                    .map(|(prompt_id, pending)| (pending.artifact_id.clone(), prompt_id.clone())),
+            )
+            .collect::<BTreeMap<_, _>>();
+        let browser_operations = state
+            .pending_browser_actions
+            .values()
+            .map(|pending| {
+                let operation = match &pending.payload {
+                    PendingArtifactBrowserPayload::Open { .. } => "open",
+                    PendingArtifactBrowserPayload::Navigate { intent, .. } => match intent {
+                        artifact::BrowserNavigationIntent::Back => "back",
+                        artifact::BrowserNavigationIntent::Forward => "forward",
+                        artifact::BrowserNavigationIntent::Refresh => "refresh",
+                    },
+                    PendingArtifactBrowserPayload::NavigateTo { .. } => "reply-navigation",
+                    PendingArtifactBrowserPayload::Recover { .. } => "refresh",
+                    PendingArtifactBrowserPayload::NativeRequest { .. } => "website-navigation",
+                    PendingArtifactBrowserPayload::ClearData { .. } => "clear-data",
+                };
+                let target_url = pending
+                    .action
+                    .arguments
+                    .get("displayUrl")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                (
+                    pending.artifact_id.clone(),
+                    (operation.to_owned(), target_url),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        (
+            pending,
+            browser_operations,
+            state.browser_mount_generations.clone(),
+            state.browser_notices.clone(),
+        )
     };
     let artifacts = records
         .into_iter()
@@ -5035,10 +5891,20 @@ fn build_artifact_workspace_snapshot(
             (active_project_id.as_deref() == Some(record.project_id.as_str())
                 && active_session_id.as_deref() == Some(record.session_id.as_str()))
             .then(|| {
+                let browser_pending = browser_pending_operations.get(&record.artifact_id).cloned();
                 artifact_protocol_snapshot(
                     record.clone(),
                     pending_by_artifact.get(&record.artifact_id).cloned(),
+                    browser_pending
+                        .as_ref()
+                        .map(|(operation, _)| operation.clone()),
+                    browser_pending.and_then(|(_, target_url)| target_url),
                     project_name,
+                    browser_mount_generations.get(&record.artifact_id).copied(),
+                    browser_notices
+                        .get(&record.artifact_id)
+                        .cloned()
+                        .unwrap_or_default(),
                 )
             })
         })
@@ -5192,6 +6058,270 @@ fn reconcile_completed_file_reply_proposals(
     Ok(())
 }
 
+/// Reconciles one explicit Browser Reply navigation envelope against the
+/// immutable captured artifact revision, then sends the exact target through
+/// the same Action Gateway used by direct Browser operations.
+fn reconcile_completed_browser_reply_navigation(
+    core: &AppCoreState,
+    app: &tauri::AppHandle,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    use runtime::session::RunAttemptStatus;
+
+    let scope = active_artifact_scope(core, correlation_id.clone())?;
+    let sessions = core
+        .runtime
+        .durable_sessions()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let Some(session) = sessions
+        .iter()
+        .find(|session| session.session_id == scope.session_id)
+    else {
+        return Ok(());
+    };
+    let mut candidates = Vec::new();
+    for attempt in &session.attempts {
+        let RunAttemptStatus::Completed { completed_at_ms } = attempt.status else {
+            continue;
+        };
+        let Some(turn) = session
+            .turns
+            .iter()
+            .find(|turn| turn.turn_id == attempt.turn_id)
+        else {
+            continue;
+        };
+        let Some(context) = turn
+            .reply_context
+            .as_ref()
+            .and_then(|reply| reply.artifact_context.as_ref())
+            .filter(|context| context.provider_type == "browser")
+        else {
+            continue;
+        };
+        let assistant_markdown = project_attempt_snapshot(attempt)?.assistant_markdown;
+        let Some(target) = artifact::browser::browser_reply_navigation_target(&assistant_markdown)
+        else {
+            continue;
+        };
+        candidates.push((
+            completed_at_ms,
+            attempt.attempt_id.as_str(),
+            context,
+            target,
+        ));
+    }
+    candidates.sort_by_key(|(completed_at_ms, ..)| *completed_at_ms);
+
+    for (completed_at_ms, attempt_id, context, target) in candidates {
+        if core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .pending_browser_actions
+            .values()
+            .any(|pending| pending.artifact_id == context.artifact_id)
+        {
+            continue;
+        }
+        let Some(document) = scope
+            .database
+            .artifact_document(&context.artifact_id)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        else {
+            continue;
+        };
+        let mut record = deserialize_artifact_record(document, correlation_id.clone())?;
+        if record.workspace_id != scope.workspace_id
+            || record.project_id != scope.project_id
+            || record.session_id != scope.session_id
+            || record.record_revision != context.artifact_record_revision
+        {
+            continue;
+        }
+        let artifact::ArtifactState::Browser(browser_state) = &mut record.state else {
+            continue;
+        };
+        if browser_state.as_resource_version() != context.captured_live_version
+            || browser_state.has_processed_reply_attempt(attempt_id)
+            || !matches!(
+                browser_state.phase,
+                artifact::BrowserPhase::Ready { .. }
+                    | artifact::BrowserPhase::Error { .. }
+                    | artifact::BrowserPhase::Recovery { .. }
+            )
+        {
+            continue;
+        }
+        let observed_at_ms = completed_at_ms.max(browser_state.version.observed_at_ms);
+        browser_state
+            .record_reply_attempt(attempt_id, observed_at_ms)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let controller_generation = browser_state.controller_generation;
+        let expected_revision = record.record_revision;
+        advance_artifact_record(
+            &mut record,
+            artifact::ArtifactHistoryKind::ReplySubmitted,
+            observed_at_ms,
+        )?;
+        persist_artifact_record(
+            &scope,
+            &record,
+            Some(expected_revision),
+            correlation_id.clone(),
+        )?;
+        let mount_generation = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .browser_mount_generations
+            .get(&record.artifact_id)
+            .copied()
+            .unwrap_or(1);
+        let (pending, facts) = prepare_browser_action(
+            core,
+            &scope,
+            &record,
+            PendingArtifactBrowserPayload::NavigateTo {
+                target: target.clone(),
+                controller_generation,
+                mount_generation,
+            },
+            "browser.reply.navigate",
+            target.display_url(),
+            &target.navigation_sha256(),
+            ActionInitiator::Agent,
+            ActionRequestOrigin::ArtifactReplyProposal,
+            observed_at_ms,
+            correlation_id.clone(),
+        )?;
+        propose_browser_action(
+            core,
+            app,
+            pending,
+            facts,
+            observed_at_ms,
+            correlation_id.clone(),
+        )?;
+    }
+    Ok(())
+}
+
+fn reconcile_pending_native_browser_requests(
+    core: &AppCoreState,
+    app: &tauri::AppHandle,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let active_scope = active_artifact_scope(core, correlation_id.clone())?;
+    let now_ms =
+        current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut candidates = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .browser_native_requests
+        .iter()
+        .map(|(request_id, request)| (request_id.clone(), request.clone()))
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(_, request)| request.observed_at_ms);
+
+    for (request_id, request) in candidates {
+        let identity = browser::native::NativeBrowserIdentity {
+            artifact_id: request.artifact_id.clone(),
+            controller_generation: request.controller_generation,
+            mount_generation: request.mount_generation,
+        };
+        let same_scope = request.scope.workspace_id == active_scope.workspace_id
+            && request.scope.project_id == active_scope.project_id
+            && request.scope.session_id == active_scope.session_id;
+        let active_identity = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .browser_active_identity
+            .as_ref()
+            == Some(&identity);
+        let expired = request.observed_at_ms < now_ms.saturating_sub(120_000);
+        if !same_scope || !active_identity || expired {
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                .browser_native_requests
+                .remove(&request_id);
+            let _ = browser::native::dispatch_action(
+                app,
+                Arc::clone(&core.browser_events),
+                identity,
+                browser::native::NativeBrowserAction::DiscardNavigationRequest { request_id },
+            );
+            continue;
+        }
+        if core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+            .pending_browser_actions
+            .values()
+            .any(|pending| pending.artifact_id == request.artifact_id)
+        {
+            continue;
+        }
+        let record = load_scoped_artifact_record(
+            &request.scope,
+            &request.artifact_id,
+            correlation_id.clone(),
+        )?;
+        let current_identity_matches = matches!(
+            &record.state,
+            artifact::ArtifactState::Browser(browser)
+                if browser.controller_generation == request.controller_generation
+                    && record.record_revision == request.record_revision
+        );
+        if !current_identity_matches {
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+                .browser_native_requests
+                .remove(&request_id);
+            let _ = browser::native::dispatch_action(
+                app,
+                Arc::clone(&core.browser_events),
+                identity,
+                browser::native::NativeBrowserAction::DiscardNavigationRequest { request_id },
+            );
+            continue;
+        }
+        let proposed_at_ms = now_ms.max(request.observed_at_ms);
+        let (pending, facts) = prepare_browser_action(
+            core,
+            &request.scope,
+            &record,
+            PendingArtifactBrowserPayload::NativeRequest {
+                request_id: request_id.clone(),
+                controller_generation: request.controller_generation,
+                mount_generation: request.mount_generation,
+                navigation_sha256: request.navigation_sha256.clone(),
+            },
+            "browser.page.navigate",
+            &request.display_url,
+            &request.navigation_sha256,
+            ActionInitiator::Runtime,
+            ActionRequestOrigin::RuntimeTool,
+            proposed_at_ms,
+            correlation_id.clone(),
+        )?;
+        propose_browser_action(
+            core,
+            app,
+            pending,
+            facts,
+            proposed_at_ms,
+            correlation_id.clone(),
+        )?;
+    }
+    Ok(())
+}
+
 fn save_artifact_ui_state(
     scope: &ActiveArtifactScope,
     focused: Option<&artifact::ArtifactRecord>,
@@ -5325,6 +6455,7 @@ fn clear_persisted_artifact_focus(
 
 #[tauri::command]
 fn artifact_snapshot(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
 ) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
@@ -5333,7 +6464,11 @@ fn artifact_snapshot(
         .artifact_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    reconcile_native_browser_events(&core, &scope, request.correlation_id.clone())?;
+    reconcile_pending_native_browser_requests(&core, &app, request.correlation_id.clone())?;
     reconcile_completed_file_reply_proposals(&core, request.correlation_id.clone())?;
+    reconcile_completed_browser_reply_navigation(&core, &app, request.correlation_id.clone())?;
     let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
     protocol::artifact_workspace_snapshot(request, payload)
 }
@@ -7280,6 +8415,1674 @@ fn propose_terminal_action(
     }
 }
 
+fn resolve_browser_environment(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    artifact_id: &str,
+    correlation_id: protocol::CorrelationId,
+) -> Result<
+    (
+        artifact::BrowserEnvironmentReference,
+        browser::native::NativeBrowserDataStore,
+    ),
+    ProtocolError,
+> {
+    let app_configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .last_known_good()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let project_id = Uuid::parse_str(&scope.project_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let chat_id = Uuid::parse_str(&scope.session_id)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let environment = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .as_ref()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?
+        .restore_effective_configuration_snapshot(
+            app_configuration,
+            Some(project_id),
+            Some(chat_id),
+            core::configuration::ManagedCeilings::default(),
+            core::configuration::SecurityConstraints::default(),
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .configuration
+        .browser_environment;
+    let persistent_scope = browser::profile::persistent_profile_scope(
+        environment,
+        &scope.workspace_id,
+        &scope.project_id,
+        &scope.session_id,
+    );
+    let Some(persistent_scope) = persistent_scope else {
+        return Ok((
+            artifact::BrowserEnvironmentReference::ephemeral(artifact_id, 1)
+                .map_err(|_| workspace_state_unavailable(correlation_id))?,
+            browser::native::NativeBrowserDataStore::Ephemeral,
+        ));
+    };
+    let mut registry = core
+        .browser_profiles
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let generation = registry.snapshot().generation;
+    let resolved = registry
+        .resolve(generation, persistent_scope)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    if !matches!(
+        resolved.profile.lifecycle,
+        browser::profile::PersistentProfileLifecycle::Ready
+    ) {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Browser data is being cleared; wait before opening this environment",
+            true,
+        ));
+    }
+    let reference = match resolved.profile.scope {
+        browser::profile::PersistentProfileScope::AppWide => {
+            artifact::BrowserEnvironmentReference::app_wide(resolved.profile.data_generation)
+        }
+        browser::profile::PersistentProfileScope::WorkspaceProject {
+            workspace_id,
+            project_id,
+        } => artifact::BrowserEnvironmentReference::workspace_project(
+            workspace_id,
+            project_id,
+            resolved.profile.data_generation,
+        ),
+        browser::profile::PersistentProfileScope::Chat {
+            workspace_id,
+            chat_id,
+        } => artifact::BrowserEnvironmentReference::chat(
+            workspace_id,
+            scope.project_id.clone(),
+            chat_id,
+            resolved.profile.data_generation,
+        ),
+    }
+    .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    Ok((
+        reference,
+        browser::native::NativeBrowserDataStore::Persistent {
+            profile_id: resolved.profile.profile_id,
+        },
+    ))
+}
+
+fn browser_data_store_for_reference(
+    core: &AppCoreState,
+    reference: &artifact::BrowserEnvironmentReference,
+    correlation_id: protocol::CorrelationId,
+) -> Result<browser::native::NativeBrowserDataStore, ProtocolError> {
+    let Some(scope) = persistent_profile_scope_for_reference(reference) else {
+        return Ok(browser::native::NativeBrowserDataStore::Ephemeral);
+    };
+    let registry = core
+        .browser_profiles
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let profile = registry
+        .snapshot()
+        .profiles
+        .into_iter()
+        .find(|profile| profile.scope == scope && profile.data_generation == reference.generation)
+        .filter(|profile| {
+            matches!(
+                profile.lifecycle,
+                browser::profile::PersistentProfileLifecycle::Ready
+            )
+        })
+        .ok_or_else(|| {
+            platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "The Browser Environment generation changed",
+                true,
+            )
+        })?;
+    Ok(browser::native::NativeBrowserDataStore::Persistent {
+        profile_id: profile.profile_id,
+    })
+}
+
+fn persistent_profile_scope_for_reference(
+    reference: &artifact::BrowserEnvironmentReference,
+) -> Option<browser::profile::PersistentProfileScope> {
+    match reference.scope {
+        artifact::BrowserEnvironmentScope::AppWide => {
+            Some(browser::profile::PersistentProfileScope::AppWide)
+        }
+        artifact::BrowserEnvironmentScope::WorkspaceProject => {
+            Some(browser::profile::PersistentProfileScope::WorkspaceProject {
+                workspace_id: reference.workspace_id.clone()?,
+                project_id: reference.project_id.clone()?,
+            })
+        }
+        artifact::BrowserEnvironmentScope::Chat => {
+            Some(browser::profile::PersistentProfileScope::Chat {
+                workspace_id: reference.workspace_id.clone()?,
+                chat_id: reference.session_id.clone()?,
+            })
+        }
+        artifact::BrowserEnvironmentScope::None => None,
+    }
+}
+
+fn effective_browser_media_permission_policy(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<browser::native::NativeBrowserPermissionPolicy, ProtocolError> {
+    let facts = ActionFacts {
+        action_kind: "browser.permission.media".into(),
+        native_tool: "webkit.permission.media".into(),
+        surface: ActionSurface::Browser,
+        effects: BTreeSet::from([ActionEffect::Capture, ActionEffect::Listen]),
+        scope: ActionScope::System,
+        initiator: ActionInitiator::Runtime,
+        sensitivity: ActionSensitivity::Private,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::RuntimeTool,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: "browser-permission:media".into(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    let resolution = core
+        .runtime
+        .coordinator()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?
+        .resolve_direct_policy(&facts, now_ms);
+    Ok(if resolution.decision == PolicyDecision::Deny {
+        browser::native::NativeBrowserPermissionPolicy::Deny
+    } else {
+        browser::native::NativeBrowserPermissionPolicy::PlatformDefault
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_browser_action(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &artifact::ArtifactRecord,
+    payload: PendingArtifactBrowserPayload,
+    action_kind: &str,
+    display_url: &str,
+    navigation_sha256: &str,
+    initiator: ActionInitiator,
+    request_origin: ActionRequestOrigin,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(PendingArtifactBrowserAction, ActionFacts), ProtocolError> {
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let action_id = format!("browser-action-{}", Uuid::new_v4().as_simple());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.browser".into(),
+        arguments: serde_json::json!({
+            "artifactId": record.artifact_id,
+            "intent": action_kind,
+            "displayUrl": display_url,
+            "navigationSha256": navigation_sha256,
+        }),
+        risk: CanonicalRisk::Low,
+        requested_authority: BTreeSet::from(["browser.navigate".into()]),
+        canonical_target: format!("browser-target:{navigation_sha256}"),
+        target_version: format!("browser-record-{}", record.record_revision),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        run_id: format!("browser-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The Browser operation could not be bound to an exact action",
+            false,
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: action_kind.into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Browser,
+        effects: BTreeSet::from([ActionEffect::Read]),
+        scope: ActionScope::Remote,
+        initiator,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: format!("browser-target:{navigation_sha256}"),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((
+        PendingArtifactBrowserAction {
+            artifact_id: record.artifact_id.clone(),
+            record_revision: record.record_revision,
+            scope: scope.clone(),
+            action,
+            live,
+            payload,
+        },
+        facts,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_browser_clear_action(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    record: &artifact::ArtifactRecord,
+    payload: PendingArtifactBrowserPayload,
+    environment: &artifact::BrowserEnvironmentReference,
+    canonical_target: String,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(PendingArtifactBrowserAction, ActionFacts), ProtocolError> {
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let action_id = format!("browser-action-{}", Uuid::new_v4().as_simple());
+    let scope_label = match environment.scope {
+        artifact::BrowserEnvironmentScope::AppWide => "all-browsers",
+        artifact::BrowserEnvironmentScope::WorkspaceProject => "per-project",
+        artifact::BrowserEnvironmentScope::Chat => "per-chat-session",
+        artifact::BrowserEnvironmentScope::None => "none",
+    };
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.browser".into(),
+        arguments: serde_json::json!({
+            "artifactId": record.artifact_id,
+            "intent": "browser.data.clear",
+            "environmentScope": scope_label,
+            "dataGeneration": environment.generation,
+        }),
+        risk: CanonicalRisk::Medium,
+        requested_authority: BTreeSet::from(["browser.clear-data".into()]),
+        canonical_target: canonical_target.clone(),
+        target_version: format!("browser-record-{}", record.record_revision),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        run_id: format!("browser-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The Browser data clear could not be bound to an exact action",
+            false,
+        )
+    })?;
+    let facts = ActionFacts {
+        action_kind: "browser.data.clear".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Browser,
+        effects: BTreeSet::from([ActionEffect::Delete]),
+        scope: ActionScope::ExternalLocal,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Private,
+        reversibility: ActionReversibility::Destructive,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target,
+        workspace_id: scope.workspace_id.clone(),
+        session_id: scope.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((
+        PendingArtifactBrowserAction {
+            artifact_id: record.artifact_id.clone(),
+            record_revision: record.record_revision,
+            scope: scope.clone(),
+            action,
+            live,
+            payload,
+        },
+        facts,
+    ))
+}
+
+fn persist_browser_policy_denial(
+    pending: &PendingArtifactBrowserAction,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    if !matches!(pending.payload, PendingArtifactBrowserPayload::Open { .. }) {
+        return Ok(());
+    }
+    let mut record =
+        load_scoped_artifact_record(&pending.scope, &pending.artifact_id, correlation_id.clone())?;
+    let artifact::ArtifactState::Browser(browser) = &mut record.state else {
+        return Err(workspace_state_unavailable(correlation_id));
+    };
+    browser
+        .fail_before_controller(artifact::BrowserErrorCode::PolicyDenied, false, now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let expected = record.record_revision;
+    advance_artifact_record(
+        &mut record,
+        artifact::ArtifactHistoryKind::RecoveryChanged,
+        now_ms,
+    )?;
+    persist_artifact_record(&pending.scope, &record, Some(expected), correlation_id)?;
+    Ok(())
+}
+
+fn discard_native_browser_request(
+    core: &AppCoreState,
+    app: &tauri::AppHandle,
+    pending: &PendingArtifactBrowserAction,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let PendingArtifactBrowserPayload::NativeRequest {
+        request_id,
+        controller_generation,
+        mount_generation,
+        ..
+    } = &pending.payload
+    else {
+        return Ok(());
+    };
+    let identity = browser::native::NativeBrowserIdentity {
+        artifact_id: pending.artifact_id.clone(),
+        controller_generation: *controller_generation,
+        mount_generation: *mount_generation,
+    };
+    let active = {
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        state.browser_native_requests.remove(request_id);
+        let active = state.browser_active_identity.as_ref() == Some(&identity);
+        let notices = state
+            .browser_notices
+            .entry(pending.artifact_id.clone())
+            .or_default();
+        notices.push(ArtifactBrowserNoticeSnapshot {
+            id: format!("browser-navigation-denied-{request_id}"),
+            kind: "warning".into(),
+            title: "Navigation blocked".into(),
+            message: "The website-requested navigation was not authorized.".into(),
+        });
+        if notices.len() > 32 {
+            let excess = notices.len() - 32;
+            notices.drain(..excess);
+        }
+        active
+    };
+    if active {
+        let _ = browser::native::dispatch_action(
+            app,
+            Arc::clone(&core.browser_events),
+            identity,
+            browser::native::NativeBrowserAction::DiscardNavigationRequest {
+                request_id: request_id.clone(),
+            },
+        );
+    }
+    Ok(())
+}
+
+fn execute_browser_action(
+    core: &AppCoreState,
+    app: &tauri::AppHandle,
+    pending: PendingArtifactBrowserAction,
+    token: AuthorizationToken,
+    approval_prompt_id: Option<&str>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let record =
+        load_scoped_artifact_record(&pending.scope, &pending.artifact_id, correlation_id.clone())?;
+    if record.record_revision != pending.record_revision
+        || !matches!(record.state, artifact::ArtifactState::Browser(_))
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The approved Browser operation changed before execution",
+            true,
+        ));
+    }
+    let mut effect_result: Option<Result<(), String>> = None;
+    let mut native_action = None;
+    let mut profile_clear_dispatch = None;
+    let mut ephemeral_clear_dispatch = None;
+    let canonical_target = pending.action.canonical_target.clone();
+    let completed_at_ms = now_ms.saturating_add(1);
+    core.runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator.execute_direct_action(
+                &token,
+                &pending.action,
+                pending.live,
+                approval_prompt_id,
+                now_ms,
+                |_permit| {
+                    let result = (|| {
+                        let mut state = core
+                            .artifact
+                            .lock()
+                            .map_err(|_| "Browser application state unavailable".to_owned())?;
+                        match &pending.payload {
+                            PendingArtifactBrowserPayload::Open { target } => {
+                                state.browser_targets.insert(
+                                    pending.artifact_id.clone(),
+                                    BrowserTransientTarget {
+                                        target: target.clone(),
+                                    },
+                                );
+                                state
+                                    .browser_mount_generations
+                                    .entry(pending.artifact_id.clone())
+                                    .or_insert(1);
+                                state.browser_notices.remove(&pending.artifact_id);
+                            }
+                            PendingArtifactBrowserPayload::Navigate {
+                                intent,
+                                navigation_sha256,
+                                controller_generation,
+                                mount_generation,
+                            } => {
+                                let artifact::ArtifactState::Browser(browser) = &record.state else {
+                                    return Err("Browser record changed".into());
+                                };
+                                if browser.controller_generation != *controller_generation
+                                    || state
+                                        .browser_mount_generations
+                                        .get(&pending.artifact_id)
+                                        .copied()
+                                        .unwrap_or(1)
+                                        != *mount_generation
+                                {
+                                    return Err("Browser controller identity changed".into());
+                                }
+                                let action = match intent {
+                                    artifact::BrowserNavigationIntent::Back => {
+                                        browser::native::NativeBrowserAction::Back {
+                                            expected_navigation_sha256: navigation_sha256.clone(),
+                                        }
+                                    }
+                                    artifact::BrowserNavigationIntent::Forward => {
+                                        browser::native::NativeBrowserAction::Forward {
+                                            expected_navigation_sha256: navigation_sha256.clone(),
+                                        }
+                                    }
+                                    artifact::BrowserNavigationIntent::Refresh => {
+                                        browser::native::NativeBrowserAction::Refresh {
+                                            expected_navigation_sha256: navigation_sha256.clone(),
+                                        }
+                                    }
+                                };
+                                if state
+                                    .browser_mounted_artifacts
+                                    .contains(&pending.artifact_id)
+                                {
+                                    native_action = Some((
+                                        browser::native::NativeBrowserIdentity {
+                                            artifact_id: pending.artifact_id.clone(),
+                                            controller_generation: *controller_generation,
+                                            mount_generation: *mount_generation,
+                                        },
+                                        action,
+                                    ));
+                                } else {
+                                    state
+                                        .browser_pending_navigation
+                                        .insert(pending.artifact_id.clone(), action);
+                                }
+                            }
+                            PendingArtifactBrowserPayload::NavigateTo {
+                                target,
+                                controller_generation,
+                                mount_generation,
+                            }
+                            | PendingArtifactBrowserPayload::Recover {
+                                target,
+                                controller_generation,
+                                mount_generation,
+                            } => {
+                                let artifact::ArtifactState::Browser(browser) = &record.state else {
+                                    return Err("Browser record changed".into());
+                                };
+                                if browser.controller_generation != *controller_generation
+                                    || state
+                                        .browser_mount_generations
+                                        .get(&pending.artifact_id)
+                                        .copied()
+                                        .unwrap_or(1)
+                                        != *mount_generation
+                                {
+                                    return Err("Browser controller identity changed".into());
+                                }
+                                state.browser_targets.insert(
+                                    pending.artifact_id.clone(),
+                                    BrowserTransientTarget {
+                                        target: target.clone(),
+                                    },
+                                );
+                                if state
+                                    .browser_mounted_artifacts
+                                    .contains(&pending.artifact_id)
+                                {
+                                    native_action = Some((
+                                        browser::native::NativeBrowserIdentity {
+                                            artifact_id: pending.artifact_id.clone(),
+                                            controller_generation: *controller_generation,
+                                            mount_generation: *mount_generation,
+                                        },
+                                        browser::native::NativeBrowserAction::NavigateTo {
+                                            target: target.clone(),
+                                        },
+                                    ));
+                                } else if matches!(
+                                    browser.phase,
+                                    artifact::BrowserPhase::Recovery {
+                                        code: artifact::BrowserRecoveryCode::ApplicationRelaunch,
+                                        ..
+                                    }
+                                ) {
+                                    state
+                                        .browser_pending_navigation
+                                        .remove(&pending.artifact_id);
+                                    let mount = state
+                                        .browser_mount_generations
+                                        .entry(pending.artifact_id.clone())
+                                        .or_insert(1);
+                                    *mount = mount.saturating_add(1).max(1);
+                                } else {
+                                    state.browser_pending_navigation.insert(
+                                        pending.artifact_id.clone(),
+                                        browser::native::NativeBrowserAction::NavigateTo {
+                                            target: target.clone(),
+                                        },
+                                    );
+                                }
+                            }
+                            PendingArtifactBrowserPayload::NativeRequest {
+                                request_id,
+                                controller_generation,
+                                mount_generation,
+                                navigation_sha256,
+                            } => {
+                                let artifact::ArtifactState::Browser(browser) = &record.state else {
+                                    return Err("Browser record changed".into());
+                                };
+                                let identity = browser::native::NativeBrowserIdentity {
+                                    artifact_id: pending.artifact_id.clone(),
+                                    controller_generation: *controller_generation,
+                                    mount_generation: *mount_generation,
+                                };
+                                if browser.controller_generation != *controller_generation
+                                    || state.browser_active_identity.as_ref() != Some(&identity)
+                                    || state
+                                        .browser_native_requests
+                                        .get(request_id)
+                                        .is_none_or(|request| {
+                                            request.navigation_sha256 != *navigation_sha256
+                                                || request.artifact_id != pending.artifact_id
+                                        })
+                                {
+                                    return Err("Browser navigation request changed".into());
+                                }
+                                state.browser_native_requests.remove(request_id);
+                                native_action = Some((
+                                    identity,
+                                    browser::native::NativeBrowserAction::AuthorizeNavigationRequest {
+                                        request_id: request_id.clone(),
+                                        expected_navigation_sha256: navigation_sha256.clone(),
+                                    },
+                                ));
+                            }
+                            PendingArtifactBrowserPayload::ClearData {
+                                environment,
+                                persistent,
+                                operation_id,
+                                controller_generation,
+                                mount_generation,
+                            } => {
+                                let artifact::ArtifactState::Browser(browser) = &record.state else {
+                                    return Err("Browser record changed".into());
+                                };
+                                if &browser.environment != environment
+                                    || browser.controller_generation != *controller_generation
+                                    || state
+                                        .browser_mount_generations
+                                        .get(&pending.artifact_id)
+                                        .copied()
+                                        .unwrap_or(1)
+                                        != *mount_generation
+                                {
+                                    return Err("Browser Environment changed".into());
+                                }
+                                if let Some(clear) = persistent {
+                                    let mut registry = core
+                                        .browser_profiles
+                                        .lock()
+                                        .map_err(|_| "Browser profile registry unavailable".to_owned())?;
+                                    let marked = registry
+                                        .mark_clear_pending(
+                                            clear.registry_generation,
+                                            &clear.scope,
+                                            clear.data_generation,
+                                            operation_id.clone(),
+                                        )
+                                        .map_err(|_| "Browser profile clear changed".to_owned())?;
+                                    if marked.profile_id != clear.profile_id {
+                                        return Err("Browser profile identifier changed".into());
+                                    }
+                                    profile_clear_dispatch = Some((
+                                        clear.profile_id.clone(),
+                                        operation_id.clone(),
+                                    ));
+                                } else {
+                                    state.browser_ephemeral_clear_operations.insert(
+                                        pending.artifact_id.clone(),
+                                        operation_id.clone(),
+                                    );
+                                    ephemeral_clear_dispatch = Some((
+                                        pending.artifact_id.clone(),
+                                        operation_id.clone(),
+                                    ));
+                                }
+                                state.browser_native_requests.retain(|_, request| {
+                                    request.artifact_id != pending.artifact_id
+                                });
+                                state.browser_pending_navigation.remove(&pending.artifact_id);
+                                state.browser_mounted_artifacts.remove(&pending.artifact_id);
+                                if state
+                                    .browser_active_identity
+                                    .as_ref()
+                                    .is_some_and(|identity| {
+                                        identity.artifact_id == pending.artifact_id
+                                    })
+                                {
+                                    state.browser_active_identity = None;
+                                }
+                                let mount = state
+                                    .browser_mount_generations
+                                    .entry(pending.artifact_id.clone())
+                                    .or_insert(1);
+                                *mount = mount.saturating_add(1).max(1);
+                            }
+                        }
+                        Ok(())
+                    })();
+                    let succeeded = result.is_ok();
+                    effect_result = Some(result);
+                    NormalizedActionResult {
+                        status: if succeeded {
+                            NormalizedActionStatus::Succeeded
+                        } else {
+                            NormalizedActionStatus::Failed
+                        },
+                        result_code: if succeeded {
+                            "browser-operation-authorized"
+                        } else {
+                            "browser-operation-rejected"
+                        }
+                        .into(),
+                        exit_code: succeeded.then_some(0),
+                        changed_targets: if succeeded {
+                            vec![canonical_target.clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        output_sha256: None,
+                        completed_at_ms,
+                    }
+                },
+            )
+            .map(|_| ())
+            .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    effect_result
+        .unwrap_or_else(|| Err("Browser action permit was not executed".into()))
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    if let Some((identity, action)) = native_action {
+        browser::native::dispatch_action(app, Arc::clone(&core.browser_events), identity, action)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    }
+    if let Some((profile_id, operation_id)) = profile_clear_dispatch {
+        browser::native::dispatch_clear_profile(
+            app,
+            Arc::clone(&core.browser_events),
+            profile_id,
+            operation_id,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    }
+    if let Some((artifact_id, operation_id)) = ephemeral_clear_dispatch {
+        browser::native::dispatch_destroy_ephemeral(
+            app,
+            Arc::clone(&core.browser_events),
+            artifact_id,
+            operation_id,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    }
+    save_artifact_ui_state(&pending.scope, Some(&record), now_ms, correlation_id)?;
+    Ok(())
+}
+
+fn propose_browser_action(
+    core: &AppCoreState,
+    app: &tauri::AppHandle,
+    mut pending: PendingArtifactBrowserAction,
+    facts: ActionFacts,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    if core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .pending_browser_actions
+        .values()
+        .any(|active| active.artifact_id == pending.artifact_id)
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Resolve the pending Browser approval before starting another Browser operation",
+            true,
+        ));
+    }
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, pending.action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            discard_native_browser_request(core, app, &pending, correlation_id.clone())?;
+            persist_browser_policy_denial(&pending, now_ms, correlation_id)
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            pending.record_revision = load_scoped_artifact_record(
+                &pending.scope,
+                &pending.artifact_id,
+                correlation_id.clone(),
+            )?
+            .record_revision;
+            core.artifact
+                .lock()
+                .map_err(|_| workspace_state_unavailable(correlation_id))?
+                .pending_browser_actions
+                .insert(prompt.prompt_id, pending);
+            Ok(())
+        }
+        GatewayProposal::Authorized { token, .. } => {
+            execute_browser_action(core, app, pending, token, None, now_ms, correlation_id)
+        }
+    }
+}
+
+#[tauri::command]
+fn artifact_open_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserOpenInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let target = artifact::BrowserNavigationTarget::parse(&input.address).map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "Enter a valid HTTP or HTTPS Browser address without embedded credentials",
+            false,
+        )
+    })?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let artifact_id = format!("artifact-{}", Uuid::new_v4().as_simple());
+    let (environment, _data_store) =
+        resolve_browser_environment(&core, &scope, &artifact_id, request.correlation_id.clone())?;
+    let state = artifact::BrowserArtifactState::new_queued(environment, &target, 1, now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let record = new_artifact_record_with_id(
+        &scope,
+        artifact_id,
+        artifact::ArtifactProviderDescriptor::browser(),
+        artifact::ArtifactState::Browser(Box::new(state)),
+        "open-browser",
+        now_ms,
+    )?;
+    persist_artifact_record(&scope, &record, None, request.correlation_id.clone())?;
+    let (pending, facts) = prepare_browser_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactBrowserPayload::Open {
+            target: target.clone(),
+        },
+        "browser.open",
+        target.display_url(),
+        &target.navigation_sha256(),
+        ActionInitiator::User,
+        ActionRequestOrigin::DirectUserEdit,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_browser_action(
+        &core,
+        &app,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_navigate_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserNavigateInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let artifact::ArtifactState::Browser(browser_state) = &record.state else {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Only a Browser artifact accepts navigation",
+            false,
+        ));
+    };
+    if browser_state.controller_generation != input.controller_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "The Browser controller generation changed",
+            true,
+        ));
+    }
+    let intent = match input.intent {
+        ArtifactBrowserNavigationIntent::Back => artifact::BrowserNavigationIntent::Back,
+        ArtifactBrowserNavigationIntent::Forward => artifact::BrowserNavigationIntent::Forward,
+        ArtifactBrowserNavigationIntent::Refresh => artifact::BrowserNavigationIntent::Refresh,
+    };
+    browser_state
+        .validate_navigation_intent(intent)
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "The Browser navigation is no longer available",
+                true,
+            )
+        })?;
+    let mount_generation = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .browser_mount_generations
+        .get(&record.artifact_id)
+        .copied()
+        .unwrap_or(1);
+    if mount_generation != input.mount_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "The Browser mount generation changed",
+            true,
+        ));
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let navigation_entry = match intent {
+        artifact::BrowserNavigationIntent::Back => {
+            &browser_state.history[browser_state.current_history_index as usize - 1]
+        }
+        artifact::BrowserNavigationIntent::Forward => {
+            &browser_state.history[browser_state.current_history_index as usize + 1]
+        }
+        artifact::BrowserNavigationIntent::Refresh => browser_state.current_entry(),
+    };
+    let navigation_target = artifact::BrowserNavigationTarget::parse(&navigation_entry.display_url)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let relaunch_refresh = matches!(intent, artifact::BrowserNavigationIntent::Refresh)
+        && matches!(
+            browser_state.phase,
+            artifact::BrowserPhase::Recovery {
+                code: artifact::BrowserRecoveryCode::ApplicationRelaunch,
+                ..
+            }
+        );
+    let (payload, target_version_sha256) = if relaunch_refresh {
+        (
+            PendingArtifactBrowserPayload::Recover {
+                target: navigation_target.clone(),
+                controller_generation: input.controller_generation,
+                mount_generation: input.mount_generation,
+            },
+            navigation_target.navigation_sha256(),
+        )
+    } else {
+        (
+            PendingArtifactBrowserPayload::Navigate {
+                intent,
+                navigation_sha256: navigation_entry.navigation_sha256.clone(),
+                controller_generation: input.controller_generation,
+                mount_generation: input.mount_generation,
+            },
+            navigation_entry.navigation_sha256.clone(),
+        )
+    };
+    let (pending, facts) = prepare_browser_action(
+        &core,
+        &scope,
+        &record,
+        payload,
+        match intent {
+            artifact::BrowserNavigationIntent::Back => "browser.back",
+            artifact::BrowserNavigationIntent::Forward => "browser.forward",
+            artifact::BrowserNavigationIntent::Refresh => "browser.refresh",
+        },
+        navigation_target.display_url(),
+        &target_version_sha256,
+        ActionInitiator::User,
+        ActionRequestOrigin::DirectUserEdit,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_browser_action(
+        &core,
+        &app,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_clear_browser_data(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserIdentityInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    if before.focused_artifact_id.as_ref() != Some(&input.artifact_id) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Only the focused Browser can clear its Browser Environment",
+            true,
+        ));
+    }
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let browser_state = require_browser_controller_identity(
+        &core,
+        &record,
+        input.controller_generation,
+        input.mount_generation,
+        request.correlation_id.clone(),
+    )?;
+    let operation_id = Uuid::new_v4().to_string();
+    let (persistent, canonical_target) = if let Some(profile_scope) =
+        persistent_profile_scope_for_reference(&browser_state.environment)
+    {
+        let registry = core
+            .browser_profiles
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let snapshot = registry.snapshot();
+        let profile = snapshot
+            .profiles
+            .iter()
+            .find(|profile| {
+                profile.scope == profile_scope
+                    && profile.data_generation == browser_state.environment.generation
+                    && matches!(
+                        profile.lifecycle,
+                        browser::profile::PersistentProfileLifecycle::Ready
+                    )
+            })
+            .ok_or_else(|| {
+                platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Conflict,
+                    "The Browser Environment generation changed",
+                    true,
+                )
+            })?;
+        (
+            Some(PendingPersistentBrowserClear {
+                scope: profile_scope,
+                profile_id: profile.profile_id.clone(),
+                registry_generation: snapshot.generation,
+                data_generation: profile.data_generation,
+            }),
+            format!(
+                "browser-profile:{}:generation:{}",
+                profile.profile_id, profile.data_generation
+            ),
+        )
+    } else {
+        (
+            None,
+            format!(
+                "browser-ephemeral:{}:generation:{}",
+                record.artifact_id, browser_state.environment.generation
+            ),
+        )
+    };
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (pending, facts) = prepare_browser_clear_action(
+        &core,
+        &scope,
+        &record,
+        PendingArtifactBrowserPayload::ClearData {
+            environment: browser_state.environment.clone(),
+            persistent,
+            operation_id,
+            controller_generation: input.controller_generation,
+            mount_generation: input.mount_generation,
+        },
+        &browser_state.environment,
+        canonical_target,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    propose_browser_action(
+        &core,
+        &app,
+        pending,
+        facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+fn require_browser_controller_identity<'a>(
+    core: &AppCoreState,
+    record: &'a artifact::ArtifactRecord,
+    controller_generation: u64,
+    mount_generation: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<&'a artifact::BrowserArtifactState, ProtocolError> {
+    let artifact::ArtifactState::Browser(browser_state) = &record.state else {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The Artifact is not a Browser",
+            false,
+        ));
+    };
+    let active_mount = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .browser_mount_generations
+        .get(&record.artifact_id)
+        .copied()
+        .unwrap_or(1);
+    if browser_state.controller_generation != controller_generation
+        || active_mount != mount_generation
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "The Browser controller identity changed",
+            true,
+        ));
+    }
+    Ok(browser_state)
+}
+
+#[tauri::command]
+fn artifact_mount_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserViewportInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    if before.focused_artifact_id.as_ref() != Some(&input.artifact_id) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Only the focused Browser can mount a native surface",
+            true,
+        ));
+    }
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let mut record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    let (already_mounted, cached) = {
+        let state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        (
+            state
+                .browser_mounted_artifacts
+                .contains(&record.artifact_id),
+            state.browser_targets.get(&record.artifact_id).cloned(),
+        )
+    };
+    if !already_mounted
+        && matches!(
+            &record.state,
+            artifact::ArtifactState::Browser(browser)
+                if matches!(browser.phase, artifact::BrowserPhase::Error { retryable: false, .. })
+        )
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "This Browser operation was denied or cannot be retried",
+            false,
+        ));
+    }
+    let requires_application_relaunch = !already_mounted
+        && cached.is_none()
+        && matches!(
+            &record.state,
+            artifact::ArtifactState::Browser(browser)
+                if !matches!(
+                    browser.phase,
+                    artifact::BrowserPhase::Recovery {
+                        code: artifact::BrowserRecoveryCode::ApplicationRelaunch,
+                        ..
+                    }
+                )
+        );
+    let requires_controller_recovery = !already_mounted
+        && cached.is_some()
+        && matches!(
+            &record.state,
+            artifact::ArtifactState::Browser(browser)
+                if matches!(
+                    browser.phase,
+                    artifact::BrowserPhase::Loading { .. }
+                        | artifact::BrowserPhase::Ready { .. }
+                        | artifact::BrowserPhase::Error { retryable: true, .. }
+                )
+        );
+    if requires_application_relaunch || requires_controller_recovery {
+        let now_ms = current_time_ms()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let artifact::ArtifactState::Browser(browser) = &mut record.state else {
+            unreachable!();
+        };
+        let recovery_code = if requires_application_relaunch {
+            artifact::BrowserRecoveryCode::ApplicationRelaunch
+        } else {
+            artifact::BrowserRecoveryCode::ControllerRecreated
+        };
+        browser
+            .begin_recovery(recovery_code, now_ms)
+            .and_then(|_| {
+                browser.install_controller_generation(
+                    browser.controller_generation.saturating_add(1),
+                    now_ms,
+                )
+            })
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let expected = record.record_revision;
+        advance_artifact_record(
+            &mut record,
+            artifact::ArtifactHistoryKind::RecoveryChanged,
+            now_ms,
+        )?;
+        persist_artifact_record(
+            &scope,
+            &record,
+            Some(expected),
+            request.correlation_id.clone(),
+        )?;
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let mount = state
+            .browser_mount_generations
+            .entry(record.artifact_id.clone())
+            .or_insert(1);
+        *mount = mount.saturating_add(1).max(1);
+        drop(state);
+        let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+        return protocol::artifact_workspace_snapshot(request, payload);
+    }
+    if cached.is_none() && !already_mounted {
+        // Application-relaunch recovery is a composed waiting state, not a
+        // failed native mount. Refresh creates the next authorization-bound
+        // transient target and advances the mount generation.
+        let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+        return protocol::artifact_workspace_snapshot(request, payload);
+    }
+    let browser_state = require_browser_controller_identity(
+        &core,
+        &record,
+        input.controller_generation,
+        input.mount_generation,
+        request.correlation_id.clone(),
+    )?;
+    let data_store = browser_data_store_for_reference(
+        &core,
+        &browser_state.environment,
+        request.correlation_id.clone(),
+    )?;
+    let media_permission_policy = effective_browser_media_permission_policy(
+        &core,
+        &scope,
+        current_time_ms()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?,
+        request.correlation_id.clone(),
+    )?;
+    let (initial_target, recover_existing_target, initial_kind) = match browser_state.phase {
+        artifact::BrowserPhase::Queued { .. } => (
+            Some(
+                cached
+                    .clone()
+                    .expect("authorization-backed Browser target was required above")
+                    .target,
+            ),
+            false,
+            artifact::BrowserNavigationKind::Initial,
+        ),
+        artifact::BrowserPhase::Recovery {
+            code:
+                artifact::BrowserRecoveryCode::ProfileCleared
+                | artifact::BrowserRecoveryCode::ApplicationRelaunch,
+            ..
+        } => (
+            Some(
+                cached
+                    .clone()
+                    .expect("an approved Browser recovery target was required above")
+                    .target,
+            ),
+            false,
+            artifact::BrowserNavigationKind::Recovery,
+        ),
+        artifact::BrowserPhase::Recovery { .. } => {
+            (None, true, artifact::BrowserNavigationKind::Recovery)
+        }
+        _ => (None, false, artifact::BrowserNavigationKind::New),
+    };
+    browser::native::dispatch_mount(
+        &app,
+        Arc::clone(&core.browser_events),
+        browser::native::NativeBrowserMountRequest {
+            artifact_id: record.artifact_id.clone(),
+            controller_generation: input.controller_generation,
+            mount_generation: input.mount_generation,
+            rect: browser::native::NativeBrowserRect {
+                x: input.x,
+                y: input.y,
+                width: input.width,
+                height: input.height,
+            },
+            data_store,
+            initial_target,
+            recover_existing_target,
+            initial_kind,
+            media_permission_policy,
+            focus: input.focus,
+        },
+    )
+    .map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Unavailable,
+            "The native Browser surface could not be mounted",
+            true,
+        )
+    })?;
+    let pending_navigation = {
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        if let Some(previous) =
+            state
+                .browser_active_identity
+                .replace(browser::native::NativeBrowserIdentity {
+                    artifact_id: record.artifact_id.clone(),
+                    controller_generation: input.controller_generation,
+                    mount_generation: input.mount_generation,
+                })
+        {
+            state
+                .browser_mounted_artifacts
+                .remove(&previous.artifact_id);
+        }
+        state
+            .browser_mounted_artifacts
+            .insert(record.artifact_id.clone());
+        state.browser_pending_navigation.remove(&record.artifact_id)
+    };
+    if let Some(action) = pending_navigation {
+        browser::native::dispatch_action(
+            &app,
+            Arc::clone(&core.browser_events),
+            browser::native::NativeBrowserIdentity {
+                artifact_id: record.artifact_id,
+                controller_generation: input.controller_generation,
+                mount_generation: input.mount_generation,
+            },
+            action,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    }
+    let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    protocol::artifact_workspace_snapshot(request, payload)
+}
+
+#[tauri::command]
+fn artifact_resize_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserViewportInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    if before.focused_artifact_id.as_ref() != Some(&input.artifact_id) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Only the focused Browser can resize a native surface",
+            true,
+        ));
+    }
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    require_browser_controller_identity(
+        &core,
+        &record,
+        input.controller_generation,
+        input.mount_generation,
+        request.correlation_id.clone(),
+    )?;
+    let requested_identity = browser::native::NativeBrowserIdentity {
+        artifact_id: record.artifact_id.clone(),
+        controller_generation: input.controller_generation,
+        mount_generation: input.mount_generation,
+    };
+    if core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .browser_active_identity
+        .as_ref()
+        != Some(&requested_identity)
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The native Browser surface is no longer mounted",
+            true,
+        ));
+    }
+    browser::native::dispatch_geometry(
+        &app,
+        requested_identity,
+        browser::native::NativeBrowserRect {
+            x: input.x,
+            y: input.y,
+            width: input.width,
+            height: input.height,
+        },
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    protocol::artifact_workspace_snapshot(request, before)
+}
+
+fn browser_identity_from_input(
+    core: &AppCoreState,
+    scope: &ActiveArtifactScope,
+    input: &ArtifactBrowserIdentityInput,
+    correlation_id: protocol::CorrelationId,
+) -> Result<browser::native::NativeBrowserIdentity, ProtocolError> {
+    let record = load_active_artifact_record(
+        scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        correlation_id.clone(),
+    )?;
+    require_browser_controller_identity(
+        core,
+        &record,
+        input.controller_generation,
+        input.mount_generation,
+        correlation_id,
+    )?;
+    Ok(browser::native::NativeBrowserIdentity {
+        artifact_id: record.artifact_id,
+        controller_generation: input.controller_generation,
+        mount_generation: input.mount_generation,
+    })
+}
+
+#[tauri::command]
+fn artifact_focus_native_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserIdentityInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &before)?;
+    if before.focused_artifact_id.as_ref() != Some(&input.artifact_id) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Only the focused Browser can receive native focus",
+            true,
+        ));
+    }
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let identity =
+        browser_identity_from_input(&core, &scope, &input, request.correlation_id.clone())?;
+    if core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .browser_active_identity
+        .as_ref()
+        != Some(&identity)
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The native Browser surface is no longer mounted",
+            true,
+        ));
+    }
+    browser::native::dispatch_action(
+        &app,
+        Arc::clone(&core.browser_events),
+        identity,
+        browser::native::NativeBrowserAction::Focus,
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    protocol::artifact_workspace_snapshot(request, before)
+}
+
+#[tauri::command]
+fn artifact_detach_browser(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ArtifactBrowserIdentityInput,
+) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    input.validate()?;
+    let _operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    let identity = browser::native::NativeBrowserIdentity {
+        artifact_id: input.artifact_id.as_str().to_owned(),
+        controller_generation: input.controller_generation,
+        mount_generation: input.mount_generation,
+    };
+    let is_active = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .browser_active_identity
+        .as_ref()
+        == Some(&identity);
+    if !is_active {
+        return protocol::artifact_workspace_snapshot(request, before);
+    }
+    browser::native::dispatch_detach(&app, identity)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut state = core
+        .artifact
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    state
+        .browser_mounted_artifacts
+        .remove(input.artifact_id.as_str());
+    state.browser_active_identity = None;
+    drop(state);
+    protocol::artifact_workspace_snapshot(request, before)
+}
+
 #[tauri::command]
 fn artifact_run_terminal(
     core: tauri::State<'_, AppCoreState>,
@@ -7832,6 +10635,7 @@ fn require_no_pending_artifact_write(
         .is_some_and(|record| match record.state {
             artifact::ArtifactState::File(file) => file.pending_save_requested_at_ms.is_some(),
             artifact::ArtifactState::Folder(_)
+            | artifact::ArtifactState::Browser(_)
             | artifact::ArtifactState::Terminal(_)
             | artifact::ArtifactState::Unknown(_) => false,
         });
@@ -7847,8 +10651,42 @@ fn require_no_pending_artifact_write(
     }
 }
 
+fn detach_active_native_browser(
+    app: &tauri::AppHandle,
+    core: &AppCoreState,
+    except_artifact_id: Option<&str>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let identity = {
+        let mut state = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if state
+            .browser_active_identity
+            .as_ref()
+            .is_some_and(|identity| Some(identity.artifact_id.as_str()) == except_artifact_id)
+        {
+            return Ok(());
+        }
+        let identity = state.browser_active_identity.take();
+        if let Some(identity) = &identity {
+            state
+                .browser_mounted_artifacts
+                .remove(&identity.artifact_id);
+        }
+        identity
+    };
+    if let Some(identity) = identity {
+        browser::native::dispatch_detach(app, identity)
+            .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn artifact_focus(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     input: ArtifactMutationInput,
@@ -7870,6 +10708,12 @@ fn artifact_focus(
     )?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    detach_active_native_browser(
+        &app,
+        &core,
+        Some(record.artifact_id.as_str()),
+        request.correlation_id.clone(),
+    )?;
     save_artifact_ui_state(
         &scope,
         Some(&record),
@@ -7882,6 +10726,7 @@ fn artifact_focus(
 
 #[tauri::command]
 fn artifact_close_focus(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
 ) -> Result<ProtocolEnvelope<ArtifactWorkspaceSnapshot>, protocol::StructuredCoreError> {
@@ -7895,6 +10740,39 @@ fn artifact_close_focus(
     let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let ephemeral_close = before
+        .focused_artifact_id
+        .as_ref()
+        .map(|artifact_id| artifact_id.as_str())
+        .and_then(|artifact_id| {
+            load_scoped_artifact_record(&scope, artifact_id, request.correlation_id.clone()).ok()
+        })
+        .filter(|record| {
+            matches!(
+                &record.state,
+                artifact::ArtifactState::Browser(browser)
+                    if matches!(
+                        browser.environment.scope,
+                        artifact::BrowserEnvironmentScope::None
+                    )
+            )
+        })
+        .map(|record| (record.artifact_id, Uuid::new_v4().to_string()));
+    detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
+    if let Some((artifact_id, operation_id)) = ephemeral_close {
+        core.artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .browser_ephemeral_clear_operations
+            .insert(artifact_id.clone(), operation_id.clone());
+        browser::native::dispatch_destroy_ephemeral(
+            &app,
+            Arc::clone(&core.browser_events),
+            artifact_id,
+            operation_id,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    }
     save_artifact_ui_state(&scope, None, now_ms, request.correlation_id.clone())?;
     let payload = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
     protocol::artifact_workspace_snapshot(request, payload)
@@ -8290,7 +11168,9 @@ fn artifact_folder_navigation_allowed(record: &artifact::ArtifactRecord, target:
                 .map_or("", |(parent, _)| parent);
             target.is_empty() || target == parent || parent.starts_with(&format!("{target}/"))
         }
-        artifact::ArtifactState::Terminal(_) | artifact::ArtifactState::Unknown(_) => false,
+        artifact::ArtifactState::Browser(_)
+        | artifact::ArtifactState::Terminal(_)
+        | artifact::ArtifactState::Unknown(_) => false,
     }
 }
 
@@ -8457,7 +11337,8 @@ fn artifact_select_folder_entry(
 }
 
 #[tauri::command]
-fn artifact_reply(
+async fn artifact_reply(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     input: ArtifactReplyInput,
@@ -8489,12 +11370,79 @@ fn artifact_reply(
             false,
         ));
     }
-    let capture = durable_artifact_reply_capture(
+    let mut capture = durable_artifact_reply_capture(
         &record,
         input.selected_text,
         input.selected_entry_id,
         request.correlation_id.clone(),
     )?;
+    let browser_capture = if let artifact::ArtifactState::Browser(browser) = &record.state {
+        let identity = core
+            .artifact
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .browser_active_identity
+            .clone()
+            .filter(|identity| {
+                identity.artifact_id == record.artifact_id
+                    && identity.controller_generation == browser.controller_generation
+            })
+            .ok_or_else(|| {
+                platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Conflict,
+                    "Focus the Browser before capturing immutable Reply context",
+                    true,
+                )
+            })?;
+        Some((identity, browser.current_navigation_sha256().to_owned()))
+    } else {
+        None
+    };
+    drop(record);
+    drop(scope);
+    drop(before);
+    drop(_artifact_operation);
+    drop(_conversation_operation);
+    if let Some((identity, expected_navigation_sha256)) = browser_capture {
+        let capture_app = app.clone();
+        let page = tauri::async_runtime::spawn_blocking(move || {
+            browser::native::capture_context(&capture_app, identity, expected_navigation_sha256)
+        })
+        .await
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "The Browser page changed or could not be captured safely",
+                true,
+            )
+        })?;
+        capture.browser_page_context = Some(DurableBrowserPageContext {
+            selected_text: page.selected_text,
+            visible_text: page.visible_text,
+            extracted_content: page.extracted_content,
+        });
+    }
+    let _conversation_operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current = build_artifact_workspace_snapshot(&core, request.correlation_id.clone())?;
+    require_exact_artifact_generation(&request, &current)?;
+    let scope = active_artifact_scope(&core, request.correlation_id.clone())?;
+    let record = load_active_artifact_record(
+        &scope,
+        &input.artifact_id,
+        input.base_record_revision,
+        request.correlation_id.clone(),
+    )?;
+    require_current_artifact_reply_capture(&record, &capture, request.correlation_id.clone())?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let generation = {
@@ -8618,6 +11566,16 @@ fn durable_artifact_reply_capture(
                 ));
             }
         }
+        artifact::ArtifactState::Browser(_) => {
+            if selected_entry_id.is_some() || selected_text.is_some() {
+                return Err(platform_boundary_error(
+                    correlation_id,
+                    ProtocolErrorCode::Conflict,
+                    "Selected Browser page content is unavailable from the no-page-IPC boundary",
+                    false,
+                ));
+            }
+        }
         artifact::ArtifactState::Terminal(terminal) => {
             let output = terminal.output.safe_text().map_err(|_| {
                 platform_boundary_error(
@@ -8660,6 +11618,7 @@ fn durable_artifact_reply_capture(
         resource_version: artifact_resource_snapshot(record.resource_version()),
         selected_text,
         selected_entry_id,
+        browser_page_context: None,
     })
 }
 
@@ -8683,8 +11642,33 @@ fn require_current_artifact_reply_capture(
         record,
         capture.selected_text.clone(),
         capture.selected_entry_id.clone(),
-        correlation_id,
+        correlation_id.clone(),
     )?;
+    match &record.state {
+        artifact::ArtifactState::Browser(_) if capture.browser_page_context.is_none() => {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Recapture the Browser Reply context from the focused page",
+                true,
+            ));
+        }
+        artifact::ArtifactState::Browser(_) => {}
+        artifact::ArtifactState::File(_)
+        | artifact::ArtifactState::Folder(_)
+        | artifact::ArtifactState::Terminal(_)
+        | artifact::ArtifactState::Unknown(_)
+            if capture.browser_page_context.is_some() =>
+        {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "The captured Browser Reply context no longer matches its Artifact",
+                true,
+            ));
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -9340,6 +12324,7 @@ fn artifact_save_file(
 
 #[tauri::command]
 fn artifact_answer_approval(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     input: ArtifactApprovalInput,
@@ -9354,7 +12339,7 @@ fn artifact_answer_approval(
     require_exact_artifact_generation(&request, &before)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let (pending_write, pending_terminal) = {
+    let (pending_write, pending_terminal, pending_browser) = {
         let state = core
             .artifact
             .lock()
@@ -9365,12 +12350,14 @@ fn artifact_answer_approval(
                 .pending_terminal_actions
                 .get(&input.prompt_id)
                 .cloned(),
+            state.pending_browser_actions.get(&input.prompt_id).cloned(),
         )
     };
     let expected_action = pending_write
         .as_ref()
         .map(|pending| &pending.action)
         .or_else(|| pending_terminal.as_ref().map(|pending| &pending.action))
+        .or_else(|| pending_browser.as_ref().map(|pending| &pending.action))
         .ok_or_else(|| {
             platform_boundary_error(
                 request.correlation_id.clone(),
@@ -9441,6 +12428,19 @@ fn artifact_answer_approval(
                         request.correlation_id.clone(),
                     )?;
                 }
+            } else if let Some(pending) = pending_browser {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_browser_actions
+                    .remove(&input.prompt_id);
+                discard_native_browser_request(
+                    &core,
+                    &app,
+                    &pending,
+                    request.correlation_id.clone(),
+                )?;
+                persist_browser_policy_denial(&pending, now_ms, request.correlation_id.clone())?;
             }
         }
         ApprovalResponse::Authorized { prompt, token } => {
@@ -9469,6 +12469,21 @@ fn artifact_answer_approval(
                     .remove(&input.prompt_id);
                 execute_terminal_action(
                     &core,
+                    pending,
+                    token,
+                    Some(&input.prompt_id),
+                    now_ms,
+                    request.correlation_id.clone(),
+                )?;
+            } else if let Some(pending) = pending_browser {
+                core.artifact
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .pending_browser_actions
+                    .remove(&input.prompt_id);
+                execute_browser_action(
+                    &core,
+                    &app,
                     pending,
                     token,
                     Some(&input.prompt_id),
@@ -10975,6 +13990,7 @@ fn conversation_retry_attempt(
 
 #[tauri::command]
 fn conversation_activate_session(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     session_id: SessionId,
@@ -10982,6 +13998,10 @@ fn conversation_activate_session(
     validate_snapshot_request(&request)?;
     let _operation = core
         .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _artifact_operation = core
+        .artifact_operation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
@@ -11044,6 +14064,9 @@ fn conversation_activate_session(
     }
     let selection_changed =
         conversation.active_session_id.as_deref() != Some(chat.chat_id.as_str());
+    if selection_changed {
+        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
+    }
     conversation.active_project_id = Some(chat.project_id.clone());
     conversation.active_session_id = Some(chat.chat_id.clone());
     let persisted_generation = conversation
@@ -11072,6 +14095,7 @@ fn conversation_activate_session(
 
 #[tauri::command]
 fn conversation_activate_project(
+    app: tauri::AppHandle,
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     project_id: ProjectId,
@@ -11149,6 +14173,9 @@ fn conversation_activate_project(
         .map(|chat| chat.chat_id.clone());
     let selection_changed = conversation.active_project_id.as_deref() != Some(project_id.as_str())
         || conversation.active_session_id != next_session_id;
+    if selection_changed {
+        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
+    }
     conversation.active_project_id = Some(project_id.as_str().into());
     conversation.active_session_id = next_session_id;
     let persisted_generation = conversation
@@ -13070,10 +16097,11 @@ fn artifact_reply_context(
         now_ms,
         correlation_id.clone(),
     )?;
-    let snapshot = capture_artifact_record_context(
+    let snapshot = capture_artifact_record_context_with_browser(
         &record,
         reply_capture.and_then(|capture| capture.selected_text.as_deref()),
         reply_capture.and_then(|capture| capture.selected_entry_id.as_deref()),
+        reply_capture.and_then(|capture| capture.browser_page_context.as_ref()),
         budget,
         now_ms,
         correlation_id.clone(),
@@ -13106,6 +16134,26 @@ fn capture_artifact_record_context(
     record: &artifact::ArtifactRecord,
     selected_text: Option<&str>,
     selected_entry_id: Option<&str>,
+    maximum_bytes: usize,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<artifact::ArtifactContextSnapshot, ProtocolError> {
+    capture_artifact_record_context_with_browser(
+        record,
+        selected_text,
+        selected_entry_id,
+        None,
+        maximum_bytes,
+        now_ms,
+        correlation_id,
+    )
+}
+
+fn capture_artifact_record_context_with_browser(
+    record: &artifact::ArtifactRecord,
+    selected_text: Option<&str>,
+    selected_entry_id: Option<&str>,
+    browser_page_context: Option<&DurableBrowserPageContext>,
     maximum_bytes: usize,
     now_ms: u64,
     correlation_id: protocol::CorrelationId,
@@ -13180,6 +16228,74 @@ fn capture_artifact_record_context(
                 recent_text: None,
                 redactions: vec![artifact::ContextRedaction::Secrets],
                 capabilities: vec![readable()],
+            })
+        }
+        artifact::ArtifactState::Browser(browser) => {
+            if selected_text.is_some() || selected_entry_id.is_some() {
+                return Err(platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::InvalidPayload,
+                    "Browser Reply cannot capture page-selected content without page IPC",
+                    false,
+                ));
+            }
+            let recent_activity = browser
+                .history
+                .iter()
+                .rev()
+                .take(16)
+                .rev()
+                .map(|entry| {
+                    entry
+                        .title
+                        .as_deref()
+                        .map(|title| format!("{title} — {}", entry.display_url))
+                        .unwrap_or_else(|| entry.display_url.clone())
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            artifact::ContextCaptureInput::Browser(artifact::BrowserContextInput {
+                current_url: artifact::SafeContextText::new(
+                    browser.current_display_url().to_owned(),
+                )
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                title: artifact::SafeContextText::new(browser_protocol_title(browser))
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                navigation_state: artifact::SafeContextText::new(format!(
+                    "historyIndex={};canGoBack={};canGoForward={};phase={}",
+                    browser.current_history_index,
+                    browser.can_go_back(),
+                    browser.can_go_forward(),
+                    browser.phase.phase(),
+                ))
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                selected_text: browser_page_context
+                    .and_then(|page| page.selected_text.clone())
+                    .map(artifact::SafeContextText::new)
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                visible_text: browser_page_context
+                    .and_then(|page| page.visible_text.clone())
+                    .map(artifact::SafeContextText::new)
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                extracted_content: browser_page_context
+                    .and_then(|page| page.extracted_content.clone())
+                    .map(artifact::SafeContextText::new)
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                recent_activity: (!recent_activity.is_empty())
+                    .then(|| artifact::SafeContextText::new(recent_activity))
+                    .transpose()
+                    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+                capabilities: vec![
+                    readable(),
+                    artifact::CapabilitySummaryEntry {
+                        capability_id: "browser.navigate".into(),
+                        access: artifact::CapabilityAccess::ApprovalRequired,
+                        reason_code: Some("action-gateway".into()),
+                    },
+                ],
             })
         }
         artifact::ArtifactState::Terminal(terminal) => {
@@ -13881,6 +16997,25 @@ pub fn run() {
                 core::configuration::ManagedCeilings::default(),
                 core::configuration::SecurityConstraints::default(),
             )?;
+            let browser_profiles = browser::profile::BrowserProfileRegistry::load(
+                home_layout.browser_profile_registry(),
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let pending_browser_profile_clears = browser_profiles
+                .snapshot()
+                .profiles
+                .into_iter()
+                .filter_map(|profile| {
+                    let browser::profile::PersistentProfileLifecycle::ClearPending {
+                        operation_id,
+                        ..
+                    } = profile.lifecycle
+                    else {
+                        return None;
+                    };
+                    Some((profile.profile_id, operation_id))
+                })
+                .collect::<Vec<_>>();
             let now_ms = current_time_ms()?;
             let active_workspace = core::services::restore_active_workspace(
                 &home_layout,
@@ -13920,6 +17055,9 @@ pub fn run() {
             let artifact_operation = Arc::new(Mutex::new(()));
             let artifact = Arc::new(Mutex::new(ArtifactApplicationState::default()));
             let terminal = Arc::new(Mutex::new(TerminalSupervisor::new()));
+            let browser_events = Arc::new(Mutex::new(
+                browser::native::NativeBrowserEventQueue::default(),
+            ));
             let terminal_reconciliation = start_terminal_reconciliation_driver(
                 Arc::clone(&active_workspace),
                 Arc::clone(&artifact_operation),
@@ -13931,13 +17069,15 @@ pub fn run() {
             let runtime_production = Arc::new(ManagedProductionRuntime::default());
             app.manage(AppCoreState {
                 database,
-                _configuration: Mutex::new(configuration),
+                configuration: Mutex::new(configuration),
                 active_workspace: Arc::clone(&active_workspace),
                 conversation_operation: Mutex::new(()),
                 artifact_operation,
                 conversation: Mutex::new(conversation),
                 artifact,
                 terminal,
+                browser_profiles: Mutex::new(browser_profiles),
+                browser_events: Arc::clone(&browser_events),
                 _terminal_reconciliation: terminal_reconciliation,
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 runtime_production: Arc::clone(&runtime_production),
@@ -13948,6 +17088,15 @@ pub fn run() {
                 conversation_drop: Mutex::new(NativeConversationDropState::default()),
                 conversation_branch: Mutex::new(NativeConversationBranchState::default()),
             });
+            for (profile_id, operation_id) in pending_browser_profile_clears {
+                browser::native::dispatch_clear_profile(
+                    app.handle(),
+                    Arc::clone(&browser_events),
+                    profile_id,
+                    operation_id,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            }
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             start_runtime_production_initialization(
                 app.handle().clone(),
@@ -13988,6 +17137,13 @@ pub fn run() {
             artifact_terminal_resize,
             artifact_terminal_stop,
             artifact_terminal_ack_output,
+            artifact_open_browser,
+            artifact_navigate_browser,
+            artifact_clear_browser_data,
+            artifact_mount_browser,
+            artifact_resize_browser,
+            artifact_focus_native_browser,
+            artifact_detach_browser,
             artifact_open_file,
             artifact_open_folder,
             artifact_focus,
@@ -14217,6 +17373,75 @@ mod artifact_file_projection_tests {
         let stale =
             require_current_artifact_reply_capture(&record, &durable, correlation).unwrap_err();
         assert_eq!(stale.code, ProtocolErrorCode::Conflict);
+    }
+
+    #[test]
+    fn browser_reply_uses_the_immutable_native_page_capture_in_priority_order() {
+        let target = artifact::BrowserNavigationTarget::parse("https://example.com/docs").unwrap();
+        let mut browser = artifact::BrowserArtifactState::new_queued(
+            artifact::BrowserEnvironmentReference::chat("workspace-1", "project-1", "session-1", 1)
+                .unwrap(),
+            &target,
+            7,
+            10,
+        )
+        .unwrap();
+        browser
+            .start_navigation(
+                artifact::BrowserControllerEventMeta::new(7, 1, 11).unwrap(),
+                &target,
+                artifact::BrowserNavigationKind::Initial,
+            )
+            .unwrap();
+        browser
+            .mark_ready(
+                artifact::BrowserControllerEventMeta::new(7, 2, 12).unwrap(),
+                &target,
+                artifact::BrowserNavigationKind::Initial,
+                Some("Example docs"),
+            )
+            .unwrap();
+        let record = artifact::ArtifactRecord {
+            schema_version: artifact::ARTIFACT_SCHEMA_VERSION,
+            artifact_id: "artifact-browser-context".into(),
+            workspace_id: "workspace-1".into(),
+            project_id: "project-1".into(),
+            session_id: "session-1".into(),
+            provider: artifact::ArtifactProviderDescriptor::browser(),
+            source: artifact::ArtifactSource::DirectOperation {
+                operation_id: "operation-browser-context".into(),
+            },
+            record_revision: 1,
+            lifecycle: artifact::ArtifactLifecycle::Ready,
+            state: artifact::ArtifactState::Browser(Box::new(browser)),
+            history: Vec::new(),
+            created_at_ms: 10,
+            updated_at_ms: 12,
+        };
+        let correlation = protocol::CorrelationId::new("browser-context-test").unwrap();
+        let mut durable =
+            durable_artifact_reply_capture(&record, None, None, correlation.clone()).unwrap();
+        durable.browser_page_context = Some(DurableBrowserPageContext {
+            selected_text: Some("selected page text".into()),
+            visible_text: Some("visible page text".into()),
+            extracted_content: Some("bounded extracted page text".into()),
+        });
+        require_current_artifact_reply_capture(&record, &durable, correlation.clone()).unwrap();
+        let context = capture_artifact_record_context_with_browser(
+            &record,
+            None,
+            None,
+            durable.browser_page_context.as_ref(),
+            4_096,
+            13,
+            correlation,
+        )
+        .unwrap();
+        let segments = artifact_context_segments(&context.payload);
+        assert_eq!(segments[0].source, "selected-text");
+        assert_eq!(segments[0].text, "selected page text");
+        assert_eq!(segments[1].source, "visible-text");
+        assert_eq!(segments[2].source, "extracted-content");
     }
 }
 

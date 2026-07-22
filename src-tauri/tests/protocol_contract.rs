@@ -654,6 +654,10 @@ fn export_protocol_types(config: &Config) {
     ArtifactTerminalResizeInput::export_all(config).unwrap();
     ArtifactTerminalOutputAckInput::export_all(config).unwrap();
     ArtifactTerminalOperationInput::export_all(config).unwrap();
+    ArtifactBrowserOpenInput::export_all(config).unwrap();
+    ArtifactBrowserNavigateInput::export_all(config).unwrap();
+    ArtifactBrowserViewportInput::export_all(config).unwrap();
+    ArtifactBrowserIdentityInput::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

@@ -1484,10 +1484,22 @@ pub fn coordinate_turn_dispatch<R: SessionRepository>(
                 )
             })
             .unwrap_or_default();
+        let browser_navigation_contract = reply
+            .artifact_context
+            .as_ref()
+            .filter(|context| context.provider_type == "browser")
+            .map(|_| {
+                format!(
+                    "\nIf the user requests navigation of this Browser, emit the exact HTTP(S) address once as JSON between {begin} and {end}: {begin}{{\"address\":\"https://example.com/path\"}}{end}. Do not use that envelope for an explanation-only answer. The envelope proposes a policy-checked in-place navigation; it does not authorize or perform the navigation by itself.",
+                    begin = crate::artifact::browser::BROWSER_REPLY_NAVIGATION_BEGIN,
+                    end = crate::artifact::browser::BROWSER_REPLY_NAVIGATION_END,
+                )
+            })
+            .unwrap_or_default();
         let composed = format!(
             "Reply to the immutable {kind} reference {target} ({digest}).\n\
              <reply-context>\n{excerpt}\n</reply-context>\n\
-             <user-message>\n{input}\n</user-message>{file_proposal_contract}",
+             <user-message>\n{input}\n</user-message>{file_proposal_contract}{browser_navigation_contract}",
             kind = reply.target_kind,
             target = reply.target_id,
             digest = reply.source_sha256,

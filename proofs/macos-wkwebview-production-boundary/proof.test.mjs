@@ -10,7 +10,8 @@ const cargo = fs.readFileSync(path.join(proofDir, 'Cargo.toml'), 'utf8');
 const resultPath = path.join(proofDir, 'macos-wkwebview-production-boundary-result.json');
 
 test('locks the selected public WebKit boundary', () => {
-  assert.match(cargo, /tauri = "=2\.11\.2"/);
+  assert.match(cargo, /tauri = "=2\.11\.5"/);
+  assert.match(cargo, /tauri-build = "=2\.6\.3"/);
   assert.match(cargo, /objc2-web-kit = (?:"0\.3\.2"|\{ version = "0\.3\.2")/);
   assert.match(source, /WKPermissionDecision::Prompt/);
   assert.match(source, /WKWebsiteDataStore::dataStoreForIdentifier/);
@@ -28,7 +29,7 @@ test('recorded native run satisfies every proof check', () => {
     assert.equal(check.status, 'pass', `${check.name}: ${JSON.stringify(check.evidence)}`);
   }
   assert.equal(result.reports.some(report => report.harnessError), false);
-  assert.equal(result.target.tauri, '2.11.2');
+  assert.equal(result.target.tauri, '2.11.5');
   assert.equal(result.target.objc2_web_kit, '0.3.2');
   assert.equal(result.target.permission_decision, 'Prompt');
   assert.equal(result.target.page_ipc_handler, false);

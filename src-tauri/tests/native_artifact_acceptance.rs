@@ -23,6 +23,10 @@ const ACCEPTANCE_HOME_ENV: &str = "C4OS_TASK8_ACCEPTANCE_HOME";
 const PROJECT_ROOT_ENV: &str = "C4OS_TASK8_PROJECT_ROOT";
 const TERMINAL_ACCEPTANCE_HOME_ENV: &str = "C4OS_TASK9_ACCEPTANCE_HOME";
 const TERMINAL_PROJECT_ROOT_ENV: &str = "C4OS_TASK9_PROJECT_ROOT";
+const BROWSER_ACCEPTANCE_HOME_ENV: &str = "C4OS_TASK10_ACCEPTANCE_HOME";
+const BROWSER_PROJECT_ROOT_ENV: &str = "C4OS_TASK10_PROJECT_ROOT";
+const BROWSER_EPHEMERAL_ACCEPTANCE_HOME_ENV: &str = "C4OS_TASK10_EPHEMERAL_ACCEPTANCE_HOME";
+const BROWSER_EPHEMERAL_PROJECT_ROOT_ENV: &str = "C4OS_TASK10_EPHEMERAL_PROJECT_ROOT";
 
 fn required_absolute_directory(name: &str) -> PathBuf {
     let value = env::var_os(name).unwrap_or_else(|| panic!("{name} is required"));
@@ -58,6 +62,7 @@ fn seed_native_workspace(
     chat_title: &str,
     lock_label: &str,
     archive_name: &str,
+    app_configuration_text: &str,
 ) -> serde_json::Value {
     let home = C4osHomeLayout::new(home_root);
     let (app_database, _) =
@@ -81,7 +86,7 @@ fn seed_native_workspace(
         &app_database,
         &home,
         &mut app_configuration,
-        "schema_version = 1\nrestore_last_workspace = true\n",
+        app_configuration_text,
         configuration_generation,
         now_seconds,
     )
@@ -161,6 +166,7 @@ fn seed_task_00008_native_workspace_without_artifacts() {
             "Inspect trusted artifacts",
             "task-00008-native-seed",
             "task-00008-acceptance.c4os.zip",
+            "schema_version = 1\nrestore_last_workspace = true\n",
         ))
         .expect("acceptance seed report")
     );
@@ -189,6 +195,73 @@ fn seed_task_00009_native_workspace_without_terminal_artifacts() {
             "Exercise the persistent Project shell",
             "task-00009-native-seed",
             "task-00009-acceptance.c4os.zip",
+            "schema_version = 1\nrestore_last_workspace = true\n",
+        ))
+        .expect("acceptance seed report")
+    );
+}
+
+#[test]
+#[ignore = "writes only to explicit isolated Task 00010 acceptance paths"]
+fn seed_task_00010_chat_browser_workspace_without_browser_artifacts() {
+    let home_root = required_absolute_directory(BROWSER_ACCEPTANCE_HOME_ENV);
+    let project_root = required_absolute_directory(BROWSER_PROJECT_ROOT_ENV);
+    require_private_home(&home_root);
+    fs::write(
+        project_root.join("README.md"),
+        "Task 00010 isolated native Browser acceptance Project.\n",
+    )
+    .expect("Project marker");
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&seed_native_workspace(
+            &home_root,
+            &project_root,
+            "Browser Acceptance Project",
+            "Task 00010 Browser Acceptance",
+            "Exercise the native Browser facility",
+            "task-00010-native-browser-seed",
+            "task-00010-acceptance.c4os.zip",
+            concat!(
+                "schema_version = 1\n",
+                "restore_last_workspace = true\n",
+                "default_approval_preset = \"ask_for_approval\"\n",
+                "browser_environment = \"chat\"\n",
+            ),
+        ))
+        .expect("acceptance seed report")
+    );
+}
+
+#[test]
+#[ignore = "writes only to explicit isolated Task 00010 ephemeral acceptance paths"]
+fn seed_task_00010_ephemeral_browser_workspace_without_browser_artifacts() {
+    let home_root = required_absolute_directory(BROWSER_EPHEMERAL_ACCEPTANCE_HOME_ENV);
+    let project_root = required_absolute_directory(BROWSER_EPHEMERAL_PROJECT_ROOT_ENV);
+    require_private_home(&home_root);
+    fs::write(
+        project_root.join("README.md"),
+        "Task 00010 isolated ephemeral native Browser acceptance Project.\n",
+    )
+    .expect("Project marker");
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&seed_native_workspace(
+            &home_root,
+            &project_root,
+            "Ephemeral Browser Acceptance Project",
+            "Task 00010 Ephemeral Browser Acceptance",
+            "Exercise one ephemeral Browser",
+            "task-00010-native-browser-ephemeral-seed",
+            "task-00010-ephemeral-acceptance.c4os.zip",
+            concat!(
+                "schema_version = 1\n",
+                "restore_last_workspace = true\n",
+                "default_approval_preset = \"ask_for_approval\"\n",
+                "browser_environment = \"none\"\n",
+            ),
         ))
         .expect("acceptance seed report")
     );

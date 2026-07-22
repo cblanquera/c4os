@@ -5,6 +5,7 @@ import type {
 import { FILE_ARTIFACT_PROVIDER } from "./file/provider";
 import { FOLDER_ARTIFACT_PROVIDER } from "./folder/provider";
 import { TERMINAL_ARTIFACT_PROVIDER } from "./terminal/provider";
+import { BROWSER_ARTIFACT_PROVIDER } from "./browser/provider";
 
 export interface ArtifactProviderRegistry {
   readonly providers: readonly ArtifactProviderDefinition[];
@@ -86,6 +87,7 @@ export function createArtifactProviderRegistry(
 export const ARTIFACT_PROVIDER_REGISTRY = createArtifactProviderRegistry([
   FILE_ARTIFACT_PROVIDER,
   FOLDER_ARTIFACT_PROVIDER,
+  BROWSER_ARTIFACT_PROVIDER,
   TERMINAL_ARTIFACT_PROVIDER,
 ]);
 

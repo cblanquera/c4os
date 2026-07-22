@@ -25,13 +25,17 @@ import {
   ConversationFocusComposition,
   type FocusedConversationArtifact,
 } from "../conversation/focus";
+import { currentBrowserViewportDetachInput } from "../artifacts/browser/browser-viewport-authority";
 import {
   FileArtifact,
   FolderArtifact,
+  BrowserArtifact,
   TerminalArtifact,
   UnknownArtifact,
   type ArtifactContext,
   type FileArtifactState,
+  type BrowserViewportFocusIntent,
+  type BrowserViewportLifecycleEvent,
 } from "../artifacts";
 import {
   ChatInformationPopover,
@@ -74,15 +78,22 @@ import {
   answerArtifactApproval,
   acknowledgeTerminalArtifactOutput,
   beginFileArtifactEdit,
+  clearBrowserArtifactData,
+  detachBrowserArtifact,
   closeArtifactFocus,
   discardFileArtifactDraft,
   focusArtifact,
+  focusNativeBrowserArtifact,
+  mountBrowserArtifact,
+  navigateBrowserArtifact,
   navigateFolderArtifact,
   openFileArtifact,
   openFolderArtifact,
+  openBrowserArtifact,
   readArtifactWorkspaceSnapshot,
   rejectFileArtifactProposal,
   refreshFolderArtifact,
+  resizeBrowserArtifact,
   replyToArtifact,
   resolveFileArtifactConflict,
   resizeTerminalArtifact,
@@ -93,6 +104,7 @@ import {
   submitTerminalArtifactStdin,
   updateFileArtifactDraft,
   type ArtifactMutationInput,
+  type ArtifactBrowserPendingOperation,
   type ArtifactSnapshot as NativeArtifactSnapshot,
   type ArtifactWorkspaceSnapshot,
   type ArtifactReplyInput,
@@ -181,6 +193,8 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const artifactOperationQueue = useRef<Promise<unknown>>(Promise.resolve());
   const artifactDraftTimers = useRef(new Map<string, number>());
   const artifactDraftOverridesRef = useRef<Record<string, string>>({});
+  const browserViewportMounts = useRef(new Set<string>());
+  const browserViewportMountsInFlight = useRef(new Set<string>());
   const [artifactDraftOverrides, setArtifactDraftOverrides] = useState<
     Readonly<Record<string, string>>
   >({});
@@ -436,6 +450,13 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           artifact.providerState.value.phase === "stdinReady" ||
           artifact.providerState.value.phase === "stopping"),
     ) === true;
+  const browserPollingActive =
+    activeArtifactWorkspace?.focusedArtifactId !== null &&
+    activeArtifactWorkspace?.artifacts.some(
+      (artifact) =>
+        artifact.artifactId === activeArtifactWorkspace.focusedArtifactId &&
+        artifact.providerState.type === "browser",
+    ) === true;
 
   useEffect(() => {
     if (!terminalPollingActive) return;
@@ -458,6 +479,26 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [queueArtifactWorkspaceOperation, terminalPollingActive]);
+
+  useEffect(() => {
+    if (!browserPollingActive) return;
+    let disposed = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      try {
+        await queueArtifactWorkspaceOperation(readArtifactWorkspaceSnapshot);
+      } catch {
+        // The queued operation already publishes its bounded native error.
+      } finally {
+        if (!disposed) timer = window.setTimeout(() => void poll(), 150);
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 150);
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [browserPollingActive, queueArtifactWorkspaceOperation]);
 
   useEffect(() => {
     const prior = priorActiveAttemptId.current;
@@ -1074,6 +1115,27 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     }
   };
 
+  const submitBrowserAddress = async (source: string) => {
+    const address = source.trim();
+    if (address.length === 0) return;
+    setConversationBusy(true);
+    setConversationError(null);
+    try {
+      await queueArtifactWorkspaceOperation(
+        async () => {
+          await readArtifactWorkspaceSnapshot();
+          return openBrowserArtifact({ address });
+        },
+        { rebaseConversation: true },
+      );
+      dispatch(shellDraftActions.composerTextChanged(""));
+    } catch (error) {
+      setConversationError(messageFor(error));
+    } finally {
+      setConversationBusy(false);
+    }
+  };
+
   const submitChat = async (source: string) => {
     const expectedReplyTargetId = composerDraft.replyTargetId;
     setConversationBusy(true);
@@ -1273,6 +1335,175 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     }
   };
 
+  const queueBrowserNavigation = useCallback(
+    (artifactId: string, intent: "back" | "forward" | "refresh") =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          const latest = await readArtifactWorkspaceSnapshot();
+          const current = latest.artifacts.find(
+            (candidate) => candidate.artifactId === artifactId,
+          );
+          if (current?.providerState.type !== "browser") return latest;
+          return navigateBrowserArtifact({
+            artifactId: current.artifactId,
+            baseRecordRevision: current.recordRevision,
+            controllerGeneration:
+              current.providerState.value.controllerGeneration,
+            mountGeneration: current.providerState.value.mountGeneration,
+            intent,
+          });
+        },
+        { rebaseConversation: true },
+      ),
+    [queueArtifactWorkspaceOperation],
+  );
+
+  const queueBrowserDataClear = useCallback(
+    (artifactId: string) =>
+      queueArtifactWorkspaceOperation(
+        async () => {
+          const latest = await readArtifactWorkspaceSnapshot();
+          const current = latest.artifacts.find(
+            (candidate) => candidate.artifactId === artifactId,
+          );
+          if (current?.providerState.type !== "browser") return latest;
+          return clearBrowserArtifactData({
+            artifactId: current.artifactId,
+            baseRecordRevision: current.recordRevision,
+            controllerGeneration:
+              current.providerState.value.controllerGeneration,
+            mountGeneration: current.providerState.value.mountGeneration,
+          });
+        },
+        { rebaseConversation: true },
+      ),
+    [queueArtifactWorkspaceOperation],
+  );
+
+  const handleBrowserViewportLifecycle = useCallback(
+    (event: BrowserViewportLifecycleEvent) => {
+      const identityKey = `${event.artifactId}:${event.controllerGeneration}:${event.mountGeneration}`;
+      const wasMounted = browserViewportMounts.current.has(identityKey);
+      if (event.kind === "geometry") {
+        if (
+          !wasMounted &&
+          browserViewportMountsInFlight.current.has(identityKey)
+        ) {
+          return;
+        }
+        if (!wasMounted) {
+          browserViewportMountsInFlight.current.add(identityKey);
+        }
+      } else {
+        browserViewportMountsInFlight.current.delete(identityKey);
+        browserViewportMounts.current.delete(identityKey);
+        if (!wasMounted) return;
+        void queueArtifactWorkspaceOperation(
+          async () => {
+            const latest = await readArtifactWorkspaceSnapshot();
+            const input = currentBrowserViewportDetachInput(
+              latest.artifacts.find(
+                (candidate) => candidate.artifactId === event.artifactId,
+              ),
+              event,
+            );
+            return input === null ? latest : detachBrowserArtifact(input);
+          },
+          { rebaseConversation: true },
+        ).catch(() => undefined);
+        return;
+      }
+      const operation = queueArtifactWorkspaceOperation(
+        async () => {
+          const latest = await readArtifactWorkspaceSnapshot();
+          const current = latest.artifacts.find(
+            (candidate) => candidate.artifactId === event.artifactId,
+          );
+          if (
+            current?.providerState.type !== "browser" ||
+            current.providerState.value.controllerGeneration !==
+              event.controllerGeneration ||
+            current.providerState.value.mountGeneration !==
+              event.mountGeneration
+          ) {
+            return latest;
+          }
+          const identity = {
+            artifactId: current.artifactId,
+            baseRecordRevision: current.recordRevision,
+            controllerGeneration: event.controllerGeneration,
+            mountGeneration: event.mountGeneration,
+          };
+          const viewport = {
+            ...identity,
+            ...event.rect,
+            focus: false,
+          };
+          return wasMounted
+            ? resizeBrowserArtifact(viewport)
+            : mountBrowserArtifact(viewport);
+        },
+        { rebaseConversation: true },
+      );
+      if (!wasMounted) {
+        void operation
+          .then((snapshot) => {
+            browserViewportMountsInFlight.current.delete(identityKey);
+            const current = snapshot.artifacts.find(
+              (candidate) => candidate.artifactId === event.artifactId,
+            );
+            const mounted =
+              current?.providerState.type === "browser" &&
+              current.providerState.value.controllerGeneration ===
+                event.controllerGeneration &&
+              current.providerState.value.mountGeneration ===
+                event.mountGeneration &&
+              current.providerState.value.phase !== "recovery";
+            if (mounted) {
+              browserViewportMounts.current.add(identityKey);
+            } else {
+              browserViewportMounts.current.delete(identityKey);
+            }
+          })
+          .catch(() => {
+            browserViewportMountsInFlight.current.delete(identityKey);
+            browserViewportMounts.current.delete(identityKey);
+          });
+      }
+    },
+    [queueArtifactWorkspaceOperation],
+  );
+
+  const handleBrowserViewportFocus = useCallback(
+    (intent: BrowserViewportFocusIntent) => {
+      void queueArtifactWorkspaceOperation(
+        async () => {
+          const latest = await readArtifactWorkspaceSnapshot();
+          const current = latest.artifacts.find(
+            (candidate) => candidate.artifactId === intent.artifactId,
+          );
+          if (
+            current?.providerState.type !== "browser" ||
+            current.providerState.value.controllerGeneration !==
+              intent.controllerGeneration ||
+            current.providerState.value.mountGeneration !==
+              intent.mountGeneration
+          ) {
+            return latest;
+          }
+          return focusNativeBrowserArtifact({
+            artifactId: current.artifactId,
+            baseRecordRevision: current.recordRevision,
+            controllerGeneration: intent.controllerGeneration,
+            mountGeneration: intent.mountGeneration,
+          });
+        },
+        { rebaseConversation: true },
+      ).catch(() => undefined);
+    },
+    [queueArtifactWorkspaceOperation],
+  );
+
   const projectItems = workspace.value.projects.map((project) => ({
     id: project.id as string,
     name: project.name,
@@ -1453,6 +1684,66 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
             onRefresh={(artifactId) =>
               void queueArtifactMutation(artifactId, refreshFolderArtifact)
             }
+          />
+        );
+      }
+      if (nativeArtifact.providerState.type === "browser") {
+        const browser = nativeArtifact.providerState.value;
+        return (
+          <BrowserArtifact
+            context={context}
+            model={{
+              artifactId: nativeArtifact.artifactId,
+              canGoBack: browser.canGoBack,
+              canGoForward: browser.canGoForward,
+              controllerGeneration: browser.controllerGeneration,
+              currentUrl: browser.currentUrl,
+              environmentScope: browser.environmentScope,
+              mountGeneration: browser.mountGeneration,
+              notices: browser.notices,
+              pageTitle: browser.pageTitle,
+              pendingApproval:
+                nativeArtifact.pendingApprovalId === null
+                  ? null
+                  : {
+                      approvalId: nativeArtifact.pendingApprovalId,
+                      message:
+                        nativeArtifact.status.message ??
+                        browserApprovalMessage(browser.pendingOperation),
+                      origin:
+                        browser.pendingOperation === "clear-data"
+                          ? browser.environmentScope
+                          : (browser.pendingTargetUrl ?? browser.currentUrl),
+                      permission: browserApprovalLabel(
+                        browser.pendingOperation,
+                      ),
+                    },
+              phase: browser.phase,
+              recordRevision: nativeArtifact.recordRevision,
+              refreshing: browser.refreshing,
+              status: nativeArtifact.status,
+              title: nativeArtifact.title,
+            }}
+            {...common}
+            onAllowApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "allow")
+            }
+            onBack={(artifactId) =>
+              void queueBrowserNavigation(artifactId, "back")
+            }
+            onClearData={(artifactId) => void queueBrowserDataClear(artifactId)}
+            onDenyApproval={(_artifactId, approvalId) =>
+              void decideArtifactApproval(approvalId, "deny")
+            }
+            onForward={(artifactId) =>
+              void queueBrowserNavigation(artifactId, "forward")
+            }
+            onRefresh={(artifactId) =>
+              void queueBrowserNavigation(artifactId, "refresh")
+            }
+            onReply={(artifactId) => void selectArtifactForReply(artifactId)}
+            onViewportFocusIntent={handleBrowserViewportFocus}
+            onViewportLifecycle={handleBrowserViewportLifecycle}
           />
         );
       }
@@ -1638,8 +1929,12 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       closeNativeArtifactFocus,
       decideArtifactApproval,
       focusNativeArtifact,
+      handleBrowserViewportFocus,
+      handleBrowserViewportLifecycle,
       queueArtifactMutation,
       queueArtifactWorkspaceOperation,
+      queueBrowserNavigation,
+      queueBrowserDataClear,
       queueTerminalMutation,
       retainArtifactDraft,
       saveArtifactDraft,
@@ -1813,10 +2108,13 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     activeComposerModel?.available === true;
   const terminalComposerActive =
     replyReference === null && composerDraft.mode === "terminal";
-  const canSubmitComposer = terminalComposerActive
-    ? sessions.value.activeSessionId !== null &&
-      conversation.value.activeAttemptId === null
-    : canSubmitChat;
+  const browserComposerActive =
+    replyReference === null && composerDraft.mode === "browser";
+  const canSubmitComposer =
+    terminalComposerActive || browserComposerActive
+      ? sessions.value.activeSessionId !== null &&
+        conversation.value.activeAttemptId === null
+      : canSubmitChat;
   const composerAttachments = composerDraft.attachments.map((attachment) => {
     const compatibility = attachmentCompatibility(
       attachment.mediaType,
@@ -1884,9 +2182,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     (latestAssistantTurn?.inputTokens ?? 0) +
     (latestAssistantTurn?.outputTokens ?? 0);
   const directModeUnavailable =
-    replyReference === null &&
-    composerDraft.mode !== "chat" &&
-    composerDraft.mode !== "terminal";
+    replyReference === null && composerDraft.mode === "files";
   const conversationTranscript = (
     <ConversationTranscript
       onArtifactFocusRequest={(artifactId) =>
@@ -2078,7 +2374,9 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           onSubmit={(submission) =>
             void (terminalComposerActive
               ? submitTerminalCommand(submission.source)
-              : submitChat(submission.source))
+              : browserComposerActive
+                ? submitBrowserAddress(submission.source)
+                : submitChat(submission.source))
           }
           onValueChange={(value) =>
             dispatch(shellDraftActions.composerTextChanged(value))
@@ -2576,6 +2874,27 @@ function replyReferenceFromProjection(
 
 function replyExcerpt(source: string): string {
   return source.trim().split(/\s+/).slice(0, 8).join(" ");
+}
+
+function browserApprovalLabel(
+  operation: ArtifactBrowserPendingOperation | null,
+): string {
+  const labels: Record<ArtifactBrowserPendingOperation, string> = {
+    open: "Open website",
+    back: "Go back",
+    forward: "Go forward",
+    refresh: "Refresh website",
+    "reply-navigation": "Navigate from Browser Reply",
+    "website-navigation": "Follow website navigation",
+    "clear-data": "Clear browser data",
+  };
+  return operation === null ? "Browser operation" : labels[operation];
+}
+
+function browserApprovalMessage(
+  operation: ArtifactBrowserPendingOperation | null,
+): string {
+  return `Allow this ${browserApprovalLabel(operation).toLocaleLowerCase()} operation?`;
 }
 
 function messageFor(error: unknown): string {

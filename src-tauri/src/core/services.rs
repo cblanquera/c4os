@@ -12,7 +12,8 @@ use super::configuration::{
     ConfigurationWatcherNotice, ConfigurationWatcherPlan, EffectiveConfigurationSnapshot,
     LastKnownGoodDocument, MAX_CONFIGURATION_BYTES, ManagedCeilings,
     ParentDirectoryConfigurationWatcher, SecurityConstraints, WatchedConfiguration,
-    compensate_scope_write, recover_missing_scope_file, stable_scope_text, validate_scope_document,
+    compensate_scope_write, recover_missing_scope_file,
+    resolve_effective_snapshot_from_last_known_good, stable_scope_text, validate_scope_document,
 };
 use super::database::{
     ChatRecord, ConfigurationSnapshotRecord, DatabaseActor, DatabaseDescriptor, DatabaseError,
@@ -141,6 +142,19 @@ impl ManagedAppConfiguration {
         self.service
             .lock()
             .map(|configuration| configuration.snapshot())
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)
+    }
+
+    pub fn last_known_good(
+        &self,
+    ) -> Result<Option<LastKnownGoodDocument>, ConfigurationPersistenceError> {
+        self.service
+            .lock()
+            .map(|configuration| {
+                configuration
+                    .last_known_good(ConfigurationScope::App)
+                    .cloned()
+            })
             .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)
     }
 
@@ -696,6 +710,54 @@ impl ActiveWorkspace {
             managed_ceilings,
             security_constraints,
         )
+    }
+
+    pub fn restore_effective_configuration_snapshot(
+        &self,
+        app: Option<LastKnownGoodDocument>,
+        project_id: Option<Uuid>,
+        chat_id: Option<Uuid>,
+        managed_ceilings: ManagedCeilings,
+        security_constraints: SecurityConstraints,
+    ) -> Result<EffectiveConfigurationSnapshot, ConfigurationPersistenceError> {
+        let state = self
+            .configuration
+            .state
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        let mut records = app.into_iter().collect::<Vec<_>>();
+        for identity in [
+            Some(WorkspaceConfigurationIdentity {
+                scope: ConfigurationScope::Workspace,
+                scope_id: self.workspace.manifest.workspace_id,
+            }),
+            project_id.map(|scope_id| WorkspaceConfigurationIdentity {
+                scope: ConfigurationScope::Project,
+                scope_id,
+            }),
+            chat_id.map(|scope_id| WorkspaceConfigurationIdentity {
+                scope: ConfigurationScope::Chat,
+                scope_id,
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(record) = state
+                .services
+                .get(&identity)
+                .and_then(|service| service.last_known_good(identity.scope))
+            {
+                records.push(record.clone());
+            }
+        }
+        drop(state);
+        resolve_effective_snapshot_from_last_known_good(
+            records,
+            managed_ceilings,
+            security_constraints,
+        )
+        .map_err(|_| ConfigurationPersistenceError::InvalidRecovery)
     }
 
     pub fn inactivate_project(

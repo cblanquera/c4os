@@ -15,6 +15,8 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_IDENTIFIER_BYTES: usize = 160;
 pub const MAX_TEXT_BYTES: usize = 1_048_576;
 pub const MAX_DIAGNOSTIC_BYTES: usize = 8_192;
+const MAX_BROWSER_ADDRESS_BYTES: usize = 8 * 1_024;
+const MAX_BROWSER_TITLE_BYTES: usize = 512;
 pub const MAX_ATTACHMENTS: usize = 64;
 pub const MAX_SAFE_DETAILS: usize = 32;
 pub const MAX_REDACTION_MARKERS: usize = 256;
@@ -1040,11 +1042,40 @@ pub struct ArtifactTerminalSnapshot {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserNoticeSnapshot {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserSnapshot {
+    pub current_url: String,
+    pub page_title: String,
+    pub phase: String,
+    pub refreshing: bool,
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+    pub controller_generation: u64,
+    pub mount_generation: u64,
+    pub environment_scope: String,
+    pub pending_operation: Option<String>,
+    pub pending_target_url: Option<String>,
+    pub notices: Vec<ArtifactBrowserNoticeSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub enum ArtifactProviderStateSnapshot {
     File(ArtifactFileSnapshot),
     Folder(ArtifactFolderSnapshot),
+    Browser(ArtifactBrowserSnapshot),
     Terminal(ArtifactTerminalSnapshot),
     Unknown,
 }
@@ -1177,6 +1208,58 @@ pub struct ArtifactTerminalOutputAckInput {
     pub artifact_id: ArtifactId,
     pub process_generation: u64,
     pub output_sequence: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserOpenInput {
+    pub address: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ArtifactBrowserNavigationIntent {
+    Back,
+    Forward,
+    Refresh,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserNavigateInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub controller_generation: u64,
+    pub mount_generation: u64,
+    pub intent: ArtifactBrowserNavigationIntent,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserViewportInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub controller_generation: u64,
+    pub mount_generation: u64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub focus: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ArtifactBrowserIdentityInput {
+    pub artifact_id: ArtifactId,
+    pub base_record_revision: u64,
+    pub controller_generation: u64,
+    pub mount_generation: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1408,6 +1491,93 @@ impl ArtifactTerminalOutputAckInput {
             ));
         }
         Ok(())
+    }
+}
+
+impl ArtifactBrowserOpenInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.address.is_empty()
+            || self.address.len() > MAX_BROWSER_ADDRESS_BYTES
+            || self.address.trim() != self.address
+            || self.address.chars().any(char::is_control)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Browser address is invalid",
+                false,
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_browser_identity(
+    artifact_id: &ArtifactId,
+    base_record_revision: u64,
+    controller_generation: u64,
+    mount_generation: u64,
+) -> Result<(), ProtocolError> {
+    ArtifactMutationInput {
+        artifact_id: artifact_id.clone(),
+        base_record_revision,
+    }
+    .validate()?;
+    if controller_generation == 0 || mount_generation == 0 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidGeneration,
+            "Browser controller identity is invalid",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+impl ArtifactBrowserNavigateInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_browser_identity(
+            &self.artifact_id,
+            self.base_record_revision,
+            self.controller_generation,
+            self.mount_generation,
+        )
+    }
+}
+
+impl ArtifactBrowserViewportInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_browser_identity(
+            &self.artifact_id,
+            self.base_record_revision,
+            self.controller_generation,
+            self.mount_generation,
+        )?;
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.x < 0.0
+            || self.y < 0.0
+            || self.width <= 0.0
+            || self.height <= 0.0
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Browser viewport geometry is invalid",
+                false,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactBrowserIdentityInput {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_browser_identity(
+            &self.artifact_id,
+            self.base_record_revision,
+            self.controller_generation,
+            self.mount_generation,
+        )
     }
 }
 
@@ -2074,6 +2244,82 @@ pub fn artifact_workspace_snapshot(
                     }
                 }
             }
+            ArtifactProviderStateSnapshot::Browser(browser) => {
+                validate_browser_display_url(&browser.current_url)?;
+                if let Some(pending_target_url) = &browser.pending_target_url {
+                    validate_browser_display_url(pending_target_url)?;
+                }
+                if artifact.provider_type != "browser"
+                    || artifact.provider_version != 1
+                    || artifact.state_schema_version != 1
+                    || browser.page_title.is_empty()
+                    || browser.page_title.len() > MAX_BROWSER_TITLE_BYTES
+                    || browser.page_title.chars().any(char::is_control)
+                    || browser.controller_generation == 0
+                    || browser.mount_generation == 0
+                    || browser.notices.len() > 32
+                    || !matches!(
+                        browser.phase.as_str(),
+                        "queued" | "loading" | "ready" | "error" | "recovery"
+                    )
+                    || !matches!(
+                        browser.environment_scope.as_str(),
+                        "all-browsers" | "per-project" | "per-chat-session" | "none"
+                    )
+                    || browser
+                        .pending_operation
+                        .as_deref()
+                        .is_some_and(|operation| {
+                            !matches!(
+                                operation,
+                                "open"
+                                    | "back"
+                                    | "forward"
+                                    | "refresh"
+                                    | "reply-navigation"
+                                    | "website-navigation"
+                                    | "clear-data"
+                            )
+                        })
+                    || (artifact.pending_approval_id.is_some()
+                        != browser.pending_operation.is_some())
+                    || (browser.pending_target_url.is_some()
+                        != browser
+                            .pending_operation
+                            .as_deref()
+                            .is_some_and(|operation| operation != "clear-data"))
+                    || (artifact.pending_approval_id.is_some()
+                        && !matches!(
+                            browser.phase.as_str(),
+                            "queued" | "ready" | "error" | "recovery"
+                        ))
+                {
+                    return Err(ProtocolError::new(
+                        ProtocolErrorCode::InvalidPayload,
+                        "Browser artifact provider state is invalid",
+                        false,
+                    ));
+                }
+                for notice in &browser.notices {
+                    validate_identifier("Browser notice id", &notice.id)?;
+                    if !matches!(
+                        notice.kind.as_str(),
+                        "information" | "permission" | "warning" | "error"
+                    ) {
+                        return Err(ProtocolError::new(
+                            ProtocolErrorCode::InvalidPayload,
+                            "Browser notice kind is invalid",
+                            false,
+                        ));
+                    }
+                    validate_display_text("Browser notice title", &notice.title, 512)?;
+                    validate_display_text(
+                        "Browser notice message",
+                        &notice.message,
+                        MAX_DIAGNOSTIC_BYTES,
+                    )?;
+                }
+            }
             ArtifactProviderStateSnapshot::Terminal(terminal) => {
                 if artifact.provider_type != "terminal"
                     || artifact.provider_version != 1
@@ -2202,7 +2448,7 @@ pub fn artifact_workspace_snapshot(
             ArtifactProviderStateSnapshot::Unknown => {
                 let is_supported_known_version = matches!(
                     artifact.provider_type.as_str(),
-                    "file" | "folder" | "terminal"
+                    "file" | "folder" | "browser" | "terminal"
                 ) && artifact.provider_version == 1
                     && artifact.state_schema_version == 1;
                 if artifact.focus_supported
@@ -2513,6 +2759,33 @@ fn validate_conversation_attachment(
         return Err(ProtocolError::new(
             ProtocolErrorCode::InvalidPayload,
             "attachment length is invalid",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_browser_display_url(value: &str) -> Result<(), ProtocolError> {
+    let parsed = url::Url::parse(value).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Browser current URL is invalid",
+            false,
+        )
+    })?;
+    if value.is_empty()
+        || value.len() > MAX_BROWSER_ADDRESS_BYTES
+        || value.chars().any(char::is_control)
+        || !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidPayload,
+            "Browser current URL is invalid",
             false,
         ));
     }

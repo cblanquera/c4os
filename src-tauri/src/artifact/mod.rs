@@ -4,12 +4,21 @@
 //! or Action Gateway authority. Callers must resolve privileged resources and
 //! commit validated replacements through the owning application services.
 
+pub mod browser;
 pub mod context;
 pub mod file;
 pub mod folder;
 pub mod record;
 pub mod terminal;
 
+pub use browser::{
+    BrowserArtifactState, BrowserControllerEventMeta, BrowserEnvironmentReference,
+    BrowserEnvironmentScope, BrowserErrorCode, BrowserHistoryEntry, BrowserNavigationIntent,
+    BrowserNavigationKind, BrowserNavigationTarget, BrowserPhase, BrowserRecoveryCode,
+    BrowserStateError, MAX_BROWSER_DISPLAY_URL_BYTES, MAX_BROWSER_HISTORY_ENTRIES,
+    MAX_BROWSER_NAVIGATION_URL_BYTES, MAX_BROWSER_REFERENCE_ID_BYTES, MAX_BROWSER_TITLE_BYTES,
+    normalize_browser_address,
+};
 pub use context::{
     ARTIFACT_CONTEXT_SCHEMA_VERSION, ArtifactContextSnapshot, BrowserContextInput,
     CapabilityAccess, CapabilitySummaryEntry, ContextBudget, ContextCaptureIdentity,

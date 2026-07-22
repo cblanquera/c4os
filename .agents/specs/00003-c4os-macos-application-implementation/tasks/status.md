@@ -13,7 +13,7 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | [00007 Workspace, Chat, composer, and conversation](00007-workspace-chat-composer.md) | verified | passed | UX-005 through UX-007, CHAT-001 through CHAT-008, ART-006 |
 | [00008 Artifact framework and File/Folder facilities](00008-artifact-file-folder.md) | verified | passed | UX-008, ART-001, ART-003, ART-004, ART-007 |
 | [00009 Terminal facility](00009-terminal-facility.md) | verified | passed | ART-005 |
-| [00010 Native Browser facility](00010-native-browser-facility.md) | open | failed | ART-002, SET-010 |
+| [00010 Native Browser facility](00010-native-browser-facility.md) | verified | passed | ART-002, SET-010 |
 | [00011 Plugin and Skill lifecycle](00011-plugin-skill-lifecycle.md) | open | failed | SET-007, SET-008 |
 | [00012 MCP lifecycle](00012-mcp-lifecycle.md) | open | failed | SET-009 |
 | [00013 Onboarding and Settings integration](00013-onboarding-settings-integration.md) | open | failed | SET-001, SET-004 through SET-006 |
@@ -25,4 +25,4 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 
 ## Current Blockers
 
-None. Tasks 00001 through 00009 passed Agent Acceptance. Task 00010 is the next isolated epoch after the scoped Task 00009 checkpoint.
+None. Tasks 00001 through 00010 passed Agent Acceptance. Task 00011 is the next isolated epoch after the scoped Task 00010 checkpoint.

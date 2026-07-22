@@ -101,6 +101,57 @@ function terminalArtifact(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function browserArtifact(overrides: Record<string, unknown> = {}) {
+  return {
+    artifactId: "artifact-browser-1",
+    projectId: "project-1",
+    sessionId: "session-1",
+    providerType: "browser",
+    providerVersion: 1,
+    stateSchemaVersion: 1,
+    recordRevision: 6,
+    title: "Example",
+    focusSupported: true,
+    pendingApprovalId: null,
+    status: { kind: "ready", message: null },
+    sourceLabel: "Direct operation",
+    resourceVersion: { sequence: 6, sha256: DIGEST, observedAtMs: 15 },
+    history: [
+      {
+        recordRevision: 1,
+        kind: "browserOpened",
+        recordedAtMs: 10,
+        resourceVersion: { sequence: 1, sha256: DIGEST, observedAtMs: 10 },
+      },
+    ],
+    providerState: {
+      type: "browser",
+      value: {
+        currentUrl: "https://example.com/",
+        pageTitle: "Example",
+        phase: "ready",
+        refreshing: false,
+        canGoBack: true,
+        canGoForward: false,
+        controllerGeneration: 2,
+        mountGeneration: 3,
+        environmentScope: "per-chat-session",
+        pendingOperation: null,
+        pendingTargetUrl: null,
+        notices: [
+          {
+            id: "browser-notice-1",
+            kind: "information",
+            title: "Browser ready",
+            message: "The website finished loading.",
+          },
+        ],
+      },
+    },
+    ...overrides,
+  };
+}
+
 function workspace(generation: number, artifacts: readonly unknown[]) {
   return {
     protocolVersion: 1,
@@ -522,6 +573,293 @@ describe("Artifact native adapter", () => {
     });
     await expect(unsafeAdapter.read()).rejects.toMatchObject({
       code: "invalidPayload",
+    });
+  });
+
+  it("validates Browser state and serializes every exact native operation", async () => {
+    const calls: { command: string; input: unknown }[] = [];
+    const adapter = createArtifactAdapter({
+      async invoke(command, args) {
+        calls.push({ command, input: args.input });
+        const request = args.request as SnapshotRequest;
+        return response(
+          request,
+          calls.length,
+          workspace(calls.length, [browserArtifact()]),
+        );
+      },
+    });
+    const identity = {
+      artifactId: "artifact-browser-1" as never,
+      baseRecordRevision: 6,
+      controllerGeneration: 2,
+      mountGeneration: 3,
+    };
+
+    const read = await adapter.read();
+    expect(read.artifacts[0]?.providerState).toMatchObject({
+      type: "browser",
+      value: {
+        currentUrl: "https://example.com/",
+        environmentScope: "per-chat-session",
+        pendingOperation: null,
+        phase: "ready",
+      },
+    });
+    await adapter.openBrowser({ address: "example.com" });
+    await adapter.navigateBrowser({ ...identity, intent: "back" });
+    await adapter.clearBrowserData(identity);
+    await adapter.mountBrowser({
+      ...identity,
+      x: 10,
+      y: 20,
+      width: 900,
+      height: 600,
+      focus: false,
+    });
+    await adapter.resizeBrowser({
+      ...identity,
+      x: 11,
+      y: 21,
+      width: 901,
+      height: 601,
+      focus: true,
+    });
+    await adapter.focusNativeBrowser(identity);
+    await adapter.detachBrowser(identity);
+
+    expect(calls).toEqual([
+      { command: "artifact_snapshot", input: undefined },
+      { command: "artifact_open_browser", input: { address: "example.com" } },
+      {
+        command: "artifact_navigate_browser",
+        input: { ...identity, intent: "back" },
+      },
+      { command: "artifact_clear_browser_data", input: identity },
+      {
+        command: "artifact_mount_browser",
+        input: {
+          ...identity,
+          x: 10,
+          y: 20,
+          width: 900,
+          height: 600,
+          focus: false,
+        },
+      },
+      {
+        command: "artifact_resize_browser",
+        input: {
+          ...identity,
+          x: 11,
+          y: 21,
+          width: 901,
+          height: 601,
+          focus: true,
+        },
+      },
+      { command: "artifact_focus_native_browser", input: identity },
+      { command: "artifact_detach_browser", input: identity },
+    ]);
+  });
+
+  it("fails closed for inconsistent Browser approval and lifecycle projections", async () => {
+    const invalid = [
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            phase: "executing",
+          },
+        },
+      }),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            environmentScope: "global",
+          },
+        },
+      }),
+      browserArtifact({
+        pendingApprovalId: "approval-browser-1",
+      }),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingOperation: "clear-everything",
+          },
+        },
+      }),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingOperation: "clear-data",
+          },
+        },
+      }),
+      browserArtifact({
+        pendingApprovalId: "approval-browser-1",
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingOperation: "website-navigation",
+          },
+        },
+      }),
+      browserArtifact({
+        pendingApprovalId: "approval-browser-1",
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingOperation: "website-navigation",
+            pendingTargetUrl: "https://example.com/path?private=value",
+          },
+        },
+      }),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingTargetUrl: "https://example.com/path",
+          },
+        },
+      }),
+      browserArtifact({
+        pendingApprovalId: "approval-browser-1",
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pendingOperation: "clear-data",
+            pendingTargetUrl: "https://example.com/path",
+          },
+        },
+      }),
+      ...[
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://user:password@example.com/",
+        "https://@example.com/",
+        "https://example.com/?private=value",
+        "https://example.com/#private",
+      ].map((currentUrl) =>
+        browserArtifact({
+          providerState: {
+            ...browserArtifact().providerState,
+            value: {
+              ...(browserArtifact().providerState as { value: object }).value,
+              currentUrl,
+            },
+          },
+        }),
+      ),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            pageTitle: "Unsafe\npage title",
+          },
+        },
+      }),
+      browserArtifact({
+        providerState: {
+          ...browserArtifact().providerState,
+          value: {
+            ...(browserArtifact().providerState as { value: object }).value,
+            notices: [
+              {
+                id: "browser-notice-unsafe",
+                kind: "warning",
+                title: "Unsafe notice",
+                message: "Unsafe\u001bmessage",
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    for (const artifact of invalid) {
+      const adapter = createArtifactAdapter({
+        async invoke(_command, args) {
+          const request = args.request as SnapshotRequest;
+          return response(request, 1, workspace(1, [artifact]));
+        },
+      });
+      await expect(adapter.read()).rejects.toMatchObject({
+        code: "invalidPayload",
+      });
+    }
+
+    const pending = browserArtifact({
+      pendingApprovalId: "approval-browser-1",
+      providerState: {
+        ...browserArtifact().providerState,
+        value: {
+          ...(browserArtifact().providerState as { value: object }).value,
+          pendingOperation: "clear-data",
+        },
+      },
+    });
+    const adapter = createArtifactAdapter({
+      async invoke(_command, args) {
+        const request = args.request as SnapshotRequest;
+        return response(request, 1, workspace(1, [pending]));
+      },
+    });
+    await expect(adapter.read()).resolves.toMatchObject({
+      artifacts: [
+        {
+          pendingApprovalId: "approval-browser-1",
+          providerState: {
+            type: "browser",
+            value: { pendingOperation: "clear-data" },
+          },
+        },
+      ],
+    });
+
+    const websiteNavigation = browserArtifact({
+      pendingApprovalId: "approval-browser-2",
+      providerState: {
+        ...browserArtifact().providerState,
+        value: {
+          ...(browserArtifact().providerState as { value: object }).value,
+          pendingOperation: "website-navigation",
+          pendingTargetUrl: "https://example.com/path",
+        },
+      },
+    });
+    const websiteAdapter = createArtifactAdapter({
+      async invoke(_command, args) {
+        const request = args.request as SnapshotRequest;
+        return response(request, 2, workspace(2, [websiteNavigation]));
+      },
+    });
+    await expect(websiteAdapter.read()).resolves.toMatchObject({
+      artifacts: [
+        {
+          pendingApprovalId: "approval-browser-2",
+          providerState: {
+            type: "browser",
+            value: {
+              pendingOperation: "website-navigation",
+              pendingTargetUrl: "https://example.com/path",
+            },
+          },
+        },
+      ],
     });
   });
 });

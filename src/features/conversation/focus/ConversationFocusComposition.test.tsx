@@ -107,6 +107,18 @@ describe("ConversationFocusComposition", () => {
     expect(screen.getAllByText("Keep this real transcript.")).toHaveLength(1);
   });
 
+  it("marks provider-owned Close surfaces for the single-row focus grid", () => {
+    render(
+      <TestComposition
+        focusedArtifact={{ ...FOCUSED_ARTIFACT, ownsClose: true }}
+      />,
+    );
+
+    const focused = screen.getByRole("region", { name: "Focused result.md" });
+    expect(focused).toHaveAttribute("data-artifact-owns-close", "true");
+    expect(within(focused).queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
   it("preserves the original transcript DOM node across focus transitions", () => {
     const { rerender } = render(<TestComposition focusedArtifact={null} />);
     const originalFeed = screen.getByRole("feed");

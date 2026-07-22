@@ -8,7 +8,7 @@
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; Tasks 00001 through 00009 are verified with passed Agent Acceptance. Tasks 00010 through 00015C remain open.
+- Implementation status: Active; Tasks 00001 through 00010 are verified with passed Agent Acceptance. Tasks 00011 through 00015C remain open.
 
 ## Work Items
 
@@ -39,8 +39,8 @@ Research from Specs 00001 and 00002 is inherited through Context. All seven narr
 
 ## Proof Status
 
-Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00009 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining Browser, extension, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
+Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00010 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining extension, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
 
 ## Recommended Next Action
 
-Start Task 00010 as the next isolated Native Browser-facility epoch from the verified Task 00009 checkpoint. Preserve the complete-contract target and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.
+Start Task 00011 as the next isolated Plugin-and-Skill lifecycle epoch after the scoped Task 00010 checkpoint. Preserve the verified public-WebKit no-page-IPC boundary, the complete-contract target, and all 50 ledger IDs; close an ID only after every named primary/supporting task and integrated audit passes.

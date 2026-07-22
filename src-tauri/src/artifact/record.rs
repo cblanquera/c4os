@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
+use super::browser::BrowserArtifactState;
 use super::file::FileArtifactState;
 use super::folder::FolderArtifactState;
 use super::terminal::TerminalArtifactState;
@@ -57,6 +58,16 @@ impl ArtifactProviderDescriptor {
             type_id: "terminal".into(),
             label: "Terminal".into(),
             accessible_name: "Terminal command artifact".into(),
+            focus: ArtifactFocusCapability::Focusable,
+        }
+    }
+
+    pub fn browser() -> Self {
+        Self {
+            schema_version: ARTIFACT_PROVIDER_SCHEMA_VERSION,
+            type_id: "browser".into(),
+            label: "Browser".into(),
+            accessible_name: "Browser artifact".into(),
             focus: ArtifactFocusCapability::Focusable,
         }
     }
@@ -197,6 +208,7 @@ impl UnknownArtifactState {
 pub enum ArtifactState {
     File(Box<FileArtifactState>),
     Folder(Box<FolderArtifactState>),
+    Browser(Box<BrowserArtifactState>),
     Terminal(Box<TerminalArtifactState>),
     Unknown(UnknownArtifactState),
 }
@@ -206,6 +218,7 @@ impl ArtifactState {
         match self {
             Self::File(file) => file.live_version.as_resource_version(),
             Self::Folder(folder) => folder.listing_version.as_resource_version(),
+            Self::Browser(browser) => browser.as_resource_version(),
             Self::Terminal(terminal) => terminal.as_resource_version(),
             Self::Unknown(unknown) => unknown.resource_version.clone(),
         }
@@ -215,6 +228,7 @@ impl ArtifactState {
         match self {
             Self::File(file) => file.validate().map_err(ArtifactRecordError::File),
             Self::Folder(folder) => folder.validate().map_err(ArtifactRecordError::Folder),
+            Self::Browser(browser) => browser.validate().map_err(ArtifactRecordError::Browser),
             Self::Terminal(terminal) => terminal.validate().map_err(ArtifactRecordError::Terminal),
             Self::Unknown(unknown) => unknown.validate(),
         }
@@ -234,6 +248,7 @@ pub enum ArtifactHistoryKind {
     ConflictObserved,
     RecoveryChanged,
     NavigationChanged,
+    ReplySubmitted,
     Converted,
     CommandQueued,
     CommandStarted,
@@ -426,6 +441,7 @@ impl ArtifactRecord {
         match (&self.state, self.provider.type_id.as_str()) {
             (ArtifactState::File(_), "file")
             | (ArtifactState::Folder(_), "folder")
+            | (ArtifactState::Browser(_), "browser")
             | (ArtifactState::Terminal(_), "terminal")
                 if self.provider.schema_version == ARTIFACT_PROVIDER_SCHEMA_VERSION
                     && !matches!(&self.lifecycle, ArtifactLifecycle::UnknownVersion { .. }) =>
@@ -503,6 +519,8 @@ pub enum ArtifactRecordError {
     File(#[from] super::file::FileStateError),
     #[error(transparent)]
     Folder(#[from] super::folder::FolderStateError),
+    #[error(transparent)]
+    Browser(#[from] super::browser::BrowserStateError),
     #[error(transparent)]
     Terminal(#[from] super::terminal::TerminalStateError),
 }

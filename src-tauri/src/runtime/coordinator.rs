@@ -37,7 +37,7 @@ use crate::security::gateway::{
     ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit, GatewayProposal,
     NormalizedActionResult,
 };
-use crate::security::policy::ActionFacts;
+use crate::security::policy::{ActionFacts, PolicyResolution, resolve_policy};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -522,6 +522,14 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
     ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
         let proposal = self.action_gateway.propose(facts, action, now_ms)?;
         self.operation(proposal)
+    }
+
+    pub(crate) fn resolve_direct_policy(
+        &self,
+        facts: &ActionFacts,
+        now_ms: u64,
+    ) -> PolicyResolution {
+        resolve_policy(facts, self.action_gateway.policy(), now_ms)
     }
 
     pub(crate) fn requeue_interrupted_direct_approval(

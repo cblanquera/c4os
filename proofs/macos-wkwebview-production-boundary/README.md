@@ -1,6 +1,6 @@
 # macOS Native WebKit Production Boundary Proof
 
-Status: passed 2026-07-18; exact-version feasibility evidence only
+Status: passed 2026-07-18; production lock revalidated twice 2026-07-22; feasibility evidence only
 
 ## Question
 
@@ -11,7 +11,8 @@ Can a public-API native `WKWebView` be embedded as a child of the locked Tauri 2
 - Gap: Spec 00003 `GAP-005`.
 - Selection: Spec 00003 `D-023` and `IS-003`.
 - Target: current macOS development environment only.
-- Locked proof baselines: Tauri `2.11.2`, `objc2-web-kit` `0.3.2`, and the system WebKit shipped with the recorded macOS build.
+- Original passing baseline: Tauri `2.11.2`, `objc2-web-kit` `0.3.2`, and the system WebKit shipped with the recorded macOS build.
+- Current production-lock revalidation baseline: Tauri `2.11.5`, tauri-build `2.6.3`, `objc2-web-kit` `0.3.2`, and the current system WebKit. This revalidation does not turn the proof into production evidence.
 
 The direct WebKit boundary is necessary because Tauri `WebviewWindow` exposes Tauri internals to its page, while Wry `0.55.1` has no public permission-policy handler and its macOS UI delegate answers media capture with `WKPermissionDecision::Grant`. C4OS requires a controller that can return WebKit's `Prompt` decision without exposing a page command bridge.
 
@@ -75,4 +76,4 @@ The native command opens a short-lived macOS window. The page requests media and
 
 Passed twice consecutively on macOS 26.5.1 (25F80), arm64, with Tauri 2.11.2 and `objc2-web-kit` 0.3.2. All eight boundary checks passed and the final raw result contains no fixture exception or error sentinel.
 
-See [the dated evidence record](macos-wkwebview-production-boundary-evidence-2026-07-18.md) and [the raw final result](macos-wkwebview-production-boundary-result.json). The proof closes the pre-Freeze feasibility gate; it does not replace production integration, target, release, or human-acceptance verification.
+See [the original dated evidence record](macos-wkwebview-production-boundary-evidence-2026-07-18.md), [the production-lock revalidation](macos-wkwebview-production-boundary-evidence-2026-07-22.md), and [the raw final result](macos-wkwebview-production-boundary-result.json). The proof closes the pre-Freeze feasibility gate and confirms the current production dependency lock still supports it; it does not replace production integration, target, release, or human-acceptance verification.

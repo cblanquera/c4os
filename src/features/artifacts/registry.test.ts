@@ -17,6 +17,13 @@ const FILE_PROVIDER: ArtifactProviderDefinition = {
 };
 
 describe("artifact provider registry", () => {
+  it("production-composes the exact Browser provider version", () => {
+    expect(ARTIFACT_PROVIDER_REGISTRY.resolve("browser", 1)).toMatchObject({
+      kind: "registered",
+      provider: { type: "browser", version: 1, focusSupported: true },
+    });
+  });
+
   it("production-composes the exact Terminal provider version", () => {
     expect(ARTIFACT_PROVIDER_REGISTRY.resolve("terminal", 1)).toMatchObject({
       kind: "registered",

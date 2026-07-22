@@ -116,6 +116,7 @@ export function ConversationFocusComposition({
               : { "aria-labelledby": focusedArtifactTitleId })}
             className="conversation-focus__artifact"
             data-artifact-id={focusedArtifact.id}
+            data-artifact-owns-close={focusedArtifact.ownsClose}
             data-artifact-type={focusedArtifact.type}
           >
             {focusedArtifact.ownsClose ? null : (
