@@ -297,6 +297,10 @@ impl ProductionMcpSamplingApprovalRegistry {
         Ok(Some((state.revision, summaries)))
     }
 
+    pub(crate) fn contains_prompt(&self, prompt_id: &str) -> bool {
+        self.lock_state().pending.contains_key(prompt_id)
+    }
+
     pub(crate) fn stable_revision(&self) -> Option<u64> {
         let state = self.lock_state();
         (state.active_transitions == 0).then_some(state.revision)

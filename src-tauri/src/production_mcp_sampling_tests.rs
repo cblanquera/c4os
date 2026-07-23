@@ -51,9 +51,9 @@ use super::{
         pi::{PI_NATIVE_VERSION, PI_PROTOCOL, PiCapabilityState, PiHealth, PiModelRoute},
         provider::{
             ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-            ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint, ProviderKind,
-            ProviderModelDeclaration, ProviderProbe, ProviderProbeFailure, ProviderProfile,
-            RouteAvailability,
+            ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery,
+            ProviderEndpoint, ProviderKind, ProviderModelDeclaration, ProviderProbe,
+            ProviderProbeFailure, ProviderProfile, RouteAvailability,
         },
         supervisor::{
             HealthState, RUNTIME_PROTOCOL_VERSION, RuntimeInstallation, RuntimeKind, sha256_file,
@@ -995,7 +995,9 @@ fn provider_profile() -> ProviderProfile {
             base_url: "https://api.openai.com/v1".into(),
             api_kind: "openai".into(),
         },
-        credential_reference: vault.store("provider-key", b"fixture-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("provider-key", b"fixture-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }

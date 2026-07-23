@@ -3,6 +3,11 @@ import { Navigate, createHashRouter } from "react-router";
 import { PlatformThemeQaSurface } from "../features/platform";
 import { RuntimeQaSurface } from "../features/runtime";
 import { ShellRouteController } from "../features/shell/ShellRouteController";
+import {
+  LaunchRoute,
+  ProviderOnboardingRoute,
+  ProviderRouteGate,
+} from "../features/shell/LaunchRoute";
 import { WorkspaceStartRoute } from "../features/workspace/WorkspaceStartRoute";
 import { QA_POLICY_PATH, QaPolicyRoute } from "../qa/policy-route";
 import { QA_FOUNDATION_PATH, QaFoundationRoute } from "../qa/route";
@@ -14,6 +19,7 @@ const qaRootEntry = resolveBuildGatedQaRootEntry(
   import.meta.env.VITE_C4OS_QA_FIXTURES === "1",
   import.meta.env.VITE_C4OS_QA_ENTRY,
 );
+const qaFixturesEnabled = import.meta.env.VITE_C4OS_QA_FIXTURES === "1";
 
 const rootElement =
   qaRootEntry !== null ? (
@@ -34,7 +40,13 @@ export const appRouter = createHashRouter([
   {
     path: "/",
     element:
-      qaRootEntry !== null ? rootElement : <Navigate replace to="/start" />,
+      qaRootEntry !== null ? (
+        rootElement
+      ) : qaFixturesEnabled ? (
+        <Navigate replace to="/start" />
+      ) : (
+        <LaunchRoute />
+      ),
   },
   {
     path: "/foundation",
@@ -52,10 +64,32 @@ export const appRouter = createHashRouter([
     path: QA_POLICY_PATH,
     element: <QaPolicyRoute />,
   },
-  ...APP_ROUTE_DEFINITIONS.map((route) => ({
-    path: route.path,
-    element: <ShellRouteController route={route.path} />,
-  })),
+  ...APP_ROUTE_DEFINITIONS.map((route) => {
+    const productElement =
+      route.path === "/onboarding" ? (
+        <ProviderOnboardingRoute />
+      ) : route.path === "/start" ? (
+        <WorkspaceStartRoute />
+      ) : (
+        <ShellRouteController route={route.path} />
+      );
+    return {
+      path: route.path,
+      element: qaFixturesEnabled ? (
+        route.path === "/onboarding" || route.path === "/start" ? (
+          <div data-qa-product-adapter="deterministic" data-route={route.path}>
+            {productElement}
+          </div>
+        ) : (
+          <ShellRouteController route={route.path} />
+        )
+      ) : (
+        <ProviderRouteGate routePath={route.path}>
+          {productElement}
+        </ProviderRouteGate>
+      ),
+    };
+  }),
   {
     path: "/qa/platform",
     element: <PlatformThemeQaSurface />,

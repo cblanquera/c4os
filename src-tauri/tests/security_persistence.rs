@@ -1,5 +1,6 @@
 use c4os_lib::core::database::{
-    DatabaseActor, DatabaseDescriptor, SecurityJournalRecord, SnapshotQuery,
+    DatabaseActor, DatabaseDescriptor, RuntimeStateDocumentRecord, SecurityJournalRecord,
+    SnapshotQuery,
 };
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -69,6 +70,76 @@ fn generic_record(
         .to_string(),
         recorded_at_ms: at,
     }
+}
+
+fn policy_document(generation: u64, at: u64) -> RuntimeStateDocumentRecord {
+    RuntimeStateDocumentRecord {
+        document_kind: "runtime-control-plane".into(),
+        document_id: "policy".into(),
+        generation,
+        canonical_document: serde_json::json!({
+            "schemaVersion": 1,
+            "policyVersion": generation,
+            "revocationEpoch": generation
+        })
+        .to_string(),
+        updated_at_ms: at,
+    }
+}
+
+#[test]
+fn policy_and_authorization_invalidation_publish_in_one_sqlite_transaction() {
+    let temp = TempDir::new().expect("temporary directory");
+    let (_, actor) = start_app(&temp);
+    let mut unsafe_record = record("proposed", 10);
+    unsafe_record.canonical_document = serde_json::json!({
+        "schemaVersion": 1,
+        "recordKind": "action-intent",
+        "recordId": "intent-1",
+        "runId": "run-1",
+        "actionId": "action-1",
+        "state": "proposed",
+        "recordedAtMs": 10,
+        "payload": {
+            "password": "must-roll-back-the-policy-write"
+        }
+    })
+    .to_string();
+
+    actor
+        .save_policy_transition(policy_document(1, 10), None, vec![unsafe_record])
+        .expect_err("unsafe invalidation must roll back the whole policy transition");
+    assert!(
+        actor
+            .runtime_state_document("runtime-control-plane", "policy")
+            .expect("policy read after rollback")
+            .is_none()
+    );
+    assert!(
+        actor
+            .security_events(SnapshotQuery::new(10).expect("query"))
+            .expect("journal after rollback")
+            .is_empty()
+    );
+
+    actor
+        .save_policy_transition(policy_document(1, 11), None, vec![record("proposed", 11)])
+        .expect("atomic policy transition");
+    assert_eq!(
+        actor
+            .runtime_state_document("runtime-control-plane", "policy")
+            .expect("published policy")
+            .expect("policy document")
+            .generation,
+        1
+    );
+    assert_eq!(
+        actor
+            .security_events(SnapshotQuery::new(10).expect("query"))
+            .expect("published invalidation journal")
+            .len(),
+        1
+    );
 }
 
 #[test]

@@ -19,6 +19,7 @@ describe("RuntimeQaSurface", () => {
       runtimeGeneration: 7,
       onboardingReady: true,
       providers: [],
+      modelRoutes: [],
       runtimes: [],
       pendingApprovals: [],
     };
@@ -73,6 +74,7 @@ describe("RuntimeQaSurface", () => {
       runtimeGeneration: 7,
       onboardingReady: true,
       providers: [],
+      modelRoutes: [],
       runtimes: [],
       pendingApprovals: [approval],
     };
@@ -96,6 +98,7 @@ describe("RuntimeQaSurface", () => {
     expect(answerApproval).toHaveBeenCalledWith({
       ...approval,
       answer: "deny",
+      remember: "once",
     });
     expect(
       screen.queryByRole("heading", { name: "Runtime effect is paused" }),

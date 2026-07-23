@@ -34,7 +34,7 @@ describe("NativePlatformSettingsContent", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
-        "Access granted to c4os-project.",
+        "The native picker returned c4os-project. No Project was changed.",
       ),
     );
     expect(document.body).not.toHaveTextContent("picker-grant");

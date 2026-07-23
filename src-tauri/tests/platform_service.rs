@@ -8,6 +8,7 @@ mod protocol;
 use platform::*;
 use protocol::{PickerGrantId, RequestId};
 use serde_json::{Value, json};
+use tempfile::TempDir;
 
 fn service() -> PlatformService {
     PlatformService::qualify(PlatformTarget::new("macos", "aarch64")).unwrap()
@@ -19,6 +20,27 @@ fn request_id(value: &str) -> RequestId {
 
 fn grant_id(value: &str) -> PickerGrantId {
     PickerGrantId::new(value).unwrap()
+}
+
+#[test]
+fn native_picker_identity_rejects_same_path_replacement_before_consumption() {
+    let temporary = TempDir::new().expect("temporary picker root");
+    let path = temporary.path().join("selected.txt");
+    std::fs::write(&path, "selected object").expect("selected file");
+    let selection =
+        NativePickerSelection::new(&path, PickerObjectKind::File).expect("native picker selection");
+    selection
+        .verify_current_identity()
+        .expect("unchanged selection");
+
+    std::fs::remove_file(&path).expect("remove selected object");
+    std::fs::write(&path, "replacement object").expect("replacement file");
+    assert!(matches!(
+        selection.verify_current_identity(),
+        Err(PlatformError::InvalidPickerSelection(
+            "native picker selection changed before consumption"
+        ))
+    ));
 }
 
 #[test]

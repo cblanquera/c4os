@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 import {
   WorkspaceStartScreen,
@@ -74,13 +80,72 @@ describe("WorkspaceStartScreen", () => {
     expect(screen.queryByText("sensitive path")).not.toBeInTheDocument();
   });
 
-  it("ignores a stale completion when two presses race a render", async () => {
+  it("collects an HTTPS repository URL before cloning", async () => {
+    const openWorkspace = vi.fn().mockResolvedValue(null);
+    render(
+      <WorkspaceStartScreen recents={recents} openWorkspace={openWorkspace} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Clone Repository/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Repository URL" }), {
+      target: { value: "https://github.com/example/c4os-fixture.git" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(openWorkspace).toHaveBeenCalledWith({
+      type: "cloneRepository",
+      repositoryUrl: "https://github.com/example/c4os-fixture.git",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("");
+  });
+
+  it("freezes start actions inside a focus-managed clone approval", async () => {
+    const answerCloneApproval = vi.fn().mockResolvedValue(null);
+    render(
+      <WorkspaceStartScreen
+        answerCloneApproval={answerCloneApproval}
+        recents={recents}
+        openWorkspace={() =>
+          Promise.resolve({
+            promptId: "approval:clone-1",
+            summary: "Clone this repository into the selected folder?",
+          })
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Clone Repository/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Repository URL" }), {
+      target: { value: "https://github.com/example/c4os-fixture.git" },
+    });
+    const clone = screen.getByRole("button", { name: "Clone" });
+    fireEvent.click(clone);
+
+    expect(
+      await screen.findByRole("dialog", { name: "Clone approval" }),
+    ).toBeVisible();
+    expect(screen.getByText("Open a folder").closest("button")).toBeDisabled();
+    expect(
+      screen.getByText("Open a workspace").closest("button"),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Clone Repository").closest("button"),
+    ).toBeDisabled();
+    expect(clone).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(answerCloneApproval).toHaveBeenCalledWith(
+        "approval:clone-1",
+        "deny",
+      ),
+    );
+    await waitFor(() => expect(clone).toHaveFocus());
+  });
+
+  it("acquires a synchronous lock before two presses can race a render", async () => {
     const first = deferredResult();
-    const second = deferredResult();
-    const openWorkspace = vi
-      .fn()
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+    const openWorkspace = vi.fn().mockReturnValueOnce(first.promise);
     render(
       <WorkspaceStartScreen recents={recents} openWorkspace={openWorkspace} />,
     );
@@ -90,12 +155,8 @@ describe("WorkspaceStartScreen", () => {
       folder.click();
       folder.click();
     });
-    expect(openWorkspace).toHaveBeenCalledTimes(2);
-    second.resolve({ workspaceName: "Current", recovered: false });
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    first.resolve({ workspaceName: "Current", recovered: false });
     expect(await screen.findByText(/Opened Current/)).toBeVisible();
-
-    first.resolve({ workspaceName: "Stale", recovered: false });
-    await Promise.resolve();
-    expect(screen.queryByText(/Opened Stale/)).not.toBeInTheDocument();
   });
 });

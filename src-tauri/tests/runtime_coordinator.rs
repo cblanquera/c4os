@@ -20,9 +20,9 @@ use c4os_lib::runtime::coordinator::{
     CoordinatedFirstSubmission, CoordinatedRetry, CoordinatorError, RuntimeCoordinator,
 };
 use c4os_lib::runtime::provider::{
-    ModelRoute, PROVIDER_SCHEMA_VERSION, ProviderConnectionEvidence, ProviderDiscovery,
-    ProviderEndpoint, ProviderKind, ProviderProbe, ProviderProbeFailure, ProviderProfile,
-    ProviderService, RouteAvailability,
+    ModelRoute, PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderConnectionEvidence,
+    ProviderDiscovery, ProviderEndpoint, ProviderKind, ProviderProbe, ProviderProbeFailure,
+    ProviderProfile, ProviderService, RouteAvailability,
 };
 use c4os_lib::runtime::session::{
     AdapterBinding, AttemptContextSnapshot, AttemptIdentity, CapabilitySnapshot,
@@ -144,7 +144,9 @@ fn profile() -> ProviderProfile {
             base_url: "https://openrouter.ai/api/v1".into(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference: vault.store("provider-key", b"fixture-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("provider-key", b"fixture-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }

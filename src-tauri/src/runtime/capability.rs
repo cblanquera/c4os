@@ -106,9 +106,9 @@ pub struct RouteIdentity {
 
 impl RouteIdentity {
     pub fn validate(&self) -> Result<(), CapabilityError> {
+        validate_snapshot_identifier(&self.provider_id)?;
+        validate_snapshot_identifier(&self.endpoint_id)?;
         for value in [
-            &self.provider_id,
-            &self.endpoint_id,
             &self.adapter_kind,
             &self.adapter_version,
             &self.runtime_kind,

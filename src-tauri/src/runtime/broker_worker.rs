@@ -1927,6 +1927,7 @@ fn requested_authority(resolved: &ResolvedBrokerAction) -> BTreeSet<String> {
                 ActionEffect::Execute => "execute",
                 ActionEffect::Control => "control",
                 ActionEffect::Publish => "publish",
+                ActionEffect::Upload => "upload",
                 ActionEffect::Reveal => "reveal",
                 ActionEffect::Listen => "listen",
                 ActionEffect::Unknown => "unknown",

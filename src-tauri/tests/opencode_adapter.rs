@@ -4,13 +4,13 @@ use c4os_lib::runtime::opencode_credential::{
     ProviderCredentialAuthorizationReceipt, ProviderCredentialRequest,
 };
 use c4os_lib::runtime::provider::{
-    OpenCodeProviderProbe, PROVIDER_SCHEMA_VERSION, ProviderEndpoint, ProviderKind, ProviderProbe,
-    ProviderProfile,
+    OpenCodeProviderProbe, PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderEndpoint,
+    ProviderKind, ProviderProbe, ProviderProfile,
 };
 use c4os_lib::security::credentials::CredentialVault;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
@@ -217,6 +217,7 @@ fn credentialed_send_uses_the_core_derived_native_provider_route() {
             native_provider_id: "provider-openai".into(),
             native_model_id: "gpt-5".into(),
             operation_authorization_id: "credential-authorization:fixture".into(),
+            credential_required: true,
         });
     let mut adapter = OpenCodeAdapter::new(
         plan(7, "launch-provider-route", "vault-provider-route"),
@@ -527,9 +528,11 @@ fn provider_models_are_bounded_and_normalized() {
         endpoint: ProviderEndpoint {
             endpoint_id: "openai-models".into(),
             base_url: "https://api.openai.com/v1".into(),
-            api_kind: "openai-compatible".into(),
+            api_kind: "openai".into(),
         },
-        credential_reference: vault.store("openai", b"fixture-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("openai", b"fixture-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     };
     adapter.transport_for_test().respond_json(200, inventory);

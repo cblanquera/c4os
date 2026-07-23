@@ -118,8 +118,8 @@ import type {
   ProjectId,
   SessionId,
 } from "../../platform/protocol";
-import { NativePlatformSettingsContent } from "../platform";
 import { ProductionRuntimeApprovalCenter } from "../runtime";
+import { CoreSettingsController } from "../settings/CoreSettingsController";
 import {
   PluginSettings,
   SkillSettings,
@@ -1150,6 +1150,45 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     sessions.value.activeSessionId,
   ]);
 
+  const persistComposerDraftForArtifact = useCallback(async () => {
+    const selectedModel = selectableModels.find(
+      (model) => conversationModelKey(model) === selectedModelKey,
+    );
+    const draft = {
+      prompt: composerDraft.text,
+      attachmentIds: composerDraft.attachments.map(
+        (attachment) => attachment.id,
+      ),
+      providerId: selectedModel?.providerId ?? null,
+      modelId: selectedModel?.modelId ?? null,
+      reasoningMode: selectedReasoning,
+      mode: replyReference ? ("chat" as const) : composerDraft.mode,
+      replyTargetId: replyReference?.id ?? null,
+    };
+    await readConversationSnapshot();
+    const snapshot = await updateConversationDraft({
+      prompt: draft.prompt,
+      pickerGrantIds: [],
+      retainedAttachmentIds: draft.attachmentIds,
+      providerId: draft.providerId,
+      modelId: draft.modelId,
+      reasoningMode: draft.reasoningMode,
+      mode: draft.mode,
+      replyTargetId: draft.replyTargetId,
+    });
+    persistedDraftSignature.current = conversationDraftSignature(draft);
+    publishConversation(snapshot);
+  }, [
+    composerDraft.attachments,
+    composerDraft.mode,
+    composerDraft.text,
+    publishConversation,
+    replyReference,
+    selectableModels,
+    selectedModelKey,
+    selectedReasoning,
+  ]);
+
   const submitTerminalCommand = async (source: string) => {
     const command = source.trim();
     if (command.length === 0) return;
@@ -1158,6 +1197,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     try {
       await queueArtifactWorkspaceOperation(
         async () => {
+          await persistComposerDraftForArtifact();
           await readArtifactWorkspaceSnapshot();
           return runTerminalArtifact({ command, columns: 80, rows: 24 });
         },
@@ -1179,6 +1219,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     try {
       await queueArtifactWorkspaceOperation(
         async () => {
+          await persistComposerDraftForArtifact();
           await readArtifactWorkspaceSnapshot();
           return openBrowserArtifact({ address });
         },
@@ -1365,8 +1406,17 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   };
 
   const returnFromSettings = () => {
-    const destination = settingsReturn?.route ?? "/start";
-    const focusTarget = asShellFocusTarget(settingsReturn?.focusTarget ?? null);
+    const currentState = store.getState();
+    const returnIdentityMatches =
+      settingsReturn !== null &&
+      settingsReturn.workspaceId ===
+        currentState.shellAuthority.workspace.value.activeWorkspaceId &&
+      settingsReturn.sessionId ===
+        currentState.shellAuthority.sessions.value.activeSessionId;
+    const destination = returnIdentityMatches ? settingsReturn.route : "/start";
+    const focusTarget = returnIdentityMatches
+      ? asShellFocusTarget(settingsReturn.focusTarget)
+      : null;
     dispatch(shellDraftActions.settingsVisitEnded());
     if (focusTarget === null) {
       void navigate(destination);
@@ -2576,6 +2626,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
         settings={settings}
         extensionSettings={extensionSettings}
         mcpSettings={mcpSettings}
+        onNavigate={navigateWithinShell}
         workspace={workspace}
       />
     );
@@ -3297,6 +3348,7 @@ interface ProjectedRouteContentProps {
   readonly settings: SettingsState;
   readonly extensionSettings: ExtensionSettingsProjection;
   readonly mcpSettings: McpSettingsProjection;
+  readonly onNavigate: (route: AppRoutePath) => void;
 }
 
 /** Renders only state already present in authoritative projections. */
@@ -3309,9 +3361,19 @@ function ProjectedRouteContent({
   settings,
   extensionSettings,
   mcpSettings,
+  onNavigate,
 }: ProjectedRouteContentProps): ReactNode {
   if (route === "/settings/providers") {
-    return <NativePlatformSettingsContent />;
+    return <CoreSettingsController onNavigate={onNavigate} route={route} />;
+  }
+
+  if (
+    route === "/settings/models" ||
+    route === "/settings/runtimes" ||
+    route === "/settings/configuration" ||
+    route === "/settings/advanced-policies"
+  ) {
+    return <CoreSettingsController onNavigate={onNavigate} route={route} />;
   }
 
   if (route === "/settings/plugins") {

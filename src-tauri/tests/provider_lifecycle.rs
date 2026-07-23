@@ -6,10 +6,10 @@ use c4os_lib::runtime::capability::{
 };
 use c4os_lib::runtime::provider::{
     ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-    ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint, ProviderFeatureClaim,
-    ProviderFieldKey, ProviderKind, ProviderModelDeclaration, ProviderNumericClaim, ProviderProbe,
-    ProviderProbeFailure, ProviderProfile, ProviderService, ProviderSnapshot, ProviderTestStatus,
-    RouteAvailability,
+    ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint,
+    ProviderError, ProviderFeatureClaim, ProviderFieldKey, ProviderKind, ProviderModelDeclaration,
+    ProviderNumericClaim, ProviderProbe, ProviderProbeFailure, ProviderProfile, ProviderService,
+    ProviderSnapshot, ProviderTestStatus, RouteAvailability,
 };
 use c4os_lib::security::credentials::CredentialVault;
 
@@ -53,9 +53,45 @@ fn profile() -> ProviderProfile {
             base_url: "https://openrouter.ai/api/v1".into(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference,
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(credential_reference),
+        headers: BTreeMap::new(),
         enabled: true,
     }
+}
+
+fn tested_service() -> (ProviderService, ProviderProfile, u64) {
+    let candidate = profile();
+    let mut service = ProviderService::new();
+    service.save_profile(candidate.clone(), 0).unwrap();
+    let report = service
+        .test_provider(
+            "provider-openrouter",
+            1,
+            NOW,
+            &mut FixtureProbe(Ok(discovery(
+                vec![route("model-a", 1, RouteAvailability::Available)],
+                None,
+            ))),
+        )
+        .unwrap();
+    (service, candidate, report.generation)
+}
+
+fn assert_profile_edit_invalidates_latest_test(edit: impl FnOnce(&mut ProviderProfile)) {
+    let (mut service, mut candidate, tested_generation) = tested_service();
+    edit(&mut candidate);
+
+    service
+        .save_profile(candidate, tested_generation)
+        .expect("a valid relevant edit should save");
+    let snapshot = service.snapshot();
+    let record = &snapshot.providers[0];
+    assert!(matches!(record.test_status, ProviderTestStatus::Untested));
+    assert!(record.connection_evidence.is_none());
+    assert!(record.models.is_empty());
+    assert!(record.selected_model_id.is_none());
+    assert!(!snapshot.onboarding_ready_at(NOW));
 }
 
 fn route(model_id: &str, rank: u32, availability: RouteAvailability) -> ModelRoute {
@@ -237,6 +273,147 @@ fn one_usable_model_is_selected_and_explicitly_confirms_readiness() {
 
     assert_eq!(report.selected_model_id.as_deref(), Some("claude-sonnet"));
     assert!(service.snapshot().onboarding_ready_at(NOW));
+}
+
+#[test]
+fn onboarding_readiness_is_bound_to_the_requested_provider_and_model() {
+    let (service, _candidate, _tested_generation) = tested_service();
+    let snapshot = service.snapshot();
+
+    assert!(snapshot.onboarding_ready_at(NOW));
+    assert!(snapshot.provider_model_ready_at("provider-openrouter", "model-a", NOW));
+    assert!(!snapshot.provider_model_ready_at("provider-missing", "model-a", NOW));
+    assert!(!snapshot.provider_model_ready_at("provider-openrouter", "model-missing", NOW));
+}
+
+#[test]
+fn launch_requires_explicit_onboarding_completion() {
+    let (mut service, _candidate, tested_generation) = tested_service();
+    let tested = service.snapshot();
+    assert!(tested.onboarding_ready_at(NOW));
+    assert!(!tested.launch_ready());
+    assert_eq!(tested.onboarding_completed_at_ms, None);
+
+    let completed_generation = service.complete_onboarding(tested_generation, NOW).unwrap();
+    let completed = service.snapshot();
+    assert_eq!(completed.generation, completed_generation);
+    assert_eq!(completed.onboarding_completed_at_ms, Some(NOW));
+    assert!(completed.launch_ready());
+}
+
+#[test]
+fn completed_onboarding_persists_after_test_freshness_expires() {
+    let (mut service, _candidate, tested_generation) = tested_service();
+    service.complete_onboarding(tested_generation, NOW).unwrap();
+
+    let stale_at = NOW + 5 * 60 * 1_000 + 1;
+    let completed = service.snapshot();
+    assert!(!completed.onboarding_ready_at(stale_at));
+    assert!(completed.launch_ready());
+
+    let restored = ProviderService::restore(completed).unwrap();
+    assert!(restored.snapshot().launch_ready());
+}
+
+#[test]
+fn deleting_the_last_provider_clears_onboarding_completion() {
+    let (mut service, _candidate, tested_generation) = tested_service();
+    let completed_generation = service.complete_onboarding(tested_generation, NOW).unwrap();
+    assert!(service.snapshot().launch_ready());
+
+    service
+        .delete_provider("provider-openrouter", completed_generation)
+        .unwrap();
+    let deleted = service.snapshot();
+    assert!(deleted.providers.is_empty());
+    assert_eq!(deleted.onboarding_completed_at_ms, None);
+    assert!(!deleted.launch_ready());
+}
+
+#[test]
+fn relevant_auth_header_endpoint_and_credential_edits_invalidate_latest_test() {
+    assert_profile_edit_invalidates_latest_test(|candidate| {
+        candidate.authentication = ProviderAuthentication::ApiKeyHeader {
+            header_name: "x-provider-key".into(),
+        };
+    });
+    assert_profile_edit_invalidates_latest_test(|candidate| {
+        candidate
+            .headers
+            .insert("x-tenant-id".into(), "tenant-b".into());
+    });
+    assert_profile_edit_invalidates_latest_test(|candidate| {
+        candidate.kind = ProviderKind::Custom;
+        candidate.endpoint.base_url = "https://openrouter.example/api/v1".into();
+        candidate.endpoint.api_kind = "openai-compatible".into();
+    });
+    assert_profile_edit_invalidates_latest_test(|candidate| {
+        let vault = CredentialVault::session_only().unwrap();
+        candidate.credential_reference = Some(
+            vault
+                .store("replacement-openrouter-key", b"replacement-secret")
+                .unwrap(),
+        );
+    });
+}
+
+#[test]
+fn custom_http_endpoints_accept_only_numeric_loopback_hosts() {
+    let mut candidate = profile();
+    candidate.kind = ProviderKind::Custom;
+    candidate.endpoint.api_kind = "openai-compatible".into();
+
+    for endpoint in [
+        "http://127.0.0.1/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://[::1]/v1",
+        "http://[::1]:8080/v1",
+    ] {
+        candidate.endpoint.base_url = endpoint.into();
+        assert!(
+            candidate.validate().is_ok(),
+            "expected {endpoint} to be valid"
+        );
+    }
+
+    for endpoint in [
+        "http://localhost:8080/v1",
+        "http://127.0.0.2:8080/v1",
+        "http://[::2]:8080/v1",
+        "http://provider.example/v1",
+    ] {
+        candidate.endpoint.base_url = endpoint.into();
+        assert!(matches!(
+            candidate.validate(),
+            Err(ProviderError::InvalidEndpoint)
+        ));
+    }
+
+    candidate.kind = ProviderKind::OpenAi;
+    candidate.endpoint.base_url = "http://127.0.0.1:8080/v1".into();
+    assert!(matches!(
+        candidate.validate(),
+        Err(ProviderError::InvalidEndpoint)
+    ));
+}
+
+#[test]
+fn authentication_and_credential_presence_must_agree() {
+    let mut candidate = profile();
+    candidate.authentication = ProviderAuthentication::None;
+    assert!(matches!(
+        candidate.validate(),
+        Err(ProviderError::InvalidProfile)
+    ));
+
+    candidate.credential_reference = None;
+    assert!(candidate.validate().is_ok());
+
+    candidate.authentication = ProviderAuthentication::Bearer;
+    assert!(matches!(
+        candidate.validate(),
+        Err(ProviderError::InvalidProfile)
+    ));
 }
 
 #[test]

@@ -879,8 +879,7 @@ fn sampling_requires_the_exact_workspace_turn_run_and_correlation_binding() {
                 max_tokens: 8,
                 temperature: None,
             },
-            "pi-primary",
-            "provider-openai",
+            Some(("pi-primary", "provider-openai")),
         )
         .unwrap();
 
@@ -946,8 +945,7 @@ fn ambiguous_sampling_start_ack_keeps_the_native_run_bound_until_shutdown() {
                 max_tokens: 8,
                 temperature: None,
             },
-            "pi-primary",
-            "provider-openai",
+            Some(("pi-primary", "provider-openai")),
         ),
         Err(PiAdapterError::Protocol(_))
     ));

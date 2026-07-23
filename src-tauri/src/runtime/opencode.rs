@@ -1167,13 +1167,14 @@ impl<T: OpenCodeTransport, C: CommandDriver> OpenCodeAdapter<T, C> {
             opencode_message_id_for_operation(&dispatch.correlation.correlation_id).map_err(
                 |_| AdapterError::CommandFailed(CommandFailureCode::ProviderCredentialUnavailable),
             )?;
-        let credential_request = authorize_provider_credential.then(|| ProviderCredentialRequest {
-            process_generation: dispatch.correlation.process_generation,
-            native_session_id: dispatch.correlation.native_session_id.clone(),
-            provider_id: dispatch.model.provider_id.clone(),
-            model_id: dispatch.model.model_id.clone(),
-            operation_id: dispatch.correlation.correlation_id.clone(),
-        });
+        let mut credential_request =
+            authorize_provider_credential.then(|| ProviderCredentialRequest {
+                process_generation: dispatch.correlation.process_generation,
+                native_session_id: dispatch.correlation.native_session_id.clone(),
+                provider_id: dispatch.model.provider_id.clone(),
+                model_id: dispatch.model.model_id.clone(),
+                operation_id: dispatch.correlation.correlation_id.clone(),
+            });
         let credential_receipt = if let Some(request) = credential_request.as_ref() {
             self.command_driver
                 .authorize_provider_credential_attempt(request.clone())
@@ -1181,6 +1182,12 @@ impl<T: OpenCodeTransport, C: CommandDriver> OpenCodeAdapter<T, C> {
         } else {
             None
         };
+        if credential_receipt
+            .as_ref()
+            .is_some_and(|receipt| !receipt.credential_required)
+        {
+            credential_request = None;
+        }
         let native_provider_id = credential_receipt
             .as_ref()
             .map_or(dispatch.model.provider_id.as_str(), |receipt| {

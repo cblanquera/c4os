@@ -44,6 +44,8 @@ pub enum ConfigurationPersistenceError {
     InvalidScope,
     #[error("configuration rollback requires recovery before another activation")]
     RecoveryRequired,
+    #[error("configuration policy activation failed")]
+    PolicyActivation,
     #[error("managed configuration state is unavailable")]
     CoordinatorUnavailable,
 }
@@ -57,6 +59,13 @@ pub struct ManagedAppConfiguration {
     service: Arc<Mutex<ConfigurationService>>,
     _watcher: ParentDirectoryConfigurationWatcher,
     last_error: Arc<Mutex<Option<&'static str>>>,
+    activation_coordinator: Arc<Mutex<Option<AppConfigurationActivationCoordinator>>>,
+}
+
+#[derive(Clone)]
+struct AppConfigurationActivationCoordinator {
+    gate: Arc<Mutex<()>>,
+    observer: Arc<dyn Fn(Option<LastKnownGoodDocument>) -> Result<(), ()> + Send + Sync>,
 }
 
 impl ManagedAppConfiguration {
@@ -73,6 +82,8 @@ impl ManagedAppConfiguration {
             security_constraints,
         )?));
         let last_error = Arc::new(Mutex::new(None));
+        let activation_coordinator =
+            Arc::new(Mutex::new(None::<AppConfigurationActivationCoordinator>));
         let plan = ConfigurationWatcherPlan::new([WatchedConfiguration {
             scope: ConfigurationScope::App,
             path: home.app_configuration(),
@@ -81,27 +92,97 @@ impl ManagedAppConfiguration {
 
         let callback_service = Arc::clone(&service);
         let callback_database = Arc::clone(&database);
+        let callback_home = home.clone();
         let callback_error = Arc::clone(&last_error);
+        let callback_activation = Arc::clone(&activation_coordinator);
         let watcher =
             ParentDirectoryConfigurationWatcher::start(plan, move |notice| match notice {
                 ConfigurationWatcherNotice::Changed(targets) => {
                     for target in targets {
+                        let activation = callback_activation
+                            .lock()
+                            .ok()
+                            .and_then(|coordinator| coordinator.clone());
+                        let _activation_guard = match activation.as_ref() {
+                            Some(coordinator) => match coordinator.gate.lock() {
+                                Ok(guard) => Some(guard),
+                                Err(_) => {
+                                    if let Ok(mut error) = callback_error.lock() {
+                                        *error =
+                                            Some("configuration policy activation gate failed");
+                                    }
+                                    continue;
+                                }
+                            },
+                            None => None,
+                        };
                         let result = callback_service
                             .lock()
                             .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)
                             .and_then(|mut configuration| {
-                                reconcile_external_app_configuration(
+                                let prior = configuration
+                                    .last_known_good(ConfigurationScope::App)
+                                    .cloned();
+                                let update = reconcile_external_app_configuration(
                                     &callback_database,
                                     &mut configuration,
                                     &target.path,
                                     current_unix_seconds(),
-                                )
-                                .map(|_| ())
+                                )?;
+                                Ok((update, prior))
                             });
-                        if result.is_err() {
-                            let callback_lock = callback_error.lock();
-                            if let Ok(mut error) = callback_lock {
-                                *error = Some("configuration watcher activation failed");
+                        let mut observer_failed = false;
+                        if let Ok((ConfigurationUpdate::Activated { snapshot, record }, prior)) =
+                            &result
+                            && let Some(activation) = activation.as_ref()
+                            && (activation.observer)(Some(record.clone())).is_err()
+                        {
+                            observer_failed = true;
+                            let rollback_text = prior
+                                .as_ref()
+                                .map(|record| record.canonical_toml.clone())
+                                .or_else(|| {
+                                    toml::to_string(
+                                        &super::configuration::ConfigurationDocument::default(),
+                                    )
+                                    .ok()
+                                });
+                            let compensated = rollback_text.is_some_and(|rollback_text| {
+                                callback_service.lock().is_ok_and(|mut configuration| {
+                                    save_app_configuration(
+                                        &callback_database,
+                                        &callback_home,
+                                        &mut configuration,
+                                        &rollback_text,
+                                        snapshot.generation,
+                                        current_unix_seconds(),
+                                    )
+                                    .is_ok()
+                                })
+                            });
+                            let policy_compensated =
+                                compensated && (activation.observer)(prior.clone()).is_ok();
+                            if let Ok(mut error) = callback_error.lock() {
+                                *error = Some(if policy_compensated {
+                                    "configuration policy activation failed and was rolled back"
+                                } else {
+                                    "configuration policy activation failed; recovery is required"
+                                });
+                            }
+                        }
+                        if let Ok(mut error) = callback_error.lock() {
+                            match &result {
+                                Err(_) => *error = Some("configuration watcher activation failed"),
+                                Ok((ConfigurationUpdate::Rejected { .. }, _)) => {
+                                    *error = Some("configuration watcher edit was rejected")
+                                }
+                                Ok((
+                                    ConfigurationUpdate::Activated { .. }
+                                    | ConfigurationUpdate::Unchanged { .. }
+                                    | ConfigurationUpdate::DeduplicatedSelfWrite { .. },
+                                    _,
+                                )) if !observer_failed => *error = None,
+                                Ok(_) => {}
                             }
                         }
                     }
@@ -133,6 +214,7 @@ impl ManagedAppConfiguration {
             service,
             _watcher: watcher,
             last_error,
+            activation_coordinator,
         })
     }
 
@@ -181,6 +263,27 @@ impl ManagedAppConfiguration {
     pub fn last_error(&self) -> Option<&'static str> {
         self.last_error.lock().ok().and_then(|error| *error)
     }
+
+    pub fn set_activation_observer(
+        &self,
+        gate: Arc<Mutex<()>>,
+        observer: Arc<dyn Fn(Option<LastKnownGoodDocument>) -> Result<(), ()> + Send + Sync>,
+    ) -> Result<(), ConfigurationPersistenceError> {
+        *self
+            .activation_coordinator
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)? =
+            Some(AppConfigurationActivationCoordinator {
+                gate: Arc::clone(&gate),
+                observer: Arc::clone(&observer),
+            });
+        let _guard = gate
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        observer(self.last_known_good()?)
+            .map_err(|_| ConfigurationPersistenceError::RecoveryRequired)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -210,6 +313,13 @@ struct ManagedWorkspaceConfiguration {
     state: Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
     watcher: Mutex<ParentDirectoryConfigurationWatcher>,
     last_error: Arc<Mutex<Option<&'static str>>>,
+    activation_coordinator: Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
+}
+
+#[derive(Clone)]
+struct WorkspaceConfigurationActivationCoordinator {
+    gate: Arc<Mutex<()>>,
+    observer: Arc<dyn Fn() -> Result<(), ()> + Send + Sync>,
 }
 
 impl ManagedWorkspaceConfiguration {
@@ -228,12 +338,16 @@ impl ManagedWorkspaceConfiguration {
             &identities,
         )?));
         let last_error = Arc::new(Mutex::new(None));
+        let activation_coordinator = Arc::new(Mutex::new(
+            None::<WorkspaceConfigurationActivationCoordinator>,
+        ));
         let watcher = start_workspace_configuration_watcher(
             Arc::clone(&database),
             root.clone(),
             workspace_id,
             Arc::clone(&state),
             Arc::clone(&last_error),
+            Arc::clone(&activation_coordinator),
             &identities,
         )?;
         Ok(Self {
@@ -243,6 +357,7 @@ impl ManagedWorkspaceConfiguration {
             state,
             watcher: Mutex::new(watcher),
             last_error,
+            activation_coordinator,
         })
     }
 
@@ -269,6 +384,7 @@ impl ManagedWorkspaceConfiguration {
             self.workspace_id,
             Arc::clone(&self.state),
             Arc::clone(&self.last_error),
+            Arc::clone(&self.activation_coordinator),
             &identities,
         )?;
         let mut watcher = self
@@ -300,7 +416,21 @@ impl ManagedWorkspaceConfiguration {
     ) -> Result<ConfigurationUpdate, ConfigurationPersistenceError> {
         let path = configuration_path(&self.root, identity.scope, &identity.persisted_scope_id())
             .map_err(|_| ConfigurationPersistenceError::InvalidScope)?;
-        let update = {
+        let activation = self
+            .activation_coordinator
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?
+            .clone();
+        let _activation_guard = activation
+            .as_ref()
+            .map(|coordinator| {
+                coordinator
+                    .gate
+                    .lock()
+                    .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)
+            })
+            .transpose()?;
+        let (prior, update) = {
             let mut state = self
                 .state
                 .lock()
@@ -322,6 +452,7 @@ impl ManagedWorkspaceConfiguration {
                 .get_mut(&identity)
                 .ok_or(ConfigurationPersistenceError::InvalidScope)?;
             service.raise_generation_floor(global_generation);
+            let prior = service.last_known_good(identity.scope).cloned();
             let update = commit_ui_configuration(
                 service,
                 identity.scope,
@@ -344,10 +475,65 @@ impl ManagedWorkspaceConfiguration {
             if let ConfigurationUpdate::Activated { record, .. } = &update {
                 state.global_generation = record.activated_generation;
             }
-            update
+            (prior, update)
         };
+        if let (ConfigurationUpdate::Activated { snapshot, .. }, Some(activation)) =
+            (&update, activation.as_ref())
+            && (activation.observer)().is_err()
+        {
+            let rollback_text = prior
+                .as_ref()
+                .map(|record| record.canonical_toml.clone())
+                .or_else(|| {
+                    toml::to_string(&super::configuration::ConfigurationDocument::default()).ok()
+                });
+            let compensated = rollback_text.is_some_and(|rollback_text| {
+                self.state.lock().is_ok_and(|mut state| {
+                    compensate_workspace_configuration_activation(
+                        &self.database,
+                        self.workspace_id,
+                        &mut state,
+                        identity,
+                        &path,
+                        &rollback_text,
+                        snapshot.generation,
+                    )
+                    .is_ok()
+                })
+            });
+            let policy_compensated = compensated && (activation.observer)().is_ok();
+            if let Ok(mut error) = self.last_error.lock() {
+                *error = Some(if policy_compensated {
+                    "Workspace configuration policy activation failed and was rolled back"
+                } else {
+                    "Workspace configuration policy activation failed; recovery is required"
+                });
+            }
+            self.refresh_targets_after_commit();
+            return Err(if policy_compensated {
+                ConfigurationPersistenceError::PolicyActivation
+            } else {
+                ConfigurationPersistenceError::RecoveryRequired
+            });
+        }
+        if let Ok(mut error) = self.last_error.lock() {
+            *error = None;
+        }
         self.refresh_targets_after_commit();
         Ok(update)
+    }
+
+    fn set_activation_observer(
+        &self,
+        gate: Arc<Mutex<()>>,
+        observer: Arc<dyn Fn() -> Result<(), ()> + Send + Sync>,
+    ) -> Result<(), ConfigurationPersistenceError> {
+        *self
+            .activation_coordinator
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)? =
+            Some(WorkspaceConfigurationActivationCoordinator { gate, observer });
+        Ok(())
     }
 
     fn effective_stack(
@@ -517,6 +703,14 @@ impl ActiveWorkspace {
 
     pub fn configuration_last_error(&self) -> Option<&'static str> {
         self.configuration.last_error()
+    }
+
+    pub fn set_configuration_activation_observer(
+        &self,
+        gate: Arc<Mutex<()>>,
+        observer: Arc<dyn Fn() -> Result<(), ()> + Send + Sync>,
+    ) -> Result<(), ConfigurationPersistenceError> {
+        self.configuration.set_activation_observer(gate, observer)
     }
 
     /// Gives crate-owned production composition a shared, read-only handle to
@@ -1190,6 +1384,7 @@ fn start_workspace_configuration_watcher(
     workspace_id: Uuid,
     state: Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
     last_error: Arc<Mutex<Option<&'static str>>>,
+    activation_coordinator: Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
     identities: &BTreeSet<WorkspaceConfigurationIdentity>,
 ) -> Result<ParentDirectoryConfigurationWatcher, ConfigurationPersistenceError> {
     let targets = identities
@@ -1206,6 +1401,23 @@ fn start_workspace_configuration_watcher(
     ParentDirectoryConfigurationWatcher::start(plan, move |notice| match notice {
         ConfigurationWatcherNotice::Changed(targets) => {
             for target in targets {
+                let activation = activation_coordinator
+                    .lock()
+                    .ok()
+                    .and_then(|coordinator| coordinator.clone());
+                let _activation_guard = match activation.as_ref() {
+                    Some(coordinator) => match coordinator.gate.lock() {
+                        Ok(guard) => Some(guard),
+                        Err(_) => {
+                            if let Ok(mut error) = last_error.lock() {
+                                *error =
+                                    Some("Workspace configuration policy activation gate failed");
+                            }
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
                 let result =
                     workspace_configuration_identity_for_target(&root, workspace_id, &target)
                         .and_then(|identity| {
@@ -1222,7 +1434,10 @@ fn start_workspace_configuration_watcher(
                             let mut state = state.lock().map_err(|_| {
                                 ConfigurationPersistenceError::CoordinatorUnavailable
                             })?;
-                            commit_external_workspace_configuration(
+                            let prior = state.services.get(&identity).and_then(|service| {
+                                service.last_known_good(identity.scope).cloned()
+                            });
+                            let update = commit_external_workspace_configuration(
                                 &mut state,
                                 identity,
                                 &target.path,
@@ -1239,13 +1454,68 @@ fn start_workspace_configuration_watcher(
                                         })
                                         .map(|_| ())
                                 },
-                            )
-                            .map(|_| ())
+                            )?;
+                            Ok((identity, prior, update))
                         });
-                if result.is_err()
-                    && let Ok(mut error) = last_error.lock()
-                {
-                    *error = Some("Workspace configuration watcher activation failed");
+                let policy_result = match (&result, activation.as_ref()) {
+                    (Ok((_, _, ConfigurationUpdate::Activated { .. })), Some(coordinator)) => {
+                        (coordinator.observer)().map(Some)
+                    }
+                    _ => Ok(None),
+                };
+                let compensated = if policy_result.is_err() {
+                    result
+                        .as_ref()
+                        .ok()
+                        .and_then(|(identity, prior, update)| {
+                            let ConfigurationUpdate::Activated { snapshot, .. } = update else {
+                                return None;
+                            };
+                            Some((*identity, prior.clone(), snapshot.generation))
+                        })
+                        .is_some_and(|(identity, prior, base_generation)| {
+                            let rollback_text = prior
+                                .as_ref()
+                                .map(|record| record.canonical_toml.clone())
+                                .or_else(|| {
+                                    toml::to_string(
+                                        &super::configuration::ConfigurationDocument::default(),
+                                    )
+                                    .ok()
+                                });
+                            rollback_text.is_some_and(|rollback_text| {
+                                state.lock().is_ok_and(|mut state| {
+                                    compensate_workspace_configuration_activation(
+                                        &database,
+                                        workspace_id,
+                                        &mut state,
+                                        identity,
+                                        &target.path,
+                                        &rollback_text,
+                                        base_generation,
+                                    )
+                                    .is_ok()
+                                })
+                            })
+                        })
+                        && activation
+                            .as_ref()
+                            .is_some_and(|coordinator| (coordinator.observer)().is_ok())
+                } else {
+                    false
+                };
+                if let Ok(mut error) = last_error.lock() {
+                    if result.is_err() {
+                        *error = Some("Workspace configuration watcher activation failed");
+                    } else if policy_result.is_err() {
+                        *error = Some(if compensated {
+                            "Workspace configuration policy activation failed and was rolled back"
+                        } else {
+                            "Workspace configuration policy activation failed; recovery is required"
+                        });
+                    } else {
+                        *error = None;
+                    }
                 }
             }
         }
@@ -1256,6 +1526,46 @@ fn start_workspace_configuration_watcher(
         }
     })
     .map_err(ConfigurationPersistenceError::Configuration)
+}
+
+fn compensate_workspace_configuration_activation(
+    database: &DatabaseActor,
+    workspace_id: Uuid,
+    state: &mut WorkspaceConfigurationCoordinatorState,
+    identity: WorkspaceConfigurationIdentity,
+    path: &Path,
+    text: &str,
+    base_generation: u64,
+) -> Result<(), ConfigurationPersistenceError> {
+    let global_generation = state.global_generation;
+    let service = state
+        .services
+        .get_mut(&identity)
+        .ok_or(ConfigurationPersistenceError::InvalidScope)?;
+    service.raise_generation_floor(global_generation);
+    let update = commit_ui_configuration(
+        service,
+        identity.scope,
+        path,
+        text,
+        base_generation,
+        |record| {
+            database
+                .activate_configuration(ConfigurationSnapshotRecord {
+                    workspace_id: workspace_id.to_string(),
+                    scope_kind: identity.scope.as_str().into(),
+                    scope_id: identity.persisted_scope_id(),
+                    canonical_document: record.canonical_toml.clone(),
+                    generation: record.activated_generation,
+                    activated_at: current_unix_seconds(),
+                })
+                .map(|_| ())
+        },
+    )?;
+    if let ConfigurationUpdate::Activated { record, .. } = update {
+        state.global_generation = record.activated_generation;
+    }
+    Ok(())
 }
 
 fn commit_external_workspace_configuration<F>(
@@ -2351,7 +2661,128 @@ fn validate_display_name(value: &str) -> WorkspaceResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn app_configuration_observer_reconciles_registration_and_rolls_back_failed_external_policy() {
+        let temp = TempDir::new().expect("temporary app configuration root");
+        let home = C4osHomeLayout::new(temp.path());
+        let (database, _) =
+            DatabaseActor::start(DatabaseDescriptor::app(temp.path())).expect("app database");
+        let managed = ManagedAppConfiguration::start(
+            Arc::new(database),
+            home.clone(),
+            ManagedCeilings::default(),
+            SecurityConstraints::default(),
+        )
+        .expect("managed app configuration");
+        let initial = managed.snapshot().expect("initial configuration");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reject_external = Arc::new(AtomicBool::new(false));
+        let observer_calls = Arc::clone(&calls);
+        let observer_rejection = Arc::clone(&reject_external);
+        managed
+            .set_activation_observer(
+                Arc::new(Mutex::new(())),
+                Arc::new(move |record| {
+                    observer_calls.fetch_add(1, Ordering::SeqCst);
+                    if observer_rejection.load(Ordering::SeqCst)
+                        && record
+                            .as_ref()
+                            .is_some_and(|record| record.canonical_toml.contains("approve_for_me"))
+                    {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                }),
+            )
+            .expect("observer registration");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        reject_external.store(true, Ordering::SeqCst);
+        let path = home.app_configuration();
+        fs::create_dir_all(path.parent().expect("configuration parent"))
+            .expect("configuration parent");
+        fs::write(
+            &path,
+            "schema_version = 1\ndefault_approval_preset = \"approve_for_me\"\n",
+        )
+        .expect("external configuration edit");
+
+        for _ in 0..80 {
+            if managed.last_error().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(
+            managed
+                .snapshot()
+                .expect("compensated configuration")
+                .configuration
+                .default_approval_preset,
+            initial.configuration.default_approval_preset
+        );
+        assert!(calls.load(Ordering::SeqCst) >= 2);
+        assert_eq!(
+            managed.last_error(),
+            Some("configuration policy activation failed and was rolled back")
+        );
+    }
+
+    #[test]
+    fn rejected_external_app_configuration_sets_and_valid_activation_clears_error_state() {
+        let temp = TempDir::new().expect("temporary app configuration root");
+        let home = C4osHomeLayout::new(temp.path());
+        let (database, _) =
+            DatabaseActor::start(DatabaseDescriptor::app(temp.path())).expect("app database");
+        let managed = ManagedAppConfiguration::start(
+            Arc::new(database),
+            home.clone(),
+            ManagedCeilings::default(),
+            SecurityConstraints::default(),
+        )
+        .expect("managed app configuration");
+        let path = home.app_configuration();
+        fs::create_dir_all(path.parent().expect("configuration parent"))
+            .expect("configuration parent");
+
+        fs::write(&path, "schema_version = 999\n").expect("invalid external configuration edit");
+        for _ in 0..80 {
+            if managed.last_error().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(
+            managed.last_error(),
+            Some("configuration watcher edit was rejected")
+        );
+
+        fs::write(
+            &path,
+            "schema_version = 1\nrestore_last_workspace = false\n",
+        )
+        .expect("valid external configuration edit");
+        for _ in 0..80 {
+            if managed.last_error().is_none() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(managed.last_error(), None);
+        assert!(
+            !managed
+                .snapshot()
+                .expect("activated configuration")
+                .configuration
+                .restore_last_workspace
+        );
+    }
 
     #[test]
     fn aborted_workspace_creation_restores_active_and_recovery_roots() {
@@ -2526,5 +2957,169 @@ mod tests {
             );
             assert_eq!(retained.diagnostics().len(), 1);
         }
+    }
+
+    #[test]
+    fn workspace_watcher_reconciles_policy_and_compensates_a_rejected_activation() {
+        let temp = TempDir::new().expect("temporary Workspace home");
+        let home = C4osHomeLayout::new(temp.path().join("home"));
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).expect("fixture Project");
+        let workspace = create_workspace_from_project(
+            &home,
+            &project,
+            "Fixture Project",
+            "Fixture Workspace",
+            "0.1.0",
+            WorkspaceLockOwner {
+                process_id: std::process::id(),
+                app_instance_id: Uuid::new_v4(),
+                acquired_unix_ms: 1,
+                label: "workspace-configuration-observer-test".into(),
+            },
+            1,
+        )
+        .expect("active Workspace");
+        let path = WorkspaceLayout::new(workspace.working_root()).workspace_configuration();
+        let initial_preset = workspace
+            .restore_effective_configuration_snapshot(
+                None,
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("initial effective configuration")
+            .configuration
+            .default_approval_preset;
+        let observer_path = path.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observer_calls = Arc::clone(&calls);
+        workspace
+            .set_configuration_activation_observer(
+                Arc::new(Mutex::new(())),
+                Arc::new(move || {
+                    observer_calls.fetch_add(1, Ordering::SeqCst);
+                    let text = fs::read_to_string(&observer_path).map_err(|_| ())?;
+                    if text.contains("approve_for_me") {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                }),
+            )
+            .expect("Workspace observer");
+
+        fs::write(
+            &path,
+            "schema_version = 1\ndefault_approval_preset = \"approve_for_me\"\n",
+        )
+        .expect("external Workspace edit");
+        for _ in 0..80 {
+            if workspace.configuration_last_error().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        assert!(calls.load(Ordering::SeqCst) >= 2);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed and was rolled back")
+        );
+        let effective = workspace
+            .restore_effective_configuration_snapshot(
+                None,
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("compensated effective configuration");
+        assert_eq!(
+            effective.configuration.default_approval_preset,
+            initial_preset
+        );
+    }
+
+    #[test]
+    fn workspace_programmatic_save_compensates_a_rejected_policy_activation() {
+        let temp = TempDir::new().expect("temporary Workspace home");
+        let home = C4osHomeLayout::new(temp.path().join("home"));
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).expect("fixture Project");
+        let mut workspace = create_workspace_from_project(
+            &home,
+            &project,
+            "Fixture Project",
+            "Fixture Workspace",
+            "0.1.0",
+            WorkspaceLockOwner {
+                process_id: std::process::id(),
+                app_instance_id: Uuid::new_v4(),
+                acquired_unix_ms: 1,
+                label: "workspace-programmatic-configuration-observer-test".into(),
+            },
+            1,
+        )
+        .expect("active Workspace");
+        let initial_preset = workspace
+            .restore_effective_configuration_snapshot(
+                None,
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("initial effective configuration")
+            .configuration
+            .default_approval_preset;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observer_calls = Arc::clone(&calls);
+        workspace
+            .set_configuration_activation_observer(
+                Arc::new(Mutex::new(())),
+                Arc::new(move || {
+                    let call = observer_calls.fetch_add(1, Ordering::SeqCst);
+                    if call == 0 { Err(()) } else { Ok(()) }
+                }),
+            )
+            .expect("Workspace observer");
+        let mut service = workspace
+            .restore_configuration_stack(
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("Workspace configuration");
+        let generation = service.snapshot().generation;
+        let workspace_id = workspace.manifest().workspace_id;
+
+        assert!(matches!(
+            workspace.save_configuration_scope(
+                &mut service,
+                ConfigurationScope::Workspace,
+                workspace_id,
+                "schema_version = 1\ndefault_approval_preset = \"approve_for_me\"\n",
+                generation,
+                2,
+            ),
+            Err(ConfigurationPersistenceError::PolicyActivation)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let effective = workspace
+            .restore_effective_configuration_snapshot(
+                None,
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("compensated effective configuration");
+        assert_eq!(
+            effective.configuration.default_approval_preset,
+            initial_preset
+        );
     }
 }

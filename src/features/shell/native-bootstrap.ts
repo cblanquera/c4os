@@ -118,33 +118,7 @@ export async function ingestNativeShellProjections(
     dispatch(shellAuthorityActions.publicationReceived(publication));
   }
   if (conversation.status === "fulfilled") {
-    dispatch(
-      shellDraftActions.composerTextChanged(conversation.value.draft.prompt),
-    );
-    dispatch(
-      shellDraftActions.composerModeChanged(conversation.value.draft.mode),
-    );
-    dispatch(
-      shellDraftActions.composerReplyReconciled({
-        expectedReplyTargetId: null,
-        authoritativeReplyTargetId: conversation.value.draft.replyTargetId,
-      }),
-    );
-    dispatch(
-      shellDraftActions.composerAttachmentsReconciled({
-        attachments: conversation.value.draft.attachments.map((attachment) => ({
-          id: attachment.attachmentId,
-          name: attachment.displayName,
-          byteLength: attachment.byteLength,
-          mediaType: attachment.mediaType,
-          stableReference: attachment.stableReference,
-          referenceNumber: attachment.originalReference,
-          compatibility: "ready",
-        })),
-        nextAttachmentReference:
-          conversation.value.draft.nextAttachmentReference,
-      }),
-    );
+    reconcileConversationDraft(dispatch, conversation.value);
   }
 
   return {
@@ -339,10 +313,42 @@ export function conversationPublications(
 export function publishConversationSnapshot(
   dispatch: AppDispatch,
   snapshot: ConversationSnapshot,
+  options: { readonly reconcileDraft?: boolean } = {},
 ): void {
   for (const publication of conversationPublications(snapshot)) {
     dispatch(shellAuthorityActions.publicationReceived(publication));
   }
+  if (options.reconcileDraft === true) {
+    reconcileConversationDraft(dispatch, snapshot);
+  }
+}
+
+function reconcileConversationDraft(
+  dispatch: AppDispatch,
+  snapshot: ConversationSnapshot,
+): void {
+  dispatch(shellDraftActions.composerTextChanged(snapshot.draft.prompt));
+  dispatch(shellDraftActions.composerModeChanged(snapshot.draft.mode));
+  dispatch(
+    shellDraftActions.composerReplyReconciled({
+      expectedReplyTargetId: null,
+      authoritativeReplyTargetId: snapshot.draft.replyTargetId,
+    }),
+  );
+  dispatch(
+    shellDraftActions.composerAttachmentsReconciled({
+      attachments: snapshot.draft.attachments.map((attachment) => ({
+        id: attachment.attachmentId,
+        name: attachment.displayName,
+        byteLength: attachment.byteLength,
+        mediaType: attachment.mediaType,
+        stableReference: attachment.stableReference,
+        referenceNumber: attachment.originalReference,
+        compatibility: "ready",
+      })),
+      nextAttachmentReference: snapshot.draft.nextAttachmentReference,
+    }),
+  );
 }
 
 function platformPublication(

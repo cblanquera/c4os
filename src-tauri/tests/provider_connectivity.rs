@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
     io::{self, Write},
     net::{IpAddr, Ipv4Addr},
@@ -9,6 +9,7 @@ use std::{
 
 use c4os_lib::{
     runtime::{
+        capability::{CapabilityKey, CapabilityState, ModelLifecycle},
         opencode::{
             CommandDriver, CommandFailureCode, LaunchCommand, LoopbackEndpoint,
             NativeAuthorityPolicy, OpenCodeAdapter, OpenCodeCompatibilityManifest,
@@ -16,10 +17,11 @@ use c4os_lib::{
             StateNamespace, TransportFailureCode, TransportRequest, TransportResponse,
         },
         provider::{
-            CurlProviderConnectivity, PROVIDER_SCHEMA_VERSION, ProviderConnectionObservation,
-            ProviderConnectionRequest, ProviderConnectivity, ProviderEndpoint, ProviderKind,
-            ProviderProbeFailure, ProviderProfile, ProviderService, ProviderTestStatus,
-            VerifiedOpenCodeProviderProbe,
+            CurlProviderConnectivity, DirectProviderProbe, PROVIDER_SCHEMA_VERSION,
+            ProviderAuthentication, ProviderCatalog, ProviderCatalogModel,
+            ProviderConnectionObservation, ProviderConnectionRequest, ProviderConnectivity,
+            ProviderEndpoint, ProviderKind, ProviderProbeFailure, ProviderProfile, ProviderService,
+            ProviderTestStatus, RouteAvailability, VerifiedOpenCodeProviderProbe,
         },
     },
     security::credentials::{CredentialVault, OperationCredentialLease},
@@ -114,9 +116,11 @@ fn profile(vault: &CredentialVault) -> ProviderProfile {
         endpoint: ProviderEndpoint {
             endpoint_id: "openai-api".into(),
             base_url: "https://api.openai.com/v1".into(),
-            api_kind: "openai-compatible".into(),
+            api_kind: "openai".into(),
         },
-        credential_reference: vault.store("openai", b"test-provider-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("openai", b"test-provider-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }
@@ -191,7 +195,7 @@ impl ProviderConnectivity for RecordingConnectivity {
     fn test_connection(
         &mut self,
         request: &ProviderConnectionRequest,
-        credential_lease: &OperationCredentialLease,
+        credential_lease: Option<&OperationCredentialLease>,
     ) -> Result<ProviderConnectionObservation, ProviderProbeFailure> {
         self.requests.push(request.clone());
         if let ConnectivityOutcome::Failure(failure) = self.outcome {
@@ -199,6 +203,7 @@ impl ProviderConnectivity for RecordingConnectivity {
         }
         let mut channel = CountingCredentialChannel(0);
         credential_lease
+            .expect("credential lease")
             .deliver_to(&mut channel)
             .map_err(|_| ProviderProbeFailure::Authentication)?;
         assert!(channel.0 > 0);
@@ -210,6 +215,7 @@ impl ProviderConnectivity for RecordingConnectivity {
             },
             profile_binding_sha256: request.profile_binding_sha256.clone(),
             response_sha256: RESPONSE_DIGEST.into(),
+            catalog: None,
         })
     }
 }
@@ -320,12 +326,13 @@ fn connectivity_success_without_consuming_the_credential_lease_fails_closed() {
         fn test_connection(
             &mut self,
             request: &ProviderConnectionRequest,
-            _credential_lease: &OperationCredentialLease,
+            _credential_lease: Option<&OperationCredentialLease>,
         ) -> Result<ProviderConnectionObservation, ProviderProbeFailure> {
             Ok(ProviderConnectionObservation {
                 endpoint_sha256: request.endpoint_sha256.clone(),
                 profile_binding_sha256: request.profile_binding_sha256.clone(),
                 response_sha256: RESPONSE_DIGEST.into(),
+                catalog: None,
             })
         }
     }
@@ -400,4 +407,223 @@ esac
 fn helper_constructor_is_used_by_successful_connectivity_fixture() {
     let connectivity = RecordingConnectivity::success();
     assert!(connectivity.requests.is_empty());
+}
+
+#[test]
+fn direct_first_launch_probe_uses_the_exact_catalog_without_a_workspace_runtime() {
+    struct CatalogConnectivity;
+    impl ProviderConnectivity for CatalogConnectivity {
+        fn test_connection(
+            &mut self,
+            request: &ProviderConnectionRequest,
+            credential_lease: Option<&OperationCredentialLease>,
+        ) -> Result<ProviderConnectionObservation, ProviderProbeFailure> {
+            let mut channel = CountingCredentialChannel(0);
+            credential_lease
+                .expect("credential lease")
+                .deliver_to(&mut channel)
+                .map_err(|_| ProviderProbeFailure::Authentication)?;
+            Ok(ProviderConnectionObservation {
+                endpoint_sha256: request.endpoint_sha256.clone(),
+                profile_binding_sha256: request.profile_binding_sha256.clone(),
+                response_sha256: RESPONSE_DIGEST.into(),
+                catalog: Some(ProviderCatalog {
+                    models: vec![ProviderCatalogModel {
+                        model_id: "gpt-4o-mini".into(),
+                        display_name: "GPT-4o mini".into(),
+                        input_modalities: BTreeSet::from(["text".into()]),
+                        output_modalities: BTreeSet::from(["text".into()]),
+                        supported_parameters: BTreeSet::from([
+                            "tools".into(),
+                            "response_format".into(),
+                        ]),
+                        context_tokens: Some(128_000),
+                        output_tokens: Some(16_384),
+                    }],
+                }),
+            })
+        }
+    }
+
+    let vault = CredentialVault::session_only().unwrap();
+    let profile = profile(&vault);
+    let mut connectivity = CatalogConnectivity;
+    let mut probe = DirectProviderProbe::new(&vault, &mut connectivity, NOW).unwrap();
+    let mut service = ProviderService::new();
+    service.save_profile(profile, 0).unwrap();
+    let report = service
+        .test_provider("provider-openai", 1, NOW, &mut probe)
+        .unwrap();
+    assert_eq!(report.discovered_models, 1);
+    assert_eq!(report.usable_models, 1);
+    assert_eq!(report.selected_model_id.as_deref(), Some("gpt-4o-mini"));
+    {
+        let snapshot = service.snapshot();
+        let route = &snapshot.providers[0].models["gpt-4o-mini"];
+        assert!(route.is_production_ready());
+        assert_eq!(route.availability, RouteAvailability::Available);
+        assert_eq!(route.capabilities.lifecycle, ModelLifecycle::Active);
+        assert_eq!(
+            route.capabilities.feature_state(CapabilityKey::InputText),
+            CapabilityState::Supported
+        );
+        assert_eq!(
+            route.capabilities.feature_state(CapabilityKey::OutputText),
+            CapabilityState::Supported
+        );
+        assert_eq!(
+            route.capabilities.feature_state(CapabilityKey::Streaming),
+            CapabilityState::Unknown
+        );
+    }
+    assert!(!service.snapshot().launch_ready());
+    service
+        .complete_onboarding(report.generation, NOW + 1)
+        .unwrap();
+    assert!(service.snapshot().launch_ready());
+    assert!(service.snapshot().onboarding_ready_at(NOW + 1));
+}
+
+#[test]
+fn direct_first_launch_probe_accepts_sparse_official_openai_chat_models_only() {
+    struct SparseCatalogConnectivity;
+    impl ProviderConnectivity for SparseCatalogConnectivity {
+        fn test_connection(
+            &mut self,
+            request: &ProviderConnectionRequest,
+            credential_lease: Option<&OperationCredentialLease>,
+        ) -> Result<ProviderConnectionObservation, ProviderProbeFailure> {
+            let mut channel = CountingCredentialChannel(0);
+            credential_lease
+                .expect("credential lease")
+                .deliver_to(&mut channel)
+                .map_err(|_| ProviderProbeFailure::Authentication)?;
+            Ok(ProviderConnectionObservation {
+                endpoint_sha256: request.endpoint_sha256.clone(),
+                profile_binding_sha256: request.profile_binding_sha256.clone(),
+                response_sha256: RESPONSE_DIGEST.into(),
+                catalog: Some(ProviderCatalog {
+                    models: vec![
+                        ProviderCatalogModel {
+                            model_id: "gpt-undisclosed".into(),
+                            display_name: "Undisclosed model".into(),
+                            input_modalities: BTreeSet::new(),
+                            output_modalities: BTreeSet::new(),
+                            supported_parameters: BTreeSet::new(),
+                            context_tokens: None,
+                            output_tokens: None,
+                        },
+                        ProviderCatalogModel {
+                            model_id: "gpt-missing-output".into(),
+                            display_name: "Missing output declaration".into(),
+                            input_modalities: BTreeSet::from(["text".into()]),
+                            output_modalities: BTreeSet::new(),
+                            supported_parameters: BTreeSet::from(["tools".into()]),
+                            context_tokens: Some(32_000),
+                            output_tokens: None,
+                        },
+                    ],
+                }),
+            })
+        }
+    }
+
+    let vault = CredentialVault::session_only().unwrap();
+    let openai_profile = profile(&vault);
+    let mut connectivity = SparseCatalogConnectivity;
+    let mut probe = DirectProviderProbe::new(&vault, &mut connectivity, NOW).unwrap();
+    let mut service = ProviderService::new();
+    service.save_profile(openai_profile, 0).unwrap();
+
+    let report = service
+        .test_provider("provider-openai", 1, NOW, &mut probe)
+        .unwrap();
+    assert_eq!(report.discovered_models, 2);
+    assert_eq!(report.usable_models, 1);
+    assert_eq!(report.selected_model_id.as_deref(), Some("gpt-undisclosed"));
+    assert!(matches!(
+        report.status,
+        ProviderTestStatus::Succeeded { .. }
+    ));
+
+    let snapshot = service.snapshot();
+    let sparse_route = &snapshot.providers[0].models["gpt-undisclosed"];
+    assert!(sparse_route.is_production_ready());
+    assert_eq!(sparse_route.availability, RouteAvailability::Available);
+    assert_eq!(sparse_route.capabilities.lifecycle, ModelLifecycle::Active);
+    assert_eq!(
+        sparse_route
+            .capabilities
+            .feature_state(CapabilityKey::InputText),
+        CapabilityState::Supported
+    );
+    assert_eq!(
+        sparse_route
+            .capabilities
+            .feature_state(CapabilityKey::OutputText),
+        CapabilityState::Supported
+    );
+    assert_eq!(
+        sparse_route
+            .capabilities
+            .feature_state(CapabilityKey::Streaming),
+        CapabilityState::Unknown
+    );
+
+    let partial_route = &snapshot.providers[0].models["gpt-missing-output"];
+    assert!(!partial_route.is_production_ready());
+    assert_eq!(partial_route.availability, RouteAvailability::Unknown);
+    assert_eq!(
+        partial_route.capabilities.lifecycle,
+        ModelLifecycle::Unavailable
+    );
+    assert_eq!(
+        partial_route
+            .capabilities
+            .feature_state(CapabilityKey::InputText),
+        CapabilityState::Supported
+    );
+    assert_eq!(
+        partial_route
+            .capabilities
+            .feature_state(CapabilityKey::OutputText),
+        CapabilityState::Unknown
+    );
+    for route in [sparse_route, partial_route] {
+        assert_eq!(
+            route.capabilities.feature_state(CapabilityKey::Streaming),
+            CapabilityState::Unknown
+        );
+    }
+    assert!(snapshot.onboarding_ready_at(NOW));
+
+    let mut custom_profile = profile(&vault);
+    custom_profile.provider_id = "provider-custom".into();
+    custom_profile.kind = ProviderKind::Custom;
+    custom_profile.display_name = "Custom OpenAI-compatible".into();
+    custom_profile.endpoint = ProviderEndpoint {
+        endpoint_id: "custom-api".into(),
+        base_url: "https://proxy.example/v1".into(),
+        api_kind: "openai-compatible".into(),
+    };
+    let mut custom_connectivity = SparseCatalogConnectivity;
+    let mut custom_probe = DirectProviderProbe::new(&vault, &mut custom_connectivity, NOW).unwrap();
+    let mut custom_service = ProviderService::new();
+    custom_service.save_profile(custom_profile, 0).unwrap();
+
+    let custom_report = custom_service
+        .test_provider("provider-custom", 1, NOW, &mut custom_probe)
+        .unwrap();
+    assert_eq!(custom_report.discovered_models, 2);
+    assert_eq!(custom_report.usable_models, 0);
+    assert!(custom_report.selected_model_id.is_none());
+    assert!(matches!(
+        custom_report.status,
+        ProviderTestStatus::SucceededNoUsableModels { .. }
+    ));
+    for route in custom_service.snapshot().providers[0].models.values() {
+        assert!(!route.is_production_ready());
+        assert_eq!(route.availability, RouteAvailability::Unknown);
+        assert_eq!(route.capabilities.lifecycle, ModelLifecycle::Unavailable);
+    }
 }

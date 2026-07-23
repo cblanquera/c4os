@@ -36,9 +36,9 @@ use crate::security::authorization::{
 };
 use crate::security::gateway::{
     ActionEffectLease, ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit,
-    GatewayProposal, NormalizedActionResult,
+    GatewayProposal, GlobalPolicyReplacement, NormalizedActionResult,
 };
-use crate::security::policy::{ActionFacts, PolicyResolution, resolve_policy};
+use crate::security::policy::{ActionFacts, PolicyConfiguration, PolicyResolution, resolve_policy};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -137,11 +137,11 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         }
     }
 
-    pub fn snapshot(&self, now_ms: u64) -> RuntimeCoordinatorSnapshot {
+    pub fn snapshot(&self, _now_ms: u64) -> RuntimeCoordinatorSnapshot {
         let providers = self.providers.snapshot();
         RuntimeCoordinatorSnapshot {
             generation: self.generation,
-            onboarding_ready: providers.onboarding_ready_at(now_ms),
+            onboarding_ready: providers.launch_ready(),
             providers,
             runtimes: self.supervisor.snapshot(),
         }
@@ -192,6 +192,54 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             self.providers
                 .select_model(provider_id, model_id, expected_provider_generation)?;
         self.operation(generation)
+    }
+
+    pub fn set_models_enabled(
+        &mut self,
+        provider_id: &str,
+        model_ids: &[String],
+        enabled: bool,
+        expected_provider_generation: u64,
+    ) -> Result<CoordinatorOperation<u64>, CoordinatorError> {
+        let generation = self.providers.set_models_enabled(
+            provider_id,
+            model_ids,
+            enabled,
+            expected_provider_generation,
+        )?;
+        self.operation(generation)
+    }
+
+    pub fn complete_onboarding(
+        &mut self,
+        expected_provider_generation: u64,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, CoordinatorError> {
+        let generation = self
+            .providers
+            .complete_onboarding(expected_provider_generation, completed_at_ms)?;
+        self.operation(generation)
+    }
+
+    pub fn delete_provider(
+        &mut self,
+        provider_id: &str,
+        expected_provider_generation: u64,
+    ) -> Result<CoordinatorOperation<u64>, CoordinatorError> {
+        let generation = self
+            .providers
+            .delete_provider(provider_id, expected_provider_generation)?;
+        self.operation(generation)
+    }
+
+    pub fn invalidate_provider_credential_reference(
+        &mut self,
+        credential_reference: &crate::security::credentials::CredentialReference,
+    ) -> Result<Option<CoordinatorOperation<u64>>, CoordinatorError> {
+        self.providers
+            .invalidate_credential_reference(credential_reference)?
+            .map(|generation| self.operation(generation))
+            .transpose()
     }
 
     pub fn register_runtime(
@@ -578,6 +626,7 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         let response = self
             .action_gateway
             .answer_approval(prompt_id, answer, now_ms)?;
+        let _ = self.action_gateway.take_answered_facts(prompt_id);
         self.operation(response)
     }
 
@@ -647,6 +696,10 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         let decision = RuntimeActionBridge::new(&mut self.action_gateway)
             .answer_approval(prompt_id, answer, now_ms)?;
         self.operation(decision)
+    }
+
+    pub(crate) fn take_runtime_approval_facts(&mut self, prompt_id: &str) -> Option<ActionFacts> {
+        self.action_gateway.take_answered_facts(prompt_id)
     }
 
     pub fn execute_runtime_action(
@@ -837,6 +890,49 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(revoked)
     }
 
+    pub fn policy_configuration(&self) -> &PolicyConfiguration {
+        self.action_gateway.policy()
+    }
+
+    pub fn replace_policy_configuration(
+        &mut self,
+        policy: PolicyConfiguration,
+        revocation: bool,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<usize>, CoordinatorError> {
+        let invalidated = self
+            .action_gateway
+            .replace_policy_globally(policy, revocation, now_ms)?;
+        self.operation(invalidated)
+    }
+
+    pub(crate) fn prepare_policy_configuration_replacement(
+        &self,
+        policy: PolicyConfiguration,
+        revocation: bool,
+        now_ms: u64,
+    ) -> Result<GlobalPolicyReplacement, CoordinatorError> {
+        if self.generation == u64::MAX {
+            return Err(CoordinatorError::GenerationExhausted);
+        }
+        Ok(self
+            .action_gateway
+            .prepare_policy_replacement(policy, revocation, now_ms)?)
+    }
+
+    pub(crate) fn commit_policy_configuration_replacement(
+        &mut self,
+        replacement: GlobalPolicyReplacement,
+    ) -> CoordinatorOperation<usize> {
+        let invalidated = replacement.invalidated_count();
+        self.action_gateway.commit_policy_replacement(replacement);
+        self.generation += 1;
+        CoordinatorOperation {
+            coordinator_generation: self.generation,
+            value: invalidated,
+        }
+    }
+
     fn fresh_selected_provider(
         &self,
         provider_id: &str,
@@ -859,6 +955,7 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             .get(model_id)
             .ok_or(CoordinatorError::ModelRouteUnavailable)?;
         if !record.profile.enabled
+            || record.disabled_model_ids.contains(model_id)
             || !route.is_usable()
             || record.connection_evidence.as_ref().is_none_or(|evidence| {
                 evidence.tested_at_ms != tested_at_ms

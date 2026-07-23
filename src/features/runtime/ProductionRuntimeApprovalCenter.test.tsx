@@ -41,6 +41,7 @@ function snapshot(
     runtimeGeneration: 5,
     onboardingReady: true,
     providers: [],
+    modelRoutes: [],
     runtimes: [],
     pendingApprovals,
   };
@@ -81,13 +82,14 @@ describe("ProductionRuntimeApprovalCenter", () => {
     expect(screen.getByText(/2 message\(s\), 412 bytes/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("private prompt canary");
 
-    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>
       expect(answerApproval).toHaveBeenCalledWith({
         runtimeId: approval.runtimeId,
         correlationId: approval.correlationId,
         promptId: approval.promptId,
         answer: "allow",
+        remember: "once",
       }),
     );
     await waitFor(() =>
@@ -126,6 +128,7 @@ describe("ProductionRuntimeApprovalCenter", () => {
             runtimeGeneration: runtimeSnapshot.runtimeGeneration,
             onboardingReady: runtimeSnapshot.onboardingReady,
             providers: runtimeSnapshot.providers,
+            modelRoutes: runtimeSnapshot.modelRoutes,
             runtimes: runtimeSnapshot.runtimes,
             pendingApprovals: runtimeSnapshot.pendingApprovals,
           },
@@ -138,6 +141,7 @@ describe("ProductionRuntimeApprovalCenter", () => {
           correlationId: approval.correlationId,
           promptId: approval.promptId,
           answer: "deny",
+          remember: "once",
         });
         answered = true;
         return {

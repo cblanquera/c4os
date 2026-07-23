@@ -102,12 +102,24 @@ struct RecordingMutationObserver {
     events: Mutex<Vec<(String, CredentialMutationKind, u64)>>,
 }
 
+struct FailingMutationObserver;
+
+impl CredentialMutationObserver for FailingMutationObserver {
+    fn credential_mutated(
+        &self,
+        _credential_reference: &CredentialReference,
+        _kind: CredentialMutationKind,
+    ) -> CredentialVaultResult<()> {
+        Err(CredentialVaultError::MutationObserver)
+    }
+}
+
 impl CredentialMutationObserver for RecordingMutationObserver {
     fn credential_mutated(
         &self,
         credential_reference: &CredentialReference,
         kind: CredentialMutationKind,
-    ) {
+    ) -> CredentialVaultResult<()> {
         // Reading the vault from the callback proves mutation notifications
         // occur after the state lock is released.
         let generation = self.vault.generation().expect("observer reads generation");
@@ -116,6 +128,7 @@ impl CredentialMutationObserver for RecordingMutationObserver {
             kind,
             generation,
         ));
+        Ok(())
     }
 }
 
@@ -336,6 +349,28 @@ fn explicit_session_only_fallback_never_writes_a_vault_file() {
 }
 
 #[test]
+fn opaque_reference_availability_tracks_the_current_session() {
+    let vault = CredentialVault::session_only().expect("session-only vault");
+    let credential_reference = vault
+        .store("provider.api_key", PRIMARY_SECRET)
+        .expect("store session credential");
+
+    assert!(
+        vault
+            .contains(&credential_reference)
+            .expect("read reference availability")
+    );
+    vault
+        .remove(&credential_reference)
+        .expect("remove session credential");
+    assert!(
+        !vault
+            .contains(&credential_reference)
+            .expect("read removed reference availability")
+    );
+}
+
+#[test]
 fn removal_and_replacement_immediately_revoke_outstanding_leases() {
     let directory = TempDir::new().expect("temporary directory");
     let path = vault_path(&directory);
@@ -417,6 +452,39 @@ fn replacement_and_removal_notify_reference_only_observers_after_durable_mutatio
                 removed_generation,
             ),
         ]
+    );
+}
+
+#[test]
+fn mutation_observer_failures_are_reported_to_the_caller() {
+    let directory = TempDir::new().expect("temporary directory");
+    let path = vault_path(&directory);
+    let vault = test_vault(&path, Arc::new(FakeClock::default())).expect("open vault");
+    let credential_reference = vault
+        .store("provider.api_key", PRIMARY_SECRET)
+        .expect("store secret");
+    let observer: Arc<dyn CredentialMutationObserver> = Arc::new(FailingMutationObserver);
+    vault
+        .register_mutation_observer(Arc::clone(&observer))
+        .expect("register observer");
+
+    assert!(matches!(
+        vault.replace(&credential_reference, b"replacement-secret"),
+        Err(CredentialVaultError::MutationObserver)
+    ));
+    assert!(
+        vault
+            .contains(&credential_reference)
+            .expect("read replaced reference")
+    );
+    assert!(matches!(
+        vault.remove(&credential_reference),
+        Err(CredentialVaultError::MutationObserver)
+    ));
+    assert!(
+        !vault
+            .contains(&credential_reference)
+            .expect("read removed reference")
     );
 }
 

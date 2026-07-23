@@ -13,6 +13,7 @@ import { shellDraftActions, UNINITIALIZED_GENERATION } from "./state";
 import {
   ingestNativeShellProjections,
   nativeResumeRoute,
+  publishConversationSnapshot,
   type NativeShellReaders,
 } from "./native-bootstrap";
 
@@ -186,6 +187,81 @@ describe("native shell projection ingestion", () => {
     expect(store.getState().shellDrafts.composer.nextAttachmentReference).toBe(
       4,
     );
+  });
+
+  it("reconciles the complete composer draft from a native Conversation snapshot", () => {
+    const store = createAppStore(undefined);
+    store.dispatch(shellDraftActions.composerTextChanged("stale local text"));
+    store.dispatch(shellDraftActions.composerModeChanged("files"));
+    const base = conversationSnapshot();
+    const restored: ConversationSnapshot = {
+      ...base,
+      draft: {
+        ...base.draft,
+        prompt: "Persist this native draft",
+        mode: "terminal",
+        replyTargetId: "turn:native-reply",
+        attachments: [
+          {
+            attachmentId: "attachment:native" as never,
+            displayName: "native.log",
+            mediaType: "text/plain",
+            byteLength: 42,
+            stableReference: "reference:native",
+            originalReference: 5,
+          },
+        ],
+        nextAttachmentReference: 6,
+      },
+      activeConversation: {
+        sessionId: "session:native" as never,
+        title: "Native Chat",
+        turns: [
+          {
+            turnId: "turn:native-reply" as never,
+            prompt: "Reply to this native turn",
+            attachments: [],
+            artifactContext: null,
+            mcpProvenance: null,
+            submittedAtMs: 1_721_312_001,
+          },
+        ],
+        attempts: [],
+        activeAttemptId: null,
+      },
+    };
+
+    publishConversationSnapshot(store.dispatch, restored, {
+      reconcileDraft: true,
+    });
+
+    expect(store.getState().shellDrafts.composer).toMatchObject({
+      text: "Persist this native draft",
+      mode: "terminal",
+      replyTargetId: "turn:native-reply",
+      nextAttachmentReference: 6,
+      attachments: [
+        {
+          id: "attachment:native",
+          name: "native.log",
+          mediaType: "text/plain",
+          byteLength: 42,
+          stableReference: "reference:native",
+          referenceNumber: 5,
+          compatibility: "ready",
+        },
+      ],
+    });
+  });
+
+  it("publishes unrelated Conversation authority without overwriting a newer local draft", () => {
+    const store = createAppStore(undefined);
+    store.dispatch(shellDraftActions.composerTextChanged("new unsaved text"));
+    const stale = conversationSnapshot();
+
+    publishConversationSnapshot(store.dispatch, stale);
+
+    expect(store.getState().shellDrafts.composer.text).toBe("new unsaved text");
   });
 
   it("does not let delayed bootstrap replace a newer local Reply target", async () => {
@@ -457,6 +533,7 @@ function runtimeSnapshot(): RuntimeCoreSnapshot {
         selectedModelId: "model:native",
       },
     ],
+    modelRoutes: [],
     runtimes: [
       {
         runtimeId: "runtime:native",

@@ -1,0 +1,265 @@
+.configuration-settings {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  margin-block-start: 26px;
+}
+
+.configuration-settings__heading,
+.configuration-card > header,
+.configuration-file-action {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.configuration-settings__heading h2,
+.configuration-settings__heading p,
+.configuration-card h3,
+.configuration-card header p,
+.configuration-browser-environments > p {
+  margin: 0;
+}
+
+.configuration-settings__heading h2 {
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.configuration-settings__heading p,
+.configuration-card header p,
+.configuration-browser-environments > p {
+  max-width: 62ch;
+  margin-block-start: 5px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.configuration-settings__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.configuration-settings-state,
+.configuration-live-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-separator);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
+.configuration-settings-state {
+  margin-block-start: 26px;
+}
+
+.configuration-settings-state > span:last-child,
+.configuration-live-state > span:last-child,
+.configuration-file-action > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.configuration-settings-state span span,
+.configuration-live-state span span,
+.configuration-file-action > span > span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.configuration-settings-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid var(--border-control);
+  border-block-start-color: var(--accent);
+  border-radius: 50%;
+  animation: configuration-settings-spin 700ms linear infinite;
+}
+
+.configuration-live-state__badge {
+  padding: 4px 7px;
+  border: 1px solid
+    color-mix(in srgb, var(--success) 36%, var(--border-separator));
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.configuration-card {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-separator);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
+.configuration-card h3 {
+  font-size: 0.97rem;
+}
+
+.configuration-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.configuration-field > label,
+.configuration-browser-environments legend {
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 710;
+}
+
+.configuration-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-control);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.configuration-field select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus-ring) 72%, transparent);
+  outline-offset: 2px;
+}
+
+.configuration-field > small {
+  color: var(--text-tertiary);
+  font-size: 0.71rem;
+  line-height: 1.4;
+}
+
+.configuration-field--policy > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.configuration-choice-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.configuration-browser-environments {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.configuration-browser-environments > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.configuration-browser-environments label {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border-control);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  cursor: pointer;
+}
+
+.configuration-browser-environments label[data-selected="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+}
+
+.configuration-browser-environments input {
+  margin-block-start: 2px;
+  accent-color: var(--accent);
+}
+
+.configuration-browser-environments label > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.configuration-browser-environments small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.configuration-file-action {
+  align-items: center;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--border-separator);
+}
+
+.configuration-operation-state,
+.configuration-draft-state {
+  padding: 9px 11px;
+  border: 1px solid var(--border-separator);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.configuration-operation-state[data-state="pending"],
+.configuration-draft-state[data-dirty="true"] {
+  color: var(--warning);
+}
+
+@keyframes configuration-settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 720px) {
+  .configuration-settings__heading,
+  .configuration-file-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .configuration-settings__actions,
+  .configuration-file-action .c4-button {
+    width: 100%;
+  }
+
+  .configuration-settings__actions .c4-button {
+    flex: 1 1 0;
+  }
+
+  .configuration-choice-pair,
+  .configuration-browser-environments > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .configuration-settings-spinner {
+    animation: none;
+  }
+}

@@ -24,7 +24,8 @@ use c4os_lib::runtime::opencode_native::{
 };
 use c4os_lib::runtime::opencode_sdk::{OpenCodeSdkIntegrity, dependency_tree_sha256};
 use c4os_lib::runtime::provider::{
-    PROVIDER_SCHEMA_VERSION, ProviderEndpoint, ProviderKind, ProviderProfile,
+    PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderEndpoint, ProviderKind,
+    ProviderProfile,
 };
 use c4os_lib::runtime::supervisor::sha256_file;
 use c4os_lib::security::credentials::CredentialVault;
@@ -581,7 +582,9 @@ fn live_exact_opencode_launch_authentication_and_process_group_cleanup() {
                 base_url: "https://api.openai.com/v1".into(),
                 api_kind: "openai".into(),
             },
-            credential_reference: provider_credential,
+            authentication: ProviderAuthentication::Bearer,
+            credential_reference: Some(provider_credential),
+            headers: BTreeMap::new(),
             enabled: true,
         })
         .expect("core-owned provider credential route");
@@ -869,7 +872,9 @@ fn live_exact_opencode_chat_headers_authenticates_a_loopback_provider_without_pe
                 base_url: "https://fixture.invalid/v1".into(),
                 api_kind: "openai-compatible".into(),
             },
-            credential_reference: provider_credential,
+            authentication: ProviderAuthentication::Bearer,
+            credential_reference: Some(provider_credential),
+            headers: BTreeMap::new(),
             enabled: true,
         })
         .expect("core-owned credential route");

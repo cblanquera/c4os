@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::core::database::{
     ChatRecord, DatabaseActor, DatabaseError, DatabaseKind, LifecycleState,
-    RuntimeStateDocumentRecord, WorkspaceSessionDocumentRecord,
+    RuntimeStateDocumentRecord, SecurityJournalRecord, WorkspaceSessionDocumentRecord,
 };
 use crate::runtime::capability_evidence::{
     CapabilityEvidenceError, CapabilityEvidenceRegistry, CapabilityEvidenceSnapshot,
@@ -19,6 +19,7 @@ use crate::runtime::session::{
 use crate::runtime::supervisor::{
     CompatibilityRequirement, RuntimeSupervisor, SupervisorError, SupervisorSnapshot,
 };
+use crate::security::policy::PolicyConfiguration;
 
 const PROVIDER_DOCUMENT_KIND: &str = "provider-snapshot";
 const PROVIDER_DOCUMENT_ID: &str = "providers";
@@ -27,6 +28,9 @@ const SUPERVISOR_DOCUMENT_ID: &str = "runtimes";
 const CONTROL_PLANE_DOCUMENT_KIND: &str = "runtime-control-plane";
 const CONTROL_PLANE_DOCUMENT_ID: &str = "runtime";
 const CONTROL_PLANE_SCHEMA_VERSION: u16 = 1;
+const POLICY_DOCUMENT_KIND: &str = "runtime-control-plane";
+const POLICY_DOCUMENT_ID: &str = "policy";
+const POLICY_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -35,6 +39,21 @@ struct RuntimeControlPlaneSnapshot {
     revision: u64,
     supervisor: SupervisorSnapshot,
     capabilities: CapabilityEvidenceSnapshot,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PolicyStateSnapshot {
+    pub schema_version: u16,
+    pub policy_version: u64,
+    pub revocation_epoch: u64,
+    pub configuration: PolicyConfiguration,
+}
+
+pub struct RestoredPolicyState {
+    pub policy_version: u64,
+    pub revocation_epoch: u64,
+    pub configuration: PolicyConfiguration,
 }
 
 pub struct RestoredRuntimeControlPlane {
@@ -606,6 +625,116 @@ impl RuntimeControlPlaneStore {
             supervisor,
             capabilities,
             revision,
+        }))
+    }
+}
+
+#[derive(Clone)]
+pub struct PolicyStateStore {
+    database: Arc<DatabaseActor>,
+}
+
+impl PolicyStateStore {
+    pub fn new(database: Arc<DatabaseActor>) -> Result<Self, RuntimePersistenceError> {
+        if !matches!(database.descriptor().kind, DatabaseKind::App) {
+            return Err(RuntimePersistenceError::WrongDatabase);
+        }
+        Ok(Self { database })
+    }
+
+    pub fn save(
+        &self,
+        policy_version: u64,
+        revocation_epoch: u64,
+        configuration: &PolicyConfiguration,
+        expected_policy_version: Option<u64>,
+        updated_at_ms: u64,
+    ) -> Result<(), RuntimePersistenceError> {
+        let record = self.record(
+            policy_version,
+            revocation_epoch,
+            configuration,
+            expected_policy_version,
+            updated_at_ms,
+        )?;
+        self.database
+            .save_runtime_state_document(record, expected_policy_version)
+            .map_err(RuntimePersistenceError::Database)?;
+        Ok(())
+    }
+
+    pub fn save_transition(
+        &self,
+        policy_version: u64,
+        revocation_epoch: u64,
+        configuration: &PolicyConfiguration,
+        expected_policy_version: Option<u64>,
+        authorization_records: Vec<SecurityJournalRecord>,
+        updated_at_ms: u64,
+    ) -> Result<(), RuntimePersistenceError> {
+        let record = self.record(
+            policy_version,
+            revocation_epoch,
+            configuration,
+            expected_policy_version,
+            updated_at_ms,
+        )?;
+        self.database
+            .save_policy_transition(record, expected_policy_version, authorization_records)
+            .map_err(RuntimePersistenceError::Database)?;
+        Ok(())
+    }
+
+    fn record(
+        &self,
+        policy_version: u64,
+        revocation_epoch: u64,
+        configuration: &PolicyConfiguration,
+        expected_policy_version: Option<u64>,
+        updated_at_ms: u64,
+    ) -> Result<RuntimeStateDocumentRecord, RuntimePersistenceError> {
+        if policy_version == 0
+            || expected_policy_version.is_some_and(|expected| policy_version <= expected)
+        {
+            return Err(RuntimePersistenceError::GenerationMismatch);
+        }
+        let snapshot = PolicyStateSnapshot {
+            schema_version: POLICY_SCHEMA_VERSION,
+            policy_version,
+            revocation_epoch,
+            configuration: configuration.clone(),
+        };
+        let canonical_document =
+            serde_json::to_string(&snapshot).map_err(|_| RuntimePersistenceError::Serialization)?;
+        Ok(RuntimeStateDocumentRecord {
+            document_kind: POLICY_DOCUMENT_KIND.into(),
+            document_id: POLICY_DOCUMENT_ID.into(),
+            generation: policy_version,
+            canonical_document,
+            updated_at_ms,
+        })
+    }
+
+    pub fn load(&self) -> Result<Option<RestoredPolicyState>, RuntimePersistenceError> {
+        let Some(document) = self
+            .database
+            .runtime_state_document(POLICY_DOCUMENT_KIND, POLICY_DOCUMENT_ID)
+            .map_err(RuntimePersistenceError::Database)?
+        else {
+            return Ok(None);
+        };
+        let snapshot: PolicyStateSnapshot = serde_json::from_str(&document.canonical_document)
+            .map_err(|_| RuntimePersistenceError::Serialization)?;
+        if snapshot.schema_version != POLICY_SCHEMA_VERSION
+            || snapshot.policy_version == 0
+            || snapshot.policy_version != document.generation
+        {
+            return Err(RuntimePersistenceError::GenerationMismatch);
+        }
+        Ok(Some(RestoredPolicyState {
+            policy_version: snapshot.policy_version,
+            revocation_epoch: snapshot.revocation_epoch,
+            configuration: snapshot.configuration,
         }))
     }
 }

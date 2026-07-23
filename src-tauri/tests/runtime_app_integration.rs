@@ -36,8 +36,8 @@ use c4os_lib::runtime::persistence::SqliteSessionRepository;
 use c4os_lib::runtime::pi::PI_NATIVE_VERSION;
 use c4os_lib::runtime::provider::{
     ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-    ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint, ProviderKind,
-    ProviderModelDeclaration, ProviderProbe, ProviderProbeFailure, ProviderProfile,
+    ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint,
+    ProviderKind, ProviderModelDeclaration, ProviderProbe, ProviderProbeFailure, ProviderProfile,
     ProviderSnapshot, RouteAvailability,
 };
 use c4os_lib::runtime::session::{
@@ -250,7 +250,9 @@ fn provider_profile() -> ProviderProfile {
             base_url: "https://openrouter.ai/api/v1".into(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference: vault.store("provider-key", b"fixture-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("provider-key", b"fixture-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }
@@ -822,6 +824,22 @@ fn coordinator_generation_advances_for_provider_and_supervisor_domains() {
     assert_eq!(after_runtime.generation, 2);
     assert_eq!(after_runtime.providers.generation, 1);
     assert_eq!(after_runtime.runtimes.state_generation, 1);
+}
+
+#[test]
+fn provider_attempt_cancellation_is_empty_before_a_workspace_is_bound() {
+    let temporary = TempDir::new().unwrap();
+    let service = app_service(temporary.path());
+
+    assert_eq!(
+        service
+            .cancel_active_provider_attempts("provider-openrouter", NOW)
+            .unwrap(),
+        0
+    );
+    service
+        .save_provider(0, provider_profile(), 0, NOW + 1)
+        .unwrap();
 }
 
 #[test]

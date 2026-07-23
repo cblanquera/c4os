@@ -17,10 +17,7 @@ type PickerState =
   | { readonly status: "selected"; readonly displayName: string }
   | { readonly status: "error" };
 
-/**
- * Preserves the Task 00005 native picker boundary as content composed into
- * the single application Settings shell.
- */
+/** Provides an explicit, non-mutating check of the native folder picker. */
 export function NativePlatformSettingsContent({
   chooseProjectFolder = () => pickNative("openProjectFolder"),
 }: NativePlatformSettingsContentProps) {
@@ -46,75 +43,45 @@ export function NativePlatformSettingsContent({
   };
 
   return (
-    <>
-      <section className="native-settings__card" aria-labelledby="native-title">
-        <div>
-          <p className="native-settings__label">macOS foundation</p>
-          <h2 id="native-title">Native project access</h2>
-          <p>
-            C4OS asks macOS to choose a folder and returns only a one-use,
-            opaque access grant to the renderer.
-          </p>
-        </div>
-        <Button
-          className="platform-button platform-button--primary"
-          isDisabled={pickerState.status === "selecting"}
-          onPress={() => void selectProjectFolder()}
-        >
-          {pickerState.status === "selecting"
-            ? "Choosing…"
-            : "Choose project folder…"}
-        </Button>
-        <p
-          className="native-settings__picker-status"
-          data-state={pickerState.status}
-          role="status"
-        >
-          {pickerMessage(pickerState)}
+    <section className="native-settings__card" aria-labelledby="native-title">
+      <div>
+        <p className="native-settings__label">macOS integration</p>
+        <h2 id="native-title">Folder picker check</h2>
+        <p>
+          Confirm that the native folder picker is available. This check does
+          not open, add, or change a Project.
         </p>
-      </section>
-
-      <section
-        className="native-settings__card"
-        aria-labelledby="appearance-title"
+      </div>
+      <Button
+        className="platform-button platform-button--primary"
+        isDisabled={pickerState.status === "selecting"}
+        onPress={() => void selectProjectFolder()}
       >
-        <div>
-          <p className="native-settings__label">System appearance</p>
-          <h2 id="appearance-title">Follows macOS</h2>
-          <p>
-            The first visible frame uses a source-qualified native snapshot.
-            Later changes arrive through an independent webview listener.
-          </p>
-        </div>
-        <dl className="native-settings__facts">
-          <div>
-            <dt>Shortcut</dt>
-            <dd>⌘,</dd>
-          </div>
-          <div>
-            <dt>Reveal action</dt>
-            <dd>Reveal in Finder</dd>
-          </div>
-          <div>
-            <dt>Window</dt>
-            <dd>Standard decorations</dd>
-          </div>
-        </dl>
-      </section>
-    </>
+        {pickerState.status === "selecting"
+          ? "Choosing…"
+          : "Choose project folder…"}
+      </Button>
+      <p
+        className="native-settings__picker-status"
+        data-state={pickerState.status}
+        role="status"
+      >
+        {pickerMessage(pickerState)}
+      </p>
+    </section>
   );
 }
 
 function pickerMessage(state: PickerState): string {
   switch (state.status) {
     case "idle":
-      return "No native folder has been selected.";
+      return "The native folder picker has not been checked.";
     case "selecting":
       return "Waiting for the macOS folder picker.";
     case "cancelled":
       return "Folder selection cancelled. No access was granted.";
     case "selected":
-      return `Access granted to ${state.displayName}.`;
+      return `The native picker returned ${state.displayName}. No Project was changed.`;
     case "error":
       return "Native folder access is unavailable. Restart C4OS and try again.";
   }

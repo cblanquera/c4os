@@ -18,6 +18,7 @@ import {
   type PlatformReviewState,
   usePlatformReviewState,
 } from "./review-state";
+import { NativePlatformSettingsContent } from "./PlatformSettingsFoundation";
 import "./platform-theme.css";
 
 interface PlatformThemeQaSurfaceProps {
@@ -249,6 +250,8 @@ export function PlatformThemeQaSurface({
             </div>
           </div>
         </section>
+
+        <NativePlatformSettingsContent />
       </div>
     </main>
   );

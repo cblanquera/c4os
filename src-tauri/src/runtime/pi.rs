@@ -592,8 +592,7 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
         run_id: &str,
         correlation_id: &str,
         request: &PiSamplingRequest,
-        runtime_id: &str,
-        provider_id: &str,
+        credential_operation: Option<(&str, &str)>,
     ) -> Result<(), PiAdapterError> {
         self.require_running()?;
         for (value, field) in [
@@ -602,10 +601,12 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
             (turn_id, "turnId"),
             (run_id, "runId"),
             (correlation_id, "correlationId"),
-            (runtime_id, "runtimeId"),
-            (provider_id, "providerId"),
         ] {
             validate_id(value, field)?;
+        }
+        if let Some((runtime_id, provider_id)) = credential_operation {
+            validate_id(runtime_id, "runtimeId")?;
+            validate_id(provider_id, "providerId")?;
         }
         validate_sampling_request(request)?;
         let session = self
@@ -633,9 +634,11 @@ impl<R: PiSidecarRunner> PiAdapter<R> {
                 "maxTokens".into(),
                 Value::Number(serde_json::Number::from(request.max_tokens)),
             ),
-            ("runtimeId".into(), Value::String(runtime_id.into())),
-            ("providerId".into(), Value::String(provider_id.into())),
         ]);
+        if let Some((runtime_id, provider_id)) = credential_operation {
+            payload.insert("runtimeId".into(), Value::String(runtime_id.into()));
+            payload.insert("providerId".into(), Value::String(provider_id.into()));
+        }
         if let Some(system_prompt) = &request.system_prompt {
             payload.insert("systemPrompt".into(), Value::String(system_prompt.clone()));
         }

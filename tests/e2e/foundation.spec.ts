@@ -42,21 +42,23 @@ test("retired foundation route enters production Workspace Start", async ({
   await page.goto("/#/foundation");
 
   await expect(
-    page.getByRole("heading", { name: "Workspace Start" }),
+    page.getByRole("heading", { name: "What would you like to open?" }),
   ).toBeVisible();
   await expect(page).toHaveURL(/#\/start$/);
 });
 
-test("QA Workspace Start uses only the build-gated projection", async ({
+test("QA Workspace Start uses the production controller with a build-gated adapter", async ({
   page,
 }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Workspace Start" }),
+    page.getByRole("heading", { name: "What would you like to open?" }),
   ).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Ready");
-  await expect(page.getByRole("button")).toHaveCount(0);
+  await expect(
+    page.locator('[data-qa-product-adapter="deterministic"]'),
+  ).toHaveAttribute("data-route", "/start");
+  await expect(page.getByRole("listitem")).toHaveCount(3);
 });
 
 test("workspace QA route preserves the three-row start contract", async ({

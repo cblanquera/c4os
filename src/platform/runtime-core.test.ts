@@ -39,7 +39,30 @@ function snapshotPayload() {
         enabled: true,
         testStatus: { state: "succeeded", checkedAtMs: 10 },
         modelCount: 2,
-        selectedModelId: "gpt-5",
+        selectedModelId: "openai/gpt-5",
+      },
+    ],
+    modelRoutes: [
+      {
+        providerId: "provider-openai",
+        modelId: "openai/gpt-5",
+        adapterKind: "opencode",
+        runtimeKind: "opencode",
+        nativeRuntimeVersion: "1.18.3",
+        lifecycle: "active",
+        contextTokens: 400_000,
+        capabilities: Object.fromEntries(
+          ["vision", "tools", "reasoning", "audio"].map((key) => [
+            key,
+            {
+              state: key === "audio" ? "unsupported" : "supported",
+              source: "c4os.effective",
+              checkedAtMs: 10,
+              expiresAtMs: 20,
+              detail: key === "audio" ? "Audio input is unavailable." : null,
+            },
+          ]),
+        ),
       },
     ],
     runtimes: [
@@ -157,6 +180,13 @@ describe("runtime core adapter", () => {
       runtimeGeneration: 2,
       onboardingReady: true,
     });
+    expect(snapshot.providers[0]?.selectedModelId).toBe("openai/gpt-5");
+    expect(snapshot.modelRoutes[0]).toMatchObject({
+      providerId: "provider-openai",
+      modelId: "openai/gpt-5",
+      contextTokens: 400_000,
+      capabilities: { tools: { state: "supported" } },
+    });
     const publishedApproval = snapshot.pendingApprovals[0];
     if (publishedApproval === undefined) {
       throw new Error("The runtime snapshot omitted its pending approval.");
@@ -178,6 +208,7 @@ describe("runtime core adapter", () => {
       adapter.answerApproval({
         ...publishedApproval,
         answer: "allow",
+        remember: "once",
       }),
     ).resolves.toEqual({
       runtimeId,
@@ -211,6 +242,7 @@ describe("runtime core adapter", () => {
           correlationId: runCorrelationId,
           promptId,
           answer: "allow",
+          remember: "once",
         },
       },
       {
@@ -389,6 +421,7 @@ describe("runtime core adapter", () => {
         correlationId: runCorrelationId,
         promptId,
         answer: "approve" as never,
+        remember: "once",
       }),
     ).rejects.toMatchObject({ code: "invalidPayload" });
     expect(invoke).not.toHaveBeenCalled();

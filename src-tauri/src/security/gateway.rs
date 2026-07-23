@@ -538,9 +538,29 @@ pub struct ActionGateway {
     approvals: ApprovalQueue,
     restored_authorizations: BTreeMap<String, PersistedAuthorization>,
     approval_origins: BTreeMap<String, String>,
+    pending_facts: BTreeMap<String, ActionFacts>,
+    answered_facts: BTreeMap<String, ActionFacts>,
     repository: SqliteSecurityRepository,
     authorization_ttl_ms: u64,
     approval_ttl_ms: u64,
+}
+
+pub(crate) struct GlobalPolicyReplacement {
+    policy: PolicyConfiguration,
+    authorizations: AuthorizationLedger,
+    restored_authorizations: BTreeMap<String, PersistedAuthorization>,
+    authorization_records: Vec<SecurityJournalRecord>,
+    invalidated_count: usize,
+}
+
+impl GlobalPolicyReplacement {
+    pub(crate) fn authorization_records(&self) -> &[SecurityJournalRecord] {
+        &self.authorization_records
+    }
+
+    pub(crate) fn invalidated_count(&self) -> usize {
+        self.invalidated_count
+    }
 }
 
 impl ActionGateway {
@@ -551,6 +571,8 @@ impl ActionGateway {
             approvals: ApprovalQueue::default(),
             restored_authorizations: BTreeMap::new(),
             approval_origins: BTreeMap::new(),
+            pending_facts: BTreeMap::new(),
+            answered_facts: BTreeMap::new(),
             repository: SqliteSecurityRepository::new(database),
             authorization_ttl_ms: DEFAULT_AUTHORIZATION_TTL_MS,
             approval_ttl_ms: DEFAULT_APPROVAL_TTL_MS,
@@ -734,6 +756,81 @@ impl ActionGateway {
         Ok(count)
     }
 
+    /// Replaces the app-wide policy and invalidates every outstanding
+    /// authorization. Category and exception settings are global authority;
+    /// scoping invalidation to one currently installed runtime would leave a
+    /// restored or temporarily stopped peer with stale permission.
+    pub fn replace_policy_globally(
+        &mut self,
+        policy: PolicyConfiguration,
+        revocation: bool,
+        now_ms: u64,
+    ) -> Result<usize, ActionGatewayError> {
+        let replacement = self.prepare_policy_replacement(policy, revocation, now_ms)?;
+        if !replacement.authorization_records.is_empty() {
+            self.repository
+                .save_batch(replacement.authorization_records.clone())?;
+        }
+        let count = replacement.invalidated_count;
+        self.commit_policy_replacement(replacement);
+        Ok(count)
+    }
+
+    pub(crate) fn prepare_policy_replacement(
+        &self,
+        policy: PolicyConfiguration,
+        revocation: bool,
+        now_ms: u64,
+    ) -> Result<GlobalPolicyReplacement, ActionGatewayError> {
+        let before = self.authorization_states();
+        let reason = if revocation {
+            AuthorizationInvalidation::RevocationEpoch
+        } else {
+            AuthorizationInvalidation::PolicyVersion
+        };
+        let mut authorizations = self.authorizations.clone();
+        let mut count = authorizations.invalidate_all(reason, now_ms);
+        let mut records = authorizations
+            .records()
+            .filter(|record| before.get(&record.authorization_id) != Some(&record.state))
+            .map(|record| {
+                self.repository.authorization_record(
+                    record,
+                    self.approval_origins
+                        .get(&record.authorization_id)
+                        .map(String::as_str),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut restored_authorizations = self.restored_authorizations.clone();
+        for authorization in restored_authorizations.values_mut() {
+            if authorization.state == AuthorizationState::Issued {
+                authorization.state = AuthorizationState::Invalidated {
+                    invalidated_at_ms: now_ms,
+                    reason,
+                };
+                records.push(
+                    self.repository
+                        .persisted_authorization_record(authorization, now_ms)?,
+                );
+                count += 1;
+            }
+        }
+        Ok(GlobalPolicyReplacement {
+            policy,
+            authorizations,
+            restored_authorizations,
+            authorization_records: records,
+            invalidated_count: count,
+        })
+    }
+
+    pub(crate) fn commit_policy_replacement(&mut self, replacement: GlobalPolicyReplacement) {
+        self.policy = replacement.policy;
+        self.authorizations = replacement.authorizations;
+        self.restored_authorizations = replacement.restored_authorizations;
+    }
+
     pub fn propose(
         &mut self,
         facts: &ActionFacts,
@@ -775,6 +872,8 @@ impl ActionGateway {
                     .map_err(ActionGatewayError::Approval)?
                     .clone();
                 self.repository.save_approval(&prompt)?;
+                self.pending_facts
+                    .insert(prompt.prompt_id.clone(), facts.clone());
                 Ok(GatewayProposal::PendingApproval {
                     prompt: Box::new(prompt),
                     resolution,
@@ -855,6 +954,8 @@ impl ActionGateway {
                     .map_err(ActionGatewayError::Approval)?
                     .clone();
                 self.repository.save_approval(&prompt)?;
+                self.pending_facts
+                    .insert(prompt.prompt_id.clone(), facts.clone());
                 Ok(GatewayProposal::PendingApproval {
                     prompt: Box::new(prompt),
                     resolution,
@@ -917,6 +1018,8 @@ impl ActionGateway {
                     .map_err(ActionGatewayError::Approval)?
                     .clone();
                 self.repository.save_approval(&prompt)?;
+                self.pending_facts
+                    .insert(prompt.prompt_id.clone(), facts.clone());
                 Ok(GatewayProposal::PendingApproval {
                     prompt: Box::new(prompt),
                     resolution,
@@ -978,6 +1081,8 @@ impl ActionGateway {
                     .map_err(ActionGatewayError::Approval)?
                     .clone();
                 self.repository.save_approval(&prompt)?;
+                self.pending_facts
+                    .insert(prompt.prompt_id.clone(), facts.clone());
                 Ok(GatewayProposal::PendingApproval {
                     prompt: Box::new(prompt),
                     resolution,
@@ -996,6 +1101,8 @@ impl ActionGateway {
         let approvals_checkpoint = self.approvals.clone();
         let authorizations_checkpoint = self.authorizations.clone();
         let approval_origins_checkpoint = self.approval_origins.clone();
+        let pending_facts_checkpoint = self.pending_facts.clone();
+        let answered_facts_checkpoint = self.answered_facts.clone();
         let before = self.approval_states();
         let answered = self.approvals.answer(prompt_id, answer, now_ms);
         let prompt = match answered {
@@ -1060,8 +1167,16 @@ impl ActionGateway {
             self.approvals = approvals_checkpoint;
             self.authorizations = authorizations_checkpoint;
             self.approval_origins = approval_origins_checkpoint;
+            self.pending_facts = pending_facts_checkpoint;
+            self.answered_facts = answered_facts_checkpoint;
+        } else if let Some(facts) = self.pending_facts.remove(prompt_id) {
+            self.answered_facts.insert(prompt_id.to_owned(), facts);
         }
         response
+    }
+
+    pub(crate) fn take_answered_facts(&mut self, prompt_id: &str) -> Option<ActionFacts> {
+        self.answered_facts.remove(prompt_id)
     }
 
     pub fn execute(

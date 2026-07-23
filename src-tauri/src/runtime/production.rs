@@ -73,9 +73,9 @@ use crate::runtime::pi_process::{
     PiCredentialLeaseMetadata, PiProcessError, PiSidecarIntegrity, SpawnedPiRunner,
 };
 use crate::runtime::provider::{
-    CurlProviderConnectivity, ModelRoute, PROVIDER_TEST_FRESHNESS_MS, ProviderDiscovery,
-    ProviderError, ProviderKind, ProviderProbe, ProviderProbeFailure, ProviderProfile,
-    ProviderRecord, ProviderTestStatus, VerifiedOpenCodeProviderProbe,
+    CurlProviderConnectivity, ModelRoute, PROVIDER_TEST_FRESHNESS_MS, ProviderAuthentication,
+    ProviderDiscovery, ProviderError, ProviderKind, ProviderProbe, ProviderProbeFailure,
+    ProviderProfile, ProviderRecord, ProviderTestStatus, VerifiedOpenCodeProviderProbe,
 };
 use crate::runtime::supervisor::{
     RUNTIME_PROTOCOL_VERSION, RuntimeInstallation, RuntimeKind, SupervisorError, sha256_file,
@@ -248,6 +248,7 @@ impl ProductionProviderRoute {
             test_status,
             connection_evidence,
             models,
+            disabled_model_ids,
             selected_model_id,
             ..
         } = record;
@@ -278,6 +279,7 @@ impl ProductionProviderRoute {
                     RuntimeKind::Pi => model.provider_declaration.is_some(),
                 };
                 runtime_compatible
+                    && !disabled_model_ids.contains(&model.model_id)
                     && model.validate_for(&profile).is_ok()
                     && model.is_production_ready_at(checked_at_ms)
                     && model.checked_at_ms <= checked_at_ms
@@ -1563,6 +1565,9 @@ impl PreparedPiProductionPeer {
         for route in routes {
             let profile = route.profile();
             profile.validate()?;
+            if !pi_provider_request_semantics_supported(profile) {
+                return Err(RuntimeProductionError::ProviderRouteUnavailable);
+            }
             let native_provider_id = profile
                 .pi_native_provider_id()
                 .ok_or(RuntimeProductionError::ProviderRouteUnavailable)?;
@@ -1609,7 +1614,7 @@ impl PreparedPiProductionPeer {
 
 struct ProductionPiCredentialIssuer {
     binding: ProductionRuntimeBinding,
-    credentials: BTreeMap<String, (String, String, CredentialReference)>,
+    credentials: BTreeMap<String, (String, String, Option<CredentialReference>)>,
     delivery: Box<dyn PiCredentialLeaseDelivery>,
     credential_vault: CredentialVault,
 }
@@ -1653,7 +1658,7 @@ impl PiDispatchCredentialIssuer for ProductionPiCredentialIssuer {
         &mut self,
         identity: &DispatchIdentity,
         provider_id: &str,
-    ) -> Result<(), PeerDispatchError> {
+    ) -> Result<bool, PeerDispatchError> {
         if identity.runtime_id != self.binding.runtime_id
             || identity.workspace_id != self.binding.workspace_id
             || identity.process_generation != self.binding.process_generation
@@ -1664,6 +1669,9 @@ impl PiDispatchCredentialIssuer for ProductionPiCredentialIssuer {
             .credentials
             .get(provider_id)
             .ok_or(PeerDispatchError::Credential)?;
+        let Some(credential_reference) = credential_reference else {
+            return Ok(false);
+        };
         let operation = pi_credential_operation(identity, provider_id, native_provider_id);
         let now_ms: u64 = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1687,7 +1695,34 @@ impl PiDispatchCredentialIssuer for ProductionPiCredentialIssuer {
                 PI_CREDENTIAL_LEASE_TTL,
             )
             .map_err(|_| PeerDispatchError::Credential)?;
-        self.delivery.deliver(&metadata, &lease)
+        self.delivery.deliver(&metadata, &lease)?;
+        Ok(true)
+    }
+}
+
+fn pi_provider_request_semantics_supported(profile: &ProviderProfile) -> bool {
+    if !profile.headers.is_empty() {
+        return false;
+    }
+    match (profile.kind, &profile.authentication) {
+        (
+            ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::HuggingFace,
+            ProviderAuthentication::Bearer,
+        ) => true,
+        (ProviderKind::Anthropic, ProviderAuthentication::ApiKeyHeader { header_name })
+            if header_name.eq_ignore_ascii_case("x-api-key") =>
+        {
+            true
+        }
+        (ProviderKind::Gemini, ProviderAuthentication::ApiKeyHeader { header_name })
+            if header_name.eq_ignore_ascii_case("x-goog-api-key") =>
+        {
+            true
+        }
+        (ProviderKind::Custom, ProviderAuthentication::Bearer | ProviderAuthentication::None) => {
+            true
+        }
+        _ => false,
     }
 }
 
@@ -2537,10 +2572,18 @@ fn materialize_opencode_provider_configuration(
             serde_json::Value::String(profile.display_name.clone()),
         );
         configuration.insert("models".into(), serde_json::Value::Object(models));
-        configuration.insert(
-            "options".into(),
-            serde_json::json!({ "baseURL": profile.endpoint.base_url.clone() }),
-        );
+        let mut options = serde_json::Map::from_iter([(
+            "baseURL".into(),
+            serde_json::Value::String(profile.endpoint.base_url.clone()),
+        )]);
+        if !profile.headers.is_empty() {
+            options.insert(
+                "headers".into(),
+                serde_json::to_value(&profile.headers)
+                    .map_err(|_| RuntimeProductionError::ProviderRouteUnavailable)?,
+            );
+        }
+        configuration.insert("options".into(), serde_json::Value::Object(options));
         configuration.insert(
             "npm".into(),
             serde_json::Value::String(route.opencode_sdk_npm()?.into()),
@@ -2615,6 +2658,7 @@ fn opencode_provider_npm(
         ProviderKind::Anthropic => Ok("@ai-sdk/anthropic"),
         ProviderKind::Gemini => Ok("@ai-sdk/google"),
         ProviderKind::OpenRouter => Ok("@openrouter/ai-sdk-provider"),
+        ProviderKind::HuggingFace => Ok("@ai-sdk/openai-compatible"),
         ProviderKind::Custom if profile.endpoint.api_kind == "openai-compatible" => {
             Ok("@ai-sdk/openai-compatible")
         }
@@ -3407,6 +3451,34 @@ mod tests {
     }
 
     #[test]
+    fn pi_routes_accept_credential_free_custom_profiles_but_reject_unimplemented_headers() {
+        let mut profile = ProviderProfile {
+            schema_version: crate::runtime::provider::PROVIDER_SCHEMA_VERSION,
+            provider_id: "provider-public".into(),
+            kind: ProviderKind::Custom,
+            display_name: "Public provider".into(),
+            endpoint: crate::runtime::provider::ProviderEndpoint {
+                endpoint_id: "endpoint-public".into(),
+                base_url: "https://public.example/v1".into(),
+                api_kind: "openai-compatible".into(),
+            },
+            authentication: ProviderAuthentication::None,
+            credential_reference: None,
+            headers: BTreeMap::new(),
+            enabled: true,
+        };
+        assert!(pi_provider_request_semantics_supported(&profile));
+
+        profile.headers.insert("X-Client".into(), "c4os".into());
+        assert!(!pi_provider_request_semantics_supported(&profile));
+        profile.headers.clear();
+        profile.authentication = ProviderAuthentication::ApiKeyHeader {
+            header_name: "X-Custom-Key".into(),
+        };
+        assert!(!pi_provider_request_semantics_supported(&profile));
+    }
+
+    #[test]
     fn production_pi_credential_delivery_keeps_same_native_profiles_isolated() {
         let temporary = TempDir::new().expect("temporary production roots");
         let workspace = temporary.path().join("workspace");
@@ -3437,7 +3509,7 @@ mod tests {
                     (
                         "openai".into(),
                         "https://api.openai.com/v1".into(),
-                        credential_a.clone(),
+                        Some(credential_a.clone()),
                     ),
                 ),
                 (
@@ -3445,8 +3517,12 @@ mod tests {
                     (
                         "openai".into(),
                         "https://api.openai.com/v1".into(),
-                        credential_b.clone(),
+                        Some(credential_b.clone()),
                     ),
+                ),
+                (
+                    "openai-public".into(),
+                    ("openai".into(), "https://api.openai.com/v1".into(), None),
                 ),
             ]),
             delivery: Box::new(CapturingPiCredentialDelivery {
@@ -3473,12 +3549,21 @@ mod tests {
             issuer.base_url("openai-team-a").unwrap(),
             "https://api.openai.com/v1"
         );
-        issuer
-            .deliver_for_dispatch(&identity_a, "openai-team-a")
-            .unwrap();
-        issuer
-            .deliver_for_dispatch(&identity_b, "openai-team-b")
-            .unwrap();
+        assert!(
+            issuer
+                .deliver_for_dispatch(&identity_a, "openai-team-a")
+                .unwrap()
+        );
+        assert!(
+            issuer
+                .deliver_for_dispatch(&identity_b, "openai-team-b")
+                .unwrap()
+        );
+        assert!(
+            !issuer
+                .deliver_for_dispatch(&identity_b, "openai-public")
+                .unwrap()
+        );
         assert!(matches!(
             issuer.deliver_for_dispatch(&identity_b, "openai-team-missing"),
             Err(PeerDispatchError::Credential)

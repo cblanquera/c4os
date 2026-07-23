@@ -3,6 +3,7 @@ import {
   MAX_IDENTIFIER_BYTES,
   PROTOCOL_VERSION,
   type CorrelationId,
+  type PickerGrantId,
   type ProtocolError,
   type RequestId,
   type SnapshotRequest,
@@ -16,19 +17,63 @@ import { ProtocolBoundaryError } from "./tauri-adapter";
 
 export const WORKSPACE_START_SNAPSHOT_COMMAND =
   "workspace_start_snapshot" as const;
+export const WORKSPACE_START_OPEN_FOLDER_COMMAND =
+  "workspace_start_open_folder" as const;
+export const WORKSPACE_START_OPEN_ARCHIVE_COMMAND =
+  "workspace_start_open_archive" as const;
+export const WORKSPACE_START_OPEN_RECENT_COMMAND =
+  "workspace_start_open_recent" as const;
+export const WORKSPACE_START_CLONE_REPOSITORY_COMMAND =
+  "workspace_start_clone_repository" as const;
+export const WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND =
+  "workspace_start_answer_clone_approval" as const;
+type WorkspaceStartCommand =
+  | typeof WORKSPACE_START_SNAPSHOT_COMMAND
+  | typeof WORKSPACE_START_OPEN_FOLDER_COMMAND
+  | typeof WORKSPACE_START_OPEN_ARCHIVE_COMMAND
+  | typeof WORKSPACE_START_OPEN_RECENT_COMMAND
+  | typeof WORKSPACE_START_CLONE_REPOSITORY_COMMAND
+  | typeof WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND;
 const MAX_RECENTS = 3;
 const MAX_DISPLAY_NAME_BYTES = 512;
 
 export interface WorkspaceStartTransport {
   invoke(
-    command: typeof WORKSPACE_START_SNAPSHOT_COMMAND,
-    args: { readonly request: SnapshotRequest },
+    command: WorkspaceStartCommand,
+    args: Readonly<Record<string, unknown>>,
   ): Promise<unknown>;
 }
+
+export interface WorkspaceStartOpenResult {
+  readonly authority: "rust-workspace-service";
+  readonly workspaceId: WorkspaceId;
+  readonly workspaceName: string;
+  readonly recovered: boolean;
+}
+
+export type WorkspaceStartCloneResult =
+  | ({ readonly state: "opened" } & WorkspaceStartOpenResult)
+  | {
+      readonly state: "pendingApproval";
+      readonly promptId: string;
+      readonly summary: string;
+    }
+  | { readonly state: "denied" };
 
 export interface WorkspaceStartAdapter {
   readonly currentGeneration: StateGeneration;
   readSnapshot(): Promise<WorkspaceStartSnapshot>;
+  openFolder(pickerGrantId: PickerGrantId): Promise<WorkspaceStartOpenResult>;
+  openArchive(pickerGrantId: PickerGrantId): Promise<WorkspaceStartOpenResult>;
+  openRecent(workspaceId: WorkspaceId): Promise<WorkspaceStartOpenResult>;
+  cloneRepository(
+    pickerGrantId: PickerGrantId,
+    repositoryUrl: string,
+  ): Promise<WorkspaceStartCloneResult>;
+  answerCloneApproval(
+    promptId: string,
+    answer: "allow" | "deny",
+  ): Promise<WorkspaceStartCloneResult>;
 }
 
 const nativeAdapter = createWorkspaceStartAdapter({
@@ -41,6 +86,21 @@ const nativeAdapter = createWorkspaceStartAdapter({
 export async function readWorkspaceStartSnapshot(): Promise<WorkspaceStartSnapshot> {
   return nativeAdapter.readSnapshot();
 }
+
+export const openWorkspaceFolder = (pickerGrantId: PickerGrantId) =>
+  nativeAdapter.openFolder(pickerGrantId);
+export const openWorkspaceArchive = (pickerGrantId: PickerGrantId) =>
+  nativeAdapter.openArchive(pickerGrantId);
+export const openRecentWorkspace = (workspaceId: WorkspaceId) =>
+  nativeAdapter.openRecent(workspaceId);
+export const cloneWorkspaceRepository = (
+  pickerGrantId: PickerGrantId,
+  repositoryUrl: string,
+) => nativeAdapter.cloneRepository(pickerGrantId, repositoryUrl);
+export const answerWorkspaceCloneApproval = (
+  promptId: string,
+  answer: "allow" | "deny",
+) => nativeAdapter.answerCloneApproval(promptId, answer);
 
 export function createWorkspaceStartAdapter(
   transport: WorkspaceStartTransport,
@@ -106,23 +166,204 @@ export function createWorkspaceStartAdapter(
       currentGeneration = envelope.generation;
       return envelope.payload;
     },
+    openFolder(pickerGrantId) {
+      return invokeOpen(WORKSPACE_START_OPEN_FOLDER_COMMAND, {
+        pickerGrantId: asIdentifier(pickerGrantId, "picker grant ID"),
+      });
+    },
+    openArchive(pickerGrantId) {
+      return invokeOpen(WORKSPACE_START_OPEN_ARCHIVE_COMMAND, {
+        pickerGrantId: asIdentifier(pickerGrantId, "picker grant ID"),
+      });
+    },
+    openRecent(workspaceId) {
+      return invokeOpen(WORKSPACE_START_OPEN_RECENT_COMMAND, {
+        workspaceId: asIdentifier(workspaceId, "Workspace ID"),
+      });
+    },
+    cloneRepository(pickerGrantId, repositoryUrl) {
+      if (
+        repositoryUrl.length === 0 ||
+        repositoryUrl.length > 2_048 ||
+        hasControlCharacter(repositoryUrl)
+      ) {
+        throw invalidPayload("The repository URL is invalid.");
+      }
+      return invokeClone(WORKSPACE_START_CLONE_REPOSITORY_COMMAND, {
+        pickerGrantId: asIdentifier(pickerGrantId, "picker grant ID"),
+        repositoryUrl,
+      });
+    },
+    answerCloneApproval(promptId, answer) {
+      return invokeClone(WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND, {
+        promptId: asIdentifier(promptId, "clone approval prompt ID"),
+        answer,
+      });
+    },
   };
+
+  async function invokeOpen(
+    command: Exclude<
+      WorkspaceStartCommand,
+      typeof WORKSPACE_START_SNAPSHOT_COMMAND
+    >,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<WorkspaceStartOpenResult> {
+    const requestId = requestIdFactory();
+    const correlationId = correlationIdFactory();
+    const request: SnapshotRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      requestId,
+      correlationId,
+      expectedGeneration: currentGeneration,
+    };
+    let raw: unknown;
+    try {
+      raw = await transport.invoke(command, { request, input });
+    } catch (error) {
+      throw normalizeCoreFailure(error);
+    }
+    const envelope = parseRawEnvelope(raw);
+    if (
+      envelope.requestId !== requestId ||
+      envelope.correlationId !== correlationId
+    ) {
+      throw new ProtocolBoundaryError(
+        "correlationMismatch",
+        "The Workspace open response identity did not match its request.",
+      );
+    }
+    if (envelope.generation < currentGeneration) {
+      throw new ProtocolBoundaryError(
+        "staleGeneration",
+        "The Workspace open response was stale.",
+      );
+    }
+    const payload = parseOpenResult(envelope.payload);
+    currentGeneration = envelope.generation;
+    return payload;
+  }
+
+  async function invokeClone(
+    command:
+      | typeof WORKSPACE_START_CLONE_REPOSITORY_COMMAND
+      | typeof WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<WorkspaceStartCloneResult> {
+    const requestId = requestIdFactory();
+    const correlationId = correlationIdFactory();
+    const request: SnapshotRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      requestId,
+      correlationId,
+      expectedGeneration: currentGeneration,
+    };
+    let raw: unknown;
+    try {
+      raw = await transport.invoke(command, { request, input });
+    } catch (error) {
+      throw normalizeCoreFailure(error);
+    }
+    const envelope = parseRawEnvelope(raw);
+    if (
+      envelope.requestId !== requestId ||
+      envelope.correlationId !== correlationId
+    ) {
+      throw new ProtocolBoundaryError(
+        "correlationMismatch",
+        "The clone response identity did not match its request.",
+      );
+    }
+    if (envelope.generation < currentGeneration) {
+      throw new ProtocolBoundaryError(
+        "staleGeneration",
+        "The clone response was stale.",
+      );
+    }
+    const payload = parseCloneResult(envelope.payload);
+    currentGeneration = envelope.generation;
+    return payload;
+  }
+}
+
+function parseCloneResult(raw: unknown): WorkspaceStartCloneResult {
+  const value = requireRecord(raw, "Workspace clone result");
+  if (value.state === "opened") {
+    return { state: "opened", ...parseOpenResult(value) };
+  }
+  if (value.state === "pendingApproval") {
+    return {
+      state: "pendingApproval",
+      promptId: asIdentifier(value.promptId, "clone approval prompt ID"),
+      summary: boundedText(value.summary, "clone approval summary", 1_024),
+    };
+  }
+  if (value.state === "denied") return { state: "denied" };
+  throw invalidPayload("The Workspace clone result state is invalid.");
 }
 
 function parseEnvelope(raw: unknown): WorkspaceStartSnapshotEnvelope {
-  const envelope = requireRecord(raw, "Workspace Start envelope");
-  requireProtocolVersion(envelope.protocolVersion);
-  const generation = asGeneration(envelope.generation);
+  const envelope = parseRawEnvelope(raw);
   return {
     protocolVersion: PROTOCOL_VERSION,
+    requestId: envelope.requestId,
+    correlationId: envelope.correlationId,
+    generation: envelope.generation,
+    payload: parseSnapshot(envelope.payload),
+  };
+}
+
+function parseRawEnvelope(raw: unknown): {
+  readonly requestId: RequestId;
+  readonly correlationId: CorrelationId;
+  readonly generation: StateGeneration;
+  readonly payload: unknown;
+} {
+  const envelope = requireRecord(raw, "Workspace Start envelope");
+  requireProtocolVersion(envelope.protocolVersion);
+  return {
     requestId: asIdentifier(envelope.requestId, "request ID") as RequestId,
     correlationId: asIdentifier(
       envelope.correlationId,
       "correlation ID",
     ) as CorrelationId,
-    generation,
-    payload: parseSnapshot(envelope.payload),
+    generation: asGeneration(envelope.generation),
+    payload: envelope.payload,
   };
+}
+
+function parseOpenResult(raw: unknown): WorkspaceStartOpenResult {
+  const result = requireRecord(raw, "Workspace open result");
+  if (result.authority !== "rust-workspace-service") {
+    throw invalidPayload("The Workspace open authority is invalid.");
+  }
+  const workspaceName = requireString(result.workspaceName, "Workspace name");
+  if (
+    workspaceName.trim().length === 0 ||
+    new TextEncoder().encode(workspaceName).length > MAX_DISPLAY_NAME_BYTES ||
+    hasControlCharacter(workspaceName)
+  ) {
+    throw invalidPayload("The Workspace name is invalid.");
+  }
+  if (typeof result.recovered !== "boolean") {
+    throw invalidPayload("The Workspace recovery state is invalid.");
+  }
+  return {
+    authority: "rust-workspace-service",
+    workspaceId: asIdentifier(
+      result.workspaceId,
+      "Workspace ID",
+    ) as WorkspaceId,
+    workspaceName,
+    recovered: result.recovered,
+  };
+}
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127;
+  });
 }
 
 function parseSnapshot(raw: unknown): WorkspaceStartSnapshot {
@@ -247,6 +488,18 @@ function requireString(value: unknown, label: string): string {
     throw invalidPayload(`The ${label} is invalid.`);
   }
   return value;
+}
+
+function boundedText(value: unknown, label: string, maximum: number): string {
+  const text = requireString(value, label);
+  if (
+    text.trim().length === 0 ||
+    text.length > maximum ||
+    hasControlCharacter(text)
+  ) {
+    throw invalidPayload(`The ${label} is invalid.`);
+  }
+  return text;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

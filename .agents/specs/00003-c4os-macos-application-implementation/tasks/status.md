@@ -16,7 +16,7 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | [00010 Native Browser facility](00010-native-browser-facility.md) | verified | passed | ART-002, SET-010 |
 | [00011 Plugin and Skill lifecycle](00011-plugin-skill-lifecycle.md) | verified | passed | SET-007, SET-008 |
 | [00012 MCP lifecycle](00012-mcp-lifecycle.md) | verified | passed | SET-009 |
-| [00013 Onboarding and Settings integration](00013-onboarding-settings-integration.md) | open | failed | SET-001, SET-004 through SET-006 |
+| [00013 Onboarding and Settings integration](00013-onboarding-settings-integration.md) | verified | passed | SET-001, SET-004 through SET-006 |
 | [00014 Updates, recovery, diagnostics, and degraded-state integration](00014-updates-recovery-diagnostics.md) | open | failed | Cross-cutting complete-contract requirements |
 | [00015 Deterministic QA and integrated Agent Acceptance](00015-integrated-agent-acceptance.md) | open | failed | UX-002, UX-009, QA-001, QA-002 |
 | [00015A Security audit](00015A-security-audit.md) | open | failed | Cross-cutting security audit |
@@ -25,4 +25,4 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 
 ## Current Blockers
 
-None. Tasks 00001 through 00012 passed Agent Acceptance. Task 00013 is the next isolated epoch from the scoped Task 00012 checkpoint.
+None. Tasks 00001 through 00013 passed Agent Acceptance. Task 00014 is the next isolated implementation epoch after the Task 00013 checkpoint.

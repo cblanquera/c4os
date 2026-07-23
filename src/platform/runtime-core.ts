@@ -49,6 +49,30 @@ export type RuntimeProcessSummary = {
   readonly processGeneration: number;
 };
 
+export type RuntimeModelCapabilitySummary = {
+  readonly state: "supported" | "degraded" | "unsupported" | "unknown";
+  readonly source: string;
+  readonly checkedAtMs: number;
+  readonly expiresAtMs: number | null;
+  readonly detail: string | null;
+};
+
+export type RuntimeModelRouteSummary = {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly adapterKind: string;
+  readonly runtimeKind: string;
+  readonly nativeRuntimeVersion: string;
+  readonly lifecycle: "active" | "preview" | "deprecated" | "unavailable";
+  readonly contextTokens: number | null;
+  readonly capabilities: Readonly<
+    Record<
+      "vision" | "tools" | "reasoning" | "audio",
+      RuntimeModelCapabilitySummary
+    >
+  >;
+};
+
 export type RuntimeCoreSnapshot = {
   readonly authority: "rust-core";
   readonly generation: StateGeneration;
@@ -58,6 +82,7 @@ export type RuntimeCoreSnapshot = {
   readonly onboardingReady: boolean;
   readonly providers: readonly RuntimeProviderSummary[];
   readonly runtimes: readonly RuntimeProcessSummary[];
+  readonly modelRoutes: readonly RuntimeModelRouteSummary[];
   readonly pendingApprovals: readonly ProductionRuntimePendingApproval[];
 };
 
@@ -100,12 +125,14 @@ export type ProductionRuntimePump = {
 };
 
 export type RuntimeProductionApprovalAnswer = "allow" | "deny";
+export type RuntimeProductionApprovalMemory = "once" | "session" | "persistent";
 
 export type ProductionRuntimeApprovalRequest = {
   readonly runtimeId: RuntimeId;
   readonly correlationId: CorrelationId;
   readonly promptId: ApprovalId;
   readonly answer: RuntimeProductionApprovalAnswer;
+  readonly remember: RuntimeProductionApprovalMemory;
 };
 
 export type ProductionRuntimeApprovalSettlement = {
@@ -143,6 +170,7 @@ export type RuntimeCoreTransportArguments = {
     readonly correlationId: CorrelationId;
     readonly promptId: ApprovalId;
     readonly answer: RuntimeProductionApprovalAnswer;
+    readonly remember: RuntimeProductionApprovalMemory;
   };
 };
 
@@ -234,6 +262,7 @@ export function readRuntimeReviewSnapshot(): Promise<RuntimeCoreSnapshot> {
             runtimeGeneration: 18,
             onboardingReady: true,
             providers: [],
+            modelRoutes: [],
             runtimes: [
               {
                 runtimeId: "opencode-primary",
@@ -394,6 +423,11 @@ export function createRuntimeCoreAdapter(
         "approval prompt ID",
       ) as ApprovalId;
       const answer = enumValue(approval.answer, ["allow", "deny"]);
+      const remember = enumValue(approval.remember, [
+        "once",
+        "session",
+        "persistent",
+      ]);
       return invokeCommand(
         RUNTIME_PRODUCTION_ANSWER_APPROVAL_COMMAND,
         (request) => ({
@@ -402,6 +436,7 @@ export function createRuntimeCoreAdapter(
           correlationId: expectedCorrelationId,
           promptId: expectedPromptId,
           answer,
+          remember,
         }),
         (payload) =>
           parseApprovalSettlement(payload, {
@@ -451,6 +486,7 @@ function parseSnapshot(
     "onboardingReady",
     "providers",
     "runtimes",
+    "modelRoutes",
     "pendingApprovals",
   ]);
   if (value.authority !== "rust-core") {
@@ -461,6 +497,9 @@ function parseSnapshot(
   }
   if (!Array.isArray(value.runtimes) || value.runtimes.length > 128) {
     throw boundary("invalidPayload", "The runtime projection is invalid.");
+  }
+  if (!Array.isArray(value.modelRoutes) || value.modelRoutes.length > 4_096) {
+    throw boundary("invalidPayload", "The model route projection is invalid.");
   }
   if (
     !Array.isArray(value.pendingApprovals) ||
@@ -489,7 +528,96 @@ function parseSnapshot(
     ),
     providers: value.providers.map(parseProvider),
     runtimes: value.runtimes.map(parseRuntime),
+    modelRoutes: value.modelRoutes.map(parseModelRoute),
     pendingApprovals: value.pendingApprovals.map(parsePendingApproval),
+  };
+}
+
+function parseModelRoute(raw: unknown): RuntimeModelRouteSummary {
+  const value = exactRecord(raw, "effective model route", [
+    "providerId",
+    "modelId",
+    "adapterKind",
+    "runtimeKind",
+    "nativeRuntimeVersion",
+    "lifecycle",
+    "contextTokens",
+    "capabilities",
+  ]);
+  const rawCapabilities = exactRecord(
+    value.capabilities,
+    "model capabilities",
+    ["vision", "tools", "reasoning", "audio"],
+  );
+  return {
+    providerId: identifier(value.providerId, "provider ID"),
+    modelId: modelIdentifier(value.modelId, "model ID"),
+    adapterKind: identifier(value.adapterKind, "adapter kind"),
+    runtimeKind: identifier(value.runtimeKind, "runtime kind"),
+    nativeRuntimeVersion: textValue(
+      value.nativeRuntimeVersion,
+      "native runtime version",
+      64,
+    ),
+    lifecycle: enumValue(value.lifecycle, [
+      "active",
+      "preview",
+      "deprecated",
+      "unavailable",
+    ]),
+    contextTokens:
+      value.contextTokens === null
+        ? null
+        : boundedInteger(
+            value.contextTokens,
+            "effective context-token limit",
+            10_000_000_000,
+            1,
+          ),
+    capabilities: {
+      vision: parseModelCapability(rawCapabilities.vision),
+      tools: parseModelCapability(rawCapabilities.tools),
+      reasoning: parseModelCapability(rawCapabilities.reasoning),
+      audio: parseModelCapability(rawCapabilities.audio),
+    },
+  };
+}
+
+function parseModelCapability(raw: unknown): RuntimeModelCapabilitySummary {
+  const value = exactRecord(raw, "effective model capability", [
+    "state",
+    "source",
+    "checkedAtMs",
+    "expiresAtMs",
+    "detail",
+  ]);
+  return {
+    state: enumValue(value.state, [
+      "supported",
+      "degraded",
+      "unsupported",
+      "unknown",
+    ]),
+    source: identifier(value.source, "capability evidence source"),
+    checkedAtMs: boundedInteger(
+      value.checkedAtMs,
+      "capability observation time",
+      Number.MAX_SAFE_INTEGER,
+      1,
+    ),
+    expiresAtMs:
+      value.expiresAtMs === null
+        ? null
+        : boundedInteger(
+            value.expiresAtMs,
+            "capability evidence expiry",
+            Number.MAX_SAFE_INTEGER,
+            1,
+          ),
+    detail:
+      value.detail === null
+        ? null
+        : textValue(value.detail, "capability evidence detail", 2_048),
   };
 }
 
@@ -534,7 +662,9 @@ function parsePendingApproval(raw: unknown): ProductionRuntimePendingApproval {
         ? null
         : identifier(value.providerId, "provider ID"),
     modelId:
-      value.modelId === null ? null : identifier(value.modelId, "model ID"),
+      value.modelId === null
+        ? null
+        : modelIdentifier(value.modelId, "model ID"),
     maxTokens:
       value.maxTokens === null
         ? null
@@ -615,7 +745,7 @@ function parseProvider(raw: unknown): RuntimeProviderSummary {
     selectedModelId:
       value.selectedModelId === null
         ? null
-        : identifier(value.selectedModelId, "selected model ID"),
+        : modelIdentifier(value.selectedModelId, "selected model ID"),
   };
 }
 
@@ -862,6 +992,24 @@ function matchingGeneration(
 function identifier(value: unknown, label: string): string {
   const candidate = textValue(value, label, MAX_IDENTIFIER_BYTES);
   if (!/^[A-Za-z0-9_.:@-]+$/u.test(candidate)) {
+    throw boundary("invalidPayload", `The ${label} is invalid.`);
+  }
+  return candidate;
+}
+
+function modelIdentifier(value: unknown, label: string): string {
+  const candidate = textValue(value, label, MAX_IDENTIFIER_BYTES);
+  if (
+    !/^[A-Za-z0-9_.:@/+-]+$/u.test(candidate) ||
+    candidate.startsWith("/") ||
+    candidate.endsWith("/") ||
+    candidate
+      .split("/")
+      .some(
+        (segment) =>
+          segment.length === 0 || segment === "." || segment === "..",
+      )
+  ) {
     throw boundary("invalidPayload", `The ${label} is invalid.`);
   }
   return candidate;

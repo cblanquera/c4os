@@ -190,6 +190,84 @@ impl<B: ProductionRuntimeBackend> RuntimeProductionApplication<B> {
             .map_err(|_| RuntimeProductionApplicationError::Unavailable)
     }
 
+    pub fn active_runtime_ids(&self) -> Result<Vec<String>, RuntimeProductionApplicationError> {
+        self.active
+            .lock()
+            .map(|active| {
+                active
+                    .iter()
+                    .filter(|(_, runtime)| !runtime.quarantined)
+                    .map(|(runtime_id, _)| runtime_id.clone())
+                    .collect()
+            })
+            .map_err(|_| RuntimeProductionApplicationError::Unavailable)
+    }
+
+    /// Rebuilds every active native peer from the latest Rust-owned Provider
+    /// profiles. Provider mutations hold the application dispatch gate while
+    /// this two-phase stop/start runs, so no next-turn dispatch can reach a
+    /// peer carrying a bootstrap-time endpoint or credential route.
+    pub fn reload_active_provider_routes(
+        &self,
+        changed_at_ms: u64,
+    ) -> Result<u64, RuntimeProductionApplicationError> {
+        let runtime_ids = self.active_runtime_ids()?;
+        let mut generation = self.application.snapshot(changed_at_ms)?.generation;
+        for runtime_id in &runtime_ids {
+            match self.shutdown_runtime(generation, runtime_id, changed_at_ms) {
+                Ok(next_generation) => generation = next_generation,
+                Err(error) => {
+                    self.quarantine_provider_route_peers(&runtime_ids)?;
+                    return Err(error);
+                }
+            }
+        }
+        for runtime_id in &runtime_ids {
+            match self.activate_runtime(generation, runtime_id, changed_at_ms) {
+                Ok(activated) => generation = activated.coordinator_generation,
+                Err(error) => {
+                    self.quarantine_provider_route_peers(&runtime_ids)?;
+                    return Err(error);
+                }
+            }
+        }
+        Ok(generation)
+    }
+
+    fn quarantine_provider_route_peers(
+        &self,
+        runtime_ids: &[String],
+    ) -> Result<(), RuntimeProductionApplicationError> {
+        let bindings = {
+            let mut active = self
+                .active
+                .lock()
+                .map_err(|_| RuntimeProductionApplicationError::Unavailable)?;
+            runtime_ids
+                .iter()
+                .filter_map(|runtime_id| {
+                    let runtime = active.get_mut(runtime_id)?;
+                    runtime.quarantined = true;
+                    runtime.worker.revoke_transient_credentials();
+                    (!runtime.native_stopped).then_some((
+                        runtime_id.clone(),
+                        runtime.worker.binding().process_generation(),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut dispatch = self.application.dispatch()?;
+        let mut first_error = None;
+        for (runtime_id, process_generation) in bindings {
+            if let Err(error) = dispatch.quarantine(&runtime_id, process_generation)
+                && first_error.is_none()
+            {
+                first_error = Some(RuntimeProductionApplicationError::from(error));
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
     pub fn activate_runtime(
         &self,
         expected_coordinator_generation: u64,
@@ -1177,15 +1255,15 @@ mod tests {
         CapabilityLayer, CapabilityState, ModelLifecycle, RouteIdentity,
     };
     use crate::runtime::dispatch::{
-        DispatchIdentity, PeerDispatchError, PeerDispatchEvent, PeerDispatchRequest,
+        DispatchError, DispatchIdentity, PeerDispatchError, PeerDispatchEvent, PeerDispatchRequest,
         RuntimeDispatchPeer, RuntimeDispatchRegistry, RuntimePeerRegistration,
     };
     use crate::runtime::production::ProductionRuntimeBinding;
     use crate::runtime::provider::{
         ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-        ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint, ProviderKind,
-        ProviderModelDeclaration, ProviderProbe, ProviderProbeFailure, ProviderProfile,
-        RouteAvailability,
+        ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint,
+        ProviderKind, ProviderModelDeclaration, ProviderProbe, ProviderProbeFailure,
+        ProviderProfile, RouteAvailability,
     };
     use crate::runtime::supervisor::{
         PI_NATIVE_VERSION, RUNTIME_PROTOCOL_VERSION, RuntimeInstallation, RuntimeKind,
@@ -1228,6 +1306,7 @@ mod tests {
 
     struct RouteCapturingBackend {
         captured: Arc<Mutex<Vec<ProviderRouteObservation>>>,
+        fail_drain_runtime: Option<String>,
     }
 
     impl ProductionRuntimeBackend for RouteCapturingBackend {
@@ -1251,7 +1330,10 @@ mod tests {
                             .into(),
                         base_url: profile.endpoint.base_url.clone(),
                         selected_model_id: route.selected_model_id().into(),
-                        credential_reference: profile.credential_reference.clone(),
+                        credential_reference: profile
+                            .credential_reference
+                            .clone()
+                            .ok_or(RuntimeProductionApplicationError::PreparationRejected)?,
                     })
                 })
                 .collect::<Result<Vec<_>, RuntimeProductionApplicationError>>()?;
@@ -1264,6 +1346,7 @@ mod tests {
                 revocations: None,
                 drains: None,
                 invalidate_attach: None,
+                fail_drain_runtime: self.fail_drain_runtime.clone(),
                 fail_pump_runtime: None,
                 fatal_pump_runtime: None,
             }))
@@ -1324,6 +1407,7 @@ mod tests {
         revocations: Option<Arc<Mutex<usize>>>,
         drains: Option<Arc<Mutex<usize>>>,
         invalidate_attach: Option<Arc<RuntimeApplicationService>>,
+        fail_drain_runtime: Option<String>,
         fail_pump_runtime: Option<String>,
         fatal_pump_runtime: Option<String>,
     }
@@ -1358,6 +1442,7 @@ mod tests {
                 pumps: Arc::clone(&self.pumps),
                 revocations: self.revocations.clone(),
                 drains: self.drains.clone(),
+                fail_drain_runtime: self.fail_drain_runtime.clone(),
                 fail_pump_runtime: self.fail_pump_runtime.clone(),
                 fatal_pump_runtime: self.fatal_pump_runtime.clone(),
             }))
@@ -1369,6 +1454,7 @@ mod tests {
         pumps: Arc<Mutex<usize>>,
         revocations: Option<Arc<Mutex<usize>>>,
         drains: Option<Arc<Mutex<usize>>>,
+        fail_drain_runtime: Option<String>,
         fail_pump_runtime: Option<String>,
         fatal_pump_runtime: Option<String>,
     }
@@ -1389,6 +1475,9 @@ mod tests {
             _application: &Arc<RuntimeApplicationService>,
             _now_ms: u64,
         ) -> Result<usize, RuntimeProductionApplicationError> {
+            if self.fail_drain_runtime.as_deref() == Some(self.binding.runtime_id()) {
+                return Err(RuntimeProductionApplicationError::PreparationRejected);
+            }
             if let Some(drains) = &self.drains {
                 *drains.lock().unwrap() += 1;
                 return Ok(1);
@@ -1480,6 +1569,7 @@ mod tests {
                 revocations: self.revocations.clone(),
                 drains: self.drains.clone(),
                 invalidate_attach: self.invalidate_attach.clone(),
+                fail_drain_runtime: None,
                 fail_pump_runtime: self.fail_pump_runtime.clone(),
                 fatal_pump_runtime: self.fatal_pump_runtime.clone(),
             }))
@@ -1571,7 +1661,9 @@ mod tests {
                 base_url: "https://api.openai.com/v1".into(),
                 api_kind: "openai".into(),
             },
-            credential_reference,
+            authentication: ProviderAuthentication::Bearer,
+            credential_reference: Some(credential_reference),
+            headers: BTreeMap::new(),
             enabled: true,
         }
     }
@@ -1682,6 +1774,7 @@ mod tests {
             Arc::clone(&application),
             RouteCapturingBackend {
                 captured: Arc::clone(&captured),
+                fail_drain_runtime: None,
             },
         );
         let before_activation = application.snapshot(NOW + 4).unwrap();
@@ -1703,6 +1796,112 @@ mod tests {
         assert!(!format!("{:?}", captured.lock().unwrap()).contains("team-a-secret"));
         host.shutdown_runtime(activated.coordinator_generation, "pi-primary", NOW + 5)
             .unwrap();
+    }
+
+    #[test]
+    fn active_provider_route_reload_rebuilds_the_peer_from_latest_profile_authority() {
+        let temporary = TempDir::new().unwrap();
+        let application = setup_service(&temporary);
+        let vault = CredentialVault::session_only().unwrap();
+        let credential_reference = vault.store("provider-key", b"team-a-secret").unwrap();
+        let mut profile =
+            tested_pi_profile("openai-team-a", "openai-endpoint-a", credential_reference);
+        profile.kind = ProviderKind::Custom;
+        profile.endpoint.base_url = "https://proxy-a.example/v1".into();
+        profile.endpoint.api_kind = "openai-compatible".into();
+        seed_tested_pi_provider(&application, profile.clone(), NOW + 2, NOW + 3);
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let host = RuntimeProductionApplication::with_backend(
+            Arc::clone(&application),
+            RouteCapturingBackend {
+                captured: Arc::clone(&captured),
+                fail_drain_runtime: None,
+            },
+        );
+        let before_activation = application.snapshot(NOW + 4).unwrap();
+        host.activate_runtime(before_activation.generation, "pi-primary", NOW + 4)
+            .unwrap();
+        assert_eq!(
+            captured.lock().unwrap().first().unwrap().base_url,
+            "https://proxy-a.example/v1"
+        );
+
+        profile.endpoint.endpoint_id = "openai-endpoint-b".into();
+        profile.endpoint.base_url = "https://proxy-b.example/v1".into();
+        let before_save = application.snapshot(NOW + 5).unwrap();
+        application
+            .save_provider(
+                before_save.generation,
+                profile.clone(),
+                before_save.providers.generation,
+                NOW + 5,
+            )
+            .unwrap();
+        let before_test = application.snapshot(NOW + 6).unwrap();
+        application
+            .test_provider(
+                before_test.generation,
+                &profile.provider_id,
+                before_test.providers.generation,
+                NOW + 6,
+                &mut FixtureProviderProbe(ProviderDiscovery {
+                    checked_at_ms: NOW + 6,
+                    models: vec![tested_pi_model(&profile, NOW + 6)],
+                    recommended_model_id: Some("gpt-4o-mini".into()),
+                    connection_evidence: None,
+                }),
+            )
+            .unwrap();
+
+        host.reload_active_provider_routes(NOW + 7).unwrap();
+        let observations = captured.lock().unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(
+            observations.last().unwrap().base_url,
+            "https://proxy-b.example/v1"
+        );
+        assert_eq!(
+            observations.last().unwrap().endpoint_id,
+            "openai-endpoint-b"
+        );
+    }
+
+    #[test]
+    fn provider_route_reload_failure_quarantines_the_stale_peer() {
+        let temporary = TempDir::new().unwrap();
+        let application = setup_service(&temporary);
+        let vault = CredentialVault::session_only().unwrap();
+        let credential_reference = vault.store("provider-key", b"team-a-secret").unwrap();
+        let mut profile =
+            tested_pi_profile("openai-team-a", "openai-endpoint-a", credential_reference);
+        profile.kind = ProviderKind::Custom;
+        profile.endpoint.base_url = "https://proxy-a.example/v1".into();
+        profile.endpoint.api_kind = "openai-compatible".into();
+        seed_tested_pi_provider(&application, profile, NOW + 2, NOW + 3);
+        let host = RuntimeProductionApplication::with_backend(
+            Arc::clone(&application),
+            RouteCapturingBackend {
+                captured: Arc::new(Mutex::new(Vec::new())),
+                fail_drain_runtime: Some("pi-primary".into()),
+            },
+        );
+        let before_activation = application.snapshot(NOW + 4).unwrap();
+        host.activate_runtime(before_activation.generation, "pi-primary", NOW + 4)
+            .unwrap();
+
+        assert!(matches!(
+            host.reload_active_provider_routes(NOW + 5),
+            Err(RuntimeProductionApplicationError::PreparationRejected)
+        ));
+        assert_eq!(host.active_runtime_count().unwrap(), 0);
+        assert!(matches!(
+            host.pump_runtime_once("pi-primary", NOW + 6),
+            Err(RuntimeProductionApplicationError::NotActive)
+        ));
+        assert!(matches!(
+            application.dispatch().unwrap().registration("pi-primary"),
+            Err(DispatchError::PeerUnavailable)
+        ));
     }
 
     #[test]
@@ -1729,6 +1928,7 @@ mod tests {
             Arc::clone(&application),
             RouteCapturingBackend {
                 captured: Arc::clone(&captured),
+                fail_drain_runtime: None,
             },
         );
         let before_activation = application.snapshot(NOW + 6).unwrap();

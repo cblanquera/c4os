@@ -6,6 +6,7 @@ import {
   type ProductionRuntimePendingApproval,
   type RuntimeCoreSnapshot,
   type RuntimeProductionApprovalAnswer,
+  type RuntimeProductionApprovalMemory,
 } from "../../platform/runtime-core";
 import "./production-runtime-approval.css";
 
@@ -57,7 +58,10 @@ export function ProductionRuntimeApprovalCenter({
   const approval = snapshot?.pendingApprovals.at(0);
   if (approval === undefined) return null;
 
-  const settle = async (answer: RuntimeProductionApprovalAnswer) => {
+  const settle = async (
+    answer: RuntimeProductionApprovalAnswer,
+    remember: RuntimeProductionApprovalMemory,
+  ) => {
     setSettlingPromptId(approval.promptId);
     setSettlementError(null);
     try {
@@ -66,6 +70,7 @@ export function ProductionRuntimeApprovalCenter({
         correlationId: approval.correlationId,
         promptId: approval.promptId,
         answer,
+        remember,
       });
       setSnapshot((current) =>
         current === null
@@ -124,19 +129,50 @@ export function ProductionRuntimeApprovalCenter({
         <div className="production-runtime-approval__actions">
           <button
             disabled={settlingPromptId !== null}
-            onClick={() => void settle("deny")}
+            onClick={() => void settle("deny", "once")}
             type="button"
           >
             Deny
           </button>
-          <button
-            className="production-runtime-approval__allow"
-            disabled={settlingPromptId !== null}
-            onClick={() => void settle("allow")}
-            type="button"
-          >
-            {settlingPromptId === approval.promptId ? "Submitting…" : "Allow"}
-          </button>
+          {approval.approvalKind === "runtime-effect" ? (
+            <>
+              <button
+                className="production-runtime-approval__allow"
+                disabled={settlingPromptId !== null}
+                onClick={() => void settle("allow", "once")}
+                type="button"
+              >
+                Allow once
+              </button>
+              <button
+                className="production-runtime-approval__allow"
+                disabled={settlingPromptId !== null}
+                onClick={() => void settle("allow", "session")}
+                type="button"
+              >
+                Allow for this Chat
+              </button>
+              <button
+                className="production-runtime-approval__allow"
+                disabled={settlingPromptId !== null}
+                onClick={() => void settle("allow", "persistent")}
+                type="button"
+              >
+                Always allow this exact action
+              </button>
+            </>
+          ) : (
+            <button
+              className="production-runtime-approval__allow"
+              disabled={settlingPromptId !== null}
+              onClick={() => void settle("allow", "once")}
+              type="button"
+            >
+              {settlingPromptId === approval.promptId
+                ? "Submitting…"
+                : "Allow once"}
+            </button>
+          )}
         </div>
       </section>
     </div>

@@ -32,9 +32,7 @@ test.describe("native semantic platform foundation", () => {
     );
 
     await page.getByRole("button", { name: "Dirty" }).click();
-    await expect(page.getByRole("status")).toContainText(
-      "Last reviewed state: Dirty",
-    );
+    await expect(page.getByText("Last reviewed state: Dirty")).toBeVisible();
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute(
       "data-color-scheme",
@@ -44,9 +42,7 @@ test.describe("native semantic platform foundation", () => {
       "data-appearance-source",
       "webviewPrefersColorScheme",
     );
-    await expect(page.getByRole("status")).toContainText(
-      "Last reviewed state: Dirty",
-    );
+    await expect(page.getByText("Last reviewed state: Dirty")).toBeVisible();
 
     const tokens = await page.evaluate(() => {
       const styles = getComputedStyle(document.documentElement);
@@ -102,13 +98,13 @@ test.describe("native semantic platform foundation", () => {
     });
   }
 
-  test("uses one production Settings route with compressed navigation and fail-closed picker feedback", async ({
+  test("keeps production Settings focused and the picker diagnostic on its QA route", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1100, height: 680 });
     await page.goto("/#/settings/providers");
     await expect(
-      page.getByRole("heading", { name: "Providers" }),
+      page.getByRole("heading", { name: "Providers", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "Settings" }),
@@ -127,12 +123,16 @@ test.describe("native semantic platform foundation", () => {
     await expect(
       page.getByRole("button", { name: "Back to C4OS" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Folder picker check" }),
+    ).toHaveCount(0);
     await expectNoDocumentOverflow(page);
 
+    await page.goto("/#/qa/platform");
     await page.getByRole("button", { name: "Choose project folder…" }).click();
-    await expect(page.getByRole("status")).toContainText(
-      "Native folder access is unavailable",
-    );
+    await expect(
+      page.getByText("Folder selection cancelled. No access was granted."),
+    ).toBeVisible();
     expect(await page.locator("body").innerText()).not.toContain("/Users/");
   });
 });

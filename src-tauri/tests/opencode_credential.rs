@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
@@ -9,7 +10,8 @@ use c4os_lib::runtime::opencode_credential::{
     OpenCodeProviderCredentialIssuer, ProviderCredentialRequest, opencode_message_id_for_operation,
 };
 use c4os_lib::runtime::provider::{
-    PROVIDER_SCHEMA_VERSION, ProviderEndpoint, ProviderKind, ProviderProfile,
+    PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderEndpoint, ProviderKind,
+    ProviderProfile,
 };
 use c4os_lib::security::credentials::{CredentialReference, CredentialVault};
 use serde_json::{Value, json};
@@ -34,7 +36,9 @@ fn profile_with_id(
             base_url: "https://api.openai.com/v1".into(),
             api_kind: "openai".into(),
         },
-        credential_reference,
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(credential_reference),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }

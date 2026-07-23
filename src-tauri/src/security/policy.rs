@@ -82,6 +82,7 @@ pub enum ActionEffect {
     Execute,
     Control,
     Publish,
+    Upload,
     Reveal,
     Listen,
     Unknown,
@@ -101,6 +102,7 @@ impl ActionEffect {
                 | Self::Execute
                 | Self::Control
                 | Self::Publish
+                | Self::Upload
                 | Self::Listen
         )
     }
@@ -229,7 +231,10 @@ impl ActionFacts {
         for effect in self.effects.iter().copied() {
             components.insert((primary, effect));
 
-            if matches!(effect, ActionEffect::Publish | ActionEffect::Listen) {
+            if matches!(
+                effect,
+                ActionEffect::Publish | ActionEffect::Upload | ActionEffect::Listen
+            ) {
                 components.insert((PolicyGroup::NetworkAndSharing, effect));
             }
             if self.sensitivity == ActionSensitivity::Credential || effect == ActionEffect::Reveal {
@@ -294,6 +299,9 @@ pub struct RuleMatcher {
     pub runtime_id: Option<String>,
     pub environment_id: Option<String>,
     pub plugin_or_mcp_id: Option<String>,
+    /// Matches whether an extension authority is present without binding one
+    /// specific Plugin, Skill, App, or MCP identity.
+    pub extension_authority_present: Option<bool>,
 }
 
 impl RuleMatcher {
@@ -322,6 +330,9 @@ impl RuleMatcher {
                 Some(expected) => facts.plugin_or_mcp_id.as_deref() == Some(expected),
                 None => true,
             }
+            && self
+                .extension_authority_present
+                .is_none_or(|expected| expected == facts.plugin_or_mcp_id.is_some())
     }
 }
 

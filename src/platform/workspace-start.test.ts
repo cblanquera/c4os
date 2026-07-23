@@ -3,11 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PROTOCOL_VERSION,
   type CorrelationId,
+  type PickerGrantId,
   type RequestId,
   type StateGeneration,
+  type WorkspaceId,
 } from "./protocol";
 import {
   createWorkspaceStartAdapter,
+  WORKSPACE_START_CLONE_REPOSITORY_COMMAND,
+  WORKSPACE_START_OPEN_RECENT_COMMAND,
   WORKSPACE_START_SNAPSHOT_COMMAND,
   type WorkspaceStartTransport,
 } from "./workspace-start";
@@ -36,6 +40,18 @@ function response(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
+}
+
+function openResponse(overrides: Record<string, unknown> = {}) {
+  return response({
+    payload: {
+      authority: "rust-workspace-service",
+      workspaceId: "workspace-opened",
+      workspaceName: "Opened Workspace",
+      recovered: false,
+    },
+    ...overrides,
+  });
 }
 
 function adapter(raw: unknown, initialGeneration = 3) {
@@ -132,5 +148,75 @@ describe("createWorkspaceStartAdapter", () => {
       code: "unavailable",
       message: "Workspace Start is unavailable.",
     });
+  });
+
+  it("opens a recent Workspace with the exact CAS request and advances the cursor", async () => {
+    const fixture = adapter(openResponse());
+
+    await expect(
+      fixture.adapter.openRecent("workspace-1" as WorkspaceId),
+    ).resolves.toEqual({
+      authority: "rust-workspace-service",
+      workspaceId: "workspace-opened",
+      workspaceName: "Opened Workspace",
+      recovered: false,
+    });
+    expect(fixture.adapter.currentGeneration).toBe(4);
+    expect(fixture.transport.invoke).toHaveBeenCalledWith(
+      WORKSPACE_START_OPEN_RECENT_COMMAND,
+      {
+        request: {
+          protocolVersion: PROTOCOL_VERSION,
+          requestId,
+          correlationId,
+          expectedGeneration: 3,
+        },
+        input: { workspaceId: "workspace-1" },
+      },
+    );
+  });
+
+  it("clones only through the native command and validates its bounded result", async () => {
+    const fixture = adapter(
+      openResponse({
+        payload: {
+          state: "pendingApproval",
+          promptId: "clone-approval-1",
+          summary: "Clone the repository into the selected folder?",
+        },
+      }),
+    );
+
+    await expect(
+      fixture.adapter.cloneRepository(
+        "picker-grant-1" as PickerGrantId,
+        "https://github.com/example/repository.git",
+      ),
+    ).resolves.toEqual({
+      state: "pendingApproval",
+      promptId: "clone-approval-1",
+      summary: "Clone the repository into the selected folder?",
+    });
+    expect(fixture.transport.invoke).toHaveBeenCalledWith(
+      WORKSPACE_START_CLONE_REPOSITORY_COMMAND,
+      expect.objectContaining({
+        input: {
+          pickerGrantId: "picker-grant-1",
+          repositoryUrl: "https://github.com/example/repository.git",
+        },
+      }),
+    );
+
+    await expect(
+      adapter(
+        openResponse({ payload: { authority: "renderer" } }),
+      ).adapter.openRecent("workspace-1" as WorkspaceId),
+    ).rejects.toMatchObject({ code: "invalidPayload" });
+    expect(() =>
+      fixture.adapter.cloneRepository(
+        "picker-grant-1" as PickerGrantId,
+        "https://example.com/repo\nname",
+      ),
+    ).toThrowError(/repository URL is invalid/);
   });
 });

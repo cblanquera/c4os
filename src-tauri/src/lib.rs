@@ -24,8 +24,9 @@ use execution::filesystem::{
 };
 use execution::git::{
     ActiveProjectRepository, BranchControlVisibility, GitBranchMenuSnapshot, GitBranchOperation,
-    GitBranchOutcome, GitBranchRequest, GitError, GitOperationAuthorization, ProductionGitRunner,
-    execute_branch_operation, inspect_branch_control, snapshot_branch_menu,
+    GitBranchOutcome, GitBranchRequest, GitCommandInvocation, GitCommandRunner, GitError,
+    GitOperationAuthorization, ProductionGitRunner, execute_branch_operation,
+    inspect_branch_control, snapshot_branch_menu,
 };
 use execution::terminal::{
     MAX_TERMINAL_DRAIN_BYTES, MAX_TERMINAL_DRAIN_EVENTS, TerminalAcknowledgeRequest,
@@ -36,7 +37,7 @@ use execution::terminal::{
 };
 use platform::{
     ColorScheme, INITIAL_REVEAL_FALLBACK_MS, InitialThemeSnapshot, InitialThemeSource,
-    NativePickerRequest, NativePickerSelection, OPEN_SETTINGS_COMMAND_ID,
+    NativePickerGrant, NativePickerRequest, NativePickerSelection, OPEN_SETTINGS_COMMAND_ID,
     PLATFORM_CONTRACT_VERSION, PickerGrantRegistry, PickerGrantSnapshot, PickerObjectKind,
     PickerOutcome, PickerPurpose, PlatformCapabilities, PlatformService, PlatformSnapshot,
     PlatformTarget, SETTINGS_ACCELERATOR, SETTINGS_MENU_ITEM_ID, SETTINGS_ROUTE,
@@ -102,7 +103,7 @@ use runtime::dispatch_authority::{
 };
 use runtime::opencode_native::{OPENCODE_C4OS_TOOL_IDS, sha256_bytes};
 use runtime::persistence::{
-    DeferredSessionRepository, ProviderStateStore, RuntimeControlPlaneStore,
+    DeferredSessionRepository, PolicyStateStore, ProviderStateStore, RuntimeControlPlaneStore,
     RuntimePersistenceError, SupervisorStateStore,
 };
 use runtime::pi::PiSamplingMessage;
@@ -116,8 +117,8 @@ use runtime::supervisor::{
     CompatibilityState, HealthState, RuntimeInstallation, RuntimeSupervisor,
 };
 use security::authorization::{
-    ApprovalAnswer, AuthorizationToken, CANONICAL_ACTION_SCHEMA_VERSION, CanonicalAction,
-    CanonicalRisk, LiveAuthorityState,
+    ApprovalAnswer, ApprovalPromptRecord, AuthorizationToken, CANONICAL_ACTION_SCHEMA_VERSION,
+    CanonicalAction, CanonicalRisk, LiveAuthorityState,
 };
 use security::gateway::{
     ActionEffectLease, ApprovalResponse, ExecutionPermit, GatewayProposal, NormalizedActionResult,
@@ -125,11 +126,13 @@ use security::gateway::{
 };
 use security::policy::{
     ActionEffect, ActionFacts, ActionInitiator, ActionRequestOrigin, ActionReversibility,
-    ActionScope, ActionSensitivity, ActionSurface, ClassificationConfidence, PolicyConfiguration,
-    PolicyDecision, RepositoryState,
+    ActionScope, ActionSensitivity, ActionSurface, ApprovalPreset as RuntimeApprovalPreset,
+    CategoryRule, ClassificationConfidence, ConcreteException, ExceptionDuration,
+    PolicyConfiguration, PolicyDecision, PolicyGroup, RepositoryState, RuleMatcher,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::io::Write as _;
 #[cfg(all(debug_assertions, unix))]
 use std::os::unix::fs::MetadataExt;
@@ -146,6 +149,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use thiserror::Error;
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 const BROKER_CONTEXT_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
 
@@ -741,14 +745,37 @@ struct ProductionMcpCredentialObserver {
     cancellations: ProductionMcpCancellationRegistry,
 }
 
+struct ProductionProviderCredentialObserver {
+    runtime: Weak<RuntimeApplicationService>,
+}
+
+impl security::credentials::CredentialMutationObserver for ProductionProviderCredentialObserver {
+    fn credential_mutated(
+        &self,
+        credential_reference: &security::credentials::CredentialReference,
+        _kind: security::credentials::CredentialMutationKind,
+    ) -> security::credentials::CredentialVaultResult<()> {
+        let Some(runtime) = self.runtime.upgrade() else {
+            return Ok(());
+        };
+        runtime
+            .invalidate_provider_credential_reference(
+                credential_reference,
+                current_time_ms().unwrap_or(1),
+            )
+            .map(|_| ())
+            .map_err(|_| security::credentials::CredentialVaultError::MutationObserver)
+    }
+}
+
 impl security::credentials::CredentialMutationObserver for ProductionMcpCredentialObserver {
     fn credential_mutated(
         &self,
         credential_reference: &security::credentials::CredentialReference,
         kind: security::credentials::CredentialMutationKind,
-    ) {
+    ) -> security::credentials::CredentialVaultResult<()> {
         let Some(service) = self.service.upgrade() else {
-            return;
+            return Ok(());
         };
         let credential_reference = credential_reference.to_string();
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -769,6 +796,7 @@ impl security::credentials::CredentialMutationObserver for ProductionMcpCredenti
                 .invalidate_credential_reference(&credential_reference, reason, now_ms)
                 .await;
         });
+        Ok(())
     }
 }
 
@@ -777,18 +805,23 @@ struct AppCoreState {
     c4os_home: PathBuf,
     bundled_skill_root: PathBuf,
     mcp: Arc<tokio::sync::Mutex<ProductionMcpService>>,
+    credential_vault: Option<security::credentials::CredentialVault>,
+    credential_protection: ProviderCredentialProtection,
+    credential_fallback_required: AtomicBool,
     _mcp_credential_observer: Option<Arc<dyn security::credentials::CredentialMutationObserver>>,
+    _provider_credential_observer:
+        Option<Arc<dyn security::credentials::CredentialMutationObserver>>,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     mcp_cancellations: ProductionMcpCancellationRegistry,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     mcp_sampling_approvals: mcp::production_sampling::ProductionMcpSamplingApprovalRegistry,
     extensions: Mutex<extension::service::ExtensionService>,
     hook_supervisor: Mutex<Option<extension::hook::HookSupervisor>>,
-    configuration: Mutex<core::services::ManagedAppConfiguration>,
+    configuration: Arc<Mutex<core::services::ManagedAppConfiguration>>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation_operation: Mutex<()>,
     artifact_operation: Arc<Mutex<()>>,
-    conversation: Mutex<ConversationApplicationState>,
+    conversation: Arc<Mutex<ConversationApplicationState>>,
     artifact: Arc<Mutex<ArtifactApplicationState>>,
     terminal: Arc<Mutex<TerminalSupervisor>>,
     browser_profiles: Mutex<browser::profile::BrowserProfileRegistry>,
@@ -800,6 +833,8 @@ struct AppCoreState {
     platform: PlatformService,
     platform_snapshot: PlatformSnapshot,
     picker_grants: Mutex<PickerGrantRegistry>,
+    pending_workspace_clones: Mutex<BTreeMap<String, PendingWorkspaceClone>>,
+    pending_provider_operations: Mutex<BTreeMap<String, PendingProviderOperation>>,
     conversation_drop: Mutex<NativeConversationDropState>,
     conversation_branch: Mutex<NativeConversationBranchState>,
 }
@@ -1484,11 +1519,15 @@ impl<T> Default for ManagedPublication<T> {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 impl<T> ManagedPublication<T> {
-    fn load(&self, correlation_id: protocol::CorrelationId) -> Result<Arc<T>, ProtocolError> {
+    fn published(&self) -> Option<Arc<T>> {
         self.application
             .lock()
             .ok()
             .and_then(|application| application.as_ref().cloned())
+    }
+
+    fn load(&self, correlation_id: protocol::CorrelationId) -> Result<Arc<T>, ProtocolError> {
+        self.published()
             .ok_or_else(|| runtime_production_unavailable(correlation_id))
     }
 
@@ -1542,6 +1581,14 @@ struct ProductionRuntimeApprovalSettlement {
     prompt_id: String,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum RuntimeApprovalRemember {
+    Once,
+    Session,
+    Persistent,
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1561,7 +1608,290 @@ struct RuntimeCoreSnapshot {
     onboarding_ready: bool,
     providers: Vec<RuntimeProviderSummary>,
     runtimes: Vec<RuntimeProcessSummary>,
+    model_routes: Vec<RuntimeModelRouteSummary>,
     pending_approvals: Vec<RuntimeApprovalSummary>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderProfileInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    provider_id: String,
+    kind: runtime::provider::ProviderKind,
+    display_name: String,
+    endpoint: runtime::provider::ProviderEndpoint,
+    authentication: runtime::provider::ProviderAuthentication,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    #[serde(default)]
+    secret: Option<String>,
+    enabled: bool,
+}
+
+impl Drop for ProviderProfileInput {
+    fn drop(&mut self) {
+        if let Some(secret) = self.secret.as_mut() {
+            secret.zeroize();
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderIdentityInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    provider_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderApprovalInput {
+    prompt_id: String,
+    answer: ArtifactApprovalAnswer,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProviderApprovalOperation {
+    SaveProfile,
+    TestConnection,
+    DeleteProfile,
+}
+
+enum PendingProviderPayload {
+    SaveProfile(ProviderProfileInput),
+    TestConnection(ProviderIdentityInput),
+    DeleteProfile(ProviderIdentityInput),
+}
+
+struct PendingProviderOperation {
+    prompt: ApprovalPromptRecord,
+    action: CanonicalAction,
+    operation: ProviderApprovalOperation,
+    provider_id: String,
+    provider_name: String,
+    payload: PendingProviderPayload,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderPendingApprovalSnapshot {
+    prompt_id: String,
+    operation: ProviderApprovalOperation,
+    provider_id: String,
+    provider_name: String,
+    expires_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderModelSelectionInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    provider_id: String,
+    model_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderModelsAvailabilityInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    provider_id: String,
+    model_ids: Vec<String>,
+    enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderOnboardingInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    expected_configuration_generation: u64,
+    provider_id: String,
+    model_id: String,
+    runtime_id: String,
+    environment_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProviderCredentialProtection {
+    InstallationKey,
+    SessionOnly,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSettingsSnapshot {
+    authority: &'static str,
+    coordinator_generation: u64,
+    configuration_generation: u64,
+    credential_protection: ProviderCredentialProtection,
+    credential_fallback_required: bool,
+    onboarding_completed: bool,
+    providers: runtime::provider::ProviderSnapshot,
+    model_route: Option<String>,
+    default_runtime: Option<String>,
+    default_environment: Option<String>,
+    pending_approval: Option<ProviderPendingApprovalSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ConfigurationSettingsInput {
+    expected_configuration_generation: u64,
+    expected_coordinator_generation: u64,
+    expected_policy_version: u64,
+    default_approval_preset: core::configuration::ApprovalPreset,
+    restore_last_workspace: bool,
+    inherit_shell_environment: bool,
+    browser_environment: core::configuration::BrowserEnvironment,
+    #[serde(default)]
+    default_runtime: Option<String>,
+    #[serde(default)]
+    default_environment: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceStartGrantInput {
+    picker_grant_id: PickerGrantId,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceStartRecentInput {
+    workspace_id: WorkspaceId,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceStartCloneInput {
+    picker_grant_id: PickerGrantId,
+    repository_url: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceStartCloneApprovalInput {
+    prompt_id: String,
+    answer: ArtifactApprovalAnswer,
+}
+
+#[derive(Clone, Debug)]
+struct PendingWorkspaceClone {
+    picker_grant: NativePickerGrant,
+    repository_url: String,
+    repository_name: String,
+    destination: PathBuf,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "state")]
+enum WorkspaceStartCloneSnapshot {
+    Opened {
+        authority: &'static str,
+        workspace_id: String,
+        workspace_name: String,
+        recovered: bool,
+    },
+    PendingApproval {
+        prompt_id: String,
+        summary: String,
+    },
+    Denied,
+}
+
+impl From<WorkspaceStartOpenSnapshot> for WorkspaceStartCloneSnapshot {
+    fn from(snapshot: WorkspaceStartOpenSnapshot) -> Self {
+        Self::Opened {
+            authority: snapshot.authority,
+            workspace_id: snapshot.workspace_id,
+            workspace_name: snapshot.workspace_name,
+            recovered: snapshot.recovered,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceStartOpenSnapshot {
+    authority: &'static str,
+    workspace_id: String,
+    workspace_name: String,
+    recovered: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigurationSettingsSnapshot {
+    authority: &'static str,
+    generation: u64,
+    coordinator_generation: u64,
+    policy_version: u64,
+    default_approval_preset: core::configuration::ApprovalPreset,
+    restore_last_workspace: bool,
+    inherit_shell_environment: bool,
+    shell_environment_allowlist: Vec<String>,
+    browser_environment: core::configuration::BrowserEnvironment,
+    default_runtime: Option<String>,
+    default_environment: Option<String>,
+    model_route: Option<String>,
+    has_external_error: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigurationExternalOpenSnapshot {
+    opened: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PolicySettingsInput {
+    expected_coordinator_generation: u64,
+    expected_policy_version: u64,
+    category_values: BTreeMap<String, Option<PolicyDecision>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PolicyExceptionInput {
+    expected_coordinator_generation: u64,
+    expected_policy_version: u64,
+    exception_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyExceptionSummary {
+    exception_id: String,
+    decision: PolicyDecision,
+    action: String,
+    scope: String,
+    source: String,
+    duration: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicySettingsSnapshot {
+    authority: &'static str,
+    coordinator_generation: u64,
+    policy_version: u64,
+    revocation_epoch: u64,
+    preset: RuntimeApprovalPreset,
+    base_preset: RuntimeApprovalPreset,
+    category_values: BTreeMap<String, Option<PolicyDecision>>,
+    effective_category_values: BTreeMap<String, Option<PolicyDecision>>,
+    exceptions: Vec<PolicyExceptionSummary>,
+    maximum_authority_rule_count: usize,
+    managed_requirement_count: usize,
 }
 
 #[derive(Serialize)]
@@ -1606,11 +1936,78 @@ struct RuntimeProcessSummary {
     process_generation: u64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeModelCapabilitySummary {
+    state: runtime::capability::CapabilityState,
+    source: String,
+    checked_at_ms: u64,
+    expires_at_ms: Option<u64>,
+    detail: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeModelRouteSummary {
+    provider_id: String,
+    model_id: String,
+    adapter_kind: String,
+    runtime_kind: String,
+    native_runtime_version: String,
+    lifecycle: runtime::capability::ModelLifecycle,
+    context_tokens: Option<u64>,
+    capabilities: BTreeMap<String, RuntimeModelCapabilitySummary>,
+}
+
+fn runtime_model_route_summary(
+    provider_id: String,
+    model_id: String,
+    descriptor: CapabilityDescriptor,
+) -> RuntimeModelRouteSummary {
+    let capabilities = [
+        ("vision", CapabilityKey::InputImage),
+        ("tools", CapabilityKey::ToolCalling),
+        ("reasoning", CapabilityKey::Reasoning),
+        ("audio", CapabilityKey::InputAudio),
+    ]
+    .into_iter()
+    .filter_map(|(name, key)| {
+        descriptor.features.get(&key).map(|evidence| {
+            (
+                name.to_owned(),
+                RuntimeModelCapabilitySummary {
+                    state: evidence.state,
+                    source: evidence.source.clone(),
+                    checked_at_ms: evidence.checked_at_ms,
+                    expires_at_ms: evidence.expires_at_ms,
+                    detail: evidence.reason.clone(),
+                },
+            )
+        })
+    })
+    .collect();
+    RuntimeModelRouteSummary {
+        provider_id,
+        model_id,
+        adapter_kind: descriptor.route.adapter_kind.clone(),
+        runtime_kind: descriptor.route.runtime_kind.clone(),
+        native_runtime_version: descriptor.route.native_runtime_version.clone(),
+        lifecycle: descriptor.lifecycle,
+        context_tokens: descriptor
+            .numeric_limits
+            .get(&NumericCapabilityKey::ContextTokens)
+            .and_then(|limit| limit.maximum),
+        capabilities,
+    }
+}
+
 /// Rust-owned application boundary used by Tauri commands and supervised
 /// workers. It keeps every runtime domain behind the coordinator's one
 /// monotonic generation and never exposes the effect executor to the renderer.
 pub struct RuntimeApplicationService {
     coordinator: Mutex<RuntimeCoordinator<DeferredSessionRepository>>,
+    provider_dispatch_gate: Mutex<()>,
+    policy_transition_gate: Arc<Mutex<()>>,
     app_database: Arc<core::database::DatabaseActor>,
     failed_transaction: Mutex<Option<RuntimeCoordinatorSnapshot>>,
     capabilities: Mutex<CapabilityEvidenceRegistry>,
@@ -1619,6 +2016,7 @@ pub struct RuntimeApplicationService {
     dispatch: Mutex<RuntimeDispatchRegistry>,
     sessions: DeferredSessionRepository,
     provider_store: ProviderStateStore,
+    policy_store: PolicyStateStore,
     control_plane_store: RuntimeControlPlaneStore,
     control_plane_revision: Mutex<u64>,
 }
@@ -1657,6 +2055,7 @@ pub(crate) struct PreparedRuntimeMcpSampling {
 /// take effect after an intervening authority change.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub(crate) struct RuntimeBrokerTransaction<'a> {
+    _policy_transition: MutexGuard<'a, ()>,
     coordinator: MutexGuard<'a, RuntimeCoordinator<DeferredSessionRepository>>,
     policy_authority: &'a Mutex<RuntimePolicyAuthority>,
     dispatch: &'a Mutex<RuntimeDispatchRegistry>,
@@ -1697,6 +2096,7 @@ pub struct ConversationFirstDispatchIntent {
     pub provider_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_mode: Option<String>,
+    pub preferred_runtime_kind: Option<runtime::supervisor::RuntimeKind>,
     pub submitted_at_ms: u64,
 }
 
@@ -1765,8 +2165,33 @@ impl RuntimeApplicationService {
         app_database: Arc<core::database::DatabaseActor>,
         now_ms: u64,
     ) -> Result<Self, RuntimeApplicationError> {
+        Self::restore_with_initial_policy(app_database, now_ms, None)
+    }
+
+    fn restore_with_initial_policy(
+        app_database: Arc<core::database::DatabaseActor>,
+        now_ms: u64,
+        initial_policy_preset: Option<RuntimeApprovalPreset>,
+    ) -> Result<Self, RuntimeApplicationError> {
         let provider_store = ProviderStateStore::new(Arc::clone(&app_database))?;
         let providers = provider_store.load()?.unwrap_or_default();
+        let policy_store = PolicyStateStore::new(Arc::clone(&app_database))?;
+        let restored_policy = policy_store.load()?;
+        let (policy_configuration, policy_version, revocation_epoch) =
+            if let Some(restored) = restored_policy {
+                (
+                    restored.configuration,
+                    restored.policy_version,
+                    restored.revocation_epoch,
+                )
+            } else {
+                let mut configuration = PolicyConfiguration::default();
+                if let Some(preset) = initial_policy_preset {
+                    configuration.preset = preset;
+                }
+                policy_store.save(1, 0, &configuration, None, now_ms)?;
+                (configuration, 1, 0)
+            };
         let control_plane_store = RuntimeControlPlaneStore::new(Arc::clone(&app_database))?;
         let restored_control_plane =
             control_plane_store.load(runtime::supervisor::pinned_compatibility())?;
@@ -1788,7 +2213,7 @@ impl RuntimeApplicationService {
                 )
             };
         let gateway = security::gateway::ActionGateway::restore(
-            PolicyConfiguration::default(),
+            policy_configuration,
             Arc::clone(&app_database),
             now_ms,
         )?;
@@ -1801,17 +2226,20 @@ impl RuntimeApplicationService {
         );
         Ok(Self {
             coordinator: Mutex::new(coordinator),
+            provider_dispatch_gate: Mutex::new(()),
+            policy_transition_gate: Arc::new(Mutex::new(())),
             app_database,
             failed_transaction: Mutex::new(None),
             capabilities: Mutex::new(capabilities),
             policy_authority: Mutex::new(RuntimePolicyAuthority {
-                policy_version: 1,
-                revocation_epoch: 0,
+                policy_version,
+                revocation_epoch,
             }),
             dispatch_authority: DispatchAuthorityRegistry::new(),
             dispatch: Mutex::new(RuntimeDispatchRegistry::new()),
             sessions,
             provider_store,
+            policy_store,
             control_plane_store,
             control_plane_revision: Mutex::new(control_plane_revision),
         })
@@ -1925,9 +2353,11 @@ impl RuntimeApplicationService {
         expected_coordinator_generation: u64,
         at_ms: u64,
     ) -> Result<RuntimeBrokerTransaction<'_>, RuntimeApplicationError> {
+        let policy_transition = self.policy_transition_guard()?;
         let coordinator = self.coordinator()?;
         require_coordinator_generation(&coordinator, expected_coordinator_generation, at_ms)?;
         Ok(RuntimeBrokerTransaction {
+            _policy_transition: policy_transition,
             coordinator,
             policy_authority: &self.policy_authority,
             dispatch: &self.dispatch,
@@ -2024,7 +2454,7 @@ impl RuntimeApplicationService {
     ) -> Result<RuntimeCoordinatorSnapshot, RuntimeApplicationError> {
         let coordinator = self.raw_coordinator()?;
         if let Some(mut snapshot) = self.failed_transaction()?.clone() {
-            snapshot.onboarding_ready = snapshot.providers.onboarding_ready_at(now_ms);
+            snapshot.onboarding_ready = snapshot.providers.launch_ready();
             return Ok(snapshot);
         }
         Ok(coordinator.snapshot(now_ms))
@@ -2040,7 +2470,7 @@ impl RuntimeApplicationService {
         } else {
             coordinator.snapshot(now_ms)
         };
-        snapshot.onboarding_ready = snapshot.providers.onboarding_ready_at(now_ms);
+        snapshot.onboarding_ready = snapshot.providers.launch_ready();
         let capability_generation = self.capabilities()?.generation();
         Ok((snapshot, capability_generation))
     }
@@ -2136,6 +2566,7 @@ impl RuntimeApplicationService {
         intent: &RuntimeMcpSamplingIntent,
         now_ms: u64,
     ) -> Result<PreparedRuntimeMcpSampling, RuntimeApplicationError> {
+        let _provider_dispatch = self.provider_dispatch_guard()?;
         let coordinator = self.coordinator()?;
         let session = coordinator.session(&intent.parent_action.session_id)?;
         if session.active_attempt_id.as_deref() != Some(intent.parent_action.run_id.as_str()) {
@@ -2189,7 +2620,10 @@ impl RuntimeApplicationService {
         let selected_model = provider
             .models
             .get(selected_model_id)
-            .filter(|model| model.is_production_ready_at(now_ms))
+            .filter(|model| {
+                !provider.disabled_model_ids.contains(selected_model_id)
+                    && model.is_production_ready_at(now_ms)
+            })
             .ok_or(RuntimeApplicationError::InvalidManagedRuntimeBinding)?;
         if selected_model.capabilities.route.provider_model_id
             != attempt.context.model_route.model_id
@@ -2616,6 +3050,7 @@ impl RuntimeApplicationService {
         approval_prompt_id: Option<&str>,
         now_ms: u64,
     ) -> Result<ActionEffectLease, RuntimeApplicationError> {
+        let _policy_transition = self.policy_transition_guard()?;
         Ok(self
             .coordinator()?
             .begin_direct_action_effect(token, action, live, approval_prompt_id, now_ms)?
@@ -2663,6 +3098,14 @@ impl RuntimeApplicationService {
         })
     }
 
+    pub(crate) fn current_provider_live_authority(
+        &self,
+        now_ms: u64,
+    ) -> Result<LiveAuthorityState, RuntimeApplicationError> {
+        let provider_generation = self.snapshot(now_ms)?.providers.generation.max(1);
+        self.current_direct_live_authority(1, provider_generation)
+    }
+
     /// Publishes policy/revocation authority atomically with the coordinator
     /// generation. Policy workers must advance this state whenever policy is
     /// tightened so retained native workers can never reuse an old authority.
@@ -2696,6 +3139,203 @@ impl RuntimeApplicationService {
             revocation_epoch,
         };
         Ok(coordinator.snapshot(updated_at_ms).generation)
+    }
+
+    fn policy_settings_snapshot(
+        &self,
+        now_ms: u64,
+    ) -> Result<PolicySettingsSnapshot, RuntimeApplicationError> {
+        let coordinator = self.raw_coordinator()?;
+        let coordinator_generation = coordinator.snapshot(now_ms).generation;
+        let configuration = coordinator.policy_configuration().clone();
+        let authority = self
+            .policy_authority
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)?;
+        Ok(project_policy_settings(
+            coordinator_generation,
+            authority.policy_version,
+            authority.revocation_epoch,
+            &configuration,
+        ))
+    }
+
+    fn replace_policy_settings(
+        &self,
+        expected_coordinator_generation: u64,
+        expected_policy_version: u64,
+        configuration: PolicyConfiguration,
+        revocation: bool,
+        now_ms: u64,
+    ) -> Result<PolicySettingsSnapshot, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(&coordinator, expected_coordinator_generation, now_ms)?;
+        let mut authority = self
+            .policy_authority
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)?;
+        if authority.policy_version != expected_policy_version {
+            return Err(RuntimeApplicationError::InvalidPolicyAuthority);
+        }
+        let policy_version = authority
+            .policy_version
+            .checked_add(1)
+            .ok_or(RuntimeApplicationError::InvalidPolicyAuthority)?;
+        let revocation_epoch = if revocation {
+            authority
+                .revocation_epoch
+                .checked_add(1)
+                .ok_or(RuntimeApplicationError::InvalidPolicyAuthority)?
+        } else {
+            authority.revocation_epoch
+        };
+        let replacement = coordinator.prepare_policy_configuration_replacement(
+            configuration.clone(),
+            revocation,
+            now_ms,
+        )?;
+        self.policy_store.save_transition(
+            policy_version,
+            revocation_epoch,
+            &configuration,
+            Some(expected_policy_version),
+            replacement.authorization_records().to_vec(),
+            now_ms,
+        )?;
+        let operation = coordinator.commit_policy_configuration_replacement(replacement);
+        authority.policy_version = policy_version;
+        authority.revocation_epoch = revocation_epoch;
+        Ok(project_policy_settings(
+            operation.coordinator_generation,
+            policy_version,
+            revocation_epoch,
+            &configuration,
+        ))
+    }
+
+    fn reconcile_effective_configuration_policy(
+        &self,
+        effective: &core::configuration::EffectiveConfiguration,
+        now_ms: u64,
+    ) -> Result<(), RuntimeApplicationError> {
+        // Keep the coordinator locked from the effective-policy read through
+        // durable publication. Configuration activation already holds the
+        // policy transition gate; this inner lock closes the remaining race
+        // with non-policy coordinator writers such as Provider mutations.
+        let mut coordinator = self.coordinator()?;
+        let mut configuration = coordinator.policy_configuration().clone();
+        let before = configuration.clone();
+        configuration.preset = runtime_approval_preset(effective.default_approval_preset);
+        configuration
+            .category_rules
+            .retain(|rule| !rule.id.starts_with(CONFIGURATION_RULE_PREFIX));
+        for (key, preset) in &effective.approval_overrides {
+            let Some((_, group)) = POLICY_SETTING_KEYS
+                .iter()
+                .find(|(setting, _)| *setting == key)
+            else {
+                continue;
+            };
+            let decision = match preset {
+                core::configuration::ApprovalPreset::AskForApproval
+                | core::configuration::ApprovalPreset::Custom => PolicyDecision::Ask,
+                core::configuration::ApprovalPreset::ApproveSafeActions
+                | core::configuration::ApprovalPreset::ApproveForMe => PolicyDecision::Allow,
+            };
+            configuration.category_rules.extend(
+                policy_rules_for_setting(key, *group, decision)
+                    .into_iter()
+                    .map(|mut rule| {
+                        rule.id = format!("{CONFIGURATION_RULE_PREFIX}{}", rule.id);
+                        rule
+                    }),
+            );
+        }
+        if configuration == before {
+            return Ok(());
+        }
+        let mut authority = self
+            .policy_authority
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)?;
+        let expected_policy_version = authority.policy_version;
+        let policy_version = expected_policy_version
+            .checked_add(1)
+            .ok_or(RuntimeApplicationError::InvalidPolicyAuthority)?;
+        let revocation_epoch = authority
+            .revocation_epoch
+            .checked_add(1)
+            .ok_or(RuntimeApplicationError::InvalidPolicyAuthority)?;
+        let replacement = coordinator.prepare_policy_configuration_replacement(
+            configuration.clone(),
+            true,
+            now_ms,
+        )?;
+        self.policy_store.save_transition(
+            policy_version,
+            revocation_epoch,
+            &configuration,
+            Some(expected_policy_version),
+            replacement.authorization_records().to_vec(),
+            now_ms,
+        )?;
+        coordinator.commit_policy_configuration_replacement(replacement);
+        authority.policy_version = policy_version;
+        authority.revocation_epoch = revocation_epoch;
+        Ok(())
+    }
+
+    fn settle_runtime_approval_memory(
+        &self,
+        prompt_id: &str,
+        answer: ApprovalAnswer,
+        remember: RuntimeApprovalRemember,
+        now_ms: u64,
+    ) -> Result<(), RuntimeApplicationError> {
+        let facts = self
+            .coordinator()?
+            .take_runtime_approval_facts(prompt_id)
+            .ok_or(RuntimeApplicationError::Unavailable)?;
+        if answer == ApprovalAnswer::Deny || remember == RuntimeApprovalRemember::Once {
+            return Ok(());
+        }
+        self.remember_runtime_approval_facts(&facts, remember, now_ms)
+    }
+
+    fn remember_runtime_approval_facts(
+        &self,
+        facts: &ActionFacts,
+        remember: RuntimeApprovalRemember,
+        now_ms: u64,
+    ) -> Result<(), RuntimeApplicationError> {
+        let _policy_transition = self.policy_transition_guard()?;
+        let duration = match remember {
+            RuntimeApprovalRemember::Session => ExceptionDuration::Session {
+                session_id: facts.session_id.clone(),
+            },
+            RuntimeApprovalRemember::Persistent => ExceptionDuration::Persistent,
+            RuntimeApprovalRemember::Once => unreachable!(),
+        };
+        let current = self.policy_settings_snapshot(now_ms)?;
+        let mut configuration = self.raw_coordinator()?.policy_configuration().clone();
+        let exception = ConcreteException::from_action(
+            format!("exception:{}", Uuid::new_v4().as_simple()),
+            PolicyDecision::Allow,
+            &facts,
+            duration,
+        );
+        configuration
+            .exceptions
+            .retain(|existing| !same_exception_action_signature(existing, &exception));
+        configuration.exceptions.push(exception);
+        self.replace_policy_settings(
+            current.coordinator_generation,
+            current.policy_version,
+            configuration,
+            true,
+            now_ms,
+        )?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -2854,6 +3494,199 @@ impl RuntimeApplicationService {
             return Err(error.into());
         }
         Ok(operation)
+    }
+
+    pub fn set_models_enabled(
+        &self,
+        expected_coordinator_generation: u64,
+        provider_id: &str,
+        model_ids: &[String],
+        enabled: bool,
+        expected_provider_generation: u64,
+        updated_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(
+            &coordinator,
+            expected_coordinator_generation,
+            updated_at_ms,
+        )?;
+        self.require_persisted_generation(
+            "provider-snapshot",
+            "providers",
+            persistence_expectation(expected_provider_generation),
+        )?;
+        let previous = coordinator.snapshot(updated_at_ms);
+        let operation = coordinator.set_models_enabled(
+            provider_id,
+            model_ids,
+            enabled,
+            expected_provider_generation,
+        )?;
+        let snapshot = coordinator.snapshot(updated_at_ms);
+        if let Err(error) = self.provider_store.save_snapshot(
+            &snapshot.providers,
+            persistence_expectation(expected_provider_generation),
+            updated_at_ms,
+        ) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error.into());
+        }
+        Ok(operation)
+    }
+
+    pub fn complete_provider_onboarding(
+        &self,
+        expected_coordinator_generation: u64,
+        expected_provider_generation: u64,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(
+            &coordinator,
+            expected_coordinator_generation,
+            completed_at_ms,
+        )?;
+        self.require_persisted_generation(
+            "provider-snapshot",
+            "providers",
+            persistence_expectation(expected_provider_generation),
+        )?;
+        let previous = coordinator.snapshot(completed_at_ms);
+        let operation =
+            coordinator.complete_onboarding(expected_provider_generation, completed_at_ms)?;
+        let snapshot = coordinator.snapshot(completed_at_ms);
+        if let Err(error) = self.provider_store.save_snapshot(
+            &snapshot.providers,
+            persistence_expectation(expected_provider_generation),
+            completed_at_ms,
+        ) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error.into());
+        }
+        Ok(operation)
+    }
+
+    pub fn delete_provider(
+        &self,
+        expected_coordinator_generation: u64,
+        provider_id: &str,
+        expected_provider_generation: u64,
+        updated_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(
+            &coordinator,
+            expected_coordinator_generation,
+            updated_at_ms,
+        )?;
+        self.require_persisted_generation(
+            "provider-snapshot",
+            "providers",
+            persistence_expectation(expected_provider_generation),
+        )?;
+        let previous = coordinator.snapshot(updated_at_ms);
+        let operation = coordinator.delete_provider(provider_id, expected_provider_generation)?;
+        let snapshot = coordinator.snapshot(updated_at_ms);
+        if let Err(error) = self.provider_store.save_snapshot(
+            &snapshot.providers,
+            persistence_expectation(expected_provider_generation),
+            updated_at_ms,
+        ) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error.into());
+        }
+        Ok(operation)
+    }
+
+    pub fn invalidate_provider_credential_reference(
+        &self,
+        credential_reference: &security::credentials::CredentialReference,
+        updated_at_ms: u64,
+    ) -> Result<bool, RuntimeApplicationError> {
+        let _provider_dispatch = self.provider_dispatch_guard()?;
+        let provider_ids = self
+            .coordinator()?
+            .snapshot(updated_at_ms)
+            .providers
+            .providers
+            .into_iter()
+            .filter(|record| {
+                record.profile.credential_reference.as_ref() == Some(credential_reference)
+            })
+            .map(|record| record.profile.provider_id)
+            .collect::<BTreeSet<_>>();
+        for provider_id in provider_ids {
+            self.cancel_active_provider_attempts(&provider_id, updated_at_ms)?;
+        }
+        let mut coordinator = self.coordinator()?;
+        let previous = coordinator.snapshot(updated_at_ms);
+        let expected_provider_generation = previous.providers.generation;
+        let Some(_operation) =
+            coordinator.invalidate_provider_credential_reference(credential_reference)?
+        else {
+            return Ok(false);
+        };
+        let snapshot = coordinator.snapshot(updated_at_ms);
+        if let Err(error) = self.provider_store.save_snapshot(
+            &snapshot.providers,
+            persistence_expectation(expected_provider_generation),
+            updated_at_ms,
+        ) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error.into());
+        }
+        Ok(true)
+    }
+
+    pub fn cancel_active_provider_attempts(
+        &self,
+        provider_id: &str,
+        requested_at_ms: u64,
+    ) -> Result<usize, RuntimeApplicationError> {
+        if self.sessions.bound_workspace_id()?.is_none() {
+            return Ok(0);
+        }
+        let mut coordinator = self.coordinator()?;
+        let identities = coordinator
+            .durable_sessions()?
+            .into_iter()
+            .filter_map(|session| {
+                let attempt = session
+                    .active_attempt_id
+                    .as_deref()
+                    .and_then(|attempt_id| session.attempt(attempt_id))?;
+                if attempt.context.model_route.provider_id != provider_id {
+                    return None;
+                }
+                Some(DispatchIdentity {
+                    workspace_id: attempt.context.workspace_id.clone(),
+                    environment_id: attempt.context.environment.environment_id.clone(),
+                    session_id: session.session_id.clone(),
+                    turn_id: attempt.turn_id.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    correlation_id: attempt.correlation_id.clone(),
+                    runtime_id: attempt.context.runtime_id.clone(),
+                    runtime_kind: match attempt.context.runtime_kind {
+                        SessionRuntimeKind::OpenCode => runtime::supervisor::RuntimeKind::OpenCode,
+                        SessionRuntimeKind::Pi => runtime::supervisor::RuntimeKind::Pi,
+                    },
+                    adapter_version: attempt.context.adapter.adapter_version.clone(),
+                    native_version: attempt.context.adapter.native_version.clone(),
+                    process_generation: attempt.process_generation,
+                })
+            })
+            .collect::<Vec<_>>();
+        if identities.is_empty() {
+            return Ok(0);
+        }
+        let mut dispatch = self.dispatch()?;
+        let mut cancelled = 0usize;
+        for identity in identities {
+            coordinate_cancellation(&mut coordinator, &mut dispatch, &identity, requested_at_ms)?;
+            cancelled = cancelled.saturating_add(1);
+        }
+        Ok(cancelled)
     }
 
     pub fn register_runtime(
@@ -3203,6 +4036,9 @@ impl RuntimeApplicationService {
                 .filter(|runtime| {
                     runtime.lifecycle == runtime::supervisor::RuntimeLifecycle::Ready
                         && runtime.health == HealthState::Healthy
+                        && intent
+                            .preferred_runtime_kind
+                            .is_none_or(|kind| runtime.installation.runtime_kind == kind)
                 })
                 .find_map(|runtime| {
                     let runtime_id = runtime.installation.runtime_id.clone();
@@ -3605,6 +4441,7 @@ impl RuntimeApplicationService {
         intent: FirstRuntimeDispatchIntent,
         mut options: FirstDispatchOptions,
     ) -> Result<CoordinatedFirstDispatch, RuntimeApplicationError> {
+        let _provider_dispatch = self.provider_dispatch_guard()?;
         let mut coordinator = self.coordinator()?;
         require_coordinator_generation(
             &coordinator,
@@ -3695,6 +4532,7 @@ impl RuntimeApplicationService {
         intent: TurnRuntimeDispatchIntent,
         mut options: TurnDispatchOptions,
     ) -> Result<CoordinatedTurnDispatch, RuntimeApplicationError> {
+        let _provider_dispatch = self.provider_dispatch_guard()?;
         let mut coordinator = self.coordinator()?;
         require_coordinator_generation(
             &coordinator,
@@ -3830,6 +4668,7 @@ impl RuntimeApplicationService {
         intent: RetryRuntimeDispatchIntent,
         mut options: RetryDispatchOptions,
     ) -> Result<CoordinatedRetryDispatch, RuntimeApplicationError> {
+        let _provider_dispatch = self.provider_dispatch_guard()?;
         let mut coordinator = self.coordinator()?;
         require_coordinator_generation(
             &coordinator,
@@ -3932,6 +4771,22 @@ impl RuntimeApplicationService {
             &mut dispatch,
             recovered_at_ms,
         )?)
+    }
+
+    fn provider_dispatch_guard(&self) -> Result<MutexGuard<'_, ()>, RuntimeApplicationError> {
+        self.provider_dispatch_gate
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)
+    }
+
+    fn policy_transition_gate(&self) -> Arc<Mutex<()>> {
+        Arc::clone(&self.policy_transition_gate)
+    }
+
+    fn policy_transition_guard(&self) -> Result<MutexGuard<'_, ()>, RuntimeApplicationError> {
+        self.policy_transition_gate
+            .lock()
+            .map_err(|_| RuntimeApplicationError::Unavailable)
     }
 
     fn coordinator(
@@ -4177,7 +5032,9 @@ fn capability_route_from_coordinator(
     let model = provider
         .models
         .get(model_id)
-        .filter(|model| model.is_production_ready_at(now_ms))
+        .filter(|model| {
+            !provider.disabled_model_ids.contains(model_id) && model.is_production_ready_at(now_ms)
+        })
         .ok_or(CoordinatorError::ModelRouteUnavailable)?;
     Ok(model.capabilities.route.clone())
 }
@@ -4196,11 +5053,9 @@ fn capability_route_for_runtime(
         .iter()
         .find(|record| record.profile.provider_id == provider_id)
         .ok_or(CoordinatorError::ModelRouteUnavailable)?;
-    if !provider
-        .models
-        .get(model_id)
-        .is_some_and(|model| model.is_production_ready_at(now_ms))
-    {
+    if !provider.models.get(model_id).is_some_and(|model| {
+        !provider.disabled_model_ids.contains(model_id) && model.is_production_ready_at(now_ms)
+    }) {
         return Err(CoordinatorError::ModelRouteUnavailable.into());
     }
     Ok(capabilities.route_for_runtime_model(
@@ -4232,7 +5087,10 @@ fn resolve_conversation_provider_model(
             provider
                 .models
                 .get(model_id)
-                .filter(|model| model.is_production_ready_at(now_ms))
+                .filter(|model| {
+                    !provider.disabled_model_ids.contains(model_id)
+                        && model.is_production_ready_at(now_ms)
+                })
                 .map(|model| (provider.profile.provider_id.clone(), model.model_id.clone()))
         })
         .ok_or_else(|| CoordinatorError::ModelRouteUnavailable.into())
@@ -4548,6 +5406,7 @@ impl BrokerActionApplication for RuntimeApplicationService {
     where
         F: FnOnce(ExecutionPermit) -> NormalizedActionResult,
     {
+        let _policy_transition = self.policy_transition_guard()?;
         Ok(self
             .coordinator()?
             .execute_runtime_action(authorization, live, now_ms, effect)?
@@ -4560,6 +5419,7 @@ impl BrokerActionApplication for RuntimeApplicationService {
         live: LiveAuthorityState,
         now_ms: u64,
     ) -> Result<runtime::action_bridge::RuntimeActionEffectLease, Self::Error> {
+        let _policy_transition = self.policy_transition_guard()?;
         Ok(self
             .coordinator()?
             .begin_runtime_action_effect(authorization, live, now_ms)?
@@ -4635,6 +5495,7 @@ impl BrokerActionApplication for Arc<RuntimeApplicationService> {
     where
         F: FnOnce(ExecutionPermit) -> NormalizedActionResult,
     {
+        let _policy_transition = self.policy_transition_guard()?;
         Ok(self
             .coordinator()?
             .execute_runtime_action(authorization, live, now_ms, effect)?
@@ -4647,6 +5508,7 @@ impl BrokerActionApplication for Arc<RuntimeApplicationService> {
         live: LiveAuthorityState,
         now_ms: u64,
     ) -> Result<runtime::action_bridge::RuntimeActionEffectLease, Self::Error> {
+        let _policy_transition = self.policy_transition_guard()?;
         Ok(self
             .coordinator()?
             .begin_runtime_action_effect(authorization, live, now_ms)?
@@ -4738,11 +5600,20 @@ pub enum RuntimeApplicationError {
 struct CredentialServiceState {
     _vault: Option<security::credentials::CredentialVault>,
     _requires_explicit_fallback: bool,
+    _protection: ProviderCredentialProtection,
 }
 
 impl CredentialServiceState {
     fn vault(&self) -> Option<security::credentials::CredentialVault> {
         self._vault.clone()
+    }
+
+    fn requires_explicit_fallback(&self) -> bool {
+        self._requires_explicit_fallback
+    }
+
+    fn protection(&self) -> ProviderCredentialProtection {
+        self._protection
     }
 
     #[cfg(target_os = "macos")]
@@ -4761,10 +5632,12 @@ impl CredentialServiceState {
             Ok(vault) => Ok(Self {
                 _vault: Some(vault),
                 _requires_explicit_fallback: false,
+                _protection: ProviderCredentialProtection::InstallationKey,
             }),
             Err(CredentialVaultError::KeychainUnavailable) => Ok(Self {
-                _vault: None,
+                _vault: Some(CredentialVault::session_only()?),
                 _requires_explicit_fallback: true,
+                _protection: ProviderCredentialProtection::SessionOnly,
             }),
             Err(error) => Err(error),
         }
@@ -4775,8 +5648,9 @@ impl CredentialServiceState {
         _c4os_home: &std::path::Path,
     ) -> Result<Self, security::credentials::CredentialVaultError> {
         Ok(Self {
-            _vault: None,
+            _vault: Some(security::credentials::CredentialVault::session_only()?),
             _requires_explicit_fallback: true,
+            _protection: ProviderCredentialProtection::SessionOnly,
         })
     }
 }
@@ -5799,7 +6673,7 @@ fn extension_publisher_link(
     let (token, prompt_id) = match proposal {
         GatewayProposal::Denied { .. } => {
             return Err(platform_boundary_error(
-                request.correlation_id,
+                request.correlation_id.clone(),
                 ProtocolErrorCode::Forbidden,
                 "Policy denied opening the publisher link",
                 false,
@@ -6279,6 +7153,927 @@ fn workspace_start_snapshot(
             recents,
         },
     )
+}
+
+fn require_workspace_start_generation(
+    core: &AppCoreState,
+    request: &SnapshotRequest,
+) -> Result<(), ProtocolError> {
+    let current = core::services::load_workspace_start_state(&core.database)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if current.generation != request.expected_generation.0 {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::StaleGeneration,
+            "Workspace Start changed before the open request",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn take_workspace_start_picker_grant(
+    core: &AppCoreState,
+    picker_grant_id: &PickerGrantId,
+    purpose: PickerPurpose,
+    object_kind: PickerObjectKind,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<PathBuf, ProtocolError> {
+    take_workspace_start_native_grant(
+        core,
+        picker_grant_id,
+        purpose,
+        object_kind,
+        now_ms,
+        correlation_id,
+    )
+    .map(|grant| grant.path().to_path_buf())
+}
+
+fn take_workspace_start_native_grant(
+    core: &AppCoreState,
+    picker_grant_id: &PickerGrantId,
+    purpose: PickerPurpose,
+    object_kind: PickerObjectKind,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<NativePickerGrant, ProtocolError> {
+    let grant = core
+        .picker_grants
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .take(picker_grant_id)
+        .ok_or_else(|| invalid_picker_selection(correlation_id.clone()))?;
+    if grant.purpose() != purpose
+        || grant.object_kind() != object_kind
+        || grant.issued_at_ms() > now_ms
+        || now_ms.saturating_sub(grant.issued_at_ms()) > 10 * 60 * 1_000
+    {
+        return Err(invalid_picker_selection(correlation_id));
+    }
+    grant
+        .verify_current_identity()
+        .map_err(|_| invalid_picker_selection(correlation_id))?;
+    Ok(grant)
+}
+
+fn workspace_start_lock_owner(now_ms: u64) -> core::workspace::WorkspaceLockOwner {
+    core::workspace::WorkspaceLockOwner {
+        process_id: std::process::id(),
+        app_instance_id: Uuid::new_v4(),
+        acquired_unix_ms: now_ms,
+        label: "c4os-workspace-start".into(),
+    }
+}
+
+fn activate_workspace_from_start(
+    core: &AppCoreState,
+    workspace: core::services::ActiveWorkspace,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(WorkspaceStartOpenSnapshot, u64), ProtocolError> {
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    install_workspace_configuration_activation_observer(
+        &workspace,
+        Arc::clone(&core.configuration),
+        Arc::clone(&core.active_workspace),
+        Arc::clone(&core.conversation),
+        &core.runtime,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let snapshot = workspace
+        .snapshot(query)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let workspace_record = snapshot
+        .workspace
+        .as_ref()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let workspace_id = workspace_record.workspace_id.clone();
+    let workspace_name = workspace_record.display_name.clone();
+    let recovered = workspace.recovery_notice().is_some();
+    let database = Arc::clone(workspace.database_actor());
+    let persisted = database
+        .conversation_state()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let restored_conversation =
+        ConversationApplicationState::restore(Some(&snapshot), persisted.as_ref());
+    let app_configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .last_known_good()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let candidate_project_id = restored_conversation
+        .active_project_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let candidate_chat_id = restored_conversation
+        .active_session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let prior_configuration = core::configuration::resolve_effective_snapshot_from_last_known_good(
+        app_configuration.clone(),
+        core::configuration::ManagedCeilings::default(),
+        core::configuration::SecurityConstraints::default(),
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let candidate_configuration = workspace
+        .restore_effective_configuration_snapshot(
+            app_configuration,
+            candidate_project_id,
+            candidate_chat_id,
+            core::configuration::ManagedCeilings::default(),
+            core::configuration::SecurityConstraints::default(),
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+
+    let mut active = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    if active.is_some() {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Close the active Workspace before opening another one",
+            false,
+        ));
+    }
+    let mut conversation = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let runtime_generation;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let resource_root = core
+            .bundled_skill_root
+            .parent()
+            .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+        let bootstrap = runtime::production::RuntimeProductionBootstrap::new(
+            resource_root,
+            core.credential_vault.clone(),
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let installations = bootstrap
+            .runtime_installations(&workspace_id, &core.c4os_home)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let runtime_production = core.runtime_production.load(correlation_id.clone())?;
+        // Publish the candidate policy before runtime binding or active-state
+        // publication. Policy failure therefore leaves Workspace Start
+        // untouched. Later runtime-start failures restore the app-only policy.
+        core.runtime
+            .reconcile_effective_configuration_policy(
+                candidate_configuration.configuration.as_ref(),
+                now_ms,
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if core
+            .runtime
+            .bind_workspace_runtime_installations(
+                Arc::clone(&database),
+                installations.into_iter().collect(),
+                now_ms,
+            )
+            .is_err()
+        {
+            let _ = core.runtime.reconcile_effective_configuration_policy(
+                prior_configuration.configuration.as_ref(),
+                now_ms,
+            );
+            return Err(workspace_state_unavailable(correlation_id));
+        }
+        let runtime_snapshot = match core.runtime.snapshot(now_ms) {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                let _ = core.runtime.unbind_workspace(&workspace_id);
+                let _ = core.runtime.reconcile_effective_configuration_policy(
+                    prior_configuration.configuration.as_ref(),
+                    now_ms,
+                );
+                return Err(workspace_state_unavailable(correlation_id));
+            }
+        };
+        let preferred_runtime = candidate_configuration
+            .configuration
+            .default_runtime
+            .clone();
+        let Some(runtime_id) = preferred_runtime_installation_id(
+            &runtime_snapshot.runtimes.records,
+            preferred_runtime.as_deref(),
+        ) else {
+            let _ = core.runtime.unbind_workspace(&workspace_id);
+            let _ = core.runtime.reconcile_effective_configuration_policy(
+                prior_configuration.configuration.as_ref(),
+                now_ms,
+            );
+            return Err(workspace_state_unavailable(correlation_id));
+        };
+        let activated_runtime = match runtime_production.activate_runtime(
+            runtime_snapshot.generation,
+            &runtime_id,
+            now_ms,
+        ) {
+            Ok(activated) => activated,
+            Err(_) => {
+                let _ = core.runtime.unbind_workspace(&workspace_id);
+                let _ = core.runtime.reconcile_effective_configuration_policy(
+                    prior_configuration.configuration.as_ref(),
+                    now_ms,
+                );
+                return Err(workspace_state_unavailable(correlation_id));
+            }
+        };
+        runtime_generation = activated_runtime.coordinator_generation;
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        core.runtime
+            .reconcile_effective_configuration_policy(
+                candidate_configuration.configuration.as_ref(),
+                now_ms,
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if core.runtime.bind_workspace(Arc::clone(&database)).is_err() {
+            let _ = core.runtime.reconcile_effective_configuration_policy(
+                prior_configuration.configuration.as_ref(),
+                now_ms,
+            );
+            return Err(workspace_state_unavailable(correlation_id));
+        }
+        runtime_generation = match core.runtime.snapshot(now_ms) {
+            Ok(snapshot) => snapshot.generation,
+            Err(_) => {
+                let _ = core.runtime.unbind_workspace(&workspace_id);
+                let _ = core.runtime.reconcile_effective_configuration_policy(
+                    prior_configuration.configuration.as_ref(),
+                    now_ms,
+                );
+                return Err(workspace_state_unavailable(correlation_id));
+            }
+        };
+    }
+
+    let generation = snapshot.generation.max(runtime_generation);
+    *conversation = restored_conversation;
+    *active = Some(workspace);
+    drop(conversation);
+    drop(active);
+    Ok((
+        WorkspaceStartOpenSnapshot {
+            authority: "rust-workspace-service",
+            workspace_id,
+            workspace_name,
+            recovered,
+        },
+        generation,
+    ))
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn preferred_runtime_installation_id(
+    records: &[runtime::supervisor::RuntimeRecord],
+    preferred: Option<&str>,
+) -> Option<String> {
+    let preferred_kind = match preferred {
+        Some("pi") => runtime::supervisor::RuntimeKind::Pi,
+        _ => runtime::supervisor::RuntimeKind::OpenCode,
+    };
+    records
+        .iter()
+        .find(|record| {
+            record.compatibility == CompatibilityState::Compatible
+                && record.installation.runtime_kind == preferred_kind
+        })
+        .or_else(|| {
+            records.iter().find(|record| {
+                record.compatibility == CompatibilityState::Compatible
+                    && record.installation.runtime_kind
+                        == runtime::supervisor::RuntimeKind::OpenCode
+            })
+        })
+        .map(|record| record.installation.runtime_id.clone())
+}
+
+fn workspace_start_open_envelope(
+    request: SnapshotRequest,
+    payload: WorkspaceStartOpenSnapshot,
+    generation: u64,
+) -> Result<ProtocolEnvelope<WorkspaceStartOpenSnapshot>, ProtocolError> {
+    let generation = generation.max(request.expected_generation.0);
+    protocol::snapshot_envelope(request, StateGeneration(generation), payload)
+}
+
+#[tauri::command]
+fn workspace_start_open_folder(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceStartGrantInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartOpenSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_workspace_start_generation(&core, &request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let folder = take_workspace_start_picker_grant(
+        &core,
+        &input.picker_grant_id,
+        PickerPurpose::OpenProjectFolder,
+        PickerObjectKind::Folder,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let display_name = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| invalid_picker_selection(request.correlation_id.clone()))?;
+    let created_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let workspace = core::services::create_workspace_from_project(
+        &core::workspace::C4osHomeLayout::new(&core.c4os_home),
+        &folder,
+        display_name,
+        display_name,
+        env!("CARGO_PKG_VERSION"),
+        workspace_start_lock_owner(now_ms),
+        created_at,
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (payload, generation) =
+        activate_workspace_from_start(&core, workspace, now_ms, request.correlation_id.clone())?;
+    workspace_start_open_envelope(request, payload, generation).map_err(Into::into)
+}
+
+fn open_workspace_archive_from_start(
+    core: &AppCoreState,
+    archive_path: &Path,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(WorkspaceStartOpenSnapshot, u64), ProtocolError> {
+    let opened_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let opened = core::services::open_workspace_with_database(
+        &core.database,
+        &core::workspace::C4osHomeLayout::new(&core.c4os_home),
+        archive_path,
+        env!("CARGO_PKG_VERSION"),
+        core::workspace::ArchiveLimits::default(),
+        workspace_start_lock_owner(now_ms),
+        opened_at,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let core::services::WorkspaceServiceOpen::Writable(workspace) = opened else {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "This Workspace can only be opened read-only by the current C4OS version",
+            false,
+        ));
+    };
+    activate_workspace_from_start(core, *workspace, now_ms, correlation_id)
+}
+
+#[tauri::command]
+fn workspace_start_open_archive(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceStartGrantInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartOpenSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_workspace_start_generation(&core, &request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let archive = take_workspace_start_picker_grant(
+        &core,
+        &input.picker_grant_id,
+        PickerPurpose::OpenWorkspaceArchive,
+        PickerObjectKind::File,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let (payload, generation) =
+        open_workspace_archive_from_start(&core, &archive, now_ms, request.correlation_id.clone())?;
+    workspace_start_open_envelope(request, payload, generation).map_err(Into::into)
+}
+
+#[tauri::command]
+fn workspace_start_open_recent(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceStartRecentInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartOpenSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_workspace_start_generation(&core, &request)?;
+    let query = core::database::SnapshotQuery::new(3)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .database
+        .snapshot(query)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let core::database::DatabaseSnapshot::App(snapshot) = snapshot else {
+        return Err(workspace_state_unavailable(request.correlation_id).into());
+    };
+    let recent = snapshot
+        .recents
+        .iter()
+        .find(|recent| recent.workspace_id == input.workspace_id.as_str())
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The recent Workspace no longer exists",
+                false,
+            )
+        })?;
+    let archive = PathBuf::from(&recent.archive_path);
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (payload, generation) =
+        open_workspace_archive_from_start(&core, &archive, now_ms, request.correlation_id.clone())?;
+    workspace_start_open_envelope(request, payload, generation).map_err(Into::into)
+}
+
+fn clone_repository_target(repository_url: &str) -> Option<(String, String)> {
+    if repository_url.len() > 2_048 || repository_url.chars().any(char::is_control) {
+        return None;
+    }
+    let parsed = url::Url::parse(repository_url).ok()?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    let repository_segment = parsed
+        .path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .next_back()?
+        .to_owned();
+    let repository_name = repository_segment
+        .strip_suffix(".git")
+        .unwrap_or(&repository_segment);
+    if repository_name.is_empty()
+        || repository_name.len() > 255
+        || !repository_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return None;
+    }
+    Some((parsed.to_string(), repository_name.to_owned()))
+}
+
+enum CloneRepositoryGatewayResult {
+    Cloned(PathBuf),
+    Pending {
+        prompt_id: String,
+        pending: PendingWorkspaceClone,
+    },
+}
+
+fn prepare_clone_repository_with_gateway(
+    core: &AppCoreState,
+    repository_url: &str,
+    picker_grant: NativePickerGrant,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<CloneRepositoryGatewayResult, ProtocolError> {
+    picker_grant
+        .verify_current_identity()
+        .map_err(|_| invalid_picker_selection(correlation_id.clone()))?;
+    let destination_parent = picker_grant.path();
+    let (repository_url, repository_name) =
+        clone_repository_target(repository_url).ok_or_else(|| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::InvalidPayload,
+                "Use an HTTPS Git repository URL without embedded credentials",
+                false,
+            )
+        })?;
+    let destination = destination_parent.join(&repository_name);
+    if destination.exists() || !destination_parent.is_dir() {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Choose a destination that does not already contain this repository",
+            false,
+        ));
+    }
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let action_id = format!("workspace-clone-{}", Uuid::new_v4().as_simple());
+    let canonical_target = destination.to_string_lossy().into_owned();
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.git.clone".into(),
+        arguments: serde_json::json!({
+            "repositoryUrl": repository_url,
+            "destination": canonical_target,
+        }),
+        risk: CanonicalRisk::Medium,
+        requested_authority: BTreeSet::from(["git.remote.read".into(), "workspace.create".into()]),
+        canonical_target: canonical_target.clone(),
+        target_version: "absent".into(),
+        workspace_id: "workspace-start".into(),
+        session_id: "workspace-start".into(),
+        run_id: format!("workspace-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action
+        .validate()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let facts = ActionFacts {
+        action_kind: "git.remote.read".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Git,
+        effects: BTreeSet::from([ActionEffect::Read, ActionEffect::Create]),
+        scope: ActionScope::Remote,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: canonical_target.clone(),
+        workspace_id: action.workspace_id.clone(),
+        session_id: action.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: true,
+        explicit_scope_grant: true,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    let proposal = core
+        .runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator
+                .propose_direct_action(&facts, action.clone(), now_ms)
+                .map(|operation| operation.value)
+                .map_err(Into::into)
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match proposal {
+        GatewayProposal::Denied { .. } => {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Forbidden,
+                "Policy denied cloning the repository",
+                false,
+            ));
+        }
+        GatewayProposal::Authorized { token, .. } => {
+            let pending = PendingWorkspaceClone {
+                picker_grant,
+                repository_url,
+                repository_name,
+                destination,
+                action,
+                live,
+            };
+            let cloned = execute_prepared_repository_clone(
+                core,
+                pending,
+                token,
+                None,
+                now_ms,
+                correlation_id,
+            )?;
+            return Ok(CloneRepositoryGatewayResult::Cloned(cloned));
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            let prompt_id = prompt.prompt_id.clone();
+            return Ok(CloneRepositoryGatewayResult::Pending {
+                prompt_id,
+                pending: PendingWorkspaceClone {
+                    picker_grant,
+                    repository_url,
+                    repository_name,
+                    destination,
+                    action,
+                    live,
+                },
+            });
+        }
+    }
+}
+
+fn execute_prepared_repository_clone(
+    core: &AppCoreState,
+    pending: PendingWorkspaceClone,
+    token: AuthorizationToken,
+    prompt_id: Option<&str>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<PathBuf, ProtocolError> {
+    pending
+        .picker_grant
+        .verify_current_identity()
+        .map_err(|_| invalid_picker_selection(correlation_id.clone()))?;
+    let destination_parent = pending.picker_grant.path();
+    if pending.destination.exists() || !destination_parent.is_dir() {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The clone destination changed while approval was pending",
+            false,
+        ));
+    }
+    let mut git_result: Option<Result<execution::git::GitCommandOutput, GitError>> = None;
+    let canonical_target = pending.action.canonical_target.clone();
+    let destination = pending.destination.clone();
+    let repository_url = pending.repository_url.clone();
+    let repository_name = pending.repository_name.clone();
+    core.runtime
+        .coordinator()
+        .and_then(|mut coordinator| {
+            coordinator.execute_direct_action(
+                &token,
+                &pending.action,
+                pending.live,
+                prompt_id,
+                now_ms,
+                |_permit| {
+                    let mut runner = ProductionGitRunner::default();
+                    let result = runner.run(&GitCommandInvocation {
+                        program: PathBuf::from(TRUSTED_GIT_PROGRAM),
+                        current_dir: destination_parent.to_path_buf(),
+                        arguments: vec![
+                            OsString::from("clone"),
+                            OsString::from("--"),
+                            OsString::from(&repository_url),
+                            OsString::from(&repository_name),
+                        ],
+                    });
+                    let succeeded = result
+                        .as_ref()
+                        .is_ok_and(|output| output.exit_code == 0 && destination.is_dir());
+                    let output_sha256 = result.as_ref().ok().map(|output| {
+                        let mut bytes = output.stdout.clone();
+                        bytes.extend_from_slice(&output.stderr);
+                        sha256_bytes(&bytes)
+                    });
+                    git_result = Some(result);
+                    NormalizedActionResult {
+                        status: if succeeded {
+                            NormalizedActionStatus::Succeeded
+                        } else {
+                            NormalizedActionStatus::Failed
+                        },
+                        result_code: if succeeded {
+                            "repository-cloned"
+                        } else {
+                            "repository-clone-failed"
+                        }
+                        .into(),
+                        exit_code: succeeded.then_some(0),
+                        changed_targets: if destination.exists() {
+                            vec![canonical_target.clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        output_sha256,
+                        completed_at_ms: now_ms.saturating_add(1),
+                    }
+                },
+            )?;
+            Ok(())
+        })
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    if !git_result.is_some_and(|result| {
+        result.is_ok_and(|output| output.exit_code == 0 && destination.is_dir())
+    }) {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "Git could not clone the repository",
+            true,
+        ));
+    }
+    Ok(pending.destination)
+}
+
+fn activate_completed_workspace_clone(
+    core: &AppCoreState,
+    cloned: &Path,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(WorkspaceStartOpenSnapshot, u64), ProtocolError> {
+    let display_name = cloned
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let created_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let workspace = core::services::create_workspace_from_completed_clone(
+        &core::workspace::C4osHomeLayout::new(&core.c4os_home),
+        cloned,
+        display_name,
+        display_name,
+        env!("CARGO_PKG_VERSION"),
+        workspace_start_lock_owner(now_ms),
+        created_at,
+    )
+    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    activate_workspace_from_start(core, workspace, now_ms, correlation_id)
+}
+
+fn workspace_start_clone_envelope(
+    request: SnapshotRequest,
+    payload: WorkspaceStartCloneSnapshot,
+    generation: u64,
+) -> Result<ProtocolEnvelope<WorkspaceStartCloneSnapshot>, ProtocolError> {
+    protocol::snapshot_envelope(
+        request.clone(),
+        StateGeneration(generation.max(request.expected_generation.0)),
+        payload,
+    )
+}
+
+#[tauri::command]
+fn workspace_start_clone_repository(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceStartCloneInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartCloneSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let _operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_workspace_start_generation(&core, &request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let picker_grant = take_workspace_start_native_grant(
+        &core,
+        &input.picker_grant_id,
+        PickerPurpose::OpenProjectFolder,
+        PickerObjectKind::Folder,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let prepared = prepare_clone_repository_with_gateway(
+        &core,
+        &input.repository_url,
+        picker_grant,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let (payload, generation) = match prepared {
+        CloneRepositoryGatewayResult::Cloned(cloned) => {
+            let (opened, generation) = activate_completed_workspace_clone(
+                &core,
+                &cloned,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            (opened.into(), generation)
+        }
+        CloneRepositoryGatewayResult::Pending { prompt_id, pending } => {
+            core.pending_workspace_clones
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .insert(prompt_id.clone(), pending);
+            let generation = core::services::load_workspace_start_state(&core.database)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .generation;
+            (
+                WorkspaceStartCloneSnapshot::PendingApproval {
+                    prompt_id,
+                    summary: "Clone this HTTPS repository into the selected folder?".into(),
+                },
+                generation,
+            )
+        }
+    };
+    workspace_start_clone_envelope(request, payload, generation).map_err(Into::into)
+}
+
+#[tauri::command]
+fn workspace_start_answer_clone_approval(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceStartCloneApprovalInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartCloneSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if input.prompt_id.trim().is_empty() || input.prompt_id.len() > protocol::MAX_IDENTIFIER_BYTES {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The clone approval identity is invalid",
+            false,
+        )
+        .into());
+    }
+    let _operation = core
+        .conversation_operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_workspace_start_generation(&core, &request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let pending = core
+        .pending_workspace_clones
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .remove(&input.prompt_id)
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The clone approval is no longer active",
+                false,
+            )
+        })?;
+    let answer = match input.answer {
+        ArtifactApprovalAnswer::Allow => ApprovalAnswer::Allow,
+        ArtifactApprovalAnswer::Deny => ApprovalAnswer::Deny,
+    };
+    let response = match core.runtime.coordinator().and_then(|mut coordinator| {
+        coordinator
+            .answer_direct_approval(&input.prompt_id, answer, now_ms)
+            .map(|operation| operation.value)
+            .map_err(Into::into)
+    }) {
+        Ok(response) => response,
+        Err(_) => {
+            core.pending_workspace_clones
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .insert(input.prompt_id.clone(), pending);
+            return Err(workspace_state_unavailable(request.correlation_id).into());
+        }
+    };
+    let (payload, generation) = match response {
+        ApprovalResponse::Denied { prompt }
+            if prompt.prompt_id == input.prompt_id && prompt.action == pending.action =>
+        {
+            let generation = core::services::load_workspace_start_state(&core.database)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .generation;
+            (WorkspaceStartCloneSnapshot::Denied, generation)
+        }
+        ApprovalResponse::Authorized { prompt, token }
+            if prompt.prompt_id == input.prompt_id && prompt.action == pending.action =>
+        {
+            let cloned = execute_prepared_repository_clone(
+                &core,
+                pending,
+                token,
+                Some(&input.prompt_id),
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            let (opened, generation) = activate_completed_workspace_clone(
+                &core,
+                &cloned,
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            (opened.into(), generation)
+        }
+        _ => return Err(workspace_state_unavailable(request.correlation_id).into()),
+    };
+    workspace_start_clone_envelope(request, payload, generation).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -10667,6 +12462,158 @@ fn propose_terminal_action(
             execute_terminal_action(core, pending, token, None, now_ms, correlation_id)
         }
     }
+}
+
+fn effective_conversation_configuration(
+    core: &AppCoreState,
+    project_id: Option<&str>,
+    chat_id: Option<&str>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<core::configuration::EffectiveConfigurationSnapshot, ProtocolError> {
+    let app_configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .last_known_good()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let project_id = project_id
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let chat_id = chat_id
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    core.active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .as_ref()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?
+        .restore_effective_configuration_snapshot(
+            app_configuration,
+            project_id,
+            chat_id,
+            core::configuration::ManagedCeilings::default(),
+            core::configuration::SecurityConstraints::default(),
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id))
+}
+
+fn resolve_active_configuration_snapshot(
+    app_configuration: Option<core::configuration::LastKnownGoodDocument>,
+    active_workspace: &Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    conversation: &Arc<Mutex<ConversationApplicationState>>,
+) -> Result<core::configuration::EffectiveConfigurationSnapshot, ()> {
+    let (project_id, chat_id) = {
+        let conversation = conversation.lock().map_err(|_| ())?;
+        (
+            conversation
+                .active_project_id
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(|_| ())?,
+            conversation
+                .active_session_id
+                .as_deref()
+                .map(Uuid::parse_str)
+                .transpose()
+                .map_err(|_| ())?,
+        )
+    };
+    let active_workspace = active_workspace.lock().map_err(|_| ())?;
+    if let Some(workspace) = active_workspace.as_ref() {
+        workspace
+            .restore_effective_configuration_snapshot(
+                app_configuration,
+                project_id,
+                chat_id,
+                core::configuration::ManagedCeilings::default(),
+                core::configuration::SecurityConstraints::default(),
+            )
+            .map_err(|_| ())
+    } else {
+        core::configuration::resolve_effective_snapshot_from_last_known_good(
+            app_configuration,
+            core::configuration::ManagedCeilings::default(),
+            core::configuration::SecurityConstraints::default(),
+        )
+        .map_err(|_| ())
+    }
+}
+
+fn reconcile_active_configuration_policy(
+    configuration: &Arc<Mutex<core::services::ManagedAppConfiguration>>,
+    active_workspace: &Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    conversation: &Arc<Mutex<ConversationApplicationState>>,
+    runtime: &RuntimeApplicationService,
+    now_ms: u64,
+) -> Result<(), ()> {
+    let app_configuration = configuration
+        .lock()
+        .map_err(|_| ())?
+        .last_known_good()
+        .map_err(|_| ())?;
+    let effective =
+        resolve_active_configuration_snapshot(app_configuration, active_workspace, conversation)?;
+    runtime
+        .reconcile_effective_configuration_policy(effective.configuration.as_ref(), now_ms)
+        .map_err(|_| ())
+}
+
+fn compensate_conversation_context_selection(
+    conversation: &Arc<Mutex<ConversationApplicationState>>,
+    database: &core::database::DatabaseActor,
+    workspace_id: &str,
+    previous_project_id: Option<String>,
+    previous_session_id: Option<String>,
+    now_ms: u64,
+) -> Result<(), ()> {
+    let mut conversation = conversation.lock().map_err(|_| ())?;
+    conversation.active_project_id = previous_project_id;
+    conversation.active_session_id = previous_session_id;
+    let persisted_generation = conversation
+        .persist(database, workspace_id, now_ms)
+        .map_err(|_| ())?;
+    conversation.advance(persisted_generation).map_err(|_| ())?;
+    Ok(())
+}
+
+fn workspace_configuration_activation_observer(
+    configuration: Arc<Mutex<core::services::ManagedAppConfiguration>>,
+    active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    conversation: Arc<Mutex<ConversationApplicationState>>,
+    runtime: Weak<RuntimeApplicationService>,
+) -> Arc<dyn Fn() -> Result<(), ()> + Send + Sync> {
+    Arc::new(move || {
+        let runtime = runtime.upgrade().ok_or(())?;
+        let now_ms = current_time_ms().map_err(|_| ())?;
+        reconcile_active_configuration_policy(
+            &configuration,
+            &active_workspace,
+            &conversation,
+            &runtime,
+            now_ms,
+        )
+    })
+}
+
+fn install_workspace_configuration_activation_observer(
+    workspace: &core::services::ActiveWorkspace,
+    configuration: Arc<Mutex<core::services::ManagedAppConfiguration>>,
+    active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
+    conversation: Arc<Mutex<ConversationApplicationState>>,
+    runtime: &Arc<RuntimeApplicationService>,
+) -> Result<(), core::services::ConfigurationPersistenceError> {
+    workspace.set_configuration_activation_observer(
+        runtime.policy_transition_gate(),
+        workspace_configuration_activation_observer(
+            configuration,
+            active_workspace,
+            conversation,
+            Arc::downgrade(runtime),
+        ),
+    )
 }
 
 fn resolve_browser_environment(
@@ -15472,6 +17419,62 @@ fn conversation_submit(
     }
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (configuration_project_id, configuration_chat_id) = {
+        let conversation = core
+            .conversation
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        match &conversation.pending {
+            conversation::PendingChatState::Draft(draft) => (
+                Some(draft.project_id.clone()),
+                Some(draft.session_id.clone()),
+            ),
+            conversation::PendingChatState::PromotionRequested(promotion) => (
+                Some(promotion.project_id.clone()),
+                Some(promotion.session_id.clone()),
+            ),
+            conversation::PendingChatState::Inactive => (
+                conversation.active_project_id.clone(),
+                conversation.active_session_id.clone(),
+            ),
+        }
+    };
+    let effective_configuration = effective_conversation_configuration(
+        &core,
+        configuration_project_id.as_deref(),
+        configuration_chat_id.as_deref(),
+        request.correlation_id.clone(),
+    )?;
+    core.runtime
+        .reconcile_effective_configuration_policy(
+            effective_configuration.configuration.as_ref(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    drop(policy_transition);
+    let configured = effective_configuration.configuration;
+    let preferred_runtime_kind =
+        configured
+            .default_runtime
+            .as_deref()
+            .and_then(|runtime| match runtime {
+                "opencode" => Some(runtime::supervisor::RuntimeKind::OpenCode),
+                "pi" => Some(runtime::supervisor::RuntimeKind::Pi),
+                _ => None,
+            });
+    let configured_model_route = configured
+        .model_route
+        .as_deref()
+        .and_then(parse_configured_model_route);
+    let requested_model_route = input
+        .provider_id
+        .clone()
+        .zip(input.model_id.clone())
+        .or(configured_model_route);
     let workspace_snapshot = active_workspace_snapshot(&core, request.correlation_id.clone())?;
     let runtime_generation = core
         .runtime
@@ -15562,7 +17565,9 @@ fn conversation_submit(
                 &session_id,
                 &target_id,
                 capture.as_ref(),
-                input.provider_id.as_deref().zip(input.model_id.as_deref()),
+                requested_model_route
+                    .as_ref()
+                    .map(|(provider_id, model_id)| (provider_id.as_str(), model_id.as_str())),
                 now_ms,
                 request.correlation_id.clone(),
             )? {
@@ -15691,8 +17696,12 @@ fn conversation_submit(
                 )
             })?;
             draft.prompt = input.prompt.clone().unwrap_or_default();
-            draft.provider_id = input.provider_id.clone();
-            draft.model_id = input.model_id.clone();
+            draft.provider_id = requested_model_route
+                .as_ref()
+                .map(|(provider_id, _)| provider_id.clone());
+            draft.model_id = requested_model_route
+                .as_ref()
+                .map(|(_, model_id)| model_id.clone());
             draft.reasoning_mode = input.reasoning_mode.clone();
             if draft.prompt.trim().is_empty() && draft.attachments.is_empty() {
                 return Err(platform_boundary_error(
@@ -15795,9 +17804,14 @@ fn conversation_submit(
                 attachments: conversation.pending_attachments.clone(),
                 skill_context: skill_context.clone(),
                 mcp_turn,
-                provider_id: input.provider_id.clone(),
-                model_id: input.model_id.clone(),
+                provider_id: requested_model_route
+                    .as_ref()
+                    .map(|(provider_id, _)| provider_id.clone()),
+                model_id: requested_model_route
+                    .as_ref()
+                    .map(|(_, model_id)| model_id.clone()),
                 reasoning_mode: input.reasoning_mode.clone(),
+                preferred_runtime_kind,
                 submitted_at_ms: now_ms,
             }))
         };
@@ -15868,8 +17882,12 @@ fn conversation_submit(
             prompt: String::new(),
             attachments: Vec::new(),
             next_attachment_reference: 1,
-            provider_id: input.provider_id.clone(),
-            model_id: input.model_id.clone(),
+            provider_id: requested_model_route
+                .as_ref()
+                .map(|(provider_id, _)| provider_id.clone()),
+            model_id: requested_model_route
+                .as_ref()
+                .map(|(_, model_id)| model_id.clone()),
             reasoning_mode: input.reasoning_mode.clone(),
             mode: input.resume_mode.clone(),
             reply_target_id: None,
@@ -15912,6 +17930,12 @@ fn valid_conversation_route_selection(provider_id: Option<&str>, model_id: Optio
         && model_id.is_none_or(|value| valid_conversation_identifier(value, true))
 }
 
+fn parse_configured_model_route(value: &str) -> Option<(String, String)> {
+    let (provider_id, model_id) = value.split_once("::")?;
+    valid_conversation_route_selection(Some(provider_id), Some(model_id))
+        .then(|| (provider_id.to_owned(), model_id.to_owned()))
+}
+
 fn valid_conversation_identifier(value: &str, allow_route_separator: bool) -> bool {
     !value.is_empty()
         && value.len() <= protocol::MAX_IDENTIFIER_BYTES
@@ -15925,9 +17949,9 @@ fn valid_conversation_identifier(value: &str, allow_route_separator: bool) -> bo
 #[cfg(test)]
 mod conversation_input_validation_tests {
     use super::{
-        conversation_authority_generation, reconcile_attachment_references,
-        resolve_conversation_provider_model, valid_conversation_identifier,
-        valid_conversation_route_selection,
+        conversation_authority_generation, parse_configured_model_route,
+        reconcile_attachment_references, resolve_conversation_provider_model,
+        valid_conversation_identifier, valid_conversation_route_selection,
     };
     use crate::runtime::capability::{
         CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityLayer, ModelLifecycle,
@@ -15936,13 +17960,13 @@ mod conversation_input_validation_tests {
     use crate::runtime::coordinator::RuntimeCoordinatorSnapshot;
     use crate::runtime::provider::{
         ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-        ProviderEndpoint, ProviderKind, ProviderModelDeclaration, ProviderProfile, ProviderRecord,
-        ProviderSnapshot, ProviderTestStatus, RouteAvailability,
+        ProviderAuthentication, ProviderEndpoint, ProviderKind, ProviderModelDeclaration,
+        ProviderProfile, ProviderRecord, ProviderSnapshot, ProviderTestStatus, RouteAvailability,
     };
     use crate::runtime::session::AttachmentSnapshot;
     use crate::runtime::supervisor::SupervisorSnapshot;
     use crate::security::credentials::CredentialReference;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn conversation_authority_generation_covers_every_published_domain() {
@@ -16002,6 +18026,12 @@ mod conversation_input_validation_tests {
             Some("open ai"),
             Some("openai/gpt-5")
         ));
+        assert_eq!(
+            parse_configured_model_route("provider-openai::openai/gpt-5"),
+            Some(("provider-openai".into(), "openai/gpt-5".into()))
+        );
+        assert_eq!(parse_configured_model_route("provider-only"), None);
+        assert_eq!(parse_configured_model_route("provider openai::gpt-5"), None);
     }
 
     #[test]
@@ -16055,6 +18085,7 @@ mod conversation_input_validation_tests {
             generation: 1,
             providers: ProviderSnapshot {
                 generation: 1,
+                onboarding_completed_at_ms: None,
                 providers: vec![ProviderRecord {
                     profile: ProviderProfile {
                         schema_version: PROVIDER_SCHEMA_VERSION,
@@ -16066,10 +18097,12 @@ mod conversation_input_validation_tests {
                             base_url: "https://example.com".into(),
                             api_kind: "openai-compatible".into(),
                         },
-                        credential_reference: serde_json::from_str::<CredentialReference>(
-                            "\"credential-one\"",
-                        )
-                        .expect("credential reference"),
+                        authentication: ProviderAuthentication::Bearer,
+                        credential_reference: Some(
+                            serde_json::from_str::<CredentialReference>("\"credential-one\"")
+                                .expect("credential reference"),
+                        ),
+                        headers: BTreeMap::new(),
                         enabled: true,
                     },
                     test_status: ProviderTestStatus::Untested,
@@ -16078,6 +18111,7 @@ mod conversation_input_validation_tests {
                         ("model-a".into(), model("model-a")),
                         ("model-b".into(), model("model-b")),
                     ]),
+                    disabled_model_ids: BTreeSet::new(),
                     selected_model_id: Some("model-a".into()),
                     generation: 1,
                 }],
@@ -16339,6 +18373,10 @@ fn conversation_activate_session(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let workspace_snapshot = active_workspace_snapshot(&core, request.correlation_id.clone())?;
     let runtime_generation = core
         .runtime
@@ -16397,31 +18435,49 @@ fn conversation_activate_session(
     }
     let selection_changed =
         conversation.active_session_id.as_deref() != Some(chat.chat_id.as_str());
-    if selection_changed {
-        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
-    }
+    let previous_project_id = conversation.active_project_id.clone();
+    let previous_session_id = conversation.active_session_id.clone();
     conversation.active_project_id = Some(chat.project_id.clone());
     conversation.active_session_id = Some(chat.chat_id.clone());
     let persisted_generation = conversation
         .persist(&database, &workspace_id, now_ms)
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let focus_generation = if selection_changed {
-        clear_persisted_artifact_focus(
+    conversation.advance(current_generation.max(persisted_generation))?;
+    drop(conversation);
+    if reconcile_active_configuration_policy(
+        &core.configuration,
+        &core.active_workspace,
+        &core.conversation,
+        &core.runtime,
+        now_ms,
+    )
+    .is_err()
+    {
+        compensate_conversation_context_selection(
+            &core.conversation,
+            &database,
+            &workspace_id,
+            previous_project_id,
+            previous_session_id,
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        return Err(workspace_state_unavailable(request.correlation_id).into());
+    }
+    if selection_changed {
+        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
+        let focus_generation = clear_persisted_artifact_focus(
             &database,
             &workspace_id,
             now_ms,
             request.correlation_id.clone(),
         )?
-        .unwrap_or(0)
-    } else {
-        0
-    };
-    conversation.advance(
-        current_generation
-            .max(persisted_generation)
-            .max(focus_generation),
-    )?;
-    drop(conversation);
+        .unwrap_or(0);
+        core.conversation
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .advance(focus_generation)?;
+    }
     let payload = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     protocol::conversation_snapshot(request, payload)
 }
@@ -16443,6 +18499,10 @@ fn conversation_activate_project(
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let workspace_snapshot = active_workspace_snapshot(&core, request.correlation_id.clone())?;
     if !workspace_snapshot.projects.iter().any(|project| {
@@ -16506,31 +18566,49 @@ fn conversation_activate_project(
         .map(|chat| chat.chat_id.clone());
     let selection_changed = conversation.active_project_id.as_deref() != Some(project_id.as_str())
         || conversation.active_session_id != next_session_id;
-    if selection_changed {
-        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
-    }
+    let previous_project_id = conversation.active_project_id.clone();
+    let previous_session_id = conversation.active_session_id.clone();
     conversation.active_project_id = Some(project_id.as_str().into());
     conversation.active_session_id = next_session_id;
     let persisted_generation = conversation
         .persist(&database, &workspace_id, now_ms)
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let focus_generation = if selection_changed {
-        clear_persisted_artifact_focus(
+    conversation.advance(current_generation.max(persisted_generation))?;
+    drop(conversation);
+    if reconcile_active_configuration_policy(
+        &core.configuration,
+        &core.active_workspace,
+        &core.conversation,
+        &core.runtime,
+        now_ms,
+    )
+    .is_err()
+    {
+        compensate_conversation_context_selection(
+            &core.conversation,
+            &database,
+            &workspace_id,
+            previous_project_id,
+            previous_session_id,
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        return Err(workspace_state_unavailable(request.correlation_id).into());
+    }
+    if selection_changed {
+        detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
+        let focus_generation = clear_persisted_artifact_focus(
             &database,
             &workspace_id,
             now_ms,
             request.correlation_id.clone(),
         )?
-        .unwrap_or(0)
-    } else {
-        0
-    };
-    conversation.advance(
-        current_generation
-            .max(persisted_generation)
-            .max(focus_generation),
-    )?;
-    drop(conversation);
+        .unwrap_or(0);
+        core.conversation
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .advance(focus_generation)?;
+    }
     let payload = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     protocol::conversation_snapshot(request, payload)
 }
@@ -17872,10 +19950,45 @@ fn build_conversation_snapshot(
         }
     };
     let draft = state.active_draft();
+    let (configuration_project_id, configuration_chat_id) = match &state.pending {
+        conversation::PendingChatState::Draft(draft) => (
+            Some(draft.project_id.as_str()),
+            Some(draft.session_id.as_str()),
+        ),
+        conversation::PendingChatState::PromotionRequested(promotion) => (
+            Some(promotion.project_id.as_str()),
+            Some(promotion.session_id.as_str()),
+        ),
+        conversation::PendingChatState::Inactive => (
+            state.active_project_id.as_deref(),
+            state.active_session_id.as_deref(),
+        ),
+    };
+    let configured_model_route = effective_conversation_configuration(
+        core,
+        configuration_project_id,
+        configuration_chat_id,
+        correlation_id.clone(),
+    )?
+    .configuration
+    .model_route
+    .as_deref()
+    .and_then(parse_configured_model_route);
     let active_model_route = draft
         .provider_id
         .clone()
         .zip(draft.model_id.clone())
+        .or_else(|| {
+            configured_model_route.and_then(|(provider_id, model_id)| {
+                resolve_conversation_provider_model(
+                    &runtime,
+                    Some(&provider_id),
+                    Some(&model_id),
+                    now_ms,
+                )
+                .ok()
+            })
+        })
         .or_else(|| {
             runtime
                 .providers
@@ -18924,6 +21037,2691 @@ fn answer_runtime_sampling_approval(
         .map_err(|_| runtime_production_unavailable(request_correlation))
 }
 
+fn provider_boundary_error(
+    error: RuntimeApplicationError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        RuntimeApplicationError::Generation { .. }
+        | RuntimeApplicationError::Coordinator(CoordinatorError::Provider(
+            runtime::provider::ProviderError::StaleGeneration { .. },
+        )) => (
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before the operation completed",
+            true,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Provider(
+            runtime::provider::ProviderError::DuplicateDisplayName,
+        )) => (
+            ProtocolErrorCode::Conflict,
+            "Provider display names must be unique",
+            false,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Provider(
+            runtime::provider::ProviderError::NotFound,
+        )) => (
+            ProtocolErrorCode::NotFound,
+            "The provider or model is unavailable",
+            false,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Provider(
+            runtime::provider::ProviderError::OnboardingNotReady
+            | runtime::provider::ProviderError::ModelUnavailable
+            | runtime::provider::ProviderError::Disabled,
+        )) => (
+            ProtocolErrorCode::Conflict,
+            "The provider has not passed the latest required test",
+            true,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Provider(
+            runtime::provider::ProviderError::InvalidProfile
+            | runtime::provider::ProviderError::InvalidEndpoint
+            | runtime::provider::ProviderError::InvalidTimestamp,
+        )) => (
+            ProtocolErrorCode::InvalidPayload,
+            "The provider request is invalid",
+            false,
+        ),
+        _ => (
+            ProtocolErrorCode::Unavailable,
+            "Provider state is temporarily unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+fn provider_settings_snapshot(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ProviderSettingsSnapshot, ProtocolError> {
+    let runtime = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, correlation_id.clone()))?;
+    let mut providers = runtime.providers;
+    for record in &mut providers.providers {
+        let available = match (
+            core.credential_vault.as_ref(),
+            record.profile.credential_reference.as_ref(),
+        ) {
+            (_, None) => false,
+            (None, Some(_)) => false,
+            (Some(vault), Some(reference)) => vault
+                .contains(reference)
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+        };
+        if !available {
+            record.profile.credential_reference = None;
+        }
+    }
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .snapshot()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let pending_approval = {
+        let mut pending = core
+            .pending_provider_operations
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id))?;
+        pending.retain(|_, operation| now_ms < operation.prompt.expires_at_ms);
+        pending
+            .values()
+            .next()
+            .map(|operation| ProviderPendingApprovalSnapshot {
+                prompt_id: operation.prompt.prompt_id.clone(),
+                operation: operation.operation,
+                provider_id: operation.provider_id.clone(),
+                provider_name: operation.provider_name.clone(),
+                expires_at_ms: operation.prompt.expires_at_ms,
+            })
+    };
+    Ok(ProviderSettingsSnapshot {
+        authority: "rust-provider-service",
+        coordinator_generation: runtime.generation,
+        configuration_generation: configuration.generation,
+        credential_protection: core.credential_protection,
+        credential_fallback_required: core
+            .credential_fallback_required
+            .load(std::sync::atomic::Ordering::Acquire),
+        onboarding_completed: providers.launch_ready(),
+        providers,
+        model_route: configuration.configuration.model_route.clone(),
+        default_runtime: configuration.configuration.default_runtime.clone(),
+        default_environment: configuration.configuration.default_environment.clone(),
+        pending_approval,
+    })
+}
+
+fn provider_snapshot_envelope(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    now_ms: u64,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, ProtocolError> {
+    let payload = provider_settings_snapshot(core, now_ms, request.correlation_id.clone())?;
+    protocol::snapshot_envelope(
+        request,
+        StateGeneration(payload.providers.generation),
+        payload,
+    )
+}
+
+fn require_provider_input_generation(
+    request: &SnapshotRequest,
+    input_generation: u64,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation.0 == input_generation {
+        return Ok(());
+    }
+    Err(platform_boundary_error(
+        request.correlation_id.clone(),
+        ProtocolErrorCode::InvalidGeneration,
+        "The provider request generations do not match",
+        false,
+    ))
+}
+
+fn provider_credential_kind(provider_id: &str) -> String {
+    let digest = sha256_bytes(provider_id.as_bytes());
+    format!(
+        "provider.{}",
+        digest.strip_prefix("sha256:").unwrap_or(digest.as_str())
+    )
+}
+
+fn current_provider_live_authority(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<LiveAuthorityState, ProtocolError> {
+    core.runtime
+        .current_provider_live_authority(now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id))
+}
+
+fn remove_provider_credential(
+    vault: &security::credentials::CredentialVault,
+    reference: &security::credentials::CredentialReference,
+) -> Result<(), security::credentials::CredentialVaultError> {
+    match vault.remove(reference) {
+        Ok(_) | Err(security::credentials::CredentialVaultError::CredentialNotFound) => Ok(()),
+        Err(error) => match vault.contains(reference) {
+            Ok(false) => Ok(()),
+            Ok(true) | Err(_) => Err(error),
+        },
+    }
+}
+
+struct ProviderActionGrant {
+    token: AuthorizationToken,
+    prompt_id: Option<String>,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+}
+
+enum ProviderActionPreparation {
+    Authorized(ProviderActionGrant),
+    Pending {
+        prompt: ApprovalPromptRecord,
+        action: CanonicalAction,
+    },
+}
+
+fn require_no_pending_provider_operation(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let mut pending = core
+        .pending_provider_operations
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    pending.retain(|_, operation| now_ms < operation.prompt.expires_at_ms);
+    if pending.is_empty() {
+        return Ok(());
+    }
+    Err(platform_boundary_error(
+        correlation_id,
+        ProtocolErrorCode::Conflict,
+        "Answer the current Provider approval before starting another change",
+        false,
+    ))
+}
+
+fn provider_action_facts(
+    action_kind: &str,
+    tool: &str,
+    effects: BTreeSet<ActionEffect>,
+    surface: ActionSurface,
+    scope: ActionScope,
+    sensitivity: ActionSensitivity,
+    canonical_target: &str,
+    authenticated: bool,
+) -> ActionFacts {
+    ActionFacts {
+        action_kind: action_kind.into(),
+        native_tool: tool.into(),
+        surface,
+        effects,
+        scope,
+        initiator: ActionInitiator::User,
+        sensitivity,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: canonical_target.into(),
+        workspace_id: "c4os-app".into(),
+        session_id: "provider-settings".into(),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated,
+        trusted_root: false,
+        explicit_scope_grant: true,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    }
+}
+
+fn prepare_provider_action(
+    core: &AppCoreState,
+    tool: &str,
+    requested_authority: BTreeSet<String>,
+    arguments: serde_json::Value,
+    canonical_target: String,
+    target_version: String,
+    candidate_facts: Vec<ActionFacts>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ProviderActionPreparation, ProtocolError> {
+    require_no_pending_provider_operation(core, now_ms, correlation_id.clone())?;
+    let live = current_provider_live_authority(core, now_ms, correlation_id.clone())?;
+    let facts = {
+        let coordinator = core
+            .runtime
+            .coordinator()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let mut selected = candidate_facts
+            .first()
+            .cloned()
+            .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+        let mut strictest = PolicyDecision::Allow;
+        for candidate in candidate_facts {
+            let decision = coordinator
+                .resolve_direct_policy(&candidate, now_ms)
+                .decision;
+            if decision > strictest {
+                strictest = decision;
+                selected = candidate;
+            }
+        }
+        if strictest == PolicyDecision::Deny {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Forbidden,
+                "Policy denied the Provider operation",
+                false,
+            ));
+        }
+        selected
+    };
+    let action_id = format!("provider-{}", Uuid::new_v4().as_simple());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: tool.into(),
+        arguments,
+        risk: CanonicalRisk::Medium,
+        requested_authority,
+        canonical_target,
+        target_version,
+        workspace_id: facts.workspace_id.clone(),
+        session_id: facts.session_id.clone(),
+        run_id: format!("provider-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: facts.runtime_id.clone(),
+        environment_id: facts.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action
+        .validate()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    match core
+        .runtime
+        .propose_direct_action(&facts, action.clone(), now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id))?
+    {
+        GatewayProposal::Denied { .. } => unreachable!("the selected strictest policy was checked"),
+        GatewayProposal::Authorized { token, .. } => {
+            Ok(ProviderActionPreparation::Authorized(ProviderActionGrant {
+                token,
+                prompt_id: None,
+                action,
+                live,
+            }))
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => Ok(ProviderActionPreparation::Pending {
+            prompt: *prompt,
+            action,
+        }),
+    }
+}
+
+fn execute_provider_action<ResultValue>(
+    core: &AppCoreState,
+    grant: ProviderActionGrant,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+    effect: impl FnOnce() -> Result<ResultValue, protocol::StructuredCoreError>,
+) -> Result<ResultValue, protocol::StructuredCoreError> {
+    let lease = core
+        .runtime
+        .begin_direct_action_effect(
+            &grant.token,
+            &grant.action,
+            grant.live,
+            grant.prompt_id.as_deref(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let outcome = effect();
+    let normalized = NormalizedActionResult {
+        status: if outcome.is_ok() {
+            NormalizedActionStatus::Succeeded
+        } else {
+            NormalizedActionStatus::Failed
+        },
+        result_code: if outcome.is_ok() {
+            "provider-operation-completed"
+        } else {
+            "provider-operation-failed"
+        }
+        .into(),
+        exit_code: None,
+        changed_targets: Vec::new(),
+        output_sha256: None,
+        completed_at_ms: now_ms.saturating_add(1),
+    };
+    core.runtime
+        .complete_direct_action_effect(lease, normalized)
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    outcome
+}
+
+fn publish_pending_provider_operation(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    now_ms: u64,
+    pending: PendingProviderOperation,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    core.pending_provider_operations
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .insert(pending.prompt.prompt_id.clone(), pending);
+    provider_snapshot_envelope(core, request, now_ms).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod provider_credential_kind_tests {
+    use super::provider_credential_kind;
+
+    #[test]
+    fn provider_identity_becomes_a_bounded_non_secret_vault_kind() {
+        let kind = provider_credential_kind("provider:task-00013-fixture");
+        assert_eq!(kind.len(), "provider.".len() + 64);
+        assert!(kind.starts_with("provider."));
+        assert!(
+            kind.bytes()
+                .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') })
+        );
+        assert!(!kind.contains("task-00013"));
+    }
+}
+
+#[tauri::command]
+fn provider_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_accept_session_credentials(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if core.credential_protection != ProviderCredentialProtection::SessionOnly {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Session-only credentials are unavailable while macOS secure storage is active",
+            false,
+        )
+        .into());
+    }
+    core.credential_fallback_required
+        .store(false, std::sync::atomic::Ordering::Release);
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+}
+
+#[tauri::command]
+fn provider_save_profile(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderProfileInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_no_pending_provider_operation(&core, now_ms, request.correlation_id.clone())?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if current.generation != input.expected_coordinator_generation
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before the operation",
+            true,
+        )
+        .into());
+    }
+    let submitted_secret_value = input.secret.as_deref().filter(|secret| !secret.is_empty());
+    if submitted_secret_value.is_some_and(|secret| {
+        secret.len() > 64 * 1024
+            || secret
+                .bytes()
+                .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'"' | b'\\'))
+    }) || (!input.authentication.requires_credential() && submitted_secret_value.is_some())
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The provider credential is invalid",
+            false,
+        )
+        .into());
+    }
+    if input.authentication.requires_credential()
+        && core
+            .credential_fallback_required
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Confirm session-only credential storage before saving this provider",
+            false,
+        )
+        .into());
+    }
+    let previous = current
+        .providers
+        .providers
+        .iter()
+        .find(|record| record.profile.provider_id == input.provider_id);
+    let submitted_secret = submitted_secret_value.is_some();
+    let previous_has_credential = previous
+        .and_then(|record| record.profile.credential_reference.as_ref())
+        .is_some();
+    let credential_effect = if submitted_secret {
+        Some(if previous_has_credential {
+            ActionEffect::Modify
+        } else {
+            ActionEffect::Create
+        })
+    } else if previous_has_credential && !input.authentication.requires_credential() {
+        Some(ActionEffect::Delete)
+    } else {
+        None
+    };
+    let Some(credential_effect) = credential_effect else {
+        return provider_save_profile_unmediated(&core, request, input, now_ms, false);
+    };
+    let target_version = sha256_bytes(
+        serde_json::to_vec(&serde_json::json!({
+            "providerId": input.provider_id,
+            "kind": input.kind,
+            "endpoint": input.endpoint,
+            "authentication": input.authentication,
+            "headers": input.headers,
+            "enabled": input.enabled,
+            "hasSubmittedCredential": submitted_secret,
+        }))
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .as_slice(),
+    );
+    let facts = provider_action_facts(
+        "credential.add",
+        "c4os.provider.save",
+        BTreeSet::from([credential_effect]),
+        ActionSurface::Credential,
+        ActionScope::System,
+        ActionSensitivity::Credential,
+        &input.provider_id,
+        false,
+    );
+    match prepare_provider_action(
+        &core,
+        "c4os.provider.save",
+        BTreeSet::from(["credential.add".into()]),
+        serde_json::json!({
+            "providerId": input.provider_id,
+            "credentialEffect": credential_effect,
+        }),
+        input.provider_id.clone(),
+        target_version,
+        vec![facts],
+        now_ms,
+        request.correlation_id.clone(),
+    )? {
+        ProviderActionPreparation::Authorized(grant) => {
+            execute_provider_action(&core, grant, now_ms, request.correlation_id.clone(), || {
+                provider_save_profile_unmediated(&core, request.clone(), input, now_ms, true)
+                    .map(|_| ())
+            })?;
+            provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+        }
+        ProviderActionPreparation::Pending { prompt, action } => {
+            let provider_id = input.provider_id.clone();
+            let provider_name = input.display_name.clone();
+            publish_pending_provider_operation(
+                &core,
+                request,
+                now_ms,
+                PendingProviderOperation {
+                    prompt,
+                    action,
+                    operation: ProviderApprovalOperation::SaveProfile,
+                    provider_id,
+                    provider_name,
+                    payload: PendingProviderPayload::SaveProfile(input),
+                },
+            )
+        }
+    }
+}
+
+fn provider_save_profile_unmediated(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    input: ProviderProfileInput,
+    now_ms: u64,
+    mediated: bool,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if (!mediated && current.generation != input.expected_coordinator_generation)
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before the operation",
+            true,
+        )
+        .into());
+    }
+    let previous_profile = current
+        .providers
+        .providers
+        .iter()
+        .find(|record| record.profile.provider_id == input.provider_id)
+        .map(|record| record.profile.clone());
+    let previous_reference = previous_profile
+        .as_ref()
+        .and_then(|profile| profile.credential_reference.clone());
+    let credential_binding_unchanged = previous_profile.as_ref().is_some_and(|profile| {
+        profile.kind == input.kind
+            && profile.endpoint == input.endpoint
+            && profile.authentication == input.authentication
+            && profile.headers == input.headers
+    });
+    let submitted_secret = input.secret.as_deref().filter(|secret| !secret.is_empty());
+    if submitted_secret.is_some_and(|secret| {
+        secret.len() > 64 * 1024
+            || secret
+                .bytes()
+                .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'"' | b'\\'))
+    }) {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The provider credential is invalid",
+            false,
+        )
+        .into());
+    }
+    if submitted_secret
+        .is_some_and(|secret| input.headers.values().any(|value| value.contains(secret)))
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Provider credentials cannot be stored in literal headers",
+            false,
+        )
+        .into());
+    }
+    if input.authentication.requires_credential()
+        && core
+            .credential_fallback_required
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Confirm session-only credential storage before saving this provider",
+            false,
+        )
+        .into());
+    }
+    let vault = core.credential_vault.as_ref();
+    let reusable_reference = if credential_binding_unchanged {
+        match (vault, previous_reference.as_ref()) {
+            (Some(vault), Some(reference))
+                if vault.contains(reference).map_err(|_| {
+                    platform_boundary_error(
+                        request.correlation_id.clone(),
+                        ProtocolErrorCode::Unavailable,
+                        "Secure credential storage is unavailable",
+                        true,
+                    )
+                })? =>
+            {
+                Some(reference.clone())
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let new_reference = if input.authentication.requires_credential() {
+        if let Some(secret) = submitted_secret {
+            Some(
+                vault
+                    .ok_or_else(|| {
+                        platform_boundary_error(
+                            request.correlation_id.clone(),
+                            ProtocolErrorCode::Unavailable,
+                            "Secure credential storage is unavailable",
+                            false,
+                        )
+                    })?
+                    .store(
+                        provider_credential_kind(&input.provider_id),
+                        secret.as_bytes(),
+                    )
+                    .map_err(|_| {
+                        platform_boundary_error(
+                            request.correlation_id.clone(),
+                            ProtocolErrorCode::Unavailable,
+                            "Secure credential storage is unavailable",
+                            true,
+                        )
+                    })?,
+            )
+        } else {
+            Some(
+                reusable_reference
+                    .ok_or_else(|| {
+                platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::InvalidPayload,
+                    "Re-enter the API key after changing provider, endpoint, authentication, or headers",
+                    false,
+                )
+            })?,
+            )
+        }
+    } else {
+        if submitted_secret.is_some() {
+            return Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::InvalidPayload,
+                "No credential may be supplied when authentication is None",
+                false,
+            )
+            .into());
+        }
+        None
+    };
+    let profile = runtime::provider::ProviderProfile {
+        schema_version: runtime::provider::PROVIDER_SCHEMA_VERSION,
+        provider_id: input.provider_id.clone(),
+        kind: input.kind,
+        display_name: input.display_name.clone(),
+        endpoint: input.endpoint.clone(),
+        authentication: input.authentication.clone(),
+        credential_reference: new_reference.clone(),
+        headers: input.headers.clone(),
+        enabled: input.enabled,
+    };
+    profile.validate().map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The provider request is invalid",
+            false,
+        )
+    })?;
+    let provider_dispatch = core
+        .runtime
+        .provider_dispatch_guard()
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    let result = (|| {
+        core.runtime
+            .cancel_active_provider_attempts(&input.provider_id, now_ms)?;
+        let save_coordinator_generation = core.runtime.snapshot(now_ms)?.generation;
+        core.runtime.save_provider(
+            save_coordinator_generation,
+            profile,
+            input.expected_provider_generation,
+            now_ms,
+        )
+    })();
+    if let Err(error) = result {
+        if new_reference != previous_reference
+            && let (Some(vault), Some(reference)) = (vault, new_reference.as_ref())
+        {
+            remove_provider_credential(vault, reference).map_err(|_| {
+                platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Unavailable,
+                    "The rejected provider credential could not be removed securely",
+                    false,
+                )
+            })?;
+        }
+        return Err(provider_boundary_error(error, request.correlation_id).into());
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let route_reload = core
+        .runtime_production
+        .published()
+        .map(|application| application.reload_active_provider_routes(now_ms))
+        .transpose();
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let route_reload = Ok::<Option<u64>, ()>(None);
+    drop(provider_dispatch);
+    if new_reference != previous_reference
+        && let (Some(vault), Some(reference)) = (vault, previous_reference.as_ref())
+    {
+        remove_provider_credential(vault, reference).map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "The replaced provider credential could not be removed securely",
+                true,
+            )
+        })?;
+    }
+    if route_reload.is_err() {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "The provider was saved, but active runtime routes could not be rebuilt",
+            true,
+        )
+        .into());
+    }
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+fn execute_provider_connection_probe(
+    core: &AppCoreState,
+    request: &SnapshotRequest,
+    input: &ProviderIdentityInput,
+    grant: ProviderActionGrant,
+    now_ms: u64,
+) -> Result<(), protocol::StructuredCoreError> {
+    let _provider_dispatch = core
+        .runtime
+        .provider_dispatch_guard()
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    let lease = core
+        .runtime
+        .begin_direct_action_effect(
+            &grant.token,
+            &grant.action,
+            grant.live,
+            grant.prompt_id.as_deref(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut connectivity = runtime::provider::CurlProviderConnectivity::new("/usr/bin/curl")
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut probe = runtime::provider::DirectProviderProbe::new(
+        &core.credential_vault,
+        &mut connectivity,
+        now_ms,
+    )
+    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let test_generation = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .generation;
+    let tested = core.runtime.test_provider(
+        test_generation,
+        &input.provider_id,
+        input.expected_provider_generation,
+        now_ms,
+        &mut probe,
+    );
+    let result = NormalizedActionResult {
+        status: if tested.is_ok() {
+            NormalizedActionStatus::Succeeded
+        } else {
+            NormalizedActionStatus::Failed
+        },
+        result_code: if tested.is_ok() {
+            "provider-test-completed"
+        } else {
+            "provider-test-failed"
+        }
+        .into(),
+        exit_code: None,
+        changed_targets: Vec::new(),
+        output_sha256: None,
+        completed_at_ms: now_ms.saturating_add(1),
+    };
+    core.runtime
+        .complete_direct_action_effect(lease, result)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let Some(application) = core.runtime_production.published() {
+        application
+            .reload_active_provider_routes(now_ms)
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    }
+    tested.map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn provider_test_connection(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderIdentityInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_no_pending_provider_operation(&core, now_ms, request.correlation_id.clone())?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if current.generation != input.expected_coordinator_generation
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before the connection test",
+            true,
+        )
+        .into());
+    }
+    let profile = current
+        .providers
+        .providers
+        .iter()
+        .find(|record| record.profile.provider_id == input.provider_id)
+        .map(|record| record.profile.clone())
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The provider is unavailable",
+                false,
+            )
+        })?;
+    if profile.authentication.requires_credential()
+        && core
+            .credential_fallback_required
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "Confirm session-only credential storage before testing this provider",
+            false,
+        )
+        .into());
+    }
+    let test_result =
+        (|| -> Result<Option<PendingProviderOperation>, protocol::StructuredCoreError> {
+            let live =
+                current_provider_live_authority(&core, now_ms, request.correlation_id.clone())?;
+            let action_id = format!("provider-test-{}", Uuid::new_v4().as_simple());
+            let action = CanonicalAction {
+                schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+                action_id: action_id.clone(),
+                tool_call_id: format!("tool-call-{action_id}"),
+                tool: "c4os.provider.test".into(),
+                arguments: serde_json::json!({
+                    "providerId": profile.provider_id.clone(),
+                    "endpointSha256": sha256_bytes(profile.endpoint.base_url.as_bytes()),
+                }),
+                risk: CanonicalRisk::Medium,
+                requested_authority: if profile.authentication.requires_credential() {
+                    BTreeSet::from(["network.retrieve".into(), "credential.use".into()])
+                } else {
+                    BTreeSet::from(["network.retrieve".into()])
+                },
+                canonical_target: profile.endpoint.base_url.clone(),
+                target_version: sha256_bytes(profile.endpoint.base_url.as_bytes()),
+                workspace_id: "c4os-app".into(),
+                session_id: "provider-settings".into(),
+                run_id: format!("provider-test-run-{}", Uuid::new_v4().as_simple()),
+                runtime_id: "c4os-core".into(),
+                environment_id: "desktop".into(),
+                plugin_or_mcp_id: None,
+                process_generation: live.process_generation,
+                configuration_version: live.configuration_version,
+                policy_version: live.policy_version,
+                revocation_epoch: live.revocation_epoch,
+            };
+            action
+                .validate()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let mut facts = ActionFacts {
+                action_kind: "network.retrieve".into(),
+                native_tool: action.tool.clone(),
+                surface: ActionSurface::Network,
+                effects: BTreeSet::from([ActionEffect::Read]),
+                scope: ActionScope::Remote,
+                initiator: ActionInitiator::User,
+                sensitivity: if profile.authentication.requires_credential() {
+                    ActionSensitivity::Credential
+                } else {
+                    ActionSensitivity::Ordinary
+                },
+                reversibility: ActionReversibility::Reversible,
+                confidence: ClassificationConfidence::Known,
+                request_origin: ActionRequestOrigin::DirectUserEdit,
+                repository_state: RepositoryState::NotApplicable,
+                inside_active_project: false,
+                canonical_target: action.canonical_target.clone(),
+                workspace_id: action.workspace_id.clone(),
+                session_id: action.session_id.clone(),
+                runtime_id: action.runtime_id.clone(),
+                environment_id: action.environment_id.clone(),
+                plugin_or_mcp_id: None,
+                target_resolved: true,
+                authenticated: profile.authentication.requires_credential(),
+                trusted_root: false,
+                explicit_scope_grant: true,
+                sandbox_allows: true,
+                declaration_exceeded: false,
+            };
+            if profile.authentication.requires_credential() {
+                let credential_facts = ActionFacts {
+                    action_kind: "credential.use".into(),
+                    native_tool: action.tool.clone(),
+                    surface: ActionSurface::Credential,
+                    effects: BTreeSet::from([ActionEffect::Read]),
+                    scope: ActionScope::System,
+                    initiator: ActionInitiator::User,
+                    sensitivity: ActionSensitivity::Credential,
+                    reversibility: ActionReversibility::Reversible,
+                    confidence: ClassificationConfidence::Known,
+                    request_origin: ActionRequestOrigin::DirectUserEdit,
+                    repository_state: RepositoryState::NotApplicable,
+                    inside_active_project: false,
+                    canonical_target: action.canonical_target.clone(),
+                    workspace_id: action.workspace_id.clone(),
+                    session_id: action.session_id.clone(),
+                    runtime_id: action.runtime_id.clone(),
+                    environment_id: action.environment_id.clone(),
+                    plugin_or_mcp_id: None,
+                    target_resolved: true,
+                    authenticated: true,
+                    trusted_root: false,
+                    explicit_scope_grant: true,
+                    sandbox_allows: true,
+                    declaration_exceeded: false,
+                };
+                let coordinator = core
+                    .runtime
+                    .coordinator()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+                let credential_resolution =
+                    coordinator.resolve_direct_policy(&credential_facts, now_ms);
+                let network_resolution = coordinator.resolve_direct_policy(&facts, now_ms);
+                if credential_resolution.decision == PolicyDecision::Deny {
+                    return Err(platform_boundary_error(
+                        request.correlation_id.clone(),
+                        ProtocolErrorCode::Forbidden,
+                        "Policy denied credential use for the provider connection test",
+                        false,
+                    )
+                    .into());
+                }
+                if credential_resolution.decision > network_resolution.decision {
+                    facts = credential_facts;
+                }
+            }
+            let proposal = core
+                .runtime
+                .propose_direct_action(&facts, action.clone(), now_ms)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let (token, prompt_id) = match proposal {
+                GatewayProposal::Denied { .. } => {
+                    return Err(platform_boundary_error(
+                        request.correlation_id.clone(),
+                        ProtocolErrorCode::Forbidden,
+                        "Policy denied the provider connection test",
+                        false,
+                    )
+                    .into());
+                }
+                GatewayProposal::Authorized { token, .. } => (token, None),
+                GatewayProposal::PendingApproval { prompt, .. } => {
+                    return Ok(Some(PendingProviderOperation {
+                        prompt: *prompt,
+                        action,
+                        operation: ProviderApprovalOperation::TestConnection,
+                        provider_id: input.provider_id.clone(),
+                        provider_name: profile.display_name.clone(),
+                        payload: PendingProviderPayload::TestConnection(input.clone()),
+                    }));
+                }
+            };
+            execute_provider_connection_probe(
+                &core,
+                &request,
+                &input,
+                ProviderActionGrant {
+                    token,
+                    prompt_id,
+                    action,
+                    live,
+                },
+                now_ms,
+            )?;
+            Ok(None)
+        })();
+    match test_result {
+        Err(error) => return Err(error),
+        Ok(Some(pending)) => {
+            return publish_pending_provider_operation(&core, request, now_ms, pending);
+        }
+        Ok(None) => {}
+    }
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_select_model(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderModelSelectionInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let result = core.runtime.select_model(
+        input.expected_coordinator_generation,
+        &input.provider_id,
+        &input.model_id,
+        input.expected_provider_generation,
+        now_ms,
+    );
+    if let Err(error) = result {
+        return Err(provider_boundary_error(error, request.correlation_id).into());
+    }
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_set_models_enabled(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderModelsAvailabilityInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let result = core.runtime.set_models_enabled(
+        input.expected_coordinator_generation,
+        &input.provider_id,
+        &input.model_ids,
+        input.enabled,
+        input.expected_provider_generation,
+        now_ms,
+    );
+    if let Err(error) = result {
+        return Err(provider_boundary_error(error, request.correlation_id).into());
+    }
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_complete_onboarding(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderOnboardingInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    if input.runtime_id != "opencode" || input.environment_id != "local" {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Onboarding requires the OpenCode runtime and Local environment",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let runtime_snapshot = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if runtime_snapshot.generation != input.expected_coordinator_generation
+        || runtime_snapshot.providers.generation != input.expected_provider_generation
+        || !runtime_snapshot.providers.provider_model_ready_at(
+            &input.provider_id,
+            &input.model_id,
+            now_ms,
+        )
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Conflict,
+            "The selected provider model must pass the latest test before continuing",
+            true,
+        )
+        .into());
+    }
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let before_snapshot = configuration
+        .snapshot()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if before_snapshot.generation != input.expected_configuration_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Configuration changed before onboarding could be completed",
+            true,
+        )
+        .into());
+    }
+    let before_toml = configuration
+        .last_known_good()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .map(|record| record.canonical_toml)
+        .unwrap_or_else(|| {
+            toml::to_string(&core::configuration::ConfigurationDocument::default())
+                .expect("default app configuration serializes")
+        });
+    let mut document = toml::from_str::<core::configuration::ConfigurationDocument>(&before_toml)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    document.model_route = Some(format!("{}::{}", input.provider_id, input.model_id));
+    document.default_runtime = Some(input.runtime_id);
+    document.default_environment = Some(input.environment_id);
+    let proposed_toml = toml::to_string(&document)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let activated_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let update = configuration
+        .save(&proposed_toml, before_snapshot.generation, activated_at)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let configuration_changed = matches!(
+        update,
+        core::configuration::ConfigurationUpdate::Activated { .. }
+    );
+    if matches!(
+        update,
+        core::configuration::ConfigurationUpdate::Rejected { .. }
+    ) {
+        return Err(workspace_state_unavailable(request.correlation_id).into());
+    }
+    let result = core.runtime.complete_provider_onboarding(
+        input.expected_coordinator_generation,
+        input.expected_provider_generation,
+        now_ms,
+    );
+    if let Err(error) = result {
+        if configuration_changed && let Ok(current) = configuration.snapshot() {
+            let rollback = configuration
+                .save(&before_toml, current.generation, activated_at)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            if matches!(
+                rollback,
+                core::configuration::ConfigurationUpdate::Rejected { .. }
+            ) {
+                return Err(workspace_state_unavailable(request.correlation_id).into());
+            }
+        }
+        return Err(provider_boundary_error(error, request.correlation_id).into());
+    }
+    drop(configuration);
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_delete_profile(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderIdentityInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_no_pending_provider_operation(&core, now_ms, request.correlation_id.clone())?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if current.generation != input.expected_coordinator_generation
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before deletion",
+            true,
+        )
+        .into());
+    }
+    let profile = current
+        .providers
+        .providers
+        .iter()
+        .find(|record| record.profile.provider_id == input.provider_id)
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The provider is unavailable",
+                false,
+            )
+        })?;
+    if profile.profile.credential_reference.is_none() {
+        return provider_delete_profile_unmediated(&core, request, input, now_ms, false);
+    }
+    let facts = provider_action_facts(
+        "credential.add",
+        "c4os.provider.delete",
+        BTreeSet::from([ActionEffect::Delete]),
+        ActionSurface::Credential,
+        ActionScope::System,
+        ActionSensitivity::Credential,
+        &input.provider_id,
+        false,
+    );
+    match prepare_provider_action(
+        &core,
+        "c4os.provider.delete",
+        BTreeSet::from(["credential.add".into()]),
+        serde_json::json!({
+            "providerId": input.provider_id,
+            "credentialEffect": ActionEffect::Delete,
+        }),
+        input.provider_id.clone(),
+        sha256_bytes(input.provider_id.as_bytes()),
+        vec![facts],
+        now_ms,
+        request.correlation_id.clone(),
+    )? {
+        ProviderActionPreparation::Authorized(grant) => {
+            execute_provider_action(&core, grant, now_ms, request.correlation_id.clone(), || {
+                provider_delete_profile_unmediated(&core, request.clone(), input, now_ms, true)
+                    .map(|_| ())
+            })?;
+            provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+        }
+        ProviderActionPreparation::Pending { prompt, action } => {
+            let provider_id = input.provider_id.clone();
+            let provider_name = profile.profile.display_name.clone();
+            publish_pending_provider_operation(
+                &core,
+                request,
+                now_ms,
+                PendingProviderOperation {
+                    prompt,
+                    action,
+                    operation: ProviderApprovalOperation::DeleteProfile,
+                    provider_id,
+                    provider_name,
+                    payload: PendingProviderPayload::DeleteProfile(input),
+                },
+            )
+        }
+    }
+}
+
+fn provider_delete_profile_unmediated(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    input: ProviderIdentityInput,
+    now_ms: u64,
+    mediated: bool,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if (!mediated && current.generation != input.expected_coordinator_generation)
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before deletion",
+            true,
+        )
+        .into());
+    }
+    let previous_reference = current
+        .providers
+        .providers
+        .iter()
+        .find(|record| record.profile.provider_id == input.provider_id)
+        .and_then(|record| record.profile.credential_reference.clone());
+    let provider_dispatch = core
+        .runtime
+        .provider_dispatch_guard()
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    core.runtime
+        .cancel_active_provider_attempts(&input.provider_id, now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    let delete_coordinator_generation = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?
+        .generation;
+    let activated_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (configuration_changed, before_toml) = {
+        let configuration = core
+            .configuration
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let before_snapshot = configuration
+            .snapshot()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let before_toml = configuration
+            .last_known_good()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .map(|record| record.canonical_toml)
+            .unwrap_or_else(|| {
+                toml::to_string(&core::configuration::ConfigurationDocument::default())
+                    .expect("default app configuration serializes")
+            });
+        let mut document =
+            toml::from_str::<core::configuration::ConfigurationDocument>(&before_toml)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let selected_provider = document
+            .model_route
+            .as_deref()
+            .is_some_and(|route| route.starts_with(&format!("{}::", input.provider_id)));
+        if selected_provider {
+            document.model_route = None;
+        }
+        let changed = if selected_provider {
+            let proposed_toml = toml::to_string(&document)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let update = configuration
+                .save(&proposed_toml, before_snapshot.generation, activated_at)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            if matches!(
+                update,
+                core::configuration::ConfigurationUpdate::Rejected { .. }
+            ) {
+                return Err(workspace_state_unavailable(request.correlation_id).into());
+            }
+            matches!(
+                update,
+                core::configuration::ConfigurationUpdate::Activated { .. }
+            )
+        } else {
+            false
+        };
+        (changed, before_toml)
+    };
+    let result = core.runtime.delete_provider(
+        delete_coordinator_generation,
+        &input.provider_id,
+        input.expected_provider_generation,
+        now_ms,
+    );
+    if let Err(error) = result {
+        if configuration_changed {
+            let rollback_succeeded = core
+                .configuration
+                .lock()
+                .ok()
+                .and_then(|configuration| {
+                    let generation = configuration.snapshot().ok()?.generation;
+                    configuration
+                        .save(&before_toml, generation, activated_at)
+                        .ok()
+                })
+                .is_some_and(|update| {
+                    !matches!(
+                        update,
+                        core::configuration::ConfigurationUpdate::Rejected { .. }
+                    )
+                });
+            if !rollback_succeeded {
+                return Err(workspace_state_unavailable(request.correlation_id).into());
+            }
+        }
+        return Err(provider_boundary_error(error, request.correlation_id).into());
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let route_reload = core
+        .runtime_production
+        .published()
+        .map(|application| application.reload_active_provider_routes(now_ms))
+        .transpose();
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let route_reload = Ok::<Option<u64>, ()>(None);
+    drop(provider_dispatch);
+    if let (Some(vault), Some(reference)) =
+        (core.credential_vault.as_ref(), previous_reference.as_ref())
+    {
+        remove_provider_credential(vault, reference).map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "The deleted provider credential could not be removed securely",
+                true,
+            )
+        })?;
+    }
+    if route_reload.is_err() {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "The provider was deleted, but active runtime routes could not be rebuilt",
+            true,
+        )
+        .into());
+    }
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
+fn provider_answer_approval(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderApprovalInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if input.prompt_id.trim().is_empty() || input.prompt_id.len() > protocol::MAX_IDENTIFIER_BYTES {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The Provider approval identity is invalid",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let pending = core
+        .pending_provider_operations
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .remove(&input.prompt_id)
+        .ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::NotFound,
+                "The Provider approval is no longer active",
+                false,
+            )
+        })?;
+    let answer = match input.answer {
+        ArtifactApprovalAnswer::Allow => ApprovalAnswer::Allow,
+        ArtifactApprovalAnswer::Deny => ApprovalAnswer::Deny,
+    };
+    let response = match core.runtime.coordinator().and_then(|mut coordinator| {
+        coordinator
+            .answer_direct_approval(&input.prompt_id, answer, now_ms)
+            .map(|operation| operation.value)
+            .map_err(Into::into)
+    }) {
+        Ok(response) => response,
+        Err(_) => {
+            core.pending_provider_operations
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .insert(input.prompt_id.clone(), pending);
+            return Err(workspace_state_unavailable(request.correlation_id).into());
+        }
+    };
+    match response {
+        ApprovalResponse::Denied { prompt }
+            if prompt.prompt_id == input.prompt_id && prompt.action == pending.action =>
+        {
+            provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+        }
+        ApprovalResponse::Authorized { prompt, token }
+            if prompt.prompt_id == input.prompt_id && prompt.action == pending.action =>
+        {
+            let live =
+                current_provider_live_authority(&core, now_ms, request.correlation_id.clone())?;
+            let grant = ProviderActionGrant {
+                token,
+                prompt_id: Some(input.prompt_id),
+                action: pending.action,
+                live,
+            };
+            match pending.payload {
+                PendingProviderPayload::SaveProfile(provider_input) => {
+                    execute_provider_action(
+                        &core,
+                        grant,
+                        now_ms,
+                        request.correlation_id.clone(),
+                        || {
+                            provider_save_profile_unmediated(
+                                &core,
+                                request.clone(),
+                                provider_input,
+                                now_ms,
+                                true,
+                            )
+                            .map(|_| ())
+                        },
+                    )?;
+                    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+                }
+                PendingProviderPayload::TestConnection(provider_input) => {
+                    execute_provider_connection_probe(
+                        &core,
+                        &request,
+                        &provider_input,
+                        grant,
+                        now_ms,
+                    )?;
+                    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+                }
+                PendingProviderPayload::DeleteProfile(provider_input) => {
+                    execute_provider_action(
+                        &core,
+                        grant,
+                        now_ms,
+                        request.correlation_id.clone(),
+                        || {
+                            provider_delete_profile_unmediated(
+                                &core,
+                                request.clone(),
+                                provider_input,
+                                now_ms,
+                                true,
+                            )
+                            .map(|_| ())
+                        },
+                    )?;
+                    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+                }
+            }
+        }
+        _ => Err(workspace_state_unavailable(request.correlation_id).into()),
+    }
+}
+
+fn configuration_settings_snapshot(
+    core: &AppCoreState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ConfigurationSettingsSnapshot, ProtocolError> {
+    let policy = core
+        .runtime
+        .policy_settings_snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let snapshot = configuration
+        .snapshot()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    let default_approval_preset = configuration_settings_approval_preset(
+        snapshot.configuration.default_approval_preset,
+        policy.preset,
+    );
+    Ok(ConfigurationSettingsSnapshot {
+        authority: "rust-configuration-service",
+        generation: snapshot.generation,
+        coordinator_generation: policy.coordinator_generation,
+        policy_version: policy.policy_version,
+        default_approval_preset,
+        restore_last_workspace: snapshot.configuration.restore_last_workspace,
+        inherit_shell_environment: snapshot.configuration.inherit_shell_environment,
+        shell_environment_allowlist: snapshot.configuration.shell_environment_allowlist.clone(),
+        browser_environment: snapshot.configuration.browser_environment,
+        default_runtime: snapshot.configuration.default_runtime.clone(),
+        default_environment: snapshot.configuration.default_environment.clone(),
+        model_route: snapshot.configuration.model_route.clone(),
+        has_external_error: configuration.last_error().is_some(),
+    })
+}
+
+fn configuration_settings_approval_preset(
+    app_base_preset: core::configuration::ApprovalPreset,
+    effective_policy_preset: RuntimeApprovalPreset,
+) -> core::configuration::ApprovalPreset {
+    if effective_policy_preset == RuntimeApprovalPreset::Custom {
+        core::configuration::ApprovalPreset::Custom
+    } else {
+        app_base_preset
+    }
+}
+
+fn configuration_settings_envelope(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    now_ms: u64,
+) -> Result<ProtocolEnvelope<ConfigurationSettingsSnapshot>, ProtocolError> {
+    let payload = configuration_settings_snapshot(core, now_ms, request.correlation_id.clone())?;
+    protocol::snapshot_envelope(request, StateGeneration(payload.generation), payload)
+}
+
+fn configuration_settings_save_error(
+    error: core::services::ConfigurationPersistenceError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    match error {
+        core::services::ConfigurationPersistenceError::Configuration(
+            core::configuration::ConfigurationError::StaleGeneration(conflict),
+        ) => {
+            let changed_keys = conflict
+                .changed_keys
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(", ");
+            ProtocolError::new(
+                ProtocolErrorCode::StaleGeneration,
+                "Configuration changed before the settings could be saved",
+                true,
+            )
+            .with_correlation(correlation_id)
+            .with_detail(
+                "baseGeneration",
+                protocol::SafeDetailValue::Unsigned(conflict.base_generation),
+            )
+            .with_detail(
+                "activeGeneration",
+                protocol::SafeDetailValue::Unsigned(conflict.active_generation),
+            )
+            .with_detail("changedKeys", protocol::SafeDetailValue::Text(changed_keys))
+        }
+        _ => workspace_state_unavailable(correlation_id),
+    }
+}
+
+#[cfg(test)]
+mod configuration_settings_save_error_tests {
+    use super::*;
+
+    #[test]
+    fn configuration_projects_custom_for_category_rules_or_exceptions() {
+        assert_eq!(
+            configuration_settings_approval_preset(
+                core::configuration::ApprovalPreset::ApproveForMe,
+                RuntimeApprovalPreset::Custom,
+            ),
+            core::configuration::ApprovalPreset::Custom
+        );
+        assert_eq!(
+            configuration_settings_approval_preset(
+                core::configuration::ApprovalPreset::ApproveForMe,
+                RuntimeApprovalPreset::ApproveForMe,
+            ),
+            core::configuration::ApprovalPreset::ApproveForMe
+        );
+    }
+
+    #[test]
+    fn stale_generation_keeps_both_cursors_and_changed_keys() {
+        let correlation_id = serde_json::from_str::<protocol::CorrelationId>(
+            "\"correlation:00000000-0000-4000-8000-000000000413\"",
+        )
+        .expect("correlation id");
+        let error = configuration_settings_save_error(
+            core::services::ConfigurationPersistenceError::Configuration(
+                core::configuration::ConfigurationError::StaleGeneration(
+                    core::configuration::StaleGenerationConflict {
+                        base_generation: 3,
+                        active_generation: 5,
+                        changed_keys: BTreeSet::from([
+                            "browser_environment".to_owned(),
+                            "restore_last_workspace".to_owned(),
+                        ]),
+                    },
+                ),
+            ),
+            correlation_id.clone(),
+        );
+
+        assert_eq!(error.code, ProtocolErrorCode::StaleGeneration);
+        assert!(error.retryable);
+        assert_eq!(error.correlation_id, Some(correlation_id));
+        assert_eq!(
+            error.details.get("baseGeneration"),
+            Some(&protocol::SafeDetailValue::Unsigned(3))
+        );
+        assert_eq!(
+            error.details.get("activeGeneration"),
+            Some(&protocol::SafeDetailValue::Unsigned(5))
+        );
+        assert_eq!(
+            error.details.get("changedKeys"),
+            Some(&protocol::SafeDetailValue::Text(
+                "browser_environment, restore_last_workspace".into()
+            ))
+        );
+    }
+}
+
+fn runtime_approval_preset(preset: core::configuration::ApprovalPreset) -> RuntimeApprovalPreset {
+    match preset {
+        core::configuration::ApprovalPreset::AskForApproval => {
+            RuntimeApprovalPreset::AskForApproval
+        }
+        core::configuration::ApprovalPreset::ApproveSafeActions => {
+            RuntimeApprovalPreset::ApproveSafeActions
+        }
+        core::configuration::ApprovalPreset::ApproveForMe => RuntimeApprovalPreset::ApproveForMe,
+        // Custom is a projection of concrete overrides, not a durable base
+        // preset. Legacy Custom documents fail closed to Ask for approval.
+        core::configuration::ApprovalPreset::Custom => RuntimeApprovalPreset::AskForApproval,
+    }
+}
+
+#[tauri::command]
+fn configuration_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ConfigurationSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    configuration_settings_envelope(&core, request, now_ms).map_err(Into::into)
+}
+
+#[tauri::command]
+fn configuration_save_settings(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ConfigurationSettingsInput,
+) -> Result<ProtocolEnvelope<ConfigurationSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_configuration_generation
+        || input
+            .default_runtime
+            .as_deref()
+            .is_some_and(|runtime| !matches!(runtime, "opencode" | "pi"))
+        || input
+            .default_environment
+            .as_deref()
+            .is_some_and(|environment| environment != "local")
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The Configuration settings request is invalid",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current_policy = core
+        .runtime
+        .policy_settings_snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if current_policy.coordinator_generation != input.expected_coordinator_generation
+        || current_policy.policy_version != input.expected_policy_version
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Policy changed before Configuration could be saved",
+            true,
+        )
+        .into());
+    }
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current_toml = configuration
+        .last_known_good()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .map(|record| record.canonical_toml)
+        .unwrap_or_else(|| {
+            toml::to_string(&core::configuration::ConfigurationDocument::default())
+                .expect("default app configuration serializes")
+        });
+    let mut document = toml::from_str::<core::configuration::ConfigurationDocument>(&current_toml)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current_app_preset = configuration
+        .snapshot()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .configuration
+        .default_approval_preset;
+    let desired_app_preset =
+        if input.default_approval_preset == core::configuration::ApprovalPreset::Custom {
+            current_app_preset
+        } else {
+            input.default_approval_preset
+        };
+    document.default_approval_preset = Some(desired_app_preset);
+    document.restore_last_workspace = Some(input.restore_last_workspace);
+    document.inherit_shell_environment = Some(input.inherit_shell_environment);
+    document.browser_environment = Some(input.browser_environment);
+    document.default_runtime = input.default_runtime;
+    document.default_environment = input.default_environment;
+    let proposed_toml = toml::to_string(&document)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let activated_at = i64::try_from(now_ms / 1_000)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let committed_configuration_generation = match configuration
+        .save(
+            &proposed_toml,
+            input.expected_configuration_generation,
+            activated_at,
+        )
+        .map_err(|error| configuration_settings_save_error(error, request.correlation_id.clone()))?
+    {
+        core::configuration::ConfigurationUpdate::Rejected { .. } => {
+            return Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Configuration validation rejected the settings change",
+                false,
+            )
+            .into());
+        }
+        core::configuration::ConfigurationUpdate::Activated { snapshot, .. }
+        | core::configuration::ConfigurationUpdate::Unchanged { snapshot }
+        | core::configuration::ConfigurationUpdate::DeduplicatedSelfWrite { snapshot } => {
+            snapshot.generation
+        }
+    };
+    drop(configuration);
+    if reconcile_active_configuration_policy(
+        &core.configuration,
+        &core.active_workspace,
+        &core.conversation,
+        &core.runtime,
+        now_ms,
+    )
+    .is_err()
+    {
+        if let Ok(configuration) = core.configuration.lock() {
+            let rollback = configuration
+                .save(
+                    &current_toml,
+                    committed_configuration_generation,
+                    activated_at,
+                )
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            if matches!(
+                rollback,
+                core::configuration::ConfigurationUpdate::Rejected { .. }
+            ) {
+                return Err(workspace_state_unavailable(request.correlation_id).into());
+            }
+            drop(configuration);
+            let _ = reconcile_active_configuration_policy(
+                &core.configuration,
+                &core.active_workspace,
+                &core.conversation,
+                &core.runtime,
+                now_ms,
+            );
+        }
+        return Err(workspace_state_unavailable(request.correlation_id).into());
+    }
+    configuration_settings_envelope(&core, request, now_ms).map_err(Into::into)
+}
+
+#[tauri::command]
+fn configuration_open_external(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ConfigurationExternalOpenSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let payload = configuration_settings_snapshot(&core, now_ms, request.correlation_id.clone())?;
+    if payload.generation != request.expected_generation.0 {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Configuration changed before the file could be opened",
+            true,
+        )
+        .into());
+    }
+    let path = core.c4os_home.join("config.toml");
+    let opened = Command::new("/usr/bin/open")
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !opened {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "The C4OS configuration file could not be opened",
+            true,
+        )
+        .into());
+    }
+    protocol::snapshot_envelope(
+        request,
+        StateGeneration(payload.generation),
+        ConfigurationExternalOpenSnapshot { opened },
+    )
+    .map_err(Into::into)
+}
+
+const CONFIGURATION_RULE_PREFIX: &str = "effective-configuration:";
+
+const POLICY_SETTING_KEYS: [(&str, PolicyGroup); 28] = [
+    ("workspace.read", PolicyGroup::WorkspaceFiles),
+    ("workspace.modify", PolicyGroup::WorkspaceFiles),
+    ("workspace.delete", PolicyGroup::WorkspaceFiles),
+    ("workspace.outside", PolicyGroup::WorkspaceFiles),
+    ("command.inspect", PolicyGroup::CommandsAndProcesses),
+    ("command.workspace", PolicyGroup::CommandsAndProcesses),
+    ("command.system", PolicyGroup::CommandsAndProcesses),
+    ("process.control", PolicyGroup::CommandsAndProcesses),
+    ("git.local.read", PolicyGroup::VersionControl),
+    ("git.local.change", PolicyGroup::VersionControl),
+    ("git.remote.read", PolicyGroup::VersionControl),
+    ("git.remote.publish", PolicyGroup::VersionControl),
+    ("network.retrieve", PolicyGroup::NetworkAndSharing),
+    ("network.publish", PolicyGroup::NetworkAndSharing),
+    ("network.listen", PolicyGroup::NetworkAndSharing),
+    ("network.upload", PolicyGroup::NetworkAndSharing),
+    ("browser.view", PolicyGroup::BrowserAndDesktop),
+    ("browser.interact", PolicyGroup::BrowserAndDesktop),
+    ("browser.authenticated", PolicyGroup::BrowserAndDesktop),
+    ("desktop.control", PolicyGroup::BrowserAndDesktop),
+    ("credential.use", PolicyGroup::Credentials),
+    ("credential.add", PolicyGroup::Credentials),
+    ("credential.reveal", PolicyGroup::Credentials),
+    ("extension.read", PolicyGroup::ExtensionsAndC4os),
+    ("extension.use", PolicyGroup::ExtensionsAndC4os),
+    ("extension.configure", PolicyGroup::ExtensionsAndC4os),
+    ("c4os.policy", PolicyGroup::ExtensionsAndC4os),
+    ("artifact.export", PolicyGroup::ExtensionsAndC4os),
+];
+
+fn project_policy_settings(
+    coordinator_generation: u64,
+    policy_version: u64,
+    revocation_epoch: u64,
+    configuration: &PolicyConfiguration,
+) -> PolicySettingsSnapshot {
+    let mut category_values = POLICY_SETTING_KEYS
+        .iter()
+        .map(|(key, _)| ((*key).to_owned(), None))
+        .collect::<BTreeMap<_, _>>();
+    let mut effective_category_values = category_values.clone();
+    for (key, group) in POLICY_SETTING_KEYS {
+        if let Some(value) = category_values.get_mut(key) {
+            *value = projected_policy_category_value(
+                configuration,
+                key,
+                group,
+                ProjectedPolicyRuleSource::Editable,
+            );
+        }
+        if let Some(value) = effective_category_values.get_mut(key) {
+            *value = projected_policy_category_value(
+                configuration,
+                key,
+                group,
+                ProjectedPolicyRuleSource::Effective,
+            );
+        }
+    }
+    let preset = if configuration.category_rules.is_empty() && configuration.exceptions.is_empty() {
+        configuration.preset
+    } else {
+        RuntimeApprovalPreset::Custom
+    };
+    PolicySettingsSnapshot {
+        authority: "rust-policy-service",
+        coordinator_generation,
+        policy_version,
+        revocation_epoch,
+        preset,
+        base_preset: configuration.preset,
+        category_values,
+        effective_category_values,
+        exceptions: configuration
+            .exceptions
+            .iter()
+            .map(policy_exception_summary)
+            .collect(),
+        maximum_authority_rule_count: configuration.maximum_authority.len(),
+        managed_requirement_count: configuration.managed_requirements.len(),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProjectedPolicyRuleSource {
+    Editable,
+    Configuration,
+    Effective,
+}
+
+fn strictest_policy_decision(left: PolicyDecision, right: PolicyDecision) -> PolicyDecision {
+    match (left, right) {
+        (PolicyDecision::Deny, _) | (_, PolicyDecision::Deny) => PolicyDecision::Deny,
+        (PolicyDecision::Ask, _) | (_, PolicyDecision::Ask) => PolicyDecision::Ask,
+        _ => PolicyDecision::Allow,
+    }
+}
+
+fn projected_policy_category_value(
+    configuration: &PolicyConfiguration,
+    key: &str,
+    group: PolicyGroup,
+    source: ProjectedPolicyRuleSource,
+) -> Option<PolicyDecision> {
+    let expected_ids = policy_rules_for_setting(key, group, PolicyDecision::Ask)
+        .into_iter()
+        .map(|rule| rule.id)
+        .collect::<Vec<_>>();
+    let decisions = expected_ids
+        .iter()
+        .map(|expected_id| {
+            configuration
+                .category_rules
+                .iter()
+                .filter(|rule| {
+                    let configuration_id = rule.id.strip_prefix(CONFIGURATION_RULE_PREFIX);
+                    match source {
+                        ProjectedPolicyRuleSource::Editable => rule.id == *expected_id,
+                        ProjectedPolicyRuleSource::Configuration => {
+                            configuration_id.is_some_and(|id| id == expected_id)
+                        }
+                        ProjectedPolicyRuleSource::Effective => {
+                            rule.id == *expected_id
+                                || configuration_id.is_some_and(|id| id == expected_id)
+                        }
+                    }
+                })
+                .map(|rule| rule.decision)
+                .reduce(strictest_policy_decision)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    decisions
+        .first()
+        .copied()
+        .filter(|first| decisions.iter().all(|decision| decision == first))
+}
+
+fn replace_editable_policy_rules(
+    configuration: &mut PolicyConfiguration,
+    category_values: &BTreeMap<String, Option<PolicyDecision>>,
+) {
+    let existing_editable = POLICY_SETTING_KEYS
+        .iter()
+        .filter_map(|(key, group)| {
+            let expected_ids = policy_rules_for_setting(key, *group, PolicyDecision::Ask)
+                .into_iter()
+                .map(|rule| rule.id)
+                .collect::<BTreeSet<_>>();
+            configuration
+                .category_rules
+                .iter()
+                .any(|rule| {
+                    !rule.id.starts_with(CONFIGURATION_RULE_PREFIX)
+                        && expected_ids.contains(&rule.id)
+                })
+                .then_some(*key)
+        })
+        .collect::<BTreeSet<_>>();
+    let configuration_values = POLICY_SETTING_KEYS
+        .iter()
+        .map(|(key, group)| {
+            (
+                *key,
+                projected_policy_category_value(
+                    configuration,
+                    key,
+                    *group,
+                    ProjectedPolicyRuleSource::Configuration,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    configuration
+        .category_rules
+        .retain(|rule| rule.id.starts_with(CONFIGURATION_RULE_PREFIX));
+    configuration.category_rules.extend(
+        POLICY_SETTING_KEYS
+            .iter()
+            .filter_map(|(key, group)| {
+                category_values
+                    .get(*key)
+                    .copied()
+                    .flatten()
+                    .filter(|decision| {
+                        existing_editable.contains(key)
+                            || configuration_values.get(key).copied().flatten() != Some(*decision)
+                    })
+                    .map(|decision| policy_rules_for_setting(key, *group, decision))
+            })
+            .flatten(),
+    );
+}
+
+fn policy_exception_summary(exception: &ConcreteException) -> PolicyExceptionSummary {
+    let duration = match &exception.duration {
+        ExceptionDuration::Session { .. } => "Current Chat session".to_owned(),
+        ExceptionDuration::Until { expires_at_ms } => format!("Until {expires_at_ms}"),
+        ExceptionDuration::Persistent => "Persistent until revoked".to_owned(),
+    };
+    PolicyExceptionSummary {
+        exception_id: exception.id.clone(),
+        decision: exception.decision,
+        action: exception.action_kind.clone(),
+        scope: format!(
+            "{} · {}",
+            exception.canonical_target, exception.workspace_id
+        ),
+        source: exception
+            .plugin_or_mcp_id
+            .clone()
+            .unwrap_or_else(|| exception.runtime_id.clone()),
+        duration,
+    }
+}
+
+fn same_exception_action_signature(left: &ConcreteException, right: &ConcreteException) -> bool {
+    left.action_kind == right.action_kind
+        && left.native_tool == right.native_tool
+        && left.surface == right.surface
+        && left.effects == right.effects
+        && left.scope == right.scope
+        && left.initiator == right.initiator
+        && left.sensitivity == right.sensitivity
+        && left.request_origin == right.request_origin
+        && left.repository_state == right.repository_state
+        && left.inside_active_project == right.inside_active_project
+        && left.canonical_target == right.canonical_target
+        && left.workspace_id == right.workspace_id
+        && left.runtime_id == right.runtime_id
+        && left.environment_id == right.environment_id
+        && left.plugin_or_mcp_id == right.plugin_or_mcp_id
+        && exception_durations_share_replacement_scope(&left.duration, &right.duration)
+}
+
+fn exception_durations_share_replacement_scope(
+    left: &ExceptionDuration,
+    right: &ExceptionDuration,
+) -> bool {
+    match (left, right) {
+        (
+            ExceptionDuration::Session {
+                session_id: left_session,
+            },
+            ExceptionDuration::Session {
+                session_id: right_session,
+            },
+        ) => left_session == right_session,
+        (ExceptionDuration::Persistent, _) | (_, ExceptionDuration::Persistent) => true,
+        (
+            ExceptionDuration::Until {
+                expires_at_ms: left_expiry,
+            },
+            ExceptionDuration::Until {
+                expires_at_ms: right_expiry,
+            },
+        ) => left_expiry == right_expiry,
+        _ => false,
+    }
+}
+
+fn policy_rules_for_setting(
+    key: &str,
+    group: PolicyGroup,
+    decision: PolicyDecision,
+) -> Vec<CategoryRule> {
+    use security::policy::ActionEffect::{
+        Capture, Control, Create, Delete, Execute, Listen, Modify, Publish, Read, Reveal, Upload,
+    };
+    let variants: Vec<(&str, RuleMatcher)> = match key {
+        "workspace.read" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::File);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.scope = Some(ActionScope::Workspace);
+            vec![("read", matcher)]
+        }
+        "workspace.modify" => [Create, Modify]
+            .into_iter()
+            .map(|effect| {
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(ActionSurface::File);
+                matcher.effects = BTreeSet::from([effect]);
+                matcher.scope = Some(ActionScope::Workspace);
+                (if effect == Create { "create" } else { "modify" }, matcher)
+            })
+            .collect(),
+        "workspace.delete" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::File);
+            matcher.effects = BTreeSet::from([Delete]);
+            matcher.scope = Some(ActionScope::Workspace);
+            vec![("delete", matcher)]
+        }
+        "workspace.outside" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::File);
+            matcher.scope = Some(ActionScope::ExternalLocal);
+            vec![("external-local", matcher)]
+        }
+        "command.inspect" => [ActionSurface::Terminal, ActionSurface::Process]
+            .into_iter()
+            .map(|surface| {
+                let id = if surface == ActionSurface::Terminal {
+                    "terminal"
+                } else {
+                    "process"
+                };
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(surface);
+                matcher.effects = BTreeSet::from([Read]);
+                (id, matcher)
+            })
+            .collect(),
+        "command.workspace" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Terminal);
+            matcher.effects = BTreeSet::from([Execute]);
+            matcher.scope = Some(ActionScope::Workspace);
+            vec![("workspace", matcher)]
+        }
+        "command.system" => [ActionScope::ExternalLocal, ActionScope::System]
+            .into_iter()
+            .map(|scope| {
+                let id = if scope == ActionScope::ExternalLocal {
+                    "external-local"
+                } else {
+                    "system"
+                };
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(ActionSurface::Terminal);
+                matcher.effects = BTreeSet::from([Execute]);
+                matcher.scope = Some(scope);
+                (id, matcher)
+            })
+            .collect(),
+        "process.control" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Process);
+            matcher.effects = BTreeSet::from([Control]);
+            vec![("control", matcher)]
+        }
+        "git.local.read" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Git);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.scope = Some(ActionScope::Workspace);
+            vec![("read", matcher)]
+        }
+        "git.local.change" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Git);
+            matcher.effects = BTreeSet::from([Modify]);
+            matcher.scope = Some(ActionScope::Workspace);
+            vec![("change", matcher)]
+        }
+        "git.remote.read" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Git);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.scope = Some(ActionScope::Remote);
+            vec![("read", matcher)]
+        }
+        "git.remote.publish" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Git);
+            matcher.effects = BTreeSet::from([Publish]);
+            matcher.scope = Some(ActionScope::Remote);
+            vec![("publish", matcher)]
+        }
+        "network.retrieve" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Network);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.scope = Some(ActionScope::Remote);
+            vec![("retrieve", matcher)]
+        }
+        "network.publish" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.effects = BTreeSet::from([Publish]);
+            matcher.scope = Some(ActionScope::Remote);
+            vec![("publish", matcher)]
+        }
+        "network.listen" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.effects = BTreeSet::from([Listen]);
+            vec![("listen", matcher)]
+        }
+        "network.upload" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.effects = BTreeSet::from([Upload]);
+            vec![("upload", matcher)]
+        }
+        "browser.view" => [Read, Capture]
+            .into_iter()
+            .map(|effect| {
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(ActionSurface::Browser);
+                matcher.effects = BTreeSet::from([effect]);
+                (if effect == Read { "read" } else { "capture" }, matcher)
+            })
+            .collect(),
+        "browser.interact" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Browser);
+            matcher.effects = BTreeSet::from([Control]);
+            vec![("control", matcher)]
+        }
+        "browser.authenticated" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Browser);
+            matcher.sensitivity = Some(ActionSensitivity::Authenticated);
+            vec![("authenticated", matcher)]
+        }
+        "desktop.control" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Desktop);
+            matcher.effects = BTreeSet::from([Control]);
+            vec![("control", matcher)]
+        }
+        "credential.use" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Credential);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.action_kind = Some("credential.use".into());
+            vec![("use", matcher)]
+        }
+        "credential.add" => [Create, Modify, Delete]
+            .into_iter()
+            .map(|effect| {
+                let id = match effect {
+                    Create => "create",
+                    Modify => "modify",
+                    Delete => "delete",
+                    _ => unreachable!(),
+                };
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(ActionSurface::Credential);
+                matcher.effects = BTreeSet::from([effect]);
+                (id, matcher)
+            })
+            .collect(),
+        "credential.reveal" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::Credential);
+            matcher.effects = BTreeSet::from([Reveal]);
+            matcher.action_kind = Some("credential.reveal".into());
+            vec![("reveal", matcher)]
+        }
+        "extension.read" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::C4os);
+            matcher.effects = BTreeSet::from([Read]);
+            matcher.action_kind = Some("extension.read".into());
+            vec![("read", matcher)]
+        }
+        "extension.use" => {
+            let matcher = RuleMatcher {
+                extension_authority_present: Some(true),
+                ..RuleMatcher::default()
+            };
+            vec![("use", matcher)]
+        }
+        "extension.configure" => [Create, Modify, Delete, Control]
+            .into_iter()
+            .map(|effect| {
+                let id = match effect {
+                    Create => "create",
+                    Modify => "modify",
+                    Delete => "delete",
+                    Control => "control",
+                    _ => unreachable!(),
+                };
+                let mut matcher = RuleMatcher::default();
+                matcher.surface = Some(ActionSurface::C4os);
+                matcher.effects = BTreeSet::from([effect]);
+                matcher.action_kind = Some("extension.configure".into());
+                (id, matcher)
+            })
+            .collect(),
+        "c4os.policy" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::C4os);
+            matcher.effects = BTreeSet::from([Modify]);
+            matcher.action_kind = Some("c4os.policy".into());
+            vec![("modify", matcher)]
+        }
+        "artifact.export" => {
+            let mut matcher = RuleMatcher::default();
+            matcher.surface = Some(ActionSurface::C4os);
+            matcher.effects = BTreeSet::from([Upload]);
+            matcher.action_kind = Some("artifact.export".into());
+            vec![("upload", matcher)]
+        }
+        _ => unreachable!("validated Policy setting key"),
+    };
+    variants
+        .into_iter()
+        .map(|(variant, matcher)| CategoryRule {
+            id: format!("{key}#{variant}"),
+            group,
+            decision,
+            matcher,
+        })
+        .collect()
+}
+
+fn policy_settings_envelope(
+    request: SnapshotRequest,
+    payload: PolicySettingsSnapshot,
+) -> Result<ProtocolEnvelope<PolicySettingsSnapshot>, ProtocolError> {
+    protocol::snapshot_envelope(request, StateGeneration(payload.policy_version), payload)
+}
+
+fn policy_boundary_error(
+    error: RuntimeApplicationError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    match error {
+        RuntimeApplicationError::Generation { .. }
+        | RuntimeApplicationError::InvalidPolicyAuthority => ProtocolError::new(
+            ProtocolErrorCode::StaleGeneration,
+            "Policy changed before the operation completed",
+            true,
+        )
+        .with_correlation(correlation_id),
+        _ => workspace_state_unavailable(correlation_id),
+    }
+}
+
+#[tauri::command]
+fn policy_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<PolicySettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let payload = core
+        .runtime
+        .policy_settings_snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    policy_settings_envelope(request, payload).map_err(Into::into)
+}
+
+#[tauri::command]
+fn policy_save(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: PolicySettingsInput,
+) -> Result<ProtocolEnvelope<PolicySettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_policy_version
+        || input.category_values.len() != POLICY_SETTING_KEYS.len()
+        || POLICY_SETTING_KEYS
+            .iter()
+            .any(|(key, _)| !input.category_values.contains_key(*key))
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The Advanced Policies request is invalid",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current = core
+        .runtime
+        .policy_settings_snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if current.coordinator_generation != input.expected_coordinator_generation
+        || current.policy_version != input.expected_policy_version
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Policy changed before the rules could be saved",
+            true,
+        )
+        .into());
+    }
+    let mut configuration = core
+        .runtime
+        .raw_coordinator()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .policy_configuration()
+        .clone();
+    replace_editable_policy_rules(&mut configuration, &input.category_values);
+    let payload = core
+        .runtime
+        .replace_policy_settings(
+            input.expected_coordinator_generation,
+            input.expected_policy_version,
+            configuration,
+            true,
+            now_ms,
+        )
+        .map_err(|error| policy_boundary_error(error, request.correlation_id.clone()))?;
+    policy_settings_envelope(request, payload).map_err(Into::into)
+}
+
+#[tauri::command]
+fn policy_revoke_exception(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: PolicyExceptionInput,
+) -> Result<ProtocolEnvelope<PolicySettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_policy_version
+        || input.exception_id.trim().is_empty()
+        || input.exception_id.len() > protocol::MAX_IDENTIFIER_BYTES
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The Policy exception request is invalid",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let _policy_transition = core
+        .runtime
+        .policy_transition_guard()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current = core
+        .runtime
+        .policy_settings_snapshot(now_ms)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if current.coordinator_generation != input.expected_coordinator_generation
+        || current.policy_version != input.expected_policy_version
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Policy changed before the exception could be revoked",
+            true,
+        )
+        .into());
+    }
+    let mut configuration = core
+        .runtime
+        .raw_coordinator()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .policy_configuration()
+        .clone();
+    let before = configuration.exceptions.len();
+    configuration
+        .exceptions
+        .retain(|exception| exception.id != input.exception_id);
+    if configuration.exceptions.len() == before {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::NotFound,
+            "The Policy exception no longer exists",
+            false,
+        )
+        .into());
+    }
+    let payload = core
+        .runtime
+        .replace_policy_settings(
+            input.expected_coordinator_generation,
+            input.expected_policy_version,
+            configuration,
+            true,
+            now_ms,
+        )
+        .map_err(|error| policy_boundary_error(error, request.correlation_id.clone()))?;
+    policy_settings_envelope(request, payload).map_err(Into::into)
+}
+
 #[tauri::command]
 fn runtime_core_snapshot(
     core: tauri::State<'_, AppCoreState>,
@@ -19006,6 +23804,15 @@ fn runtime_core_snapshot(
     );
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     let pending_approvals = Vec::new();
+    let model_routes = core
+        .runtime
+        .effective_conversation_models(None, now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .into_iter()
+        .map(|((provider_id, model_id), descriptor)| {
+            runtime_model_route_summary(provider_id, model_id, descriptor)
+        })
+        .collect();
     let payload = RuntimeCoreSnapshot {
         authority: "rust-core",
         provider_generation: runtime.providers.generation,
@@ -19038,6 +23845,7 @@ fn runtime_core_snapshot(
                 process_generation: record.process_generation,
             })
             .collect(),
+        model_routes,
         pending_approvals,
     };
     protocol::snapshot_envelope(request, generation, payload)
@@ -19146,6 +23954,7 @@ fn runtime_production_answer_approval(
     correlation_id: String,
     prompt_id: String,
     answer: ApprovalAnswer,
+    remember: RuntimeApprovalRemember,
 ) -> Result<ProtocolEnvelope<ProductionRuntimeApprovalSettlement>, protocol::StructuredCoreError> {
     let request_correlation = request.correlation_id.clone();
     let now_ms = current_time_ms()
@@ -19157,6 +23966,17 @@ fn runtime_production_answer_approval(
             .generation,
     );
     let _ = protocol::snapshot_envelope(request.clone(), current_generation, ())?;
+    if remember != RuntimeApprovalRemember::Once
+        && core.mcp_sampling_approvals.contains_prompt(&prompt_id)
+    {
+        return Err(platform_boundary_error(
+            request_correlation,
+            ProtocolErrorCode::InvalidPayload,
+            "MCP sampling approvals can only be allowed once",
+            false,
+        )
+        .into());
+    }
     let sampling_answered = answer_runtime_sampling_approval(
         &core.runtime,
         &core.mcp_sampling_approvals,
@@ -19180,6 +24000,9 @@ fn runtime_production_answer_approval(
                 now_ms,
             )
             .map_err(|_| runtime_production_unavailable(request_correlation))?;
+        core.runtime
+            .settle_runtime_approval_memory(&prompt_id, answer, remember, now_ms)
+            .map_err(|_| runtime_production_unavailable(request.correlation_id.clone()))?;
     }
     let generation = StateGeneration(
         core.runtime
@@ -20117,6 +24940,7 @@ fn start_runtime_production_initialization(
     mcp_cancellations: ProductionMcpCancellationRegistry,
     sampling_parents: mcp::production_sampling::McpSamplingParentRegistry,
     managed: Arc<ManagedProductionRuntime>,
+    preferred_runtime: Option<String>,
 ) -> Result<(), std::io::Error> {
     thread::Builder::new()
         .name("c4os-production-runtime-initialization".into())
@@ -20147,6 +24971,7 @@ fn start_runtime_production_initialization(
                         )
                     });
                 let now_ms = current_time_ms().map_err(|error| error.to_string())?;
+                let has_workspace = workspace_binding.is_some();
                 if let Some((workspace_id, database)) = workspace_binding {
                     let installations = bootstrap
                         .runtime_installations(&workspace_id, &c4os_home)
@@ -20171,6 +24996,19 @@ fn start_runtime_production_initialization(
                     ),
                 );
                 start_runtime_production_driver(&application).map_err(|error| error.to_string())?;
+                if has_workspace {
+                    let snapshot = runtime
+                        .snapshot(now_ms)
+                        .map_err(|error| error.to_string())?;
+                    let runtime_id = preferred_runtime_installation_id(
+                        &snapshot.runtimes.records,
+                        preferred_runtime.as_deref(),
+                    )
+                    .ok_or_else(|| "no compatible production runtime is installed".to_string())?;
+                    application
+                        .activate_runtime(snapshot.generation, &runtime_id, now_ms)
+                        .map_err(|error| error.to_string())?;
+                }
                 Ok(application)
             };
 
@@ -20308,9 +25146,11 @@ pub fn run() {
             .map_err(|error| std::io::Error::other(error.to_string()))?;
             let platform_snapshot = platform.initial_snapshot(initial_theme);
             let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
-            let credential_vault = CredentialServiceState::initialize(&c4os_home)
-                .map_err(|error| std::io::Error::other(error.to_string()))?
-                .vault();
+            let credential_service = CredentialServiceState::initialize(&c4os_home)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let credential_vault = credential_service.vault();
+            let credential_protection = credential_service.protection();
+            let credential_fallback_required = credential_service.requires_explicit_fallback();
             let application_resource_dir = app.path().resource_dir()?;
             let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
             let (database, _) = core::database::DatabaseActor::start(
@@ -20343,6 +25183,10 @@ pub fn run() {
                 })
                 .collect::<Vec<_>>();
             let now_ms = current_time_ms()?;
+            let initial_configuration = configuration.snapshot()?.configuration;
+            let initial_policy_preset =
+                runtime_approval_preset(initial_configuration.default_approval_preset);
+            let preferred_runtime = initial_configuration.default_runtime.clone();
             let extensions = extension::service::ExtensionService::restore(
                 Arc::clone(&database),
                 &c4os_home,
@@ -20364,10 +25208,48 @@ pub fn run() {
                     label: "c4os-production".into(),
                 },
             )?;
-            let runtime = Arc::new(RuntimeApplicationService::restore(
+            let runtime = Arc::new(RuntimeApplicationService::restore_with_initial_policy(
                 Arc::clone(&database),
                 now_ms,
+                Some(initial_policy_preset),
             )?);
+            let unavailable_provider_credentials = runtime
+                .snapshot(now_ms)?
+                .providers
+                .providers
+                .into_iter()
+                .filter_map(|record| record.profile.credential_reference)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|reference| {
+                    let available = credential_vault
+                        .as_ref()
+                        .map(|vault| vault.contains(&reference))
+                        .transpose()
+                        .map_err(|error| std::io::Error::other(error.to_string()))?
+                        .unwrap_or(false);
+                    Ok::<_, std::io::Error>((!available).then_some(reference))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            for reference in unavailable_provider_credentials {
+                runtime.invalidate_provider_credential_reference(&reference, now_ms)?;
+            }
+            let provider_credential_observer = credential_vault
+                .as_ref()
+                .map(|vault| {
+                    let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
+                        Arc::new(ProductionProviderCredentialObserver {
+                            runtime: Arc::downgrade(&runtime),
+                        });
+                    vault
+                        .register_mutation_observer(Arc::clone(&observer))
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
+                    Ok::<_, std::io::Error>(observer)
+                })
+                .transpose()?;
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             let runtime_resource_dir = application_resource_dir.clone();
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -20390,7 +25272,46 @@ pub fn run() {
             } else {
                 ConversationApplicationState::default()
             };
+            let configuration = Arc::new(Mutex::new(configuration));
             let active_workspace = Arc::new(Mutex::new(active_workspace));
+            let conversation = Arc::new(Mutex::new(conversation));
+            let app_policy_runtime = Arc::downgrade(&runtime);
+            let app_policy_workspace = Arc::clone(&active_workspace);
+            let app_policy_conversation = Arc::clone(&conversation);
+            configuration
+                .lock()
+                .map_err(|_| std::io::Error::other("app configuration is unavailable"))?
+                .set_activation_observer(
+                    runtime.policy_transition_gate(),
+                    Arc::new(move |app_configuration| {
+                        let runtime = app_policy_runtime.upgrade().ok_or(())?;
+                        let effective = resolve_active_configuration_snapshot(
+                            app_configuration,
+                            &app_policy_workspace,
+                            &app_policy_conversation,
+                        )?;
+                        let now_ms = current_time_ms().map_err(|_| ())?;
+                        runtime
+                            .reconcile_effective_configuration_policy(
+                                effective.configuration.as_ref(),
+                                now_ms,
+                            )
+                            .map_err(|_| ())
+                    }),
+                )?;
+            if let Some(workspace) = active_workspace
+                .lock()
+                .map_err(|_| std::io::Error::other("active Workspace is unavailable"))?
+                .as_ref()
+            {
+                install_workspace_configuration_activation_observer(
+                    workspace,
+                    Arc::clone(&configuration),
+                    Arc::clone(&active_workspace),
+                    Arc::clone(&conversation),
+                    &runtime,
+                )?;
+            }
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             let mcp_sampling_broker = Arc::new(
                 mcp::production_sampling::ProductionMcpSamplingBroker::new(Arc::clone(&runtime)),
@@ -20466,18 +25387,22 @@ pub fn run() {
                 c4os_home: c4os_home.clone(),
                 bundled_skill_root: application_resource_dir.join("skills"),
                 mcp: Arc::clone(&mcp),
+                credential_vault: credential_vault.clone(),
+                credential_protection,
+                credential_fallback_required: AtomicBool::new(credential_fallback_required),
                 _mcp_credential_observer: mcp_credential_observer,
+                _provider_credential_observer: provider_credential_observer,
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 mcp_cancellations: mcp_cancellations.clone(),
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 mcp_sampling_approvals: mcp_sampling_approvals.clone(),
                 extensions: Mutex::new(extensions),
                 hook_supervisor: Mutex::new(hook_supervisor),
-                configuration: Mutex::new(configuration),
+                configuration: Arc::clone(&configuration),
                 active_workspace: Arc::clone(&active_workspace),
                 conversation_operation: Mutex::new(()),
                 artifact_operation,
-                conversation: Mutex::new(conversation),
+                conversation: Arc::clone(&conversation),
                 artifact,
                 terminal,
                 browser_profiles: Mutex::new(browser_profiles),
@@ -20489,6 +25414,8 @@ pub fn run() {
                 platform,
                 platform_snapshot,
                 picker_grants: Mutex::new(PickerGrantRegistry::default()),
+                pending_workspace_clones: Mutex::new(BTreeMap::new()),
+                pending_provider_operations: Mutex::new(BTreeMap::new()),
                 conversation_drop: Mutex::new(NativeConversationDropState::default()),
                 conversation_branch: Mutex::new(NativeConversationBranchState::default()),
             });
@@ -20513,6 +25440,7 @@ pub fn run() {
                 mcp_cancellations,
                 mcp_sampling_parents,
                 runtime_production,
+                preferred_runtime,
             )?;
             let fallback_app = app.handle().clone();
             thread::Builder::new()
@@ -20566,6 +25494,11 @@ pub fn run() {
             mcp_delete_server,
             foundation_snapshot,
             workspace_start_snapshot,
+            workspace_start_open_folder,
+            workspace_start_open_archive,
+            workspace_start_open_recent,
+            workspace_start_clone_repository,
+            workspace_start_answer_clone_approval,
             conversation_snapshot,
             artifact_snapshot,
             artifact_run_terminal,
@@ -20615,6 +25548,21 @@ pub fn run() {
             conversation_reorder_projects,
             conversation_inactivate_project,
             conversation_inactivate_session,
+            provider_snapshot,
+            provider_accept_session_credentials,
+            provider_save_profile,
+            provider_test_connection,
+            provider_answer_approval,
+            provider_select_model,
+            provider_set_models_enabled,
+            provider_complete_onboarding,
+            provider_delete_profile,
+            configuration_snapshot,
+            configuration_save_settings,
+            configuration_open_external,
+            policy_snapshot,
+            policy_save,
+            policy_revoke_exception,
             runtime_core_snapshot,
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             runtime_production_activate,
@@ -20700,6 +25648,640 @@ mod atomic_capability_publication_tests {
         );
         writer.join().unwrap();
         reader.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod settings_policy_persistence_tests {
+    use super::*;
+    use crate::security::policy::resolve_policy;
+
+    use tempfile::TempDir;
+
+    fn facts_for_policy_rule(rule: &CategoryRule) -> ActionFacts {
+        let surface = rule.matcher.surface.clone().unwrap_or(match rule.group {
+            PolicyGroup::WorkspaceFiles => ActionSurface::File,
+            PolicyGroup::CommandsAndProcesses => ActionSurface::Terminal,
+            PolicyGroup::VersionControl => ActionSurface::Git,
+            PolicyGroup::NetworkAndSharing => ActionSurface::Network,
+            PolicyGroup::BrowserAndDesktop => ActionSurface::Browser,
+            PolicyGroup::Credentials => ActionSurface::Credential,
+            PolicyGroup::ExtensionsAndC4os => ActionSurface::C4os,
+        });
+        let mut effects = rule.matcher.effects.clone();
+        if effects.is_empty() {
+            effects.insert(ActionEffect::Read);
+        }
+        ActionFacts {
+            action_kind: rule
+                .matcher
+                .action_kind
+                .clone()
+                .unwrap_or_else(|| format!("fixture.{}", rule.id)),
+            native_tool: "fixture.tool".into(),
+            surface,
+            effects,
+            scope: rule.matcher.scope.unwrap_or(ActionScope::Remote),
+            initiator: ActionInitiator::User,
+            sensitivity: rule
+                .matcher
+                .sensitivity
+                .unwrap_or(ActionSensitivity::Ordinary),
+            reversibility: ActionReversibility::Reversible,
+            confidence: ClassificationConfidence::Known,
+            request_origin: ActionRequestOrigin::DirectUserEdit,
+            repository_state: RepositoryState::VersionControlled,
+            inside_active_project: true,
+            canonical_target: "fixture:policy-target".into(),
+            workspace_id: "workspace-policy".into(),
+            session_id: "session-policy".into(),
+            runtime_id: "runtime-policy".into(),
+            environment_id: "environment-policy".into(),
+            plugin_or_mcp_id: rule
+                .matcher
+                .extension_authority_present
+                .is_some_and(|present| present)
+                .then(|| "extension-policy".into()),
+            target_resolved: true,
+            authenticated: rule.matcher.sensitivity == Some(ActionSensitivity::Authenticated),
+            trusted_root: true,
+            explicit_scope_grant: true,
+            sandbox_allows: true,
+            declaration_exceeded: false,
+        }
+    }
+
+    fn nearest_nonmatching_facts(rule: &CategoryRule, mut facts: ActionFacts) -> ActionFacts {
+        if rule.matcher.extension_authority_present.is_some() {
+            facts.plugin_or_mcp_id = None;
+        } else if rule.matcher.action_kind.is_some() {
+            facts.action_kind = "fixture.nearest-other-action".into();
+        } else if rule.matcher.surface.is_some() {
+            facts.surface = ActionSurface::Unknown("nearest-other-surface".into());
+        } else if !rule.matcher.effects.is_empty() {
+            facts.effects.clear();
+        } else if rule.matcher.scope.is_some() {
+            facts.scope = ActionScope::Unknown;
+        } else if rule.matcher.sensitivity.is_some() {
+            facts.sensitivity = ActionSensitivity::Ordinary;
+        } else {
+            panic!("policy rule {} has no structural matcher", rule.id);
+        }
+        facts
+    }
+
+    #[test]
+    fn policy_settings_seed_replace_and_restore_one_durable_authority() {
+        let temporary = TempDir::new().unwrap();
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(temporary.path()),
+        )
+        .unwrap();
+        let database = Arc::new(database);
+        let service = RuntimeApplicationService::restore(Arc::clone(&database), 10).unwrap();
+
+        let initial = service.policy_settings_snapshot(11).unwrap();
+        assert_eq!(initial.coordinator_generation, 0);
+        assert_eq!(initial.policy_version, 1);
+        assert_eq!(initial.revocation_epoch, 0);
+        assert_eq!(initial.preset, RuntimeApprovalPreset::AskForApproval);
+        assert_eq!(initial.category_values.len(), POLICY_SETTING_KEYS.len());
+
+        let mut configuration = service
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .clone();
+        configuration.preset = RuntimeApprovalPreset::AskForApproval;
+        let changed = service
+            .replace_policy_settings(0, 1, configuration, true, 12)
+            .unwrap();
+        assert_eq!(changed.coordinator_generation, 1);
+        assert_eq!(changed.policy_version, 2);
+        assert_eq!(changed.revocation_epoch, 1);
+        assert_eq!(changed.preset, RuntimeApprovalPreset::AskForApproval);
+
+        drop(service);
+        let restored = RuntimeApplicationService::restore(database, 13).unwrap();
+        let restored_snapshot = restored.policy_settings_snapshot(14).unwrap();
+        assert_eq!(restored_snapshot.policy_version, 2);
+        assert_eq!(restored_snapshot.revocation_epoch, 1);
+        assert_eq!(
+            restored_snapshot.preset,
+            RuntimeApprovalPreset::AskForApproval
+        );
+    }
+
+    #[test]
+    fn remembered_runtime_exception_promotes_persists_and_revokes_exactly() {
+        let temporary = TempDir::new().unwrap();
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(temporary.path()),
+        )
+        .unwrap();
+        let database = Arc::new(database);
+        let rule = policy_rules_for_setting(
+            "workspace.modify",
+            PolicyGroup::WorkspaceFiles,
+            PolicyDecision::Ask,
+        )
+        .remove(0);
+        let facts = facts_for_policy_rule(&rule);
+        let service = RuntimeApplicationService::restore(Arc::clone(&database), 10).unwrap();
+
+        service
+            .remember_runtime_approval_facts(&facts, RuntimeApprovalRemember::Session, 11)
+            .unwrap();
+        let session_configuration = service
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .clone();
+        assert_eq!(session_configuration.exceptions.len(), 1);
+        assert!(matches!(
+            &session_configuration.exceptions[0].duration,
+            ExceptionDuration::Session { session_id } if session_id == &facts.session_id
+        ));
+
+        drop(service);
+        let restored = RuntimeApplicationService::restore(Arc::clone(&database), 12).unwrap();
+        assert_eq!(
+            restored
+                .raw_coordinator()
+                .unwrap()
+                .policy_configuration()
+                .exceptions
+                .len(),
+            1
+        );
+        restored
+            .remember_runtime_approval_facts(&facts, RuntimeApprovalRemember::Persistent, 13)
+            .unwrap();
+        let promoted = restored.policy_settings_snapshot(14).unwrap();
+        assert_eq!(promoted.exceptions.len(), 1);
+        assert_eq!(promoted.exceptions[0].duration, "Persistent until revoked");
+
+        drop(restored);
+        let restored = RuntimeApplicationService::restore(Arc::clone(&database), 15).unwrap();
+        let current = restored.policy_settings_snapshot(16).unwrap();
+        let mut configuration = restored
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .clone();
+        configuration.exceptions.clear();
+        restored
+            .replace_policy_settings(
+                current.coordinator_generation,
+                current.policy_version,
+                configuration,
+                true,
+                17,
+            )
+            .unwrap();
+        drop(restored);
+
+        let revoked = RuntimeApplicationService::restore(database, 18).unwrap();
+        assert!(
+            revoked
+                .policy_settings_snapshot(19)
+                .unwrap()
+                .exceptions
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn configuration_presets_map_to_a_non_custom_runtime_base() {
+        use super::core::configuration::ApprovalPreset as ConfigurationPreset;
+
+        assert_eq!(
+            runtime_approval_preset(ConfigurationPreset::AskForApproval),
+            RuntimeApprovalPreset::AskForApproval
+        );
+        assert_eq!(
+            runtime_approval_preset(ConfigurationPreset::ApproveSafeActions),
+            RuntimeApprovalPreset::ApproveSafeActions
+        );
+        assert_eq!(
+            runtime_approval_preset(ConfigurationPreset::ApproveForMe),
+            RuntimeApprovalPreset::ApproveForMe
+        );
+        assert_eq!(
+            runtime_approval_preset(ConfigurationPreset::Custom),
+            RuntimeApprovalPreset::AskForApproval
+        );
+    }
+
+    #[test]
+    fn effective_configuration_policy_overrides_survive_advanced_policy_edits() {
+        let temporary = TempDir::new().unwrap();
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(temporary.path()),
+        )
+        .unwrap();
+        let service = RuntimeApplicationService::restore(Arc::new(database), 10).unwrap();
+        let mut effective = core::configuration::EffectiveConfiguration::default();
+        effective.default_approval_preset = core::configuration::ApprovalPreset::ApproveForMe;
+        effective.approval_overrides.insert(
+            "network.retrieve".into(),
+            core::configuration::ApprovalPreset::AskForApproval,
+        );
+
+        service
+            .reconcile_effective_configuration_policy(&effective, 11)
+            .unwrap();
+        let reconciled = service.policy_settings_snapshot(12).unwrap();
+        assert_eq!(reconciled.policy_version, 2);
+        assert_eq!(reconciled.revocation_epoch, 1);
+        assert_eq!(reconciled.preset, RuntimeApprovalPreset::Custom);
+        assert_eq!(reconciled.base_preset, RuntimeApprovalPreset::ApproveForMe);
+        assert_eq!(reconciled.category_values["network.retrieve"], None);
+        assert_eq!(
+            reconciled.effective_category_values["network.retrieve"],
+            Some(PolicyDecision::Ask)
+        );
+        let mut configuration = service
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .clone();
+        let derived_rule_ids = configuration
+            .category_rules
+            .iter()
+            .filter(|rule| rule.id.starts_with(CONFIGURATION_RULE_PREFIX))
+            .map(|rule| rule.id.clone())
+            .collect::<BTreeSet<_>>();
+        assert!(!derived_rule_ids.is_empty());
+
+        let mut editable = reconciled.category_values.clone();
+        editable.insert("workspace.modify".into(), Some(PolicyDecision::Deny));
+        editable.insert("network.retrieve".into(), Some(PolicyDecision::Allow));
+        replace_editable_policy_rules(&mut configuration, &editable);
+        let edited = service
+            .replace_policy_settings(
+                reconciled.coordinator_generation,
+                reconciled.policy_version,
+                configuration,
+                true,
+                13,
+            )
+            .unwrap();
+        let persisted = service
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .category_rules
+            .iter()
+            .filter(|rule| rule.id.starts_with(CONFIGURATION_RULE_PREFIX))
+            .map(|rule| rule.id.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(persisted, derived_rule_ids);
+        assert_eq!(
+            edited.category_values["workspace.modify"],
+            Some(PolicyDecision::Deny)
+        );
+        assert_eq!(
+            edited.effective_category_values["workspace.modify"],
+            Some(PolicyDecision::Deny)
+        );
+        assert_eq!(
+            edited.category_values["network.retrieve"],
+            Some(PolicyDecision::Allow)
+        );
+        assert_eq!(
+            edited.effective_category_values["network.retrieve"],
+            Some(PolicyDecision::Ask)
+        );
+    }
+
+    #[test]
+    fn provider_dispatch_exclusion_blocks_external_credential_invalidation() {
+        let temporary = TempDir::new().unwrap();
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(temporary.path()),
+        )
+        .unwrap();
+        let service = Arc::new(RuntimeApplicationService::restore(Arc::new(database), 10).unwrap());
+        let vault = security::credentials::CredentialVault::session_only().unwrap();
+        let reference = vault.store("provider-gate", b"fixture-secret").unwrap();
+        let profile = runtime::provider::ProviderProfile {
+            schema_version: runtime::provider::PROVIDER_SCHEMA_VERSION,
+            provider_id: "provider-gate".into(),
+            kind: runtime::provider::ProviderKind::OpenRouter,
+            display_name: "Provider Gate".into(),
+            endpoint: runtime::provider::ProviderEndpoint {
+                endpoint_id: "provider-gate-endpoint".into(),
+                base_url: "https://openrouter.ai/api/v1".into(),
+                api_kind: "openai-compatible".into(),
+            },
+            authentication: runtime::provider::ProviderAuthentication::Bearer,
+            credential_reference: Some(reference.clone()),
+            headers: BTreeMap::new(),
+            enabled: true,
+        };
+        service.save_provider(0, profile, 0, 11).unwrap();
+        let provider_dispatch = service.provider_dispatch_guard().unwrap();
+        let (completed_tx, completed_rx) = std::sync::mpsc::sync_channel(1);
+        let worker = Arc::clone(&service);
+        let worker_reference = reference.clone();
+        let join = std::thread::spawn(move || {
+            let result = worker.invalidate_provider_credential_reference(&worker_reference, 12);
+            completed_tx.send(result).unwrap();
+        });
+
+        assert!(
+            completed_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err()
+        );
+        drop(provider_dispatch);
+        assert_eq!(
+            completed_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap(),
+            true
+        );
+        join.join().unwrap();
+    }
+
+    #[test]
+    fn provider_approval_refresh_ignores_approval_only_coordinator_generations() {
+        let temporary = TempDir::new().unwrap();
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(temporary.path()),
+        )
+        .unwrap();
+        let service = RuntimeApplicationService::restore(Arc::new(database), 10).unwrap();
+        let live = service.current_provider_live_authority(11).unwrap();
+        let facts = provider_action_facts(
+            "network.retrieve",
+            "c4os.provider.test",
+            BTreeSet::from([ActionEffect::Read]),
+            ActionSurface::Network,
+            ActionScope::Remote,
+            ActionSensitivity::Ordinary,
+            "https://provider.example/v1",
+            false,
+        );
+        let action = CanonicalAction {
+            schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+            action_id: "provider-approval-generation".into(),
+            tool_call_id: "provider-approval-generation-call".into(),
+            tool: "c4os.provider.test".into(),
+            arguments: serde_json::json!({"providerId": "provider-generation"}),
+            risk: CanonicalRisk::Medium,
+            requested_authority: BTreeSet::from(["network.retrieve".into()]),
+            canonical_target: "https://provider.example/v1".into(),
+            target_version: sha256_bytes(b"https://provider.example/v1"),
+            workspace_id: facts.workspace_id.clone(),
+            session_id: facts.session_id.clone(),
+            run_id: "provider-approval-generation-run".into(),
+            runtime_id: facts.runtime_id.clone(),
+            environment_id: facts.environment_id.clone(),
+            plugin_or_mcp_id: None,
+            process_generation: live.process_generation,
+            configuration_version: live.configuration_version,
+            policy_version: live.policy_version,
+            revocation_epoch: live.revocation_epoch,
+        };
+        let prompt = match service
+            .propose_direct_action(&facts, action.clone(), 11)
+            .unwrap()
+        {
+            GatewayProposal::PendingApproval { prompt, .. } => prompt,
+            other => panic!("expected pending provider approval, found {other:?}"),
+        };
+        let generation_after_prompt = service.snapshot(12).unwrap().generation;
+        let token = match service
+            .coordinator()
+            .unwrap()
+            .answer_direct_approval(&prompt.prompt_id, ApprovalAnswer::Allow, 12)
+            .unwrap()
+            .value
+        {
+            ApprovalResponse::Authorized { token, .. } => token,
+            other => panic!("expected authorized provider approval, found {other:?}"),
+        };
+        assert!(service.snapshot(13).unwrap().generation > generation_after_prompt);
+
+        let refreshed = service.current_provider_live_authority(13).unwrap();
+        assert_eq!(refreshed.configuration_version, live.configuration_version);
+        let lease = service
+            .begin_direct_action_effect(&token, &action, refreshed, Some(&prompt.prompt_id), 13)
+            .unwrap();
+        service
+            .complete_direct_action_effect(
+                lease,
+                NormalizedActionResult {
+                    status: NormalizedActionStatus::Succeeded,
+                    result_code: "provider-generation-test".into(),
+                    exit_code: None,
+                    changed_targets: Vec::new(),
+                    output_sha256: None,
+                    completed_at_ms: 14,
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn every_policy_setting_matches_its_structural_variants_and_rejects_a_nearest_neighbor() {
+        assert_eq!(POLICY_SETTING_KEYS.len(), 28);
+        let mut structural_variant_count = 0;
+        for (key, group) in POLICY_SETTING_KEYS {
+            let rules = policy_rules_for_setting(key, group, PolicyDecision::Deny);
+            assert!(!rules.is_empty(), "{key} must map to at least one rule");
+            for rule in rules {
+                structural_variant_count += 1;
+                let facts = facts_for_policy_rule(&rule);
+                assert!(
+                    facts.policy_groups().contains(&group),
+                    "{} must implicate its visible policy group",
+                    rule.id
+                );
+                assert!(rule.matcher.matches(&facts), "{} positive fixture", rule.id);
+                let nearest = nearest_nonmatching_facts(&rule, facts);
+                assert!(
+                    !rule.matcher.matches(&nearest),
+                    "{} nearest negative fixture",
+                    rule.id
+                );
+            }
+        }
+        assert_eq!(structural_variant_count, 37);
+    }
+
+    #[test]
+    fn policy_projection_requires_every_variant_to_share_one_decision() {
+        let mut configuration = PolicyConfiguration {
+            preset: RuntimeApprovalPreset::ApproveSafeActions,
+            ..PolicyConfiguration::default()
+        };
+        configuration.category_rules = POLICY_SETTING_KEYS
+            .iter()
+            .flat_map(|(key, group)| policy_rules_for_setting(key, *group, PolicyDecision::Ask))
+            .collect();
+        let complete = project_policy_settings(3, 4, 5, &configuration);
+        assert_eq!(complete.preset, RuntimeApprovalPreset::Custom);
+        assert_eq!(
+            complete.base_preset,
+            RuntimeApprovalPreset::ApproveSafeActions
+        );
+        assert!(
+            complete
+                .category_values
+                .values()
+                .all(|value| { *value == Some(PolicyDecision::Ask) })
+        );
+        assert_eq!(complete.category_values, complete.effective_category_values);
+
+        configuration
+            .category_rules
+            .retain(|rule| rule.id != "workspace.modify#modify");
+        let incomplete = project_policy_settings(3, 4, 5, &configuration);
+        assert_eq!(incomplete.category_values["workspace.modify"], None);
+        assert_eq!(
+            incomplete.effective_category_values["workspace.modify"],
+            None
+        );
+
+        configuration.category_rules.push(
+            policy_rules_for_setting(
+                "workspace.modify",
+                PolicyGroup::WorkspaceFiles,
+                PolicyDecision::Deny,
+            )
+            .into_iter()
+            .find(|rule| rule.id == "workspace.modify#modify")
+            .unwrap(),
+        );
+        let mixed = project_policy_settings(3, 4, 5, &configuration);
+        assert_eq!(mixed.category_values["workspace.modify"], None);
+
+        configuration.category_rules.clear();
+        let restored_base = project_policy_settings(3, 4, 5, &configuration);
+        assert_eq!(
+            restored_base.preset,
+            RuntimeApprovalPreset::ApproveSafeActions
+        );
+    }
+
+    #[test]
+    fn remembered_session_exceptions_do_not_deduplicate_other_chat_sessions() {
+        let rule = policy_rules_for_setting(
+            "workspace.read",
+            PolicyGroup::WorkspaceFiles,
+            PolicyDecision::Allow,
+        )
+        .remove(0);
+        let facts = facts_for_policy_rule(&rule);
+        let first = ConcreteException::from_action(
+            "exception:first",
+            PolicyDecision::Allow,
+            &facts,
+            ExceptionDuration::Session {
+                session_id: "chat:first".into(),
+            },
+        );
+        let second = ConcreteException::from_action(
+            "exception:second",
+            PolicyDecision::Allow,
+            &facts,
+            ExceptionDuration::Session {
+                session_id: "chat:second".into(),
+            },
+        );
+        assert!(!same_exception_action_signature(&first, &second));
+    }
+
+    #[test]
+    fn artifact_upload_obeys_both_artifact_and_network_policy_groups() {
+        let artifact_rule = policy_rules_for_setting(
+            "artifact.export",
+            PolicyGroup::ExtensionsAndC4os,
+            PolicyDecision::Allow,
+        )
+        .remove(0);
+        let network_rule = policy_rules_for_setting(
+            "network.upload",
+            PolicyGroup::NetworkAndSharing,
+            PolicyDecision::Allow,
+        )
+        .remove(0);
+        let facts = facts_for_policy_rule(&artifact_rule);
+        assert_eq!(
+            facts.policy_groups(),
+            BTreeSet::from([
+                PolicyGroup::NetworkAndSharing,
+                PolicyGroup::ExtensionsAndC4os,
+            ])
+        );
+        assert!(artifact_rule.matcher.matches(&facts));
+        assert!(network_rule.matcher.matches(&facts));
+
+        for artifact_decision in [
+            PolicyDecision::Allow,
+            PolicyDecision::Ask,
+            PolicyDecision::Deny,
+        ] {
+            for network_decision in [
+                PolicyDecision::Allow,
+                PolicyDecision::Ask,
+                PolicyDecision::Deny,
+            ] {
+                let mut artifact = artifact_rule.clone();
+                artifact.decision = artifact_decision;
+                let mut network = network_rule.clone();
+                network.decision = network_decision;
+                let configuration = PolicyConfiguration {
+                    preset: RuntimeApprovalPreset::ApproveForMe,
+                    category_rules: vec![artifact, network],
+                    ..PolicyConfiguration::default()
+                };
+                assert_eq!(
+                    resolve_policy(&facts, &configuration, 10).decision,
+                    artifact_decision.max(network_decision)
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod workspace_start_clone_validation_tests {
+    use super::*;
+
+    #[test]
+    fn clone_target_accepts_a_bounded_https_repository() {
+        assert_eq!(
+            clone_repository_target("https://github.com/example/c4os-fixture.git"),
+            Some((
+                "https://github.com/example/c4os-fixture.git".into(),
+                "c4os-fixture".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn clone_target_rejects_unsafe_or_ambiguous_urls() {
+        for repository_url in [
+            "http://github.com/example/repository.git",
+            "git@github.com:example/repository.git",
+            "https://user:secret@github.com/example/repository.git",
+            "https://github.com/example/repository.git?ref=main",
+            "https://github.com/example/repository.git#branch",
+            "https://github.com/",
+            "https://github.com/example/repo%2Fescape.git",
+            "https://github.com/example/repo\nname.git",
+        ] {
+            assert_eq!(
+                clone_repository_target(repository_url),
+                None,
+                "unexpected accepted clone URL: {repository_url}"
+            );
+        }
     }
 }
 

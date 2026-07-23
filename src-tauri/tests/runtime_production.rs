@@ -45,9 +45,9 @@ use c4os_lib::runtime::{
     opencode_broker::{InstalledBrokerClassification, InstalledBrokerFacility},
     provider::{
         ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-        ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint, ProviderFeatureClaim,
-        ProviderKind, ProviderModelDeclaration, ProviderNumericClaim, ProviderProbe,
-        ProviderProbeFailure, ProviderProfile, RouteAvailability,
+        ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint,
+        ProviderFeatureClaim, ProviderKind, ProviderModelDeclaration, ProviderNumericClaim,
+        ProviderProbe, ProviderProbeFailure, ProviderProfile, RouteAvailability,
     },
     session::{AttachmentSnapshot, RunAttemptStatus, RunEventKind, SessionRepository},
 };
@@ -1236,7 +1236,9 @@ fn packaged_production_peers_complete_the_app_owned_native_golden_paths() {
             base_url: fixture.base_url.clone(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference: provider_credential.clone(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(provider_credential.clone()),
+        headers: BTreeMap::new(),
         enabled: true,
     };
     bootstrap

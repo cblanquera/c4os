@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { isQaFixtureBuildEnabled } from "../qa/fixture";
+import { invokeQaProductRoute } from "../qa/product-route-native";
+
 export type NativeCommand =
   | "platform_snapshot"
   | "platform_reveal_main"
@@ -34,6 +37,11 @@ export type NativeCommand =
   | "mcp_delete_server"
   | "foundation_snapshot"
   | "workspace_start_snapshot"
+  | "workspace_start_open_folder"
+  | "workspace_start_open_archive"
+  | "workspace_start_open_recent"
+  | "workspace_start_clone_repository"
+  | "workspace_start_answer_clone_approval"
   | "conversation_snapshot"
   | "artifact_snapshot"
   | "artifact_run_terminal"
@@ -83,6 +91,21 @@ export type NativeCommand =
   | "conversation_reorder_projects"
   | "conversation_inactivate_project"
   | "conversation_inactivate_session"
+  | "provider_snapshot"
+  | "provider_accept_session_credentials"
+  | "provider_save_profile"
+  | "provider_test_connection"
+  | "provider_answer_approval"
+  | "provider_select_model"
+  | "provider_set_models_enabled"
+  | "provider_complete_onboarding"
+  | "provider_delete_profile"
+  | "configuration_snapshot"
+  | "configuration_save_settings"
+  | "configuration_open_external"
+  | "policy_snapshot"
+  | "policy_save"
+  | "policy_revoke_exception"
   | "runtime_core_snapshot"
   | "runtime_production_activate"
   | "runtime_production_shutdown"
@@ -97,5 +120,9 @@ export function invokeNative(
   command: NativeCommand,
   args: Readonly<Record<string, unknown>>,
 ): Promise<unknown> {
+  if (isQaFixtureBuildEnabled() && !("__TAURI_INTERNALS__" in globalThis)) {
+    const fixture = invokeQaProductRoute(command, args);
+    if (fixture !== null) return fixture;
+  }
   return invoke(command, args);
 }

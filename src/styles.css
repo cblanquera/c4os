@@ -768,6 +768,53 @@ select {
   gap: 14px;
 }
 
+.workspace-start__clone {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid var(--border-separator);
+  border-radius: 16px;
+  background: var(--surface-raised);
+}
+
+.workspace-start__clone label {
+  font-size: 0.82rem;
+  font-weight: 680;
+}
+
+.workspace-start__clone-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.workspace-start__clone input {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-separator);
+  border-radius: 10px;
+  background: var(--surface-window);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.workspace-start__clone button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--surface-window);
+  cursor: pointer;
+  font-weight: 680;
+}
+
+.workspace-start__clone p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
 .workspace-start__action,
 .workspace-start__recent {
   border: 1px solid var(--border-separator);

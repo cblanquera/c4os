@@ -94,6 +94,8 @@ pub enum CredentialVaultError {
     EntropyUnavailable,
     #[error("credential vault state is unavailable")]
     StateUnavailable,
+    #[error("credential mutation invalidation failed")]
+    MutationObserver,
     #[error("credential vault storage failed during {operation}")]
     Storage {
         operation: &'static str,
@@ -320,7 +322,7 @@ pub trait CredentialMutationObserver: Send + Sync {
         &self,
         credential_reference: &CredentialReference,
         kind: CredentialMutationKind,
-    );
+    ) -> CredentialVaultResult<()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -411,6 +413,19 @@ impl CredentialVault {
             .values()
             .map(StoredCredential::metadata)
             .collect())
+    }
+
+    /// Reports opaque reference availability without leasing or exposing the
+    /// credential bytes. Renderer projections use this after session-only
+    /// restart so a persisted reference is not mistaken for a usable key.
+    pub fn contains(
+        &self,
+        credential_reference: &CredentialReference,
+    ) -> CredentialVaultResult<bool> {
+        Ok(self
+            .lock_state()?
+            .entries
+            .contains_key(credential_reference))
     }
 
     /// Stores or replaces a secret under a new opaque reference.
@@ -1041,7 +1056,7 @@ impl VaultInner {
             active
         };
         for observer in observers {
-            observer.credential_mutated(credential_reference, kind);
+            observer.credential_mutated(credential_reference, kind)?;
         }
         Ok(())
     }

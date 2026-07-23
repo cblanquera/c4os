@@ -26,9 +26,15 @@ export { BrandMark, Icon } from "./icons";
 export type {
   ActionMenuItem,
   ActionMenuProps,
+  ControlledModalDialogProps,
   ModalDialogProps,
   PopoverDialogProps,
 } from "./overlays";
-export { ActionMenu, ModalDialog, PopoverDialog } from "./overlays";
+export {
+  ActionMenu,
+  ControlledModalDialog,
+  ModalDialog,
+  PopoverDialog,
+} from "./overlays";
 export type { ResizerProps } from "./resizer";
 export { Resizer } from "./resizer";

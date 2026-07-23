@@ -48,7 +48,7 @@ export function RuntimeQaSurface({
     answer: ProductionRuntimeApprovalRequest["answer"],
   ) {
     setApprovalStatus("Submitting approval decision…");
-    void answerApproval({ ...approval, answer }).then(
+    void answerApproval({ ...approval, answer, remember: "once" }).then(
       () => {
         setCoreSnapshot((current) =>
           current === null

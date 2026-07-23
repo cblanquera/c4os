@@ -61,6 +61,7 @@ export interface RedactionMarker {
 export type SafeDetailValue =
   | { readonly kind: "text"; readonly value: string }
   | { readonly kind: "integer"; readonly value: number }
+  | { readonly kind: "unsigned"; readonly value: number }
   | { readonly kind: "boolean"; readonly value: boolean }
   | { readonly kind: "redacted"; readonly value: RedactionMarker };
 

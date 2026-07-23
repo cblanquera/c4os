@@ -44,9 +44,9 @@ use c4os_lib::runtime::pi::{
     PI_NATIVE_VERSION, PiAdapter, PiSamplingMessage, PiSidecarManifest, PiSidecarRunner,
 };
 use c4os_lib::runtime::provider::{
-    ModelRoute, PROVIDER_SCHEMA_VERSION, ProviderConnectionEvidence, ProviderDiscovery,
-    ProviderEndpoint, ProviderKind, ProviderProbe, ProviderProbeFailure, ProviderProfile,
-    ProviderService, RouteAvailability,
+    ModelRoute, PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderConnectionEvidence,
+    ProviderDiscovery, ProviderEndpoint, ProviderKind, ProviderProbe, ProviderProbeFailure,
+    ProviderProfile, ProviderService, RouteAvailability,
 };
 use c4os_lib::runtime::session::{
     AdapterBinding, AttachmentSnapshot, AttemptContextSnapshot, CapabilitySnapshot,
@@ -215,7 +215,9 @@ fn profile() -> ProviderProfile {
             base_url: "https://openrouter.ai/api/v1".into(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference: vault.store("provider-key", b"fixture-secret").unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(vault.store("provider-key", b"fixture-secret").unwrap()),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }
@@ -2053,8 +2055,8 @@ impl PiDispatchCredentialIssuer for FixedPiCredentialIssuer {
         &mut self,
         _identity: &DispatchIdentity,
         _provider_id: &str,
-    ) -> Result<(), PeerDispatchError> {
-        Ok(())
+    ) -> Result<bool, PeerDispatchError> {
+        Ok(true)
     }
 }
 

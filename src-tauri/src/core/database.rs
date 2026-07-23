@@ -16,7 +16,9 @@ use crate::artifact::{
 };
 
 use rusqlite::backup::Backup;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, Params, TransactionBehavior, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Params, Transaction, TransactionBehavior, params,
+};
 use rusqlite_migration::{M, Migrations};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -646,6 +648,12 @@ enum WriteCommand {
         expected_generation: Option<u64>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    SavePolicyTransition {
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        security_records: Vec<SecurityJournalRecord>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     SaveExtensionTransition {
         state: ExtensionStateDocumentRecord,
         event: ExtensionEventRecord,
@@ -973,6 +981,23 @@ impl DatabaseActor {
         self.request(|reply| WriteCommand::SaveRuntimeStateDocument {
             record,
             expected_generation,
+            reply,
+        })
+    }
+
+    /// Atomically publishes policy state and every authorization invalidation
+    /// caused by that policy epoch in one SQLite transaction.
+    pub fn save_policy_transition(
+        &self,
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        security_records: Vec<SecurityJournalRecord>,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        self.request(|reply| WriteCommand::SavePolicyTransition {
+            record,
+            expected_generation,
+            security_records,
             reply,
         })
     }
@@ -1468,6 +1493,20 @@ fn writer_loop(
             } => reply_result(
                 reply,
                 write_runtime_state_document(&mut connection, record, expected_generation),
+            ),
+            WriteCommand::SavePolicyTransition {
+                record,
+                expected_generation,
+                security_records,
+                reply,
+            } => reply_result(
+                reply,
+                write_policy_transition(
+                    &mut connection,
+                    record,
+                    expected_generation,
+                    security_records,
+                ),
             ),
             WriteCommand::SaveExtensionTransition {
                 state,
@@ -3095,6 +3134,18 @@ fn write_runtime_state_document(
     record: RuntimeStateDocumentRecord,
     expected_generation: Option<u64>,
 ) -> DatabaseResult<u64> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    write_runtime_state_document_in_transaction(&transaction, record, expected_generation)?;
+    let durable_generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn write_runtime_state_document_in_transaction(
+    transaction: &Transaction<'_>,
+    record: RuntimeStateDocumentRecord,
+    expected_generation: Option<u64>,
+) -> DatabaseResult<()> {
     validate_runtime_document_identity(&record.document_kind, &record.document_id)?;
     validate_text_field(
         "runtime canonical document",
@@ -3112,7 +3163,6 @@ fn write_runtime_state_document(
     let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
         DatabaseError::InvalidInput("runtime timestamp exceeds SQLite range".into())
     })?;
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let current = transaction
         .query_row(
             "SELECT generation FROM runtime_state_documents
@@ -3159,9 +3209,7 @@ fn write_runtime_state_document(
             updated_at_ms
         ],
     )?;
-    let durable_generation = bump_app_generation(&transaction)?;
-    transaction.commit()?;
-    Ok(durable_generation)
+    Ok(())
 }
 
 fn read_extension_state_document(
@@ -5397,6 +5445,22 @@ fn write_security_records(
             "security batch must contain between 1 and {MAX_SECURITY_BATCH_RECORDS} records"
         )));
     }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    write_security_records_in_transaction(&transaction, records)?;
+    let generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(generation)
+}
+
+fn write_security_records_in_transaction(
+    transaction: &Transaction<'_>,
+    records: Vec<SecurityJournalRecord>,
+) -> DatabaseResult<()> {
+    if records.len() > MAX_SECURITY_BATCH_RECORDS {
+        return Err(DatabaseError::InvalidInput(format!(
+            "security batch cannot exceed {MAX_SECURITY_BATCH_RECORDS} records"
+        )));
+    }
     let mut keys = HashSet::new();
     for record in &records {
         validate_security_record(record)?;
@@ -5406,7 +5470,6 @@ fn write_security_records(
             ));
         }
     }
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let current_count: i64 =
         transaction.query_row("SELECT COUNT(*) FROM security_records", [], |row| {
             row.get(0)
@@ -5490,6 +5553,18 @@ fn write_security_records(
             ],
         )?;
     }
+    Ok(())
+}
+
+fn write_policy_transition(
+    connection: &mut Connection,
+    record: RuntimeStateDocumentRecord,
+    expected_generation: Option<u64>,
+    security_records: Vec<SecurityJournalRecord>,
+) -> DatabaseResult<u64> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    write_runtime_state_document_in_transaction(&transaction, record, expected_generation)?;
+    write_security_records_in_transaction(&transaction, security_records)?;
     let generation = bump_app_generation(&transaction)?;
     transaction.commit()?;
     Ok(generation)

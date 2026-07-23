@@ -67,7 +67,7 @@ describe("PlatformThemeQaSurface", () => {
     render(<PlatformThemeQaSurface isEnabled />);
 
     fireEvent.click(screen.getByRole("button", { name: "Dirty" }));
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByText(/^Last reviewed state:/)).toHaveTextContent(
       "Last reviewed state: Dirty",
     );
 
@@ -81,7 +81,7 @@ describe("PlatformThemeQaSurface", () => {
     expect(
       screen.getByLabelText("Resolved platform appearance"),
     ).toHaveTextContent("Dark");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByText(/^Last reviewed state:/)).toHaveTextContent(
       "Last reviewed state: Dirty",
     );
   });
@@ -111,7 +111,7 @@ describe("PlatformThemeQaSurface", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByText(/^Last reviewed state:/)).toHaveTextContent(
       "Last reviewed state: Dirty",
     );
   });

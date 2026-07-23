@@ -22,7 +22,8 @@ use c4os_lib::runtime::persistence::{
     ProviderStateStore, RuntimeControlPlaneStore, SqliteSessionRepository, SupervisorStateStore,
 };
 use c4os_lib::runtime::provider::{
-    PROVIDER_SCHEMA_VERSION, ProviderEndpoint, ProviderKind, ProviderProfile, ProviderService,
+    PROVIDER_SCHEMA_VERSION, ProviderAuthentication, ProviderEndpoint, ProviderKind,
+    ProviderProfile, ProviderService,
 };
 use c4os_lib::runtime::session::{
     AdapterBinding, AttemptIdentity, CapabilitySnapshot, ConfigurationSnapshot,
@@ -53,9 +54,13 @@ fn app_profile() -> ProviderProfile {
             base_url: "https://openrouter.ai/api/v1".into(),
             api_kind: "openai-compatible".into(),
         },
-        credential_reference: vault
-            .store("openrouter-key", b"never-in-product-state")
-            .unwrap(),
+        authentication: ProviderAuthentication::Bearer,
+        credential_reference: Some(
+            vault
+                .store("openrouter-key", b"never-in-product-state")
+                .unwrap(),
+        ),
+        headers: BTreeMap::new(),
         enabled: true,
     }
 }

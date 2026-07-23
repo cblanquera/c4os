@@ -481,6 +481,18 @@ impl AuthorizationLedger {
         })
     }
 
+    /// Invalidates every still-issued authorization after a global policy
+    /// publication. Policy settings are app-wide, so retaining an unrelated
+    /// runtime token across that publication would preserve stale authority.
+    pub fn invalidate_all(&mut self, reason: AuthorizationInvalidation, now_ms: u64) -> usize {
+        mutate_issued(&mut self.records, now_ms, |_| {
+            Some(AuthorizationState::Invalidated {
+                invalidated_at_ms: now_ms,
+                reason,
+            })
+        })
+    }
+
     pub fn expire_due(&mut self, now_ms: u64) -> usize {
         mutate_issued(&mut self.records, now_ms, |record| {
             (now_ms >= record.expires_at_ms).then_some(AuthorizationState::Expired {

@@ -27,7 +27,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::runtime::provider::{ProviderKind, ProviderProfile};
+use crate::runtime::provider::{ProviderAuthentication, ProviderProfile};
 use crate::security::credentials::{CredentialReference, CredentialVault, CredentialVaultError};
 
 pub const OPENCODE_CREDENTIAL_FD_ENV: &str = "C4OS_OPENCODE_CREDENTIAL_FD";
@@ -66,28 +66,27 @@ pub struct ProviderCredentialAuthorizationReceipt {
     pub native_provider_id: String,
     pub native_model_id: String,
     pub operation_authorization_id: String,
+    pub credential_required: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ProviderHeader {
     AuthorizationBearer,
-    AnthropicApiKey,
-    GoogleApiKey,
+    Named(String),
 }
 
 impl ProviderHeader {
-    fn name(self) -> &'static str {
+    fn name(&self) -> &str {
         match self {
             Self::AuthorizationBearer => "Authorization",
-            Self::AnthropicApiKey => "x-api-key",
-            Self::GoogleApiKey => "x-goog-api-key",
+            Self::Named(name) => name,
         }
     }
 
-    fn prefix(self) -> &'static str {
+    fn prefix(&self) -> &'static str {
         match self {
             Self::AuthorizationBearer => "Bearer ",
-            Self::AnthropicApiKey | Self::GoogleApiKey => "",
+            Self::Named(_) => "",
         }
     }
 }
@@ -96,8 +95,8 @@ impl ProviderHeader {
 struct ProviderCredentialRoute {
     profile_id: String,
     native_provider_id: String,
-    credential_reference: CredentialReference,
-    header: ProviderHeader,
+    credential_reference: Option<CredentialReference>,
+    header: Option<ProviderHeader>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -203,17 +202,18 @@ impl OpenCodeProviderCredentialIssuer {
             return Err(ProviderCredentialError::InvalidProviderRoute);
         }
         let native_provider_id = profile.opencode_native_provider_id().to_owned();
-        let header = match profile.kind {
-            ProviderKind::Anthropic => ProviderHeader::AnthropicApiKey,
-            ProviderKind::Gemini => ProviderHeader::GoogleApiKey,
-            ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Custom => {
-                ProviderHeader::AuthorizationBearer
+        let header = match &profile.authentication {
+            ProviderAuthentication::Bearer => Some(ProviderHeader::AuthorizationBearer),
+            ProviderAuthentication::ApiKeyHeader { header_name } => {
+                Some(ProviderHeader::Named(header_name.clone()))
             }
+            ProviderAuthentication::None => None,
         };
+        let credential_reference = profile.credential_reference.clone();
         let route = ProviderCredentialRoute {
             profile_id: profile.provider_id.clone(),
             native_provider_id,
-            credential_reference: profile.credential_reference.clone(),
+            credential_reference,
             header,
         };
         if state
@@ -279,13 +279,30 @@ impl OpenCodeProviderCredentialIssuer {
         }
         let operation_authorization_id =
             format!("credential-authorization:{}", Uuid::new_v4().as_simple());
+        let credential_required = route.credential_reference.is_some();
+        if credential_required != route.header.is_some() {
+            return Err(ProviderCredentialError::InvalidProviderRoute);
+        }
+        if !credential_required {
+            return Ok(ProviderCredentialAuthorizationReceipt {
+                process_generation: state.process_generation,
+                native_session_id: request.native_session_id,
+                c4os_provider_id: route.profile_id,
+                native_provider_id: route.native_provider_id,
+                native_model_id,
+                operation_authorization_id,
+                credential_required: false,
+            });
+        }
         state.authorizations.insert(
             binding,
             AttemptAuthorization {
                 authorization_id: operation_authorization_id.clone(),
                 profile_id: route.profile_id.clone(),
-                credential_reference: route.credential_reference,
-                header: route.header,
+                credential_reference: route
+                    .credential_reference
+                    .expect("validated credential route"),
+                header: route.header.expect("validated credential header"),
                 expires_at: now + ATTEMPT_AUTHORIZATION_TTL,
                 issued_requests: 0,
             },
@@ -297,6 +314,7 @@ impl OpenCodeProviderCredentialIssuer {
             native_provider_id: route.native_provider_id,
             native_model_id,
             operation_authorization_id,
+            credential_required: true,
         })
     }
 
@@ -461,7 +479,7 @@ struct CredentialFrameMetadata {
     model_id: String,
     operation_id: String,
     native_message_id: String,
-    header_name: &'static str,
+    header_name: String,
     header_prefix: &'static str,
     secret_length: usize,
     ttl_ms: u64,
@@ -615,7 +633,7 @@ fn issue_worker_lease(
     let authorization_id = authorization.authorization_id.clone();
     let profile_id = authorization.profile_id.clone();
     let credential_reference = authorization.credential_reference.clone();
-    let header = authorization.header;
+    let header = authorization.header.clone();
     let lease_id = format!("credential-lease:{}", Uuid::new_v4().as_simple());
     let operation = format!(
         "opencode-provider-request:{}:{}:{}:{}:{}",
@@ -654,7 +672,7 @@ fn issue_worker_lease(
         model_id: request.model_id.clone(),
         operation_id: request.operation_id.clone(),
         native_message_id: request.native_message_id.clone(),
-        header_name: header.name(),
+        header_name: header.name().to_owned(),
         header_prefix: header.prefix(),
         secret_length: secret.len(),
         ttl_ms: DESCRIPTOR_TTL_MS,

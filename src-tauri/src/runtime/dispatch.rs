@@ -681,11 +681,12 @@ pub trait PiDispatchCredentialIssuer: Send {
         &mut self,
         identity: &DispatchIdentity,
         provider_id: &str,
-    ) -> Result<(), PeerDispatchError>;
+    ) -> Result<bool, PeerDispatchError>;
 }
 
 pub struct RuntimeDispatchRegistry {
     peers: BTreeMap<String, Box<dyn RuntimeDispatchPeer>>,
+    quarantined_peers: BTreeSet<String>,
     event_sequences: BTreeMap<DispatchIdentity, u64>,
 }
 
@@ -699,6 +700,7 @@ impl RuntimeDispatchRegistry {
     pub fn new() -> Self {
         Self {
             peers: BTreeMap::new(),
+            quarantined_peers: BTreeSet::new(),
             event_sequences: BTreeMap::new(),
         }
     }
@@ -713,7 +715,10 @@ impl RuntimeDispatchRegistry {
     ) -> Result<(), DispatchError> {
         let registration = peer.registration();
         registration.validate()?;
-        if self.peers.len() >= MAX_PEERS || self.peers.contains_key(&registration.runtime_id) {
+        if self.peers.len() >= MAX_PEERS
+            || self.peers.contains_key(&registration.runtime_id)
+            || self.quarantined_peers.contains(&registration.runtime_id)
+        {
             return Err(DispatchError::DuplicatePeer);
         }
         self.peers
@@ -725,6 +730,9 @@ impl RuntimeDispatchRegistry {
     /// minting. No executable path, secret, or mutable peer handle escapes.
     pub fn registration(&self, runtime_id: &str) -> Result<RuntimePeerRegistration, DispatchError> {
         validate_id(runtime_id)?;
+        if self.quarantined_peers.contains(runtime_id) {
+            return Err(DispatchError::PeerUnavailable);
+        }
         self.peers
             .get(runtime_id)
             .map(|peer| peer.registration().clone())
@@ -733,6 +741,9 @@ impl RuntimeDispatchRegistry {
 
     pub fn ensure_ready(&self, identity: &DispatchIdentity) -> Result<(), DispatchError> {
         identity.validate()?;
+        if self.quarantined_peers.contains(&identity.runtime_id) {
+            return Err(DispatchError::PeerUnavailable);
+        }
         let peer = self
             .peers
             .get(&identity.runtime_id)
@@ -790,6 +801,9 @@ impl RuntimeDispatchRegistry {
     ) -> Result<Vec<DispatchEvent>, DispatchError> {
         if recorded_at_ms == 0 {
             return Err(DispatchError::InvalidEvent);
+        }
+        if self.quarantined_peers.contains(runtime_id) {
+            return Err(DispatchError::PeerUnavailable);
         }
         let peer = self
             .peers
@@ -874,6 +888,31 @@ impl RuntimeDispatchRegistry {
         }
         peer.shutdown().map_err(DispatchError::Peer)?;
         self.peers.remove(runtime_id);
+        self.quarantined_peers.remove(runtime_id);
+        self.event_sequences
+            .retain(|identity, _| identity.runtime_id != runtime_id);
+        Ok(())
+    }
+
+    /// Makes an exact peer unreachable while retaining its native handle for
+    /// a later protocol-aware shutdown retry.
+    pub fn quarantine(
+        &mut self,
+        runtime_id: &str,
+        process_generation: u64,
+    ) -> Result<(), DispatchError> {
+        validate_id(runtime_id)?;
+        if process_generation == 0 {
+            return Err(DispatchError::StalePeer);
+        }
+        let peer = self
+            .peers
+            .get(runtime_id)
+            .ok_or(DispatchError::PeerUnavailable)?;
+        if peer.registration().descriptor.process_generation != process_generation {
+            return Err(DispatchError::StalePeer);
+        }
+        self.quarantined_peers.insert(runtime_id.to_owned());
         self.event_sequences
             .retain(|identity, _| identity.runtime_id != runtime_id);
         Ok(())
@@ -2824,11 +2863,12 @@ impl<R: PiSidecarRunner + Send> RuntimeDispatchPeer for PiDispatchPeer<R> {
                 {
                     return Err(PeerDispatchError::Credential);
                 }
-                issuer.deliver_for_dispatch(&request.identity, &request.model.provider_id)?;
-                Some((
-                    request.identity.runtime_id.as_str(),
-                    request.model.provider_id.as_str(),
-                ))
+                issuer
+                    .deliver_for_dispatch(&request.identity, &request.model.provider_id)?
+                    .then_some((
+                        request.identity.runtime_id.as_str(),
+                        request.model.provider_id.as_str(),
+                    ))
             }
             None => None,
         };
@@ -2969,13 +3009,16 @@ impl<R: PiSidecarRunner + Send> RuntimeDispatchPeer for PiDispatchPeer<R> {
                 .ok_or(PeerDispatchError::Credential)?;
             issuer.deliver_for_dispatch(&request.identity, &request.model.provider_id)
         })();
-        if let Err(error) = credential {
-            self.close_sampling_session(
-                &request.identity.workspace_id,
-                &request.identity.session_id,
-            )?;
-            return Err(error);
-        }
+        let credential_required = match credential {
+            Ok(required) => required,
+            Err(error) => {
+                self.close_sampling_session(
+                    &request.identity.workspace_id,
+                    &request.identity.session_id,
+                )?;
+                return Err(error);
+            }
+        };
         let start = self.adapter.start_sampling_with_credential_operation(
             &request.identity.workspace_id,
             &request.identity.session_id,
@@ -2988,8 +3031,10 @@ impl<R: PiSidecarRunner + Send> RuntimeDispatchPeer for PiDispatchPeer<R> {
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,
             },
-            &request.identity.runtime_id,
-            &request.model.provider_id,
+            credential_required.then_some((
+                request.identity.runtime_id.as_str(),
+                request.model.provider_id.as_str(),
+            )),
         );
         if let Err(error) = start {
             if matches!(

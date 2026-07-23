@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const routes = [
   ["/onboarding", "Connect your AI provider"],
-  ["/start", "Workspace Start"],
+  ["/start", "What would you like to open?"],
   ["/chat", "Chat"],
   ["/chat-search", "Search Chat Sessions"],
   ["/chat-capabilities", "Capability-aware Chat"],
@@ -18,6 +18,31 @@ const routes = [
   ["/settings/mcp", "MCP Servers"],
   ["/settings/advanced-policies", "Advanced Policies"],
 ] as const;
+
+test("QA adapters exercise the production onboarding and Workspace Start controllers", async ({
+  page,
+}) => {
+  await page.goto("/#/onboarding");
+  await expect(
+    page.locator('[data-qa-product-adapter="deterministic"]'),
+  ).toHaveAttribute("data-route", "/onboarding");
+
+  await page.getByRole("textbox", { name: "Profile label" }).fill("QA OpenAI");
+  await page
+    .getByRole("textbox", { name: "API key" })
+    .fill("qa-renderer-only-key");
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  await expect(page.getByText("Connection passed")).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await expect(page).toHaveURL(/#\/start$/);
+  await expect(
+    page.locator('[data-qa-product-adapter="deterministic"]'),
+  ).toHaveAttribute("data-route", "/start");
+  await page.getByRole("button", { name: /AI Desktop UI/ }).click();
+  await expect(page).toHaveURL(/#\/chat$/);
+  await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
+});
 
 async function expectNoDocumentOverflow(page: Page) {
   await expect

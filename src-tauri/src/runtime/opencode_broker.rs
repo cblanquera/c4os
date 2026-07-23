@@ -1298,6 +1298,7 @@ fn canonical_risk_for_installed(
                 effect,
                 ActionEffect::Execute
                     | ActionEffect::Publish
+                    | ActionEffect::Upload
                     | ActionEffect::Reveal
                     | ActionEffect::Listen
             )

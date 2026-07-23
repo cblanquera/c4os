@@ -17,6 +17,7 @@ import {
   initialQaState,
   initialShellAuthorityState,
   initialShellDraftState,
+  shellAuthorityActions,
   shellDraftActions,
 } from "./state";
 import type { SessionId, StateGeneration } from "../../platform/protocol";
@@ -390,6 +391,60 @@ describe("ShellRouteController", () => {
       expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus(),
     );
     expect(store.getState().shellDrafts.settings.visit).toBeNull();
+  });
+
+  it("returns to Workspace Start without restoring focus when Settings identities no longer match", async () => {
+    const { router, store } = renderShellAt("/chat", true);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Providers", level: 1 }),
+    ).toBeVisible();
+    expect(store.getState().shellDrafts.settings.visit).toMatchObject({
+      route: "/chat",
+      workspaceId: null,
+      sessionId: null,
+      focusTarget: "workspace-settings",
+    });
+
+    act(() => {
+      store.dispatch(
+        shellAuthorityActions.publicationReceived({
+          source: "snapshot",
+          domain: "workspace",
+          generation: 1 as StateGeneration,
+          value: {
+            activeWorkspaceId: "workspace:replacement" as never,
+            displayName: "Replacement Workspace",
+            projects: [],
+            activeProjectId: null,
+          },
+        }),
+      );
+      store.dispatch(
+        shellAuthorityActions.publicationReceived({
+          source: "snapshot",
+          domain: "sessions",
+          generation: 1 as StateGeneration,
+          value: {
+            activeSessionId: "session:replacement" as never,
+            sessions: [],
+          },
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to C4OS" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/start"));
+    expect(router.state.location.state).toBeNull();
+    expect(store.getState().shellDrafts.settings.visit).toBeNull();
+    expect(
+      await screen.findByRole("heading", {
+        name: "Workspace Start",
+        level: 1,
+      }),
+    ).toBeVisible();
   });
 
   it("prepares the explicitly selected Skill visibly before Try in Chat navigates", async () => {

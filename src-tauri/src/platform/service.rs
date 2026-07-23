@@ -1,6 +1,8 @@
 use crate::protocol::{PickerGrantId, RequestId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -436,6 +438,13 @@ impl NativePickerRequest {
 pub struct NativePickerSelection {
     path: PathBuf,
     object_kind: PickerObjectKind,
+    filesystem_identity: Option<NativeFilesystemIdentity>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeFilesystemIdentity {
+    device: u64,
+    inode: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -465,6 +474,10 @@ impl NativePickerGrant {
 
     pub fn issued_at_ms(&self) -> u64 {
         self.issued_at_ms
+    }
+
+    pub fn verify_current_identity(&self) -> Result<(), PlatformError> {
+        self.selection.verify_current_identity()
     }
 }
 
@@ -594,7 +607,12 @@ impl NativePickerSelection {
                 "native picker selections must be absolute",
             ));
         }
-        Ok(Self { path, object_kind })
+        let filesystem_identity = native_filesystem_identity(&path, object_kind).ok();
+        Ok(Self {
+            path,
+            object_kind,
+            filesystem_identity,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -604,6 +622,58 @@ impl NativePickerSelection {
     pub fn object_kind(&self) -> PickerObjectKind {
         self.object_kind
     }
+
+    /// Revalidates the exact filesystem object selected by the native picker.
+    /// This closes the selection-to-consumption replacement window; synthetic
+    /// or absent paths never carry production picker authority.
+    pub fn verify_current_identity(&self) -> Result<(), PlatformError> {
+        let expected =
+            self.filesystem_identity
+                .as_ref()
+                .ok_or(PlatformError::InvalidPickerSelection(
+                    "native picker selection has no filesystem identity",
+                ))?;
+        let observed = native_filesystem_identity(&self.path, self.object_kind)?;
+        if &observed != expected {
+            return Err(PlatformError::InvalidPickerSelection(
+                "native picker selection changed before consumption",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn native_filesystem_identity(
+    path: &Path,
+    object_kind: PickerObjectKind,
+) -> Result<NativeFilesystemIdentity, PlatformError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| {
+        PlatformError::InvalidPickerSelection("native picker selection is unavailable")
+    })?;
+    let kind_matches = match object_kind {
+        PickerObjectKind::File => metadata.is_file(),
+        PickerObjectKind::Folder => metadata.is_dir(),
+    };
+    if metadata.file_type().is_symlink() || !kind_matches {
+        return Err(PlatformError::InvalidPickerSelection(
+            "native picker selection kind changed",
+        ));
+    }
+    Ok(NativeFilesystemIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+#[cfg(not(unix))]
+fn native_filesystem_identity(
+    _path: &Path,
+    _object_kind: PickerObjectKind,
+) -> Result<NativeFilesystemIdentity, PlatformError> {
+    Err(PlatformError::InvalidPickerSelection(
+        "native picker filesystem identity is unsupported",
+    ))
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
