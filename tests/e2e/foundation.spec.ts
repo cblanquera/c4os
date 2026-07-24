@@ -20,6 +20,15 @@ test("direct QA foundation route is visibly deterministic and fixture-only", asy
     page.getByText("Deterministic QA data only — not production state."),
   ).toBeVisible();
   await expect(page.getByText("workspace-qa-0001")).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Accepted deterministic routes" }),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Accepted deterministic routes" })
+      .getByRole("link"),
+  ).toHaveCount(16);
+  await expect(page.getByText("spec-00003-integrated-r013")).toBeVisible();
 
   await page.getByRole("button", { name: "Reset fixture" }).click();
   await expect(
@@ -34,6 +43,28 @@ test("direct QA foundation route is visibly deterministic and fixture-only", asy
   ).toBeLessThanOrEqual(
     await page.evaluate(() => document.documentElement.clientWidth),
   );
+});
+
+test("QA direct route launcher enters a production-composed destination", async ({
+  page,
+}) => {
+  await page.goto("/#/qa/foundation");
+
+  await page
+    .getByRole("navigation", { name: "Accepted deterministic routes" })
+    .getByRole("link", { name: "/settings/models", exact: true })
+    .click();
+
+  await expect(page).toHaveURL(/#\/settings\/models$/);
+  await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
+  await expect(page.getByLabel("QA fixture identity")).toContainText(
+    "not production state",
+  );
+  await page.goto("/#/qa/foundation");
+  await expect(page).toHaveURL(/#\/qa\/foundation$/);
+  await expect(
+    page.getByRole("heading", { name: "Direct route launcher" }),
+  ).toBeVisible();
 });
 
 test("retired foundation route enters production Workspace Start", async ({
@@ -57,7 +88,7 @@ test("QA Workspace Start uses the production controller with a build-gated adapt
   ).toBeVisible();
   await expect(
     page.locator('[data-qa-product-adapter="deterministic"]'),
-  ).toHaveAttribute("data-route", "/start");
+  ).toHaveAttribute("data-qa-route", "/start");
   await expect(page.getByRole("listitem")).toHaveCount(3);
   await page.getByRole("button", { name: /Legacy UI/ }).click();
   await expect(page.getByRole("status")).toContainText("Recovered Legacy UI");

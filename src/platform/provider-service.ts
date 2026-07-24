@@ -8,6 +8,10 @@ import {
   type StateGeneration,
 } from "./protocol";
 import { ProtocolBoundaryError } from "./tauri-adapter";
+import {
+  isAcceptedQaAwareAuthority,
+  type QaAwareAuthority,
+} from "../qa/authority";
 
 export type ProviderKind =
   | "open-ai"
@@ -92,7 +96,7 @@ export type ProviderRecord = {
 };
 
 export type ProviderSettingsSnapshot = {
-  readonly authority: "rust-provider-service";
+  readonly authority: QaAwareAuthority<"rust-provider-service">;
   readonly coordinatorGeneration: number;
   readonly configurationGeneration: number;
   readonly credentialProtection: ProviderCredentialProtection;
@@ -358,7 +362,7 @@ function parseEnvelope(raw: unknown): {
 
 function parseSnapshot(raw: unknown): ProviderSettingsSnapshot {
   const value = asObject(raw, "Provider snapshot");
-  if (value.authority !== "rust-provider-service") {
+  if (!isAcceptedQaAwareAuthority(value.authority, "rust-provider-service")) {
     throw invalidPayload("The Provider authority is invalid.");
   }
   const providerState = asObject(value.providers, "provider state");
@@ -381,7 +385,7 @@ function parseSnapshot(raw: unknown): ProviderSettingsSnapshot {
     throw invalidPayload("The Provider onboarding state is inconsistent.");
   }
   return {
-    authority: "rust-provider-service",
+    authority: value.authority,
     coordinatorGeneration: asGeneration(
       value.coordinatorGeneration,
       "coordinator generation",

@@ -156,8 +156,14 @@ async function installNativeConversationFixture(
       (
         window as unknown as {
           __TAURI_INTERNALS__: typeof internals;
+          __C4OS_QA_NATIVE_FIXTURE__: "deterministic-e2e";
         }
       ).__TAURI_INTERNALS__ = internals;
+      (
+        window as unknown as {
+          __C4OS_QA_NATIVE_FIXTURE__: "deterministic-e2e";
+        }
+      ).__C4OS_QA_NATIVE_FIXTURE__ = "deterministic-e2e";
     },
     {
       initialSnapshot: conversationSnapshot(state),

@@ -38,33 +38,65 @@ export const QA_WORKSPACE_RECOVERY_NOTICE: WorkspaceRecoveryNotice = {
   mustNotifyBeforeNextSave: true,
 };
 
-let activeRecoveryNotice: WorkspaceRecoveryNotice | null = null;
+export interface QaWorkspaceFixtureAdapter {
+  open(action: WorkspaceStartAction): Promise<WorkspaceOpenResult>;
+  continueRecovery(): Promise<WorkspaceOpenResult>;
+  reset(): void;
+  pendingRecovery(): WorkspaceRecoveryNotice | null;
+}
+
+export function createQaWorkspaceFixtureAdapter(): QaWorkspaceFixtureAdapter {
+  let activeRecoveryNotice: WorkspaceRecoveryNotice | null = null;
+
+  return {
+    open(action) {
+      const recent =
+        action.type === "openRecent"
+          ? QA_RECENT_WORKSPACES.find((item) => item.id === action.workspaceId)
+          : undefined;
+      const recovered = recent?.id === "workspace-qa-0003";
+      activeRecoveryNotice = recovered ? QA_WORKSPACE_RECOVERY_NOTICE : null;
+      return Promise.resolve({
+        workspaceName: recent?.name ?? "Untitled Workspace",
+        recovered,
+        recoveryNotice: activeRecoveryNotice,
+      });
+    },
+    continueRecovery() {
+      if (activeRecoveryNotice === null) {
+        return Promise.reject(
+          new Error("No QA Workspace recovery is pending."),
+        );
+      }
+      const workspaceName = activeRecoveryNotice.workspaceName;
+      activeRecoveryNotice = null;
+      return Promise.resolve({
+        workspaceName,
+        recovered: true,
+        recoveryNotice: null,
+      });
+    },
+    reset() {
+      activeRecoveryNotice = null;
+    },
+    pendingRecovery() {
+      return activeRecoveryNotice;
+    },
+  };
+}
+
+const defaultQaWorkspaceFixture = createQaWorkspaceFixtureAdapter();
 
 export function openQaWorkspace(
   action: WorkspaceStartAction,
 ): Promise<WorkspaceOpenResult> {
-  const recent =
-    action.type === "openRecent"
-      ? QA_RECENT_WORKSPACES.find((item) => item.id === action.workspaceId)
-      : undefined;
-  const recovered = recent?.id === "workspace-qa-0003";
-  activeRecoveryNotice = recovered ? QA_WORKSPACE_RECOVERY_NOTICE : null;
-  return Promise.resolve({
-    workspaceName: recent?.name ?? "Untitled Workspace",
-    recovered,
-    recoveryNotice: activeRecoveryNotice,
-  });
+  return defaultQaWorkspaceFixture.open(action);
 }
 
 export function continueQaWorkspaceRecovery(): Promise<WorkspaceOpenResult> {
-  if (activeRecoveryNotice === null) {
-    return Promise.reject(new Error("No QA Workspace recovery is pending."));
-  }
-  const workspaceName = activeRecoveryNotice.workspaceName;
-  activeRecoveryNotice = null;
-  return Promise.resolve({
-    workspaceName,
-    recovered: true,
-    recoveryNotice: null,
-  });
+  return defaultQaWorkspaceFixture.continueRecovery();
+}
+
+export function resetQaWorkspaceFixture(): void {
+  defaultQaWorkspaceFixture.reset();
 }

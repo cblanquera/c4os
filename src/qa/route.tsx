@@ -4,6 +4,7 @@ import {
   createQaFixtureAdapter,
   QA_FIXTURE_GATE_ENV,
   QA_FIXTURE_GATE_VALUE,
+  QA_FIXTURE_SCHEMA_VERSION,
   type QaFixtureAdapter,
   type QaFoundationSnapshot,
 } from "./fixture";
@@ -43,6 +44,10 @@ export function QaFoundationRoute({ adapter }: QaFoundationRouteProps) {
     setResetMessage(`Fixture reset to ${fixture.now()}`);
   };
 
+  const recordRouteLaunch = (route: (typeof fixture.routes)[number]) => {
+    setSnapshot(fixture.launchRoute(route).snapshot);
+  };
+
   return (
     <main className="qa-foundation" data-qa-fixture-mode="enabled">
       <header>
@@ -61,8 +66,18 @@ export function QaFoundationRoute({ adapter }: QaFoundationRouteProps) {
         <dl>
           <dt>Authority</dt>
           <dd>{snapshot.authority}</dd>
+          <dt>Schema</dt>
+          <dd>{QA_FIXTURE_SCHEMA_VERSION}</dd>
+          <dt>Scenario</dt>
+          <dd>{snapshot.scenarioId}</dd>
+          <dt>Isolation</dt>
+          <dd>{snapshot.isolationId}</dd>
           <dt>Clock</dt>
           <dd>{snapshot.capturedAt}</dd>
+          <dt>Generation</dt>
+          <dd>{snapshot.generation}</dd>
+          <dt>Active route</dt>
+          <dd>{snapshot.activeRoute}</dd>
           <dt>Workspace ID</dt>
           <dd>{snapshot.ids.workspace}</dd>
           <dt>Project ID</dt>
@@ -73,6 +88,20 @@ export function QaFoundationRoute({ adapter }: QaFoundationRouteProps) {
           <dd>{snapshot.ids.correlation}</dd>
         </dl>
       </section>
+
+      <nav aria-label="Accepted deterministic routes">
+        <h2>Direct route launcher</h2>
+        <p>All 16 destinations render production components with QA data.</p>
+        <ul>
+          {fixture.routes.map((route) => (
+            <li key={route}>
+              <a href={`#${route}`} onClick={() => recordRouteLaunch(route)}>
+                {route}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       <button
         className="qa-foundation__button"

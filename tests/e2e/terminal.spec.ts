@@ -560,8 +560,14 @@ async function installNativeTerminalFixture(page: Page) {
         window as unknown as {
           __C4OS_TERMINAL_E2E__: { readonly commands: string[] };
           __TAURI_INTERNALS__: typeof internals;
+          __C4OS_QA_NATIVE_FIXTURE__: "deterministic-e2e";
         }
       ).__TAURI_INTERNALS__ = internals;
+      (
+        window as unknown as {
+          __C4OS_QA_NATIVE_FIXTURE__: "deterministic-e2e";
+        }
+      ).__C4OS_QA_NATIVE_FIXTURE__ = "deterministic-e2e";
       (
         window as unknown as {
           __TAURI_EVENT_PLUGIN_INTERNALS__: {

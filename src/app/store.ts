@@ -1,10 +1,10 @@
 import { combineReducers, configureStore, createSlice } from "@reduxjs/toolkit";
 
 import {
-  createBuildGatedQaPreloadedState,
   shellStateReducers,
   type ShellPreloadedState,
 } from "../features/shell/state";
+import { createBuildGatedQaPreloadedState } from "#qa-store";
 
 type FoundationState = {
   readonly phase: "foundation";

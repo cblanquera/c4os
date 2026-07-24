@@ -25,7 +25,7 @@ test("QA adapters exercise the production onboarding and Workspace Start control
   await page.goto("/#/onboarding");
   await expect(
     page.locator('[data-qa-product-adapter="deterministic"]'),
-  ).toHaveAttribute("data-route", "/onboarding");
+  ).toHaveAttribute("data-qa-route", "/onboarding");
 
   await page.getByRole("textbox", { name: "Profile label" }).fill("QA OpenAI");
   await page
@@ -38,7 +38,7 @@ test("QA adapters exercise the production onboarding and Workspace Start control
   await expect(page).toHaveURL(/#\/start$/);
   await expect(
     page.locator('[data-qa-product-adapter="deterministic"]'),
-  ).toHaveAttribute("data-route", "/start");
+  ).toHaveAttribute("data-qa-route", "/start");
   await page.getByRole("button", { name: /AI Desktop UI/ }).click();
   await expect(page).toHaveURL(/#\/chat$/);
   await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
@@ -59,10 +59,20 @@ async function expectNoDocumentOverflow(page: Page) {
 test("all accepted product routes are directly addressable", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
+  const browserFailures: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
+    if (message.type() === "error" || message.type() === "warning") {
+      browserFailures.push(`console ${message.type()}: ${message.text()}`);
+    }
   });
+  page.on("pageerror", (error) =>
+    browserFailures.push(`pageerror: ${error.message}`),
+  );
+  page.on("requestfailed", (request) =>
+    browserFailures.push(
+      `requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`,
+    ),
+  );
 
   for (const [path, title] of routes) {
     await page.goto(`/#${path}`);
@@ -73,11 +83,99 @@ test("all accepted product routes are directly addressable", async ({
         page.getByRole("heading", { name: title, level: 1 }),
       ).toBeVisible();
     }
-    await expect(page.locator(`[data-route="${path}"]`)).toBeVisible();
+    const routeSurface =
+      path === "/onboarding" || path === "/start"
+        ? page.locator(`[data-qa-route="${path}"]`)
+        : page.locator(`[data-route="${path}"]`);
+    await expect(routeSurface).toBeVisible();
     await expectNoDocumentOverflow(page);
   }
 
-  expect(consoleErrors).toEqual([]);
+  expect(browserFailures).toEqual([]);
+});
+
+test("workspace review routes expose their accepted material state", async ({
+  page,
+}) => {
+  await page.goto("/#/chat-search");
+  const search = page.getByRole("searchbox", { name: "Search chats" });
+  await expect(search).toHaveValue("project");
+  await expect(
+    page.getByRole("heading", { name: "Search results", level: 2 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Design workspace projects C4OS QA",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Establish project knowledge base quotable-ai",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
+  await page.getByRole("button", { name: "Clear chat search" }).click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Projects", level: 2 }),
+  ).toBeVisible();
+
+  await page.goto("/#/chat-capabilities");
+  await expect(
+    page.getByRole("heading", { name: "Capability preflight", level: 2 }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Capability preflight" })
+      .getByText("moonshotai/kimi-k2"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Attachment needs a compatible model",
+      level: 3,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Use compatible model" }),
+  ).toBeVisible();
+
+  await page.goto("/#/files");
+  await expect(
+    page.getByRole("form", { name: "Message composer" }),
+  ).toHaveAttribute("data-composer-mode", "files");
+  await expect(
+    page.getByRole("textbox", { name: "File or folder path" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Browse File" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Browse Folder" }),
+  ).toBeVisible();
+
+  await page.goto("/#/browser");
+  await expect(
+    page.getByRole("form", { name: "Message composer" }),
+  ).toHaveAttribute("data-composer-mode", "browser");
+  await expect(
+    page.getByRole("textbox", { name: "Web address" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "New tab" })).toBeDisabled();
+
+  await page.goto("/#/terminal");
+  await expect(
+    page.getByRole("form", { name: "Message composer" }),
+  ).toHaveAttribute("data-composer-mode", "terminal");
+  await expect(
+    page.getByRole("textbox", { name: "Terminal command" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Enter full screen" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Enter password" }),
+  ).toBeDisabled();
 });
 
 test("Settings Back restores exact workspace drafts, panel state, and focus", async ({

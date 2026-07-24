@@ -5,6 +5,8 @@ import {
   isQaFixtureBuildEnabled,
   QA_FIXTURE_CLOCK,
   QA_FIXTURE_IDS,
+  QA_FIXTURE_SCHEMA_VERSION,
+  QA_FIXTURE_SCENARIO_ID,
   QaFixtureDisabledError,
 } from "./fixture";
 
@@ -24,6 +26,8 @@ describe("deterministic QA fixture adapter", () => {
     expect(() => adapter.snapshot()).toThrow(QaFixtureDisabledError);
     expect(() => adapter.now()).toThrow(QaFixtureDisabledError);
     expect(() => adapter.reset()).toThrow(QaFixtureDisabledError);
+    expect(() => adapter.launchRoute("/chat")).toThrow(QaFixtureDisabledError);
+    expect(() => adapter.replay([])).toThrow(QaFixtureDisabledError);
   });
 
   it("uses fixed IDs and a fixed clock", () => {
@@ -32,6 +36,8 @@ describe("deterministic QA fixture adapter", () => {
     expect(adapter.now()).toBe(QA_FIXTURE_CLOCK);
     expect(adapter.snapshot()).toEqual(
       expect.objectContaining({
+        schemaVersion: QA_FIXTURE_SCHEMA_VERSION,
+        scenarioId: QA_FIXTURE_SCENARIO_ID,
         capturedAt: QA_FIXTURE_CLOCK,
         ids: QA_FIXTURE_IDS,
       }),
@@ -55,5 +61,56 @@ describe("deterministic QA fixture adapter", () => {
     (snapshot.ids as { workspace: string }).workspace = "mutated";
 
     expect(adapter.snapshot().ids.workspace).toBe(QA_FIXTURE_IDS.workspace);
+  });
+
+  it("derives all 16 accepted direct routes from the application contract", () => {
+    const adapter = createQaFixtureAdapter({ enabled: true });
+
+    expect(adapter.routes).toHaveLength(16);
+    expect(new Set(adapter.routes).size).toBe(16);
+    expect(adapter.launchRoute("/settings/advanced-policies")).toMatchObject({
+      route: "/settings/advanced-policies",
+      hashHref: "#/settings/advanced-policies",
+      snapshot: {
+        activeRoute: "/settings/advanced-policies",
+        generation: 2,
+      },
+    });
+  });
+
+  it("replays an exact route trace from the deterministic baseline", () => {
+    const adapter = createQaFixtureAdapter({
+      enabled: true,
+      isolationId: "qa-replay",
+    });
+    adapter.launchRoute("/chat");
+    const expected = adapter.launchRoute("/settings/models").snapshot;
+
+    expect(adapter.replay(expected.replay)).toEqual(expected);
+  });
+
+  it("keeps independently created fixture adapters isolated", () => {
+    const first = createQaFixtureAdapter({
+      enabled: true,
+      isolationId: "qa-first",
+    });
+    const second = createQaFixtureAdapter({
+      enabled: true,
+      isolationId: "qa-second",
+    });
+
+    first.launchRoute("/terminal");
+
+    expect(first.snapshot()).toMatchObject({
+      isolationId: "qa-first",
+      activeRoute: "/terminal",
+      generation: 2,
+    });
+    expect(second.snapshot()).toMatchObject({
+      isolationId: "qa-second",
+      activeRoute: "/qa/foundation",
+      generation: 1,
+      replay: [],
+    });
   });
 });

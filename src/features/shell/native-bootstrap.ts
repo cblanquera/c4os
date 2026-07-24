@@ -38,6 +38,33 @@ export interface NativeShellIngestionResult {
   )[];
 }
 
+interface ReducedMotionMediaQuery {
+  readonly matches: boolean;
+  addEventListener(
+    type: "change",
+    listener: (event: { readonly matches: boolean }) => void,
+  ): void;
+  removeEventListener(
+    type: "change",
+    listener: (event: { readonly matches: boolean }) => void,
+  ): void;
+}
+
+/** Keeps JavaScript motion behavior synchronized with the live system setting. */
+export function listenForReducedMotionChanges(
+  dispatch: AppDispatch,
+  query: ReducedMotionMediaQuery = globalThis.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ),
+): () => void {
+  const publish = ({ matches }: { readonly matches: boolean }) => {
+    dispatch(shellAuthorityActions.platformReducedMotionChanged(matches));
+  };
+  publish(query);
+  query.addEventListener("change", publish);
+  return () => query.removeEventListener("change", publish);
+}
+
 /** Resumes only an already-active native Chat and never overrides user navigation. */
 export function nativeResumeRoute(
   result: NativeShellIngestionResult,

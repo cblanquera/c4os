@@ -49,6 +49,11 @@ export class ConversationFileDropBoundaryError extends Error {
 
 const tauriEventSource: NativeEventSource = {
   listen(eventName, handler) {
+    if (import.meta.env.VITE_C4OS_QA_FIXTURES === "1") {
+      void eventName;
+      void handler;
+      return Promise.resolve(() => undefined);
+    }
     return listen<unknown>(eventName, handler);
   },
 };

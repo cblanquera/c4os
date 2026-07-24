@@ -34,7 +34,11 @@ const qaSlice = createSlice({
 const generation = 50 as StateGeneration;
 const workspaceId = "workspace:qa" as WorkspaceId;
 const projectId = "project:qa" as ProjectId;
+const secondaryProjectId = "project:qa-quotable" as ProjectId;
+const missingProjectId = "project:qa-legacy" as ProjectId;
 const sessionId = "session:qa" as SessionId;
+const designSessionId = "session:qa-design" as SessionId;
+const knowledgeSessionId = "session:qa-knowledge" as SessionId;
 const artifactId = "artifact:qa-file" as ArtifactId;
 const runtimeId = "runtime:qa-opencode" as RuntimeId;
 
@@ -72,6 +76,18 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
               pathState: "found",
               gitVersioned: true,
             },
+            {
+              id: secondaryProjectId,
+              name: "quotable-ai",
+              pathState: "found",
+              gitVersioned: true,
+            },
+            {
+              id: missingProjectId,
+              name: "legacy-ui",
+              pathState: "missing",
+              gitVersioned: false,
+            },
           ],
         },
       },
@@ -84,6 +100,18 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
               id: sessionId,
               projectId,
               title: "Build onboarding start screens",
+              lifecycle: "saved",
+            },
+            {
+              id: designSessionId,
+              projectId,
+              title: "Design workspace projects",
+              lifecycle: "saved",
+            },
+            {
+              id: knowledgeSessionId,
+              projectId: secondaryProjectId,
+              title: "Establish project knowledge base",
               lifecycle: "saved",
             },
           ],
@@ -118,10 +146,22 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
           activeReasoningEffort: "medium",
           models: [
             {
+              providerId: "openrouter",
+              providerName: "OpenRouter",
+              modelId: "moonshotai/kimi-k2",
+              selected: true,
+              available: true,
+              supportsVision: false,
+              supportsTools: true,
+              supportsReasoning: false,
+              supportsAudio: false,
+              contextTokens: 128_000,
+            },
+            {
               providerId: "openai",
               providerName: "OpenAI",
               modelId: "openai/gpt-5",
-              selected: true,
+              selected: false,
               available: true,
               supportsVision: true,
               supportsTools: true,
@@ -228,6 +268,18 @@ function deterministicQaPreloadedState(): ShellPreloadedState {
       composer: {
         ...initialShellDraftState.composer,
         text: "Preserved QA composer draft",
+        attachments: [
+          {
+            id: "attachment:qa-concept-board" as never,
+            name: "concept-board.png",
+            byteLength: 284_672,
+            mediaType: "image/png",
+            stableReference: "qa-fixture:concept-board.png",
+            referenceNumber: 1,
+            compatibility: "needs-vision",
+          },
+        ],
+        nextAttachmentReference: 2,
       },
     },
     shellQa: {

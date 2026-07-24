@@ -384,7 +384,6 @@ impl MarketplaceSourceResolver {
 enum ParsedSource {
     PlainDirectory { canonical: PathBuf },
     FileRepository { canonical: PathBuf },
-    HttpsRepository { url: String },
 }
 
 impl ParsedSource {
@@ -403,7 +402,6 @@ impl ParsedSource {
                     .to_string();
                 Ok((source.clone(), source))
             }
-            Self::HttpsRepository { url } => Ok((url.clone(), url)),
         }
     }
 }
@@ -418,9 +416,6 @@ fn parse_source(source: &str) -> Result<ParsedSource, ExtensionError> {
             return Err(ExtensionError::InvalidInput);
         }
         return match url.scheme() {
-            "https" if url.host_str().is_some() => Ok(ParsedSource::HttpsRepository {
-                url: url.to_string(),
-            }),
             "file"
                 if url
                     .host_str()
@@ -960,6 +955,18 @@ mod tests {
                     None,
                     &["../plugins".into()],
                 )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn remote_https_repository_is_rejected_before_git_execution() {
+        let temporary = tempfile::tempdir().expect("temporary");
+        let resolver =
+            MarketplaceSourceResolver::new(temporary.path().join("resolver")).expect("resolver");
+        assert!(
+            resolver
+                .resolve("https://example.com/catalog.git", None, &[])
                 .is_err()
         );
     }

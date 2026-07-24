@@ -259,6 +259,7 @@ struct ProductionMcpCancellationRegistry {
     jobs: Arc<Mutex<BTreeMap<String, ProductionMcpCancellationRegistration>>>,
     quiescing_servers: Arc<Mutex<BTreeSet<String>>>,
     credential_servers: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
+    known_servers: Arc<Mutex<BTreeSet<String>>>,
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -354,6 +355,25 @@ impl ProductionMcpCancellationRegistry {
         if let Ok(mut current) = self.credential_servers.lock() {
             *current = bindings;
         }
+        if let Ok(mut current) = self.known_servers.lock() {
+            *current = snapshot
+                .servers
+                .iter()
+                .map(|server| server.server_id.clone())
+                .collect();
+        }
+    }
+
+    fn quiesce_all_servers(&self) -> usize {
+        let servers = self
+            .known_servers
+            .lock()
+            .map(|servers| servers.clone())
+            .unwrap_or_default();
+        servers
+            .iter()
+            .map(|server_id| self.quiesce_server(server_id))
+            .sum()
     }
 
     fn cancel_credential(&self, credential_reference: &str) -> usize {
@@ -368,6 +388,55 @@ impl ProductionMcpCancellationRegistry {
             .map(|server_id| self.quiesce_server(server_id))
             .sum()
     }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct ProductionMcpLifecycleCancellation {
+    registry: ProductionMcpCancellationRegistry,
+    ticket: String,
+    cancellation: mcp::transport::McpCancellation,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl ProductionMcpLifecycleCancellation {
+    fn cancellation(&self) -> mcp::transport::McpCancellation {
+        self.cancellation.clone()
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Drop for ProductionMcpLifecycleCancellation {
+    fn drop(&mut self) {
+        self.registry.complete(&self.ticket);
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn register_mcp_lifecycle_for_live_authority(
+    runtime: &RuntimeApplicationService,
+    cancellations: &ProductionMcpCancellationRegistry,
+    server_id: &str,
+    ticket: String,
+    expected: LiveAuthorityState,
+) -> Result<ProductionMcpLifecycleCancellation, RuntimeApplicationError> {
+    let _policy_transition = runtime.policy_transition_guard()?;
+    let current = runtime.current_direct_live_authority(
+        expected.process_generation,
+        expected.configuration_version,
+    )?;
+    if current != expected {
+        return Err(RuntimeApplicationError::InvalidPolicyAuthority);
+    }
+    cancellations.allow_server(server_id);
+    let cancellation = mcp::transport::McpCancellation::default();
+    cancellations
+        .register(ticket.clone(), server_id.to_owned(), cancellation.clone())
+        .map_err(|_| RuntimeApplicationError::InvalidPolicyAuthority)?;
+    Ok(ProductionMcpLifecycleCancellation {
+        registry: cancellations.clone(),
+        ticket,
+        cancellation,
+    })
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -914,7 +983,14 @@ impl RecoveryDirectoryAuthority {
 
 fn recovery_location_command(directory: &Path) -> Command {
     let mut command = Command::new("/usr/bin/open");
-    command.arg("-R").arg("--").arg(directory);
+    command
+        .arg("-R")
+        .arg("--")
+        .arg(directory)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     command
 }
 
@@ -6735,6 +6811,126 @@ fn extension_snapshot_envelope(
     protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
 }
 
+fn prepare_extension_configuration_action(
+    core: &AppCoreState,
+    tool: &str,
+    canonical_target: String,
+    target_version: String,
+    effect: ActionEffect,
+    plugin_or_mcp_id: Option<String>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(CanonicalAction, ActionFacts, LiveAuthorityState), ProtocolError> {
+    let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
+    let action_id = format!("extension-configure-{}", Uuid::new_v4().as_simple());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: tool.into(),
+        arguments: serde_json::json!({
+            "targetSha256": sha256_bytes(canonical_target.as_bytes()),
+        }),
+        risk: CanonicalRisk::Medium,
+        requested_authority: BTreeSet::from(["extension.configure".into()]),
+        canonical_target: canonical_target.clone(),
+        target_version,
+        workspace_id: "c4os-app".into(),
+        session_id: "settings-extensions".into(),
+        run_id: format!("extension-configure-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: plugin_or_mcp_id.clone(),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action
+        .validate()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    let facts = ActionFacts {
+        action_kind: "extension.configure".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::C4os,
+        effects: BTreeSet::from([effect]),
+        scope: ActionScope::System,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Private,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target,
+        workspace_id: action.workspace_id.clone(),
+        session_id: action.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((action, facts, live))
+}
+
+fn strictest_direct_action_facts(
+    core: &AppCoreState,
+    facts: impl IntoIterator<Item = ActionFacts>,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<ActionFacts, ProtocolError> {
+    let coordinator = core
+        .runtime
+        .coordinator()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    facts
+        .into_iter()
+        .max_by_key(|candidate| {
+            coordinator
+                .resolve_direct_policy(candidate, now_ms)
+                .decision
+        })
+        .ok_or_else(|| {
+            ProtocolError::new(ProtocolErrorCode::InvalidPayload, "No action facts", false)
+        })
+}
+
+fn marketplace_source_policy_facts(
+    base: &ActionFacts,
+    source: &str,
+) -> Result<ActionFacts, ProtocolError> {
+    if let Ok(url) = url::Url::parse(source) {
+        if url.scheme() == "https" {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::Forbidden,
+                "Remote marketplace sources are unavailable during the local-development milestone",
+                false,
+            ));
+        }
+        if url.scheme() != "file" {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Marketplace sources must be local paths for this milestone",
+                false,
+            ));
+        }
+    }
+    Ok(ActionFacts {
+        action_kind: "workspace.outside".into(),
+        surface: ActionSurface::File,
+        effects: BTreeSet::from([ActionEffect::Read]),
+        scope: ActionScope::ExternalLocal,
+        sensitivity: ActionSensitivity::Private,
+        target_resolved: false,
+        ..base.clone()
+    })
+}
+
 #[tauri::command]
 fn extension_snapshot(
     core: tauri::State<'_, AppCoreState>,
@@ -6757,14 +6953,51 @@ fn extension_add_marketplace(
     validate_snapshot_request(&request)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let mut extensions = core
-        .extensions
-        .lock()
+    let source_sha256 = sha256_bytes(input.source.as_bytes());
+    let (mut action, base_facts, live) = prepare_extension_configuration_action(
+        &core,
+        "c4os.extension.add-marketplace",
+        format!("marketplace-source:{source_sha256}"),
+        source_sha256.clone(),
+        ActionEffect::Create,
+        None,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let source_facts = marketplace_source_policy_facts(&base_facts, &input.source)?;
+    action
+        .requested_authority
+        .insert(source_facts.action_kind.clone());
+    action
+        .validate()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    require_extension_generation(&request, extensions.snapshot().generation)?;
-    let snapshot = extensions
-        .add_marketplace(input, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let facts = strictest_direct_action_facts(
+        &core,
+        [base_facts, source_facts],
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let snapshot = execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied adding the marketplace",
+        "marketplace-added",
+        "marketplace-add-failed",
+        || {
+            let mut extensions = core
+                .extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            require_extension_generation(&request, extensions.snapshot().generation)?;
+            extensions
+                .add_marketplace(input, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+        },
+    )?;
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
@@ -6776,14 +7009,65 @@ fn extension_refresh_catalogs(
     validate_snapshot_request(&request)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let mut extensions = core
-        .extensions
-        .lock()
+    let sources = {
+        let extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let snapshot = extensions.snapshot();
+        require_extension_generation(&request, snapshot.generation)?;
+        snapshot
+            .marketplaces
+            .into_iter()
+            .map(|marketplace| marketplace.source)
+            .collect::<Vec<_>>()
+    };
+    let sources_sha256 = sha256_bytes(
+        serde_json::to_vec(&sources)
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .as_slice(),
+    );
+    let (mut action, base_facts, live) = prepare_extension_configuration_action(
+        &core,
+        "c4os.extension.refresh-marketplaces",
+        format!("marketplace-catalogs:{sources_sha256}"),
+        sources_sha256,
+        ActionEffect::Modify,
+        None,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let mut candidates = vec![base_facts.clone()];
+    for source in &sources {
+        let source_facts = marketplace_source_policy_facts(&base_facts, source)?;
+        action
+            .requested_authority
+            .insert(source_facts.action_kind.clone());
+        candidates.push(source_facts);
+    }
+    action
+        .validate()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    require_extension_generation(&request, extensions.snapshot().generation)?;
-    let snapshot = extensions
-        .refresh_catalogs(request.expected_generation.0, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let facts =
+        strictest_direct_action_facts(&core, candidates, now_ms, request.correlation_id.clone())?;
+    let snapshot = execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied refreshing marketplaces",
+        "marketplaces-refreshed",
+        "marketplace-refresh-failed",
+        || {
+            core.extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .refresh_catalogs(request.expected_generation.0, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+        },
+    )?;
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
@@ -6843,7 +7127,7 @@ fn invalidate_extension_generation(
 }
 
 macro_rules! extension_package_command {
-    ($command:ident, $method:ident) => {
+    ($command:ident, $method:ident, $effect:expr) => {
         #[tauri::command]
         fn $command(
             core: tauri::State<'_, AppCoreState>,
@@ -6856,17 +7140,48 @@ macro_rules! extension_package_command {
             validate_snapshot_request(&request)?;
             let now_ms = current_time_ms()
                 .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-            let snapshot =
-                mutate_extension_package(&core, &request, input, now_ms, |service, input, now| {
-                    service.$method(input, now)
-                })?;
+            let package_id = input.package_id.clone();
+            let (action, facts, live) = prepare_extension_configuration_action(
+                &core,
+                concat!("c4os.extension.", stringify!($method)),
+                format!("extension-package:{package_id}"),
+                format!("extension-generation-{}", input.expected_generation),
+                $effect,
+                Some(package_id),
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            let snapshot = execute_fail_closed_direct_action(
+                &core,
+                &facts,
+                action,
+                live,
+                now_ms,
+                request.correlation_id.clone(),
+                "Policy denied configuring the extension",
+                "extension-configuration-succeeded",
+                "extension-configuration-failed",
+                || {
+                    mutate_extension_package(
+                        &core,
+                        &request,
+                        input,
+                        now_ms,
+                        |service, input, now| service.$method(input, now),
+                    )
+                },
+            )?;
             extension_snapshot_envelope(&core, request, snapshot)
         }
     };
 }
 
-extension_package_command!(extension_install_disabled, install_disabled);
-extension_package_command!(extension_enable, enable);
+extension_package_command!(
+    extension_install_disabled,
+    install_disabled,
+    ActionEffect::Create
+);
+extension_package_command!(extension_enable, enable, ActionEffect::Control);
 
 #[tauri::command]
 fn extension_stage_update(
@@ -6884,7 +7199,7 @@ fn extension_stage_update(
     )?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let mut extensions = core
+    let extensions = core
         .extensions
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
@@ -6895,14 +7210,47 @@ fn extension_stage_update(
             extension::service::ExtensionPackageMutation::StageUpdate,
         )
         .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
-    let snapshot = extensions
-        .stage_update(input, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    drop(extensions);
+    let package_id = input.package_id.clone();
+    let (action, facts, live) = prepare_extension_configuration_action(
+        &core,
+        "c4os.extension.stage-update",
+        format!("extension-package:{package_id}"),
+        format!("extension-generation-{}", input.expected_generation),
+        ActionEffect::Modify,
+        Some(package_id),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let snapshot = execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied staging the extension update",
+        "extension-update-staged",
+        "extension-update-stage-failed",
+        || {
+            core.extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .stage_update(input, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+        },
+    )?;
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
 macro_rules! extension_package_command_with_worker_termination {
-    ($command:ident, $method:ident, $mutation:ident $(, $update_operation:expr)?) => {
+    (
+        $command:ident,
+        $method:ident,
+        $mutation:ident,
+        $update_operation:expr,
+        $gate_effect:expr
+    ) => {
         #[tauri::command]
         fn $command(
             core: tauri::State<'_, AppCoreState>,
@@ -6914,14 +7262,14 @@ macro_rules! extension_package_command_with_worker_termination {
         > {
             validate_snapshot_request(&request)?;
             require_extension_input_generation(&request, input.expected_generation)?;
-            $(
+            if let Some(update_operation) = $update_operation {
                 require_update_policy(
                     &core,
                     update::UpdateChannel::Plugin,
-                    $update_operation,
+                    update_operation,
                     request.correlation_id.clone(),
                 )?;
-            )?
+            }
             let package_id = input.package_id.clone();
             let invalidated_generation = input.expected_generation;
             let now_ms = current_time_ms()
@@ -6937,6 +7285,59 @@ macro_rules! extension_package_command_with_worker_termination {
                     extension::service::ExtensionPackageMutation::$mutation,
                 )
                 .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+            if let Some(effect) = $gate_effect {
+                drop(extensions);
+                let (action, facts, live) = prepare_extension_configuration_action(
+                    &core,
+                    concat!("c4os.extension.", stringify!($method)),
+                    format!("extension-package:{package_id}"),
+                    format!("extension-generation-{}", input.expected_generation),
+                    effect,
+                    Some(package_id.clone()),
+                    now_ms,
+                    request.correlation_id.clone(),
+                )?;
+                let snapshot = execute_fail_closed_direct_action(
+                    &core,
+                    &facts,
+                    action,
+                    live,
+                    now_ms,
+                    request.correlation_id.clone(),
+                    "Policy denied configuring the extension",
+                    "extension-configuration-succeeded",
+                    "extension-configuration-failed",
+                    || {
+                        let mut extensions = core.extensions.lock().map_err(|_| {
+                            workspace_state_unavailable(request.correlation_id.clone())
+                        })?;
+                        require_extension_generation(&request, extensions.snapshot().generation)?;
+                        extensions
+                            .preflight_package_mutation(
+                                &input,
+                                extension::service::ExtensionPackageMutation::$mutation,
+                            )
+                            .map_err(|error| {
+                                extension_boundary_error(error, request.correlation_id.clone())
+                            })?;
+                        core.runtime
+                            .revoke_plugin_authority(&package_id, now_ms)
+                            .map_err(|_| {
+                                workspace_state_unavailable(request.correlation_id.clone())
+                            })?;
+                        invalidate_extension_generation(
+                            &core,
+                            &package_id,
+                            invalidated_generation,
+                            request.correlation_id.clone(),
+                        )?;
+                        extensions.$method(input, now_ms).map_err(|error| {
+                            extension_boundary_error(error, request.correlation_id.clone())
+                        })
+                    },
+                )?;
+                return extension_snapshot_envelope(&core, request, snapshot).map_err(Into::into);
+            }
             core.runtime
                 .revoke_plugin_authority(&package_id, now_ms)
                 .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
@@ -6954,15 +7355,34 @@ macro_rules! extension_package_command_with_worker_termination {
     };
 }
 
-extension_package_command_with_worker_termination!(extension_disable, disable, Disable);
+extension_package_command_with_worker_termination!(
+    extension_disable,
+    disable,
+    Disable,
+    None::<UpdatePolicyOperation>,
+    None::<ActionEffect>
+);
 extension_package_command_with_worker_termination!(
     extension_activate_update,
     activate_staged_update,
     ActivateStagedUpdate,
-    UpdatePolicyOperation::Activation
+    Some(UpdatePolicyOperation::Activation),
+    Some(ActionEffect::Modify)
 );
-extension_package_command_with_worker_termination!(extension_rollback, rollback, Rollback);
-extension_package_command_with_worker_termination!(extension_uninstall, uninstall, Uninstall);
+extension_package_command_with_worker_termination!(
+    extension_rollback,
+    rollback,
+    Rollback,
+    None::<UpdatePolicyOperation>,
+    Some(ActionEffect::Modify)
+);
+extension_package_command_with_worker_termination!(
+    extension_uninstall,
+    uninstall,
+    Uninstall,
+    None::<UpdatePolicyOperation>,
+    None::<ActionEffect>
+);
 
 #[tauri::command]
 fn extension_revoke(
@@ -7070,12 +7490,45 @@ fn extension_set_skill_enabled(
     require_extension_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let snapshot = core
-        .extensions
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-        .set_skill_enabled(input, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let snapshot = if input.enabled {
+        let skill_identity = input.skill_identity.clone();
+        let (action, facts, live) = prepare_extension_configuration_action(
+            &core,
+            "c4os.extension.enable-skill",
+            format!("extension-skill:{skill_identity}"),
+            format!("extension-generation-{}", input.expected_generation),
+            ActionEffect::Control,
+            None,
+            now_ms,
+            request.correlation_id.clone(),
+        )?;
+        execute_fail_closed_direct_action(
+            &core,
+            &facts,
+            action,
+            live,
+            now_ms,
+            request.correlation_id.clone(),
+            "Policy denied enabling the Skill",
+            "extension-skill-enabled",
+            "extension-skill-enable-failed",
+            || {
+                core.extensions
+                    .lock()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .set_skill_enabled(input, now_ms)
+                    .map_err(|error| {
+                        extension_boundary_error(error, request.correlation_id.clone())
+                    })
+            },
+        )?
+    } else {
+        core.extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .set_skill_enabled(input, now_ms)
+            .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+    };
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
@@ -7108,12 +7561,35 @@ fn extension_customize_skill(
     require_extension_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let snapshot = core
-        .extensions
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-        .customize_skill(input, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let skill_identity = input.skill_identity.clone();
+    let (action, facts, live) = prepare_extension_configuration_action(
+        &core,
+        "c4os.extension.customize-skill",
+        format!("extension-skill:{skill_identity}"),
+        format!("extension-generation-{}", input.expected_generation),
+        ActionEffect::Modify,
+        None,
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let snapshot = execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied customizing the Skill",
+        "extension-skill-customized",
+        "extension-skill-customize-failed",
+        || {
+            core.extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .customize_skill(input, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+        },
+    )?;
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
@@ -7127,12 +7603,35 @@ fn extension_review_hook(
     require_extension_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let snapshot = core
-        .extensions
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-        .review_hook(input, now_ms)
-        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let package_id = input.package_id.clone();
+    let (action, facts, live) = prepare_extension_configuration_action(
+        &core,
+        "c4os.extension.review-hook",
+        format!("extension-hook:{package_id}:{}", input.hook_id),
+        format!("extension-generation-{}", input.expected_generation),
+        ActionEffect::Modify,
+        Some(package_id),
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    let snapshot = execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied reviewing the extension Hook",
+        "extension-hook-reviewed",
+        "extension-hook-review-failed",
+        || {
+            core.extensions
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .review_hook(input, now_ms)
+                .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))
+        },
+    )?;
     extension_snapshot_envelope(&core, request, snapshot)
 }
 
@@ -7259,30 +7758,36 @@ fn extension_publisher_link(
                 false,
             ));
         }
-        GatewayProposal::Authorized { token, .. } => (token, None),
+        GatewayProposal::Authorized { token, .. } => (token, None::<String>),
         GatewayProposal::PendingApproval { prompt, .. } => {
-            // This Settings click is the user's one-time approval for the
-            // exact package-bound URL; the Action Gateway still consumes the
-            // resulting permit before `/usr/bin/open` can run.
             let prompt_id = prompt.prompt_id.clone();
             let response = core
                 .runtime
                 .coordinator()
                 .and_then(|mut coordinator| {
                     coordinator
-                        .answer_direct_approval(&prompt_id, ApprovalAnswer::Allow, now_ms)
+                        .answer_direct_approval(
+                            &prompt_id,
+                            ApprovalAnswer::Deny,
+                            now_ms.saturating_add(1),
+                        )
                         .map(|operation| operation.value)
                         .map_err(Into::into)
                 })
                 .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-            match response {
-                ApprovalResponse::Authorized { token, prompt }
-                    if prompt.prompt_id == prompt_id && prompt.action == action =>
-                {
-                    (token, Some(prompt_id))
-                }
-                _ => return Err(workspace_state_unavailable(request.correlation_id)),
+            if !matches!(
+                response,
+                ApprovalResponse::Denied { ref prompt }
+                    if prompt.prompt_id == prompt_id && prompt.action == action
+            ) {
+                return Err(workspace_state_unavailable(request.correlation_id));
             }
+            return Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::Forbidden,
+                "Opening the publisher link requires an explicit approval workflow",
+                false,
+            ));
         }
     };
     let mut effect_result = None;
@@ -7626,6 +8131,18 @@ fn startup_recovery_action(
             true,
         ));
     }
+    let validated_migration_backup = bootstrap
+        .validated_migration_backup
+        .lock()
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "Startup recovery backup authority is unavailable",
+                true,
+            )
+        })?
+        .clone();
     let prepared = bootstrap
         .startup_recovery
         .lock()
@@ -7656,13 +8173,7 @@ fn startup_recovery_action(
         },
         StartupRecoveryAction::RestoreValidatedBackup => {
             let backup = (prepared.boundary() == StartupRecoveryBoundary::Database)
-                .then(|| {
-                    bootstrap
-                        .validated_migration_backup
-                        .lock()
-                        .ok()
-                        .and_then(|backup| backup.clone())
-                })
+                .then_some(validated_migration_backup)
                 .flatten();
             if backup.as_ref().is_some_and(|backup| {
                 core::database::restore_validated_migration_backup(backup).is_ok()
@@ -9020,12 +9531,22 @@ fn activate_workspace_from_start(
         .runtime
         .policy_transition_guard()
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let policy_quiescence: Arc<dyn Fn() + Send + Sync> = {
+        let cancellations = core.mcp_cancellations.clone();
+        Arc::new(move || {
+            cancellations.quiesce_all_servers();
+        })
+    };
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let policy_quiescence: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
     install_workspace_configuration_activation_observer(
         &workspace,
         Arc::clone(&core.configuration),
         Arc::clone(&core.active_workspace),
         Arc::clone(&core.conversation),
         &core.runtime,
+        policy_quiescence,
     )
     .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
@@ -14377,6 +14898,7 @@ fn workspace_configuration_activation_observer(
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation: Arc<Mutex<ConversationApplicationState>>,
     runtime: Weak<RuntimeApplicationService>,
+    policy_quiescence: Arc<dyn Fn() + Send + Sync>,
 ) -> Arc<dyn Fn() -> Result<(), ()> + Send + Sync> {
     Arc::new(move || {
         let runtime = runtime.upgrade().ok_or(())?;
@@ -14387,7 +14909,9 @@ fn workspace_configuration_activation_observer(
             &conversation,
             &runtime,
             now_ms,
-        )
+        )?;
+        policy_quiescence();
+        Ok(())
     })
 }
 
@@ -14397,6 +14921,7 @@ fn install_workspace_configuration_activation_observer(
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
     conversation: Arc<Mutex<ConversationApplicationState>>,
     runtime: &Arc<RuntimeApplicationService>,
+    policy_quiescence: Arc<dyn Fn() + Send + Sync>,
 ) -> Result<(), core::services::ConfigurationPersistenceError> {
     workspace.set_configuration_activation_observer(
         runtime.policy_transition_gate(),
@@ -14405,6 +14930,7 @@ fn install_workspace_configuration_activation_observer(
             active_workspace,
             conversation,
             Arc::downgrade(runtime),
+            policy_quiescence,
         ),
     )
 }
@@ -14629,6 +15155,15 @@ fn prepare_browser_action(
 ) -> Result<(PendingArtifactBrowserAction, ActionFacts), ProtocolError> {
     let live = current_artifact_live_authority(core, now_ms, correlation_id.clone())?;
     let action_id = format!("browser-action-{}", Uuid::new_v4().as_simple());
+    let authenticated = matches!(
+        &record.state,
+        artifact::ArtifactState::Browser(browser)
+            if browser_environment_may_hold_authenticated_state(&browser.environment)
+    );
+    let mut requested_authority = BTreeSet::from(["browser.navigate".into()]);
+    if authenticated {
+        requested_authority.insert("browser.authenticated".into());
+    }
     let action = CanonicalAction {
         schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
         action_id: action_id.clone(),
@@ -14641,7 +15176,7 @@ fn prepare_browser_action(
             "navigationSha256": navigation_sha256,
         }),
         risk: CanonicalRisk::Low,
-        requested_authority: BTreeSet::from(["browser.navigate".into()]),
+        requested_authority,
         canonical_target: format!("browser-target:{navigation_sha256}"),
         target_version: format!("browser-record-{}", record.record_revision),
         workspace_id: scope.workspace_id.clone(),
@@ -14667,10 +15202,14 @@ fn prepare_browser_action(
         action_kind: action_kind.into(),
         native_tool: action.tool.clone(),
         surface: ActionSurface::Browser,
-        effects: BTreeSet::from([ActionEffect::Read]),
+        effects: BTreeSet::from([ActionEffect::Read, ActionEffect::Control]),
         scope: ActionScope::Remote,
         initiator,
-        sensitivity: ActionSensitivity::Ordinary,
+        sensitivity: if authenticated {
+            ActionSensitivity::Authenticated
+        } else {
+            ActionSensitivity::Ordinary
+        },
         reversibility: ActionReversibility::Reversible,
         confidence: ClassificationConfidence::Known,
         request_origin,
@@ -14683,7 +15222,7 @@ fn prepare_browser_action(
         environment_id: action.environment_id.clone(),
         plugin_or_mcp_id: None,
         target_resolved: true,
-        authenticated: false,
+        authenticated,
         trusted_root: false,
         explicit_scope_grant: false,
         sandbox_allows: true,
@@ -14700,6 +15239,15 @@ fn prepare_browser_action(
         },
         facts,
     ))
+}
+
+fn browser_environment_may_hold_authenticated_state(
+    _environment: &artifact::BrowserEnvironmentReference,
+) -> bool {
+    // Every live WebKit page can acquire authenticated state. In particular,
+    // the None scope is ephemeral per Artifact, not an authentication proof:
+    // it may still hold cookies, sessionStorage, or a live logged-in document.
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -17372,6 +17920,8 @@ async fn artifact_reply(
         input.selected_entry_id,
         request.correlation_id.clone(),
     )?;
+    let capture_started_at_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     let browser_capture = if let artifact::ArtifactState::Browser(browser) = &record.state {
         let identity = core
             .artifact
@@ -17391,7 +17941,81 @@ async fn artifact_reply(
                     true,
                 )
             })?;
-        Some((identity, browser.current_navigation_sha256().to_owned()))
+        let navigation_sha256 = browser.current_navigation_sha256().to_owned();
+        let authenticated = browser_environment_may_hold_authenticated_state(&browser.environment);
+        let live = current_artifact_live_authority(
+            &core,
+            capture_started_at_ms,
+            request.correlation_id.clone(),
+        )?;
+        let action_id = format!("browser-reply-capture-{}", Uuid::new_v4().as_simple());
+        let canonical_target = format!("browser-navigation:{navigation_sha256}");
+        let mut requested_authority = BTreeSet::from(["browser.view".into()]);
+        if authenticated {
+            requested_authority.insert("browser.authenticated".into());
+        }
+        let action = CanonicalAction {
+            schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+            action_id: action_id.clone(),
+            tool_call_id: format!("tool-call-{action_id}"),
+            tool: "c4os.browser.capture-reply".into(),
+            arguments: serde_json::json!({
+                "artifactId": record.artifact_id,
+                "navigationSha256": navigation_sha256,
+                "controllerGeneration": browser.controller_generation,
+            }),
+            risk: CanonicalRisk::Medium,
+            requested_authority,
+            canonical_target: canonical_target.clone(),
+            target_version: format!(
+                "browser-record-{}-controller-{}",
+                record.record_revision, browser.controller_generation
+            ),
+            workspace_id: scope.workspace_id.clone(),
+            session_id: scope.session_id.clone(),
+            run_id: format!("browser-reply-capture-run-{}", Uuid::new_v4().as_simple()),
+            runtime_id: "c4os-core".into(),
+            environment_id: "desktop".into(),
+            plugin_or_mcp_id: None,
+            process_generation: live.process_generation,
+            configuration_version: live.configuration_version,
+            policy_version: live.policy_version,
+            revocation_epoch: live.revocation_epoch,
+        };
+        action
+            .validate()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let facts = ActionFacts {
+            action_kind: "browser.capture-reply".into(),
+            native_tool: action.tool.clone(),
+            surface: ActionSurface::Browser,
+            effects: BTreeSet::from([ActionEffect::Capture]),
+            scope: ActionScope::Remote,
+            initiator: ActionInitiator::User,
+            sensitivity: if authenticated {
+                ActionSensitivity::Authenticated
+            } else {
+                ActionSensitivity::Private
+            },
+            reversibility: ActionReversibility::Reversible,
+            confidence: ClassificationConfidence::Known,
+            request_origin: ActionRequestOrigin::DirectUserEdit,
+            repository_state: RepositoryState::NotApplicable,
+            inside_active_project: false,
+            canonical_target,
+            workspace_id: action.workspace_id.clone(),
+            session_id: action.session_id.clone(),
+            runtime_id: action.runtime_id.clone(),
+            environment_id: action.environment_id.clone(),
+            plugin_or_mcp_id: None,
+            target_resolved: true,
+            authenticated,
+            trusted_root: false,
+            explicit_scope_grant: false,
+            sandbox_allows: true,
+            declaration_exceeded: false,
+        };
+        Some((identity, navigation_sha256, action, facts, live))
     } else {
         None
     };
@@ -17400,9 +18024,18 @@ async fn artifact_reply(
     drop(before);
     drop(_artifact_operation);
     drop(_conversation_operation);
-    if let Some((identity, expected_navigation_sha256)) = browser_capture {
+    if let Some((identity, expected_navigation_sha256, action, facts, live)) = browser_capture {
+        let lease = begin_fail_closed_direct_action(
+            &core,
+            &facts,
+            &action,
+            live,
+            capture_started_at_ms,
+            request.correlation_id.clone(),
+            "Policy denied capturing Browser Reply context",
+        )?;
         let capture_app = app.clone();
-        let page = tauri::async_runtime::spawn_blocking(move || {
+        let page_result = tauri::async_runtime::spawn_blocking(move || {
             browser::native::capture_context(&capture_app, identity, expected_navigation_sha256)
         })
         .await
@@ -17414,7 +18047,31 @@ async fn artifact_reply(
                 "The Browser page changed or could not be captured safely",
                 true,
             )
-        })?;
+        });
+        let succeeded = page_result.is_ok();
+        core.runtime
+            .complete_direct_action_effect(
+                lease,
+                NormalizedActionResult {
+                    status: if succeeded {
+                        NormalizedActionStatus::Succeeded
+                    } else {
+                        NormalizedActionStatus::Failed
+                    },
+                    result_code: if succeeded {
+                        "browser-reply-captured"
+                    } else {
+                        "browser-reply-capture-failed"
+                    }
+                    .into(),
+                    exit_code: succeeded.then_some(0),
+                    changed_targets: Vec::new(),
+                    output_sha256: None,
+                    completed_at_ms: capture_started_at_ms.saturating_add(2),
+                },
+            )
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let page = page_result?;
         capture.browser_page_context = Some(DurableBrowserPageContext {
             selected_text: page.selected_text,
             visible_text: page.visible_text,
@@ -17732,6 +18389,112 @@ fn current_artifact_live_authority(
         policy_version: authority.policy_version,
         revocation_epoch: authority.revocation_epoch,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn begin_fail_closed_direct_action(
+    core: &AppCoreState,
+    facts: &ActionFacts,
+    action: &CanonicalAction,
+    live: LiveAuthorityState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+    denied_message: &'static str,
+) -> Result<ActionEffectLease, ProtocolError> {
+    let proposal = core
+        .runtime
+        .propose_direct_action(facts, action.clone(), now_ms)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let token = match proposal {
+        GatewayProposal::Authorized { token, .. } => token,
+        GatewayProposal::Denied { .. } => {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Forbidden,
+                denied_message,
+                false,
+            ));
+        }
+        GatewayProposal::PendingApproval { prompt, .. } => {
+            let response = core
+                .runtime
+                .coordinator()
+                .and_then(|mut coordinator| {
+                    coordinator
+                        .answer_direct_approval(
+                            &prompt.prompt_id,
+                            ApprovalAnswer::Deny,
+                            now_ms.saturating_add(1),
+                        )
+                        .map(|operation| operation.value)
+                        .map_err(Into::into)
+                })
+                .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+            if !matches!(response, ApprovalResponse::Denied { .. }) {
+                return Err(workspace_state_unavailable(correlation_id));
+            }
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Forbidden,
+                denied_message,
+                false,
+            ));
+        }
+    };
+    let lease = core
+        .runtime
+        .begin_direct_action_effect(&token, action, live, None, now_ms.saturating_add(1))
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    Ok(lease)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_fail_closed_direct_action<T>(
+    core: &AppCoreState,
+    facts: &ActionFacts,
+    action: CanonicalAction,
+    live: LiveAuthorityState,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+    denied_message: &'static str,
+    success_code: &'static str,
+    failure_code: &'static str,
+    effect: impl FnOnce() -> Result<T, ProtocolError>,
+) -> Result<T, ProtocolError> {
+    let lease = begin_fail_closed_direct_action(
+        core,
+        facts,
+        &action,
+        live,
+        now_ms,
+        correlation_id.clone(),
+        denied_message,
+    )?;
+    let result = effect();
+    let succeeded = result.is_ok();
+    core.runtime
+        .complete_direct_action_effect(
+            lease,
+            NormalizedActionResult {
+                status: if succeeded {
+                    NormalizedActionStatus::Succeeded
+                } else {
+                    NormalizedActionStatus::Failed
+                },
+                result_code: if succeeded {
+                    success_code
+                } else {
+                    failure_code
+                }
+                .into(),
+                exit_code: succeeded.then_some(0),
+                changed_targets: Vec::new(),
+                output_sha256: None,
+                completed_at_ms: now_ms.saturating_add(2),
+            },
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    result
 }
 
 fn prepare_artifact_write(
@@ -20257,6 +21020,8 @@ fn conversation_activate_session(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
         return Err(workspace_state_unavailable(request.correlation_id).into());
     }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_all_servers();
     if selection_changed {
         detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
         let focus_generation = clear_persisted_artifact_focus(
@@ -20388,6 +21153,8 @@ fn conversation_activate_project(
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
         return Err(workspace_state_unavailable(request.correlation_id).into());
     }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_all_servers();
     if selection_changed {
         detach_active_native_browser(&app, &core, None, request.correlation_id.clone())?;
         let focus_generation = clear_persisted_artifact_focus(
@@ -20680,42 +21447,121 @@ fn conversation_project_native_action(
                 false,
             )
         })?;
+    let project_path = project.current_path.clone();
+    let workspace_id = project.workspace_id.clone();
+    let action_label = match action {
+        ProjectNativeAction::CopyPath => "copy-path",
+        ProjectNativeAction::Reveal => "reveal",
+    };
+    let live = current_artifact_live_authority(&core, now_ms, request.correlation_id.clone())?;
+    let action_id = format!("project-native-{}", Uuid::new_v4().as_simple());
+    let canonical_action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: format!("c4os.desktop.project-{action_label}"),
+        arguments: serde_json::json!({
+            "projectId": project_id.as_str(),
+            "operation": action_label,
+        }),
+        risk: CanonicalRisk::Low,
+        requested_authority: BTreeSet::from(["desktop.control".into()]),
+        canonical_target: project_path.clone(),
+        target_version: sha256_bytes(project_path.as_bytes()),
+        workspace_id: workspace_id.clone(),
+        session_id: "project-switcher".into(),
+        run_id: format!("project-native-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    canonical_action
+        .validate()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let facts = ActionFacts {
+        action_kind: "desktop.control".into(),
+        native_tool: canonical_action.tool.clone(),
+        surface: ActionSurface::Desktop,
+        effects: BTreeSet::from([ActionEffect::Control]),
+        scope: ActionScope::ExternalLocal,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Ordinary,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: project_path.clone(),
+        workspace_id,
+        session_id: canonical_action.session_id.clone(),
+        runtime_id: canonical_action.runtime_id.clone(),
+        environment_id: canonical_action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
     #[cfg(target_os = "macos")]
-    match action {
-        ProjectNativeAction::CopyPath => {
-            let mut child = Command::new("/usr/bin/pbcopy")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-            child
-                .stdin
-                .as_mut()
-                .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))?
-                .write_all(project.current_path.as_bytes())
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-            if !child
-                .wait()
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
-                .success()
-            {
-                return Err(workspace_state_unavailable(request.correlation_id));
+    execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        canonical_action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied the Project desktop action",
+        "project-desktop-action-succeeded",
+        "project-desktop-action-failed",
+        || match action {
+            ProjectNativeAction::CopyPath => {
+                let mut child = Command::new("/usr/bin/pbcopy")
+                    .env_clear()
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+                child
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .write_all(project_path.as_bytes())
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+                if !child
+                    .wait()
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                    .success()
+                {
+                    return Err(workspace_state_unavailable(request.correlation_id.clone()));
+                }
+                Ok(())
             }
-        }
-        ProjectNativeAction::Reveal => {
-            Command::new("/usr/bin/open")
+            ProjectNativeAction::Reveal => Command::new("/usr/bin/open")
                 .arg("-R")
-                .arg(&project.current_path)
+                .arg(&project_path)
+                .env_clear()
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .spawn()
-                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-        }
-    }
+                .status()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))
+                .and_then(|status| {
+                    status
+                        .success()
+                        .then_some(())
+                        .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))
+                }),
+        },
+    )?;
     #[cfg(not(target_os = "macos"))]
-    let _ = (action, project);
+    let _ = (action, project_path, facts, canonical_action, live);
     let payload = build_conversation_snapshot(&core, request.correlation_id.clone())?;
     protocol::conversation_snapshot(request, payload)
 }
@@ -24780,6 +25626,8 @@ fn configuration_save_settings(
         }
         return Err(workspace_state_unavailable(request.correlation_id).into());
     }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_all_servers();
     configuration_settings_envelope(&core, request, now_ms).map_err(Into::into)
 }
 
@@ -24806,26 +25654,97 @@ fn configuration_open_external(
         .into());
     }
     let path = core.c4os_home.join("config.toml");
-    let opened = Command::new("/usr/bin/open")
-        .arg(&path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !opened {
-        return Err(platform_boundary_error(
-            request.correlation_id,
-            ProtocolErrorCode::Unavailable,
-            "The C4OS configuration file could not be opened",
-            true,
-        )
-        .into());
-    }
+    let path_text = path.to_string_lossy().into_owned();
+    let live = current_artifact_live_authority(&core, now_ms, request.correlation_id.clone())?;
+    let action_id = format!("configuration-open-{}", Uuid::new_v4().as_simple());
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-call-{action_id}"),
+        tool: "c4os.desktop.open-configuration".into(),
+        arguments: serde_json::json!({
+            "configurationGeneration": payload.generation,
+        }),
+        risk: CanonicalRisk::Low,
+        requested_authority: BTreeSet::from(["desktop.control".into()]),
+        canonical_target: path_text.clone(),
+        target_version: sha256_bytes(path_text.as_bytes()),
+        workspace_id: "c4os-app".into(),
+        session_id: "settings".into(),
+        run_id: format!("configuration-open-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: None,
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action
+        .validate()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let facts = ActionFacts {
+        action_kind: "desktop.control".into(),
+        native_tool: action.tool.clone(),
+        surface: ActionSurface::Desktop,
+        effects: BTreeSet::from([ActionEffect::Control]),
+        scope: ActionScope::ExternalLocal,
+        initiator: ActionInitiator::User,
+        sensitivity: ActionSensitivity::Private,
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: path_text,
+        workspace_id: action.workspace_id.clone(),
+        session_id: action.session_id.clone(),
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: None,
+        target_resolved: true,
+        authenticated: false,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    drop(_policy_transition);
+    execute_fail_closed_direct_action(
+        &core,
+        &facts,
+        action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied opening the C4OS configuration file",
+        "configuration-opened",
+        "configuration-open-failed",
+        || {
+            let opened = Command::new("/usr/bin/open")
+                .arg(&path)
+                .env_clear()
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if opened {
+                Ok(())
+            } else {
+                Err(platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Unavailable,
+                    "The C4OS configuration file could not be opened",
+                    true,
+                ))
+            }
+        },
+    )?;
     protocol::snapshot_envelope(
         request,
         StateGeneration(payload.generation),
-        ConfigurationExternalOpenSnapshot { opened },
+        ConfigurationExternalOpenSnapshot { opened: true },
     )
     .map_err(Into::into)
 }
@@ -25440,6 +26359,8 @@ fn policy_save(
             now_ms,
         )
         .map_err(|error| policy_boundary_error(error, request.correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_all_servers();
     policy_settings_envelope(request, payload).map_err(Into::into)
 }
 
@@ -25512,6 +26433,8 @@ fn policy_revoke_exception(
             now_ms,
         )
         .map_err(|error| policy_boundary_error(error, request.correlation_id.clone()))?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    core.mcp_cancellations.quiesce_all_servers();
     policy_settings_envelope(request, payload).map_err(Into::into)
 }
 
@@ -26062,7 +26985,11 @@ fn prepare_mcp_trust(
         } else {
             ActionSurface::Process
         },
-        effects: BTreeSet::from([ActionEffect::Control]),
+        effects: if remote {
+            BTreeSet::from([ActionEffect::Read, ActionEffect::Control])
+        } else {
+            BTreeSet::from([ActionEffect::Execute, ActionEffect::Control])
+        },
         scope: if remote {
             ActionScope::Remote
         } else {
@@ -26093,6 +27020,152 @@ fn prepare_mcp_trust(
         declaration_exceeded: false,
     };
     Ok((action, facts))
+}
+
+fn prepare_mcp_lifecycle_action(
+    runtime: &RuntimeApplicationService,
+    snapshot: &mcp::McpServiceSnapshot,
+    server: &mcp::McpServerSnapshot,
+    definition_sha256: String,
+    operation: &str,
+) -> Result<(CanonicalAction, ActionFacts, LiveAuthorityState), mcp::McpError> {
+    let (workspace_id, session_id) = match &server.scope {
+        mcp::McpScope::Application => ("c4os-settings".to_owned(), "mcp-settings".to_owned()),
+        mcp::McpScope::Workspace { workspace_id }
+        | mcp::McpScope::Project { workspace_id, .. }
+        | mcp::McpScope::Chat { workspace_id, .. } => (
+            workspace_id.clone(),
+            match &server.scope {
+                mcp::McpScope::Chat { session_id, .. } => session_id.clone(),
+                _ => "mcp-settings".to_owned(),
+            },
+        ),
+    };
+    let remote = matches!(
+        server.transport,
+        mcp::McpTransportDefinition::StreamableHttp { .. }
+    );
+    let credential_bound = match &server.transport {
+        mcp::McpTransportDefinition::Stdio { environment, .. } => environment
+            .iter()
+            .any(|binding| !matches!(binding.source, mcp::McpEnvironmentSource::Literal { .. })),
+        mcp::McpTransportDefinition::StreamableHttp { .. } => true,
+    };
+    let live = runtime
+        .current_direct_live_authority(server.lifecycle_generation, snapshot.generation)
+        .map_err(|_| mcp::McpError::StateUnavailable)?;
+    let identity = format!(
+        "mcp-{}",
+        sha256_bytes(server.server_id.as_bytes()).trim_start_matches("sha256:")
+    );
+    let action_id = format!("mcp-{operation}-{}", Uuid::new_v4().as_simple());
+    let target = format!("mcp-definition:{}:{definition_sha256}", server.server_id);
+    let policy_kind = if remote {
+        "network.retrieve"
+    } else {
+        "process.control"
+    };
+    let action = CanonicalAction {
+        schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
+        action_id: action_id.clone(),
+        tool_call_id: format!("tool-{action_id}"),
+        tool: format!("mcp.server.{operation}"),
+        arguments: serde_json::json!({
+            "definitionSha256": definition_sha256,
+            "operation": operation,
+            "serverId": server.server_id,
+            "transportKind": server.transport.kind(),
+        }),
+        risk: CanonicalRisk::High,
+        requested_authority: BTreeSet::from([policy_kind.into()]),
+        canonical_target: target.clone(),
+        target_version: definition_sha256,
+        workspace_id: workspace_id.clone(),
+        session_id: session_id.clone(),
+        run_id: format!("mcp-{operation}-run-{}", Uuid::new_v4().as_simple()),
+        runtime_id: "c4os-core".into(),
+        environment_id: "desktop".into(),
+        plugin_or_mcp_id: Some(identity.clone()),
+        process_generation: live.process_generation,
+        configuration_version: live.configuration_version,
+        policy_version: live.policy_version,
+        revocation_epoch: live.revocation_epoch,
+    };
+    action.validate().map_err(|_| mcp::McpError::InvalidState)?;
+    let facts = ActionFacts {
+        action_kind: policy_kind.into(),
+        native_tool: action.tool.clone(),
+        surface: if remote {
+            ActionSurface::Network
+        } else {
+            ActionSurface::Process
+        },
+        effects: if remote {
+            BTreeSet::from([ActionEffect::Read, ActionEffect::Control])
+        } else {
+            BTreeSet::from([ActionEffect::Execute, ActionEffect::Control])
+        },
+        scope: if remote {
+            ActionScope::Remote
+        } else {
+            ActionScope::ExternalLocal
+        },
+        initiator: ActionInitiator::User,
+        sensitivity: if credential_bound {
+            ActionSensitivity::Credential
+        } else {
+            ActionSensitivity::Ordinary
+        },
+        reversibility: ActionReversibility::Reversible,
+        confidence: ClassificationConfidence::Known,
+        request_origin: ActionRequestOrigin::DirectUserEdit,
+        repository_state: RepositoryState::NotApplicable,
+        inside_active_project: false,
+        canonical_target: target,
+        workspace_id,
+        session_id,
+        runtime_id: action.runtime_id.clone(),
+        environment_id: action.environment_id.clone(),
+        plugin_or_mcp_id: Some(identity),
+        target_resolved: true,
+        authenticated: remote,
+        trusted_root: false,
+        explicit_scope_grant: false,
+        sandbox_allows: true,
+        declaration_exceeded: false,
+    };
+    Ok((action, facts, live))
+}
+
+fn complete_mcp_lifecycle_policy_effect(
+    core: &AppCoreState,
+    lease: ActionEffectLease,
+    succeeded: bool,
+    operation: &str,
+    now_ms: u64,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    core.runtime
+        .complete_direct_action_effect(
+            lease,
+            NormalizedActionResult {
+                status: if succeeded {
+                    NormalizedActionStatus::Succeeded
+                } else {
+                    NormalizedActionStatus::Failed
+                },
+                result_code: format!(
+                    "mcp-{operation}-{}",
+                    if succeeded { "succeeded" } else { "failed" }
+                ),
+                exit_code: succeeded.then_some(0),
+                changed_targets: Vec::new(),
+                output_sha256: None,
+                completed_at_ms: now_ms.saturating_add(2),
+            },
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id))?;
+    Ok(())
 }
 
 // Trust execution keeps the reviewed definition, action, token, and prompt
@@ -26488,10 +27561,74 @@ async fn mcp_test_server(
     require_mcp_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (action, facts, live) = {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        if snapshot.generation != input.expected_generation {
+            return Err(mcp_boundary_error(
+                mcp::McpError::Conflict,
+                request.correlation_id,
+            ));
+        }
+        let server = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == input.server_id)
+            .ok_or_else(|| {
+                mcp_boundary_error(mcp::McpError::InvalidInput, request.correlation_id.clone())
+            })?;
+        prepare_mcp_lifecycle_action(
+            &core.runtime,
+            &snapshot,
+            server,
+            service
+                .definition_sha256(&input.server_id)
+                .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?,
+            "test",
+        )
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let lease = begin_fail_closed_direct_action(
+        &core,
+        &facts,
+        &action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied testing the MCP server",
+    )?;
     let mut service = core.mcp.lock().await;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let lifecycle_cancellation = match register_mcp_lifecycle_for_live_authority(
+        &core.runtime,
+        &core.mcp_cancellations,
+        &input.server_id,
+        format!("mcp-lifecycle-{}", action.action_id),
+        live,
+    ) {
+        Ok(cancellation) => cancellation,
+        Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "test",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            return Err(policy_boundary_error(error, request.correlation_id).into());
+        }
+    };
     let previous_generation = service.snapshot().generation;
-    let snapshot = match service.test_server(&input, now_ms).await {
-        Ok(snapshot) => snapshot,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let test_result = service
+        .test_server_cancellable(&input, now_ms, lifecycle_cancellation.cancellation())
+        .await;
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let test_result = service.test_server(&input, now_ms).await;
+    let (result, succeeded) = match test_result {
+        Ok(snapshot) => (snapshot, true),
         Err(_error)
             if service.snapshot().generation > previous_generation
                 && service.snapshot().servers.iter().any(|server| {
@@ -26499,13 +27636,33 @@ async fn mcp_test_server(
                         && server.lifecycle == mcp::McpLifecycle::Failed
                 }) =>
         {
-            service.snapshot()
+            (service.snapshot(), false)
         }
         Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "test",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
             return Err(mcp_boundary_error(error, request.correlation_id.clone()));
         }
     };
-    mcp_snapshot_envelope(request, snapshot)
+    drop(service);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    drop(lifecycle_cancellation);
+    complete_mcp_lifecycle_policy_effect(
+        &core,
+        lease,
+        succeeded,
+        "test",
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
+    mcp_snapshot_envelope(request, result)
 }
 
 #[tauri::command]
@@ -26518,12 +27675,74 @@ async fn mcp_enable_server(
     require_mcp_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (action, facts, live) = {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        if snapshot.generation != input.expected_generation {
+            return Err(mcp_boundary_error(
+                mcp::McpError::Conflict,
+                request.correlation_id,
+            ));
+        }
+        let server = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == input.server_id)
+            .ok_or_else(|| {
+                mcp_boundary_error(mcp::McpError::InvalidInput, request.correlation_id.clone())
+            })?;
+        prepare_mcp_lifecycle_action(
+            &core.runtime,
+            &snapshot,
+            server,
+            service
+                .definition_sha256(&input.server_id)
+                .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?,
+            "enable",
+        )
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let lease = begin_fail_closed_direct_action(
+        &core,
+        &facts,
+        &action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied enabling the MCP server",
+    )?;
     let mut service = core.mcp.lock().await;
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    core.mcp_cancellations.allow_server(&input.server_id);
+    let lifecycle_cancellation = match register_mcp_lifecycle_for_live_authority(
+        &core.runtime,
+        &core.mcp_cancellations,
+        &input.server_id,
+        format!("mcp-lifecycle-{}", action.action_id),
+        live,
+    ) {
+        Ok(cancellation) => cancellation,
+        Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "enable",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            return Err(policy_boundary_error(error, request.correlation_id).into());
+        }
+    };
     let previous_generation = service.snapshot().generation;
-    let snapshot = match service.enable_server(&input, now_ms).await {
-        Ok(snapshot) => snapshot,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let enable_result = service
+        .enable_server_cancellable(&input, now_ms, lifecycle_cancellation.cancellation())
+        .await;
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let enable_result = service.enable_server(&input, now_ms).await;
+    let (snapshot, succeeded) = match enable_result {
+        Ok(snapshot) => (snapshot, true),
         Err(_error)
             if service.snapshot().generation > previous_generation
                 && service.snapshot().servers.iter().any(|server| {
@@ -26531,12 +27750,32 @@ async fn mcp_enable_server(
                         && server.lifecycle == mcp::McpLifecycle::Failed
                 }) =>
         {
-            service.snapshot()
+            (service.snapshot(), false)
         }
         Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "enable",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
             return Err(mcp_boundary_error(error, request.correlation_id.clone()));
         }
     };
+    drop(service);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    drop(lifecycle_cancellation);
+    complete_mcp_lifecycle_policy_effect(
+        &core,
+        lease,
+        succeeded,
+        "enable",
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
     mcp_snapshot_envelope(request, snapshot)
 }
 
@@ -26550,12 +27789,74 @@ async fn mcp_recover_server(
     require_mcp_input_generation(&request, input.expected_generation)?;
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (action, facts, live) = {
+        let service = core.mcp.lock().await;
+        let snapshot = service.snapshot();
+        if snapshot.generation != input.expected_generation {
+            return Err(mcp_boundary_error(
+                mcp::McpError::Conflict,
+                request.correlation_id,
+            ));
+        }
+        let server = snapshot
+            .servers
+            .iter()
+            .find(|server| server.server_id == input.server_id)
+            .ok_or_else(|| {
+                mcp_boundary_error(mcp::McpError::InvalidInput, request.correlation_id.clone())
+            })?;
+        prepare_mcp_lifecycle_action(
+            &core.runtime,
+            &snapshot,
+            server,
+            service
+                .definition_sha256(&input.server_id)
+                .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?,
+            "recover",
+        )
+        .map_err(|error| mcp_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let lease = begin_fail_closed_direct_action(
+        &core,
+        &facts,
+        &action,
+        live,
+        now_ms,
+        request.correlation_id.clone(),
+        "Policy denied recovering the MCP server",
+    )?;
     let mut service = core.mcp.lock().await;
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    core.mcp_cancellations.allow_server(&input.server_id);
+    let lifecycle_cancellation = match register_mcp_lifecycle_for_live_authority(
+        &core.runtime,
+        &core.mcp_cancellations,
+        &input.server_id,
+        format!("mcp-lifecycle-{}", action.action_id),
+        live,
+    ) {
+        Ok(cancellation) => cancellation,
+        Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "recover",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
+            return Err(policy_boundary_error(error, request.correlation_id).into());
+        }
+    };
     let previous_generation = service.snapshot().generation;
-    let snapshot = match service.recover_server(&input, now_ms).await {
-        Ok(snapshot) => snapshot,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let recover_result = service
+        .recover_server_cancellable(&input, now_ms, lifecycle_cancellation.cancellation())
+        .await;
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    let recover_result = service.recover_server(&input, now_ms).await;
+    let (snapshot, succeeded) = match recover_result {
+        Ok(snapshot) => (snapshot, true),
         Err(_error)
             if service.snapshot().generation > previous_generation
                 && service.snapshot().servers.iter().any(|server| {
@@ -26563,12 +27864,32 @@ async fn mcp_recover_server(
                         && server.lifecycle == mcp::McpLifecycle::Failed
                 }) =>
         {
-            service.snapshot()
+            (service.snapshot(), false)
         }
         Err(error) => {
+            drop(service);
+            complete_mcp_lifecycle_policy_effect(
+                &core,
+                lease,
+                false,
+                "recover",
+                now_ms,
+                request.correlation_id.clone(),
+            )?;
             return Err(mcp_boundary_error(error, request.correlation_id.clone()));
         }
     };
+    drop(service);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    drop(lifecycle_cancellation);
+    complete_mcp_lifecycle_policy_effect(
+        &core,
+        lease,
+        succeeded,
+        "recover",
+        now_ms,
+        request.correlation_id.clone(),
+    )?;
     mcp_snapshot_envelope(request, snapshot)
 }
 
@@ -27234,6 +28555,17 @@ pub fn run() {
                 let configuration = Arc::new(Mutex::new(configuration));
                 let active_workspace = Arc::new(Mutex::new(active_workspace));
                 let conversation = Arc::new(Mutex::new(conversation));
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_cancellations = ProductionMcpCancellationRegistry::default();
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let app_policy_quiescence: Arc<dyn Fn() + Send + Sync> = {
+                    let cancellations = mcp_cancellations.clone();
+                    Arc::new(move || {
+                        cancellations.quiesce_all_servers();
+                    })
+                };
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let app_policy_quiescence: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
                 let app_policy_runtime = Arc::downgrade(&runtime);
                 let app_policy_workspace = Arc::clone(&active_workspace);
                 let app_policy_conversation = Arc::clone(&conversation);
@@ -27255,7 +28587,9 @@ pub fn run() {
                                     effective.configuration.as_ref(),
                                     now_ms,
                                 )
-                                .map_err(|_| ())
+                                .map_err(|_| ())?;
+                            app_policy_quiescence();
+                            Ok(())
                         }),
                     )?;
                 if let Some(workspace) = active_workspace
@@ -27263,12 +28597,26 @@ pub fn run() {
                     .map_err(|_| std::io::Error::other("active Workspace is unavailable"))?
                     .as_ref()
                 {
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    let workspace_policy_quiescence: Arc<
+                        dyn Fn() + Send + Sync,
+                    > = {
+                        let cancellations = mcp_cancellations.clone();
+                        Arc::new(move || {
+                            cancellations.quiesce_all_servers();
+                        })
+                    };
+                    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                    let workspace_policy_quiescence: Arc<
+                        dyn Fn() + Send + Sync,
+                    > = Arc::new(|| {});
                     install_workspace_configuration_activation_observer(
                         workspace,
                         Arc::clone(&configuration),
                         Arc::clone(&active_workspace),
                         Arc::clone(&conversation),
                         &runtime,
+                        workspace_policy_quiescence,
                     )?;
                 }
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -27308,8 +28656,6 @@ pub fn run() {
                     )
                     .map_err(|error| std::io::Error::other(error.to_string()))?,
                 ));
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                let mcp_cancellations = ProductionMcpCancellationRegistry::default();
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 if let Ok(service) = mcp.try_lock() {
                     mcp_cancellations.refresh_credential_bindings(&service.snapshot());
@@ -28356,6 +29702,16 @@ mod workspace_start_clone_validation_tests {
 #[cfg(test)]
 mod artifact_file_projection_tests {
     use super::*;
+
+    #[test]
+    fn ephemeral_browser_environment_is_not_treated_as_unauthenticated() {
+        let environment =
+            artifact::BrowserEnvironmentReference::ephemeral("artifact-ephemeral-auth", 1).unwrap();
+        assert_eq!(environment.scope, artifact::BrowserEnvironmentScope::None);
+        assert!(browser_environment_may_hold_authenticated_state(
+            &environment
+        ));
+    }
 
     #[test]
     fn pending_reply_proposal_is_the_exact_approval_candidate_over_a_retained_draft() {

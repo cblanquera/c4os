@@ -1,6 +1,6 @@
 # Side Quest 00015B — Accessibility And Native macOS Audit
 
-Status: open
+Status: verified
 
 Coverage: independent cross-cutting audit of UX-001 through UX-009, UX-011, UI-001 through UI-005, CHAT-001 through CHAT-008, ART-001 through ART-006, SET-001 through SET-011, QA-001, QA-002.
 
@@ -26,18 +26,18 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 ## Agent Acceptance
 
-Result: failed — a launched production build does not yet exist.
+Result: passed — complete deterministic route/state coverage, production-rendered native walkthrough, keyboard/theme/responsive/recovery evidence, and independent renderer/integration review report P0 = 0 and P1 = 0.
 
 Required evidence: route/state matrix; screenshots; accessibility and focus records; native menu/picker/theme/window observations; width/zoom/reduced-motion results; console and overflow results; defect resolutions and limitations.
 
 ## Implementation Notes
 
-Not started. Source-only accessibility claims and static wireframe screenshots do not count.
+Completed 2026-07-24 using the QA-composed native application for deterministic states and the final production bundle for launch, restart, onboarding, and degraded recovery. Computer Use traversed all 16 accepted destinations, native Settings and Back, the accessibility tree, keyboard focus, wide and 626 px narrow layouts, Light/Dark composition, and blocked startup recovery. Existing task-native evidence remains supporting proof for pickers, menus, focus restoration, reduced motion, zoom/text behavior, facility interaction, and all accepted responsive breakpoints.
 
 ## Verification Notes
 
-Not run.
+The renderer matrix passed 79 files and 454 tests, including accessibility, focus, route, theme, reduced-motion, responsive, and overflow assertions. Playwright passed 45/45. The production bundle contains zero QA markers and zero frontend source maps. Final native launches showed standard macOS window/menu semantics, secure-field labels, session-only credential warning, onboarding hierarchy, and a path-free recovery projection. The saturated journal launched healthy repeatedly; the intentionally degraded Database fixture exposed only Retry/Refresh and remained blocked with a new correlation. Evidence and image hashes are indexed in `output/native/task-00015-acceptance.md`.
 
 ## Agent Acceptance Notes
 
-Every in-scope blocking accessibility or native-convention defect must be fixed before passing.
+Independent renderer/integration result: P0 = 0, P1 = 0, P2 = 2, P3 = 0. One QA adapter snapshot exposes its live replay-event array to a hostile cast; product UI consumers receive copies. The fixed QA identity pill can visually cover top-right QA chrome at narrow widths, while `pointer-events: none` preserves operation. Apple/WebKit sandbox and Computer Use/AppKit negative-geometry notices appeared in unified logs during accessibility capture without a renderer exception or product-state failure. These QA-only/non-product observations do not block acceptance.

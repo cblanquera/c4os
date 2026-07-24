@@ -7,7 +7,7 @@ use c4os_lib::{
         DatabaseActor, DatabaseDescriptor, RuntimeStateDocumentRecord, SnapshotQuery,
     },
     update::{
-        DiagnosticCategory, DiagnosticSeverity, LocalUpdateStageInput,
+        DiagnosticCategory, DiagnosticSeverity, LocalUpdateStageInput, MAX_DIAGNOSTIC_RECORDS,
         OperationalDiagnosticObservation, OperationalDiagnosticSignal, UpdateActionInput,
         UpdateChannel, UpdateCoordinator, UpdateError, UpdateFaultPoint, UpdateLifecycleState,
         UpdateRecoveryAction, UpdateRecoveryInput, UpdateRevocationInput,
@@ -379,6 +379,62 @@ fn changed_diagnostic_preferences_replace_and_remove_persisted_rows_atomically()
             .expect("read diagnostics after retention")
             .iter()
             .all(|record| record.diagnostic_id != diagnostic_id)
+    );
+}
+
+#[test]
+fn startup_diagnostics_roll_forward_after_the_bounded_journal_is_saturated() {
+    let temporary = TempDir::new().expect("temporary home");
+    let (database, _) =
+        DatabaseActor::start(DatabaseDescriptor::app(temporary.path())).expect("app database");
+    let database = Arc::new(database);
+    let mut coordinator =
+        UpdateCoordinator::restore(Arc::clone(&database), NOW).expect("coordinator");
+    let boundaries = [
+        "database",
+        "configuration",
+        "runtime-provider",
+        "extension",
+        "mcp",
+        "browser-terminal",
+        "credential",
+        "workspace",
+        "startup",
+    ];
+    for index in 0..(MAX_DIAGNOSTIC_RECORDS + boundaries.len()) {
+        let boundary = boundaries[index % boundaries.len()];
+        coordinator
+            .ingest_diagnostic(
+                DiagnosticCategory::Recovery,
+                DiagnosticSeverity::Info,
+                boundary,
+                "Startup authority restored successfully",
+                None,
+                "startup:diagnostics",
+                NOW + 1,
+            )
+            .unwrap_or_else(|error| {
+                panic!("diagnostic {index} at {boundary} failed after saturation: {error:?}")
+            });
+    }
+
+    let saturated = coordinator.diagnostics_snapshot();
+    assert_eq!(saturated.records.len(), MAX_DIAGNOSTIC_RECORDS);
+    assert!(saturated.truncated);
+    assert_eq!(
+        saturated.records.last().unwrap().component_boundary,
+        boundaries[(MAX_DIAGNOSTIC_RECORDS + boundaries.len() - 1) % boundaries.len()]
+    );
+    drop(coordinator);
+    drop(database);
+
+    let (database, _) =
+        DatabaseActor::start(DatabaseDescriptor::app(temporary.path())).expect("restart database");
+    let restored =
+        UpdateCoordinator::restore(Arc::new(database), NOW + 2).expect("restart coordinator");
+    assert_eq!(
+        restored.diagnostics_snapshot().records.len(),
+        MAX_DIAGNOSTIC_RECORDS
     );
 }
 

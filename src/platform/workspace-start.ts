@@ -14,6 +14,10 @@ import {
   type WorkspaceStartSnapshot as ProtocolWorkspaceStartSnapshot,
 } from "./protocol";
 import { ProtocolBoundaryError } from "./tauri-adapter";
+import {
+  isAcceptedQaAwareAuthority,
+  type QaAwareAuthority,
+} from "../qa/authority";
 
 export const WORKSPACE_START_SNAPSHOT_COMMAND =
   "workspace_start_snapshot" as const;
@@ -48,7 +52,7 @@ export interface WorkspaceStartTransport {
 }
 
 export interface WorkspaceStartOpenResult {
-  readonly authority: "rust-workspace-service";
+  readonly authority: QaAwareAuthority<"rust-workspace-service">;
   readonly workspaceId: WorkspaceId;
   readonly workspaceName: string;
   readonly recovered: boolean;
@@ -57,7 +61,12 @@ export interface WorkspaceStartOpenResult {
 
 export type WorkspaceRecoveryNotice = ProtocolWorkspaceRecoveryNoticeSnapshot;
 
-export type WorkspaceStartSnapshot = ProtocolWorkspaceStartSnapshot;
+export type WorkspaceStartSnapshot = Omit<
+  ProtocolWorkspaceStartSnapshot,
+  "authority"
+> & {
+  readonly authority: QaAwareAuthority<"rust-core">;
+};
 
 export type WorkspaceStartCloneResult =
   | ({ readonly state: "opened" } & WorkspaceStartOpenResult)
@@ -415,7 +424,7 @@ function parseRawEnvelope(raw: unknown): {
 
 function parseOpenResult(raw: unknown): WorkspaceStartOpenResult {
   const result = requireRecord(raw, "Workspace open result");
-  if (result.authority !== "rust-workspace-service") {
+  if (!isAcceptedQaAwareAuthority(result.authority, "rust-workspace-service")) {
     throw invalidPayload("The Workspace open authority is invalid.");
   }
   const workspaceName = requireString(result.workspaceName, "Workspace name");
@@ -452,7 +461,7 @@ function parseOpenResult(raw: unknown): WorkspaceStartOpenResult {
     );
   }
   return {
-    authority: "rust-workspace-service",
+    authority: result.authority,
     workspaceId,
     workspaceName,
     recovered: result.recovered,
@@ -504,7 +513,7 @@ function hasControlCharacter(value: string): boolean {
 function parseSnapshot(raw: unknown): WorkspaceStartSnapshot {
   const snapshot = requireRecord(raw, "Workspace Start snapshot");
   requireProtocolVersion(snapshot.protocolVersion);
-  if (snapshot.authority !== "rust-core") {
+  if (!isAcceptedQaAwareAuthority(snapshot.authority, "rust-core")) {
     throw invalidPayload("The Workspace Start authority is invalid.");
   }
   if (
@@ -516,7 +525,7 @@ function parseSnapshot(raw: unknown): WorkspaceStartSnapshot {
   return {
     protocolVersion: PROTOCOL_VERSION,
     generation: asGeneration(snapshot.generation),
-    authority: "rust-core",
+    authority: snapshot.authority,
     recents: snapshot.recents.map(parseRecent),
     activeRecoveryNotice:
       snapshot.activeRecoveryNotice === null ||

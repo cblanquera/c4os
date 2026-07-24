@@ -21,6 +21,10 @@ import {
   type WorkspaceId,
 } from "./protocol";
 import { ProtocolBoundaryError } from "./tauri-adapter";
+import {
+  isAcceptedQaAwareAuthority,
+  type QaAwareAuthority,
+} from "../qa/authority";
 
 export interface ConversationAttachmentSnapshot {
   readonly attachmentId: AttachmentId;
@@ -179,7 +183,7 @@ export interface ConversationModelSnapshot {
 export interface ConversationSnapshot {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly generation: StateGeneration;
-  readonly authority: "rust-core";
+  readonly authority: QaAwareAuthority<"rust-core">;
   readonly workspaceId: WorkspaceId | null;
   readonly workspaceName: string | null;
   readonly activeProjectId: ProjectId | null;
@@ -540,7 +544,7 @@ function parseSnapshot(raw: unknown): ConversationSnapshot {
   const value = record(raw, "Conversation snapshot");
   if (
     value.protocolVersion !== PROTOCOL_VERSION ||
-    value.authority !== "rust-core"
+    !isAcceptedQaAwareAuthority(value.authority, "rust-core")
   ) {
     throw boundary("invalidPayload", "Conversation authority is invalid.");
   }
@@ -568,7 +572,7 @@ function parseSnapshot(raw: unknown): ConversationSnapshot {
   return {
     protocolVersion: PROTOCOL_VERSION,
     generation: generationValue(value.generation),
-    authority: "rust-core",
+    authority: value.authority,
     workspaceId: nullableIdentifier(
       value.workspaceId,
       "workspace ID",

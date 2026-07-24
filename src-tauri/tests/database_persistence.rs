@@ -1076,6 +1076,80 @@ fn app_diagnostics_are_bounded_and_commit_atomically_with_runtime_state() {
 }
 
 #[test]
+fn bounded_runtime_diagnostics_can_atomically_replace_a_full_journal() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::app(temp.path());
+    let (actor, _) = DatabaseActor::start(descriptor).expect("app database");
+    let first = (0..database::MAX_READ_RECORDS)
+        .map(|index| database::DiagnosticRecord {
+            diagnostic_id: format!("first-{index}"),
+            category: "startup.info".into(),
+            message: format!("First bounded diagnostic {index}"),
+            created_at: NOW + i64::try_from(index).unwrap(),
+        })
+        .collect::<Vec<_>>();
+    actor
+        .save_runtime_state_with_diagnostics(
+            database::RuntimeStateDocumentRecord {
+                document_kind: "update-coordinator".into(),
+                document_id: "local-development".into(),
+                generation: 1,
+                canonical_document: "{\"generation\":1}".into(),
+                updated_at_ms: u64::try_from(NOW).unwrap(),
+            },
+            None,
+            first.clone(),
+            first
+                .iter()
+                .map(|diagnostic| diagnostic.diagnostic_id.clone())
+                .collect(),
+            NOW,
+            database::MAX_READ_RECORDS,
+        )
+        .expect("seed full diagnostic journal");
+
+    let second = (0..database::MAX_READ_RECORDS)
+        .map(|index| database::DiagnosticRecord {
+            diagnostic_id: format!("second-{index}"),
+            category: "startup.info".into(),
+            message: format!("Second bounded diagnostic {index}"),
+            created_at: NOW + i64::try_from(database::MAX_READ_RECORDS + index).unwrap(),
+        })
+        .collect::<Vec<_>>();
+    let replacement_ids = first
+        .iter()
+        .chain(second.iter())
+        .map(|diagnostic| diagnostic.diagnostic_id.clone())
+        .collect();
+    actor
+        .save_runtime_state_with_diagnostics(
+            database::RuntimeStateDocumentRecord {
+                document_kind: "update-coordinator".into(),
+                document_id: "local-development".into(),
+                generation: 2,
+                canonical_document: "{\"generation\":2}".into(),
+                updated_at_ms: u64::try_from(NOW + 1).unwrap(),
+            },
+            Some(1),
+            second,
+            replacement_ids,
+            NOW,
+            database::MAX_READ_RECORDS,
+        )
+        .expect("replace full diagnostic journal");
+
+    let retained = actor
+        .app_diagnostics(SnapshotQuery::new(database::MAX_READ_RECORDS).unwrap())
+        .expect("read replaced diagnostic journal");
+    assert_eq!(retained.len(), database::MAX_READ_RECORDS);
+    assert!(
+        retained
+            .iter()
+            .all(|diagnostic| diagnostic.diagnostic_id.starts_with("second-"))
+    );
+}
+
+#[test]
 fn migration_creates_validated_online_backup_and_failure_preserves_source() {
     let temp = TempDir::new().expect("temp directory");
     let descriptor = DatabaseDescriptor::app(temp.path());

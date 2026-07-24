@@ -18,7 +18,12 @@
     "jsx": "react-jsx",
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "types": ["vite/client", "vitest/globals"]
+    "types": ["vite/client", "vitest/globals"],
+    "paths": {
+      "#qa-native-transport": ["./src/qa/build-native-transport.ts"],
+      "#qa-router": ["./src/qa/build-router.tsx"],
+      "#qa-store": ["./src/qa/build-store.ts"]
+    }
   },
   "include": ["src"]
 }

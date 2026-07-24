@@ -13,6 +13,7 @@ import type { WorkspaceStartSnapshot } from "../../platform/workspace-start";
 import { shellDraftActions, UNINITIALIZED_GENERATION } from "./state";
 import {
   ingestNativeShellProjections,
+  listenForReducedMotionChanges,
   nativeResumeRoute,
   publishConversationSnapshot,
   type NativeShellReaders,
@@ -419,6 +420,41 @@ describe("native shell projection ingestion", () => {
         activities: [expect.objectContaining({ state: "running" })],
       }),
     ]);
+  });
+
+  it("tracks live reduced-motion changes and removes the listener", () => {
+    const store = createAppStore(undefined);
+    let listener: (event: { readonly matches: boolean }) => void = () =>
+      undefined;
+    let listenerInstalled = false;
+    const query = {
+      matches: false,
+      addEventListener(
+        _type: "change",
+        next: (event: { readonly matches: boolean }) => void,
+      ) {
+        listener = next;
+        listenerInstalled = true;
+      },
+      removeEventListener(
+        _type: "change",
+        next: (event: { readonly matches: boolean }) => void,
+      ) {
+        if (listener === next) listenerInstalled = false;
+      },
+    };
+
+    const stop = listenForReducedMotionChanges(store.dispatch, query);
+    expect(store.getState().shellAuthority.platform.value.reducedMotion).toBe(
+      false,
+    );
+    listener?.({ matches: true });
+    expect(store.getState().shellAuthority.platform.value.reducedMotion).toBe(
+      true,
+    );
+
+    stop();
+    expect(listenerInstalled).toBe(false);
   });
 });
 

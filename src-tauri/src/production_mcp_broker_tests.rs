@@ -9,7 +9,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use super::{ProductionMcpCancellationRegistry, ProductionMcpDeferredFacility};
+use super::{
+    ProductionMcpCancellationRegistry, ProductionMcpDeferredFacility, RuntimeApplicationService,
+    register_mcp_lifecycle_for_live_authority,
+};
 use crate::core::database::{DatabaseActor, DatabaseDescriptor, SnapshotQuery};
 use crate::mcp::database::DatabaseMcpRepository;
 use crate::mcp::service::{
@@ -76,6 +79,70 @@ fn production_mcp_cancellation_registry_targets_exact_server_and_credential_bind
     assert_eq!(registry.quiesce_server("server-1"), 0);
     assert!(registry.cancel_ticket("ticket-2"));
     assert!(second.is_cancelled());
+}
+
+#[test]
+fn stale_lifecycle_authority_cannot_clear_a_policy_transition_quiesce() {
+    let temporary = TempDir::new().unwrap();
+    let (database, _) =
+        DatabaseActor::start(DatabaseDescriptor::app(temporary.path())).expect("database");
+    let runtime =
+        RuntimeApplicationService::restore(Arc::new(database), 10).expect("runtime restore");
+    let cancellations = ProductionMcpCancellationRegistry::default();
+    let stale = runtime
+        .current_direct_live_authority(1, 1)
+        .expect("initial authority");
+    cancellations.quiesce_server("server-policy-race");
+
+    let configuration = runtime
+        .raw_coordinator()
+        .expect("coordinator")
+        .policy_configuration()
+        .clone();
+    runtime
+        .replace_policy_settings(0, 1, configuration, true, 11)
+        .expect("policy transition");
+
+    assert!(
+        register_mcp_lifecycle_for_live_authority(
+            &runtime,
+            &cancellations,
+            "server-policy-race",
+            "lifecycle-stale".into(),
+            stale,
+        )
+        .is_err()
+    );
+    assert!(
+        cancellations
+            .register(
+                "ticket-stale".into(),
+                "server-policy-race".into(),
+                McpCancellation::default(),
+            )
+            .is_err(),
+        "a lifecycle operation authorized before the transition must not clear quiesce"
+    );
+
+    let current = runtime
+        .current_direct_live_authority(1, 1)
+        .expect("current authority");
+    let current_lifecycle = register_mcp_lifecycle_for_live_authority(
+        &runtime,
+        &cancellations,
+        "server-policy-race",
+        "lifecycle-current".into(),
+        current,
+    )
+    .expect("current lifecycle authority");
+    drop(current_lifecycle);
+    cancellations
+        .register(
+            "ticket-current".into(),
+            "server-policy-race".into(),
+            McpCancellation::default(),
+        )
+        .expect("registration after current-authority enable");
 }
 
 #[derive(Default)]

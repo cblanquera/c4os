@@ -696,6 +696,61 @@ select {
   font-size: 0.82rem;
 }
 
+.qa-fixture-boundary {
+  display: contents;
+}
+
+.qa-fixture-boundary__identity {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  right: 8px;
+  max-width: min(320px, calc(100vw - 16px));
+  margin: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-menu);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  text-decoration: none;
+  pointer-events: none;
+}
+
+.shell-capability-review {
+  border: 1px solid var(--border-separator);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.shell-capability-review h2,
+.shell-capability-review dl,
+.shell-capability-review dd {
+  margin: 0;
+}
+
+.shell-capability-review dl {
+  display: grid;
+  gap: 10px;
+}
+
+.shell-capability-review dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.shell-capability-review dt {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
 @media (max-width: 560px) {
   .qa-foundation {
     width: min(100% - 24px, 780px);

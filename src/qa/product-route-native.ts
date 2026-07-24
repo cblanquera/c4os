@@ -12,34 +12,177 @@ type Request = {
 
 type Args = Readonly<Record<string, unknown>>;
 
-let providerGeneration = 1;
-let configurationGeneration = 1;
-let onboardingCompletedAtMs: number | null = null;
-let provider: Record<string, unknown> | null = null;
-let workspaceGeneration = 51;
-let conversationGeneration = 51;
-let activatedWorkspaceId: string | null = null;
-let activatedWorkspaceName: string | null = null;
-let activeRecoveryNotice: typeof QA_WORKSPACE_RECOVERY_NOTICE | null = null;
+interface QaProductRouteState {
+  providerGeneration: number;
+  configurationGeneration: number;
+  onboardingCompletedAtMs: number | null;
+  provider: Record<string, unknown> | null;
+  workspaceGeneration: number;
+  conversationGeneration: number;
+  activatedWorkspaceId: string | null;
+  activatedWorkspaceName: string | null;
+  activeRecoveryNotice: typeof QA_WORKSPACE_RECOVERY_NOTICE | null;
+  draftMode: "chat" | "files" | "browser" | "terminal";
+  draftPrompt: string;
+  draftProviderId: string | null;
+  draftModelId: string | null;
+  draftReasoningMode: "off" | "low" | "medium" | "high" | null;
+}
+
+export interface QaProductRouteFixtureSnapshot {
+  readonly authority: "qa-fixture-only";
+  readonly providerGeneration: number;
+  readonly configurationGeneration: number;
+  readonly workspaceGeneration: number;
+  readonly conversationGeneration: number;
+  readonly onboardingCompleted: boolean;
+  readonly providerConfigured: boolean;
+  readonly activatedWorkspaceId: string | null;
+  readonly activeRecoveryId: string | null;
+}
+
+export interface QaProductRouteAdapter {
+  invoke(command: string, args: Args): Promise<unknown>;
+  reset(): QaProductRouteFixtureSnapshot;
+  snapshot(): QaProductRouteFixtureSnapshot;
+}
+
+function initialQaProductRouteState(): QaProductRouteState {
+  return {
+    providerGeneration: 1,
+    configurationGeneration: 1,
+    onboardingCompletedAtMs: null,
+    provider: null,
+    workspaceGeneration: 51,
+    conversationGeneration: 51,
+    activatedWorkspaceId: "workspace-qa-0001",
+    activatedWorkspaceName: "C4OS QA Workspace",
+    activeRecoveryNotice: null,
+    draftMode: "chat",
+    draftPrompt: "Preserved QA composer draft",
+    draftProviderId: "openrouter",
+    draftModelId: "moonshotai/kimi-k2",
+    draftReasoningMode: null,
+  };
+}
+
+function productRouteFixtureSnapshot(
+  state: QaProductRouteState,
+): QaProductRouteFixtureSnapshot {
+  return {
+    authority: "qa-fixture-only",
+    providerGeneration: state.providerGeneration,
+    configurationGeneration: state.configurationGeneration,
+    workspaceGeneration: state.workspaceGeneration,
+    conversationGeneration: state.conversationGeneration,
+    onboardingCompleted: state.onboardingCompletedAtMs !== null,
+    providerConfigured: state.provider !== null,
+    activatedWorkspaceId: state.activatedWorkspaceId,
+    activeRecoveryId: state.activeRecoveryNotice?.recoveryId ?? null,
+  };
+}
+
+export function createQaProductRouteAdapter(): QaProductRouteAdapter {
+  let state = initialQaProductRouteState();
+  return {
+    invoke(command, args) {
+      return invokeQaProductRouteWithState(state, command, args);
+    },
+    reset() {
+      state = initialQaProductRouteState();
+      return productRouteFixtureSnapshot(state);
+    },
+    snapshot() {
+      return productRouteFixtureSnapshot(state);
+    },
+  };
+}
+
+const defaultQaProductRouteAdapter = createQaProductRouteAdapter();
 
 export function invokeQaProductRoute(
   command: string,
   args: Args,
-): Promise<unknown> | null {
+): Promise<unknown> {
+  return defaultQaProductRouteAdapter.invoke(command, args);
+}
+
+export function resetQaProductRoute(): QaProductRouteFixtureSnapshot {
+  return defaultQaProductRouteAdapter.reset();
+}
+
+function invokeQaProductRouteWithState(
+  state: QaProductRouteState,
+  command: string,
+  args: Args,
+): Promise<unknown> {
+  if (command === "platform_snapshot") {
+    const prefersDark =
+      typeof globalThis.matchMedia === "function" &&
+      globalThis.matchMedia("(prefers-color-scheme: dark)").matches;
+    return Promise.resolve(
+      envelope(args, 0, {
+        contractVersion: 1,
+        platform: "macos",
+        architecture: "aarch64",
+        initialTheme: {
+          scheme: prefersDark ? "dark" : "light",
+          source: "webviewPreferredColorScheme",
+        },
+        liveThemeSource: "webviewPrefersColorScheme",
+        window: {
+          decorations: "standard",
+          titlebarTransparent: false,
+          titlebarOverlay: false,
+          initiallyVisible: false,
+          revealFallbackTimeoutMs: 5_000,
+        },
+        vocabulary: {
+          revealAction: "Reveal in Finder",
+          primaryModifierSymbol: "⌘",
+          alternateModifierSymbol: "⌥",
+          shiftModifierSymbol: "⇧",
+        },
+        capabilities: {
+          nativeApplicationMenu: true,
+          nativeSettingsShortcut: true,
+          nativeFilePicker: true,
+          nativeFolderPicker: true,
+          nativeWorkspacePicker: true,
+          standardWindowDecorations: true,
+        },
+        settingsMenu: {
+          menuItemId: "c4os.menu.settings",
+          commandId: "c4os.command.openSettings",
+          route: "/settings/providers",
+          accelerator: "CmdOrCtrl+,",
+          keyboardLabel: "⌘,",
+        },
+      }),
+    );
+  }
+  if (command === "platform_reveal_main") {
+    return Promise.resolve(
+      envelope(args, 0, {
+        revealed: true,
+        fallback: false,
+      }),
+    );
+  }
   if (command.startsWith("provider_")) {
-    return Promise.resolve(providerCommand(command, args));
+    return Promise.resolve(providerCommand(state, command, args));
   }
   if (command === "workspace_start_snapshot") {
     return Promise.resolve(
-      envelope(args, workspaceGeneration, workspaceStartSnapshot()),
+      envelope(args, state.workspaceGeneration, workspaceStartSnapshot(state)),
     );
   }
   if (command === "workspace_start_open_recent") {
     const input = record(args.input);
     const workspaceId = text(input.workspaceId);
     const recent = QA_RECENT_WORKSPACES.find(({ id }) => id === workspaceId);
-    const payload = activateWorkspace(workspaceId, recent);
-    return Promise.resolve(envelope(args, workspaceGeneration, payload));
+    const payload = activateWorkspace(state, workspaceId, recent);
+    return Promise.resolve(envelope(args, state.workspaceGeneration, payload));
   }
   if (command === "workspace_start_open_archive") {
     const input = record(args.input);
@@ -50,36 +193,73 @@ export function invokeQaProductRoute(
       ({ id }) => id === QA_WORKSPACE_RECOVERY_NOTICE.workspaceId,
     );
     const payload = activateWorkspace(
+      state,
       QA_WORKSPACE_RECOVERY_NOTICE.workspaceId,
       recent,
     );
-    return Promise.resolve(envelope(args, workspaceGeneration, payload));
+    return Promise.resolve(envelope(args, state.workspaceGeneration, payload));
   }
   if (command === "workspace_recovery_acknowledge") {
     const request = record(args.request);
     const input = record(args.input);
     if (
-      activeRecoveryNotice === null ||
-      integer(request.expectedGeneration) !== workspaceGeneration ||
-      integer(input.expectedGeneration) !== workspaceGeneration ||
-      text(input.recoveryId) !== activeRecoveryNotice.recoveryId ||
-      text(input.workspaceId) !== activeRecoveryNotice.workspaceId ||
+      state.activeRecoveryNotice === null ||
+      integer(request.expectedGeneration) !== state.workspaceGeneration ||
+      integer(input.expectedGeneration) !== state.workspaceGeneration ||
+      text(input.recoveryId) !== state.activeRecoveryNotice.recoveryId ||
+      text(input.workspaceId) !== state.activeRecoveryNotice.workspaceId ||
       integer(input.workingGeneration) !==
-        activeRecoveryNotice.workingGeneration ||
+        state.activeRecoveryNotice.workingGeneration ||
       integer(input.archiveGeneration) !==
-        activeRecoveryNotice.archiveGeneration
+        state.activeRecoveryNotice.archiveGeneration
     ) {
       throw new Error("The QA Workspace recovery identity is stale.");
     }
-    workspaceGeneration += 1;
-    activeRecoveryNotice = null;
+    state.workspaceGeneration += 1;
+    state.activeRecoveryNotice = null;
     return Promise.resolve(
-      envelope(args, workspaceGeneration, workspaceStartSnapshot()),
+      envelope(args, state.workspaceGeneration, workspaceStartSnapshot(state)),
     );
   }
   if (command === "conversation_snapshot") {
     return Promise.resolve(
-      envelope(args, conversationGeneration, conversationSnapshot()),
+      envelope(args, state.conversationGeneration, conversationSnapshot(state)),
+    );
+  }
+  if (command === "conversation_update_draft") {
+    const input = record(args.input);
+    state.conversationGeneration += 1;
+    state.draftPrompt = text(input.prompt);
+    state.draftMode = composerMode(input.mode);
+    state.draftProviderId = nullableText(input.providerId);
+    state.draftModelId = nullableText(input.modelId);
+    state.draftReasoningMode = reasoningMode(input.reasoningMode);
+    return Promise.resolve(
+      envelope(args, state.conversationGeneration, conversationSnapshot(state)),
+    );
+  }
+  if (
+    command === "conversation_activate_session" ||
+    command === "conversation_activate_project"
+  ) {
+    return Promise.resolve(
+      envelope(args, state.conversationGeneration, conversationSnapshot(state)),
+    );
+  }
+  if (command === "artifact_snapshot") {
+    return Promise.resolve(
+      envelope(args, state.conversationGeneration, {
+        protocolVersion: 1,
+        generation: state.conversationGeneration,
+        authority: "qa-fixture-only",
+        workspaceId: state.activatedWorkspaceId,
+        activeProjectId:
+          state.activatedWorkspaceId === null ? null : "project-qa-0001",
+        activeSessionId:
+          state.activatedWorkspaceId === null ? null : "chat-qa-0001",
+        focusedArtifactId: null,
+        artifacts: [],
+      }),
     );
   }
   if (command === "platform_pick") {
@@ -108,42 +288,49 @@ export function invokeQaProductRoute(
       }),
     );
   }
-  return null;
+  return Promise.reject(
+    new Error(`QA fixture command is not allowlisted: ${command}`),
+  );
 }
 
 function activateWorkspace(
+  state: QaProductRouteState,
   workspaceId: string,
   recent: (typeof QA_RECENT_WORKSPACES)[number] | undefined,
 ) {
-  workspaceGeneration += 1;
-  conversationGeneration += 1;
-  activatedWorkspaceId = workspaceId;
-  activatedWorkspaceName = recent?.name ?? "QA Workspace";
-  activeRecoveryNotice =
+  state.workspaceGeneration += 1;
+  state.conversationGeneration += 1;
+  state.activatedWorkspaceId = workspaceId;
+  state.activatedWorkspaceName = recent?.name ?? "QA Workspace";
+  state.activeRecoveryNotice =
     recent?.isMissing === true ? QA_WORKSPACE_RECOVERY_NOTICE : null;
   return {
-    authority: "rust-workspace-service",
+    authority: "qa-fixture-only",
     workspaceId,
-    workspaceName: activatedWorkspaceName,
-    recovered: activeRecoveryNotice !== null,
-    recoveryNotice: activeRecoveryNotice,
+    workspaceName: state.activatedWorkspaceName,
+    recovered: state.activeRecoveryNotice !== null,
+    recoveryNotice: state.activeRecoveryNotice,
   };
 }
 
-function providerCommand(command: string, args: Args): unknown {
+function providerCommand(
+  state: QaProductRouteState,
+  command: string,
+  args: Args,
+): unknown {
   const input = record(args.input);
   switch (command) {
     case "provider_snapshot":
     case "provider_accept_session_credentials":
       break;
     case "provider_save_profile": {
-      providerGeneration += 1;
+      state.providerGeneration += 1;
       const authentication = record(input.authentication);
       const existingProfile =
-        provider === null ? null : record(provider.profile);
+        state.provider === null ? null : record(state.provider.profile);
       const submittedSecret =
         typeof input.secret === "string" && input.secret.length > 0;
-      provider = {
+      state.provider = {
         profile: {
           schemaVersion: 1,
           providerId: text(input.providerId),
@@ -165,81 +352,92 @@ function providerCommand(command: string, args: Args): unknown {
         models: {},
         disabledModelIds: [],
         selectedModelId: null,
-        generation: providerGeneration,
+        generation: state.providerGeneration,
       };
       break;
     }
     case "provider_test_connection": {
-      if (provider === null) throw new Error("QA provider is unavailable");
-      providerGeneration += 1;
-      provider = {
-        ...provider,
+      if (state.provider === null)
+        throw new Error("QA provider is unavailable");
+      state.providerGeneration += 1;
+      state.provider = {
+        ...state.provider,
         testStatus: { state: "succeeded", checkedAtMs: 1_784_390_400_000 },
         models: {
           "openai/gpt-5": providerModel(),
         },
         selectedModelId: "openai/gpt-5",
-        generation: providerGeneration,
+        generation: state.providerGeneration,
       };
       break;
     }
     case "provider_select_model":
-      if (provider === null) throw new Error("QA provider is unavailable");
-      providerGeneration += 1;
-      provider = {
-        ...provider,
+      if (state.provider === null)
+        throw new Error("QA provider is unavailable");
+      state.providerGeneration += 1;
+      state.provider = {
+        ...state.provider,
         selectedModelId: text(input.modelId),
-        generation: providerGeneration,
+        generation: state.providerGeneration,
       };
       break;
     case "provider_complete_onboarding":
-      providerGeneration += 1;
-      configurationGeneration += 1;
-      onboardingCompletedAtMs = 1_784_390_400_000;
-      if (provider !== null) {
-        provider = { ...provider, generation: providerGeneration };
+      state.providerGeneration += 1;
+      state.configurationGeneration += 1;
+      state.onboardingCompletedAtMs = 1_784_390_400_000;
+      if (state.provider !== null) {
+        state.provider = {
+          ...state.provider,
+          generation: state.providerGeneration,
+        };
       }
       break;
     case "provider_set_models_enabled":
-      providerGeneration += 1;
-      if (provider !== null) {
-        provider = { ...provider, generation: providerGeneration };
+      state.providerGeneration += 1;
+      if (state.provider !== null) {
+        state.provider = {
+          ...state.provider,
+          generation: state.providerGeneration,
+        };
       }
       break;
     case "provider_delete_profile":
-      providerGeneration += 1;
-      provider = null;
-      onboardingCompletedAtMs = null;
+      state.providerGeneration += 1;
+      state.provider = null;
+      state.onboardingCompletedAtMs = null;
       break;
     case "provider_answer_approval":
       break;
     default:
       throw new Error(`Unsupported QA Provider command: ${command}`);
   }
-  return envelope(args, providerGeneration, providerSnapshot());
+  return envelope(args, state.providerGeneration, providerSnapshot(state));
 }
 
-function providerSnapshot() {
+function providerSnapshot(state: QaProductRouteState) {
   const activeProviderId =
-    provider === null ? null : text(record(provider.profile).providerId);
+    state.provider === null
+      ? null
+      : text(record(state.provider.profile).providerId);
   return {
-    authority: "rust-provider-service",
-    coordinatorGeneration: providerGeneration,
-    configurationGeneration,
+    authority: "qa-fixture-only",
+    coordinatorGeneration: state.providerGeneration,
+    configurationGeneration: state.configurationGeneration,
     credentialProtection: "installation-key",
     credentialFallbackRequired: false,
-    onboardingCompleted: onboardingCompletedAtMs !== null && provider !== null,
+    onboardingCompleted:
+      state.onboardingCompletedAtMs !== null && state.provider !== null,
     providers: {
-      generation: providerGeneration,
-      onboardingCompletedAtMs,
-      providers: provider === null ? [] : [provider],
+      generation: state.providerGeneration,
+      onboardingCompletedAtMs: state.onboardingCompletedAtMs,
+      providers: state.provider === null ? [] : [state.provider],
     },
     modelRoute:
-      onboardingCompletedAtMs === null || activeProviderId === null
+      state.onboardingCompletedAtMs === null || activeProviderId === null
         ? null
         : `${activeProviderId}::openai/gpt-5`,
-    defaultRuntime: onboardingCompletedAtMs === null ? null : "opencode",
-    defaultEnvironment: onboardingCompletedAtMs === null ? null : "local",
+    defaultRuntime: state.onboardingCompletedAtMs === null ? null : "opencode",
+    defaultEnvironment: state.onboardingCompletedAtMs === null ? null : "local",
     pendingApproval: null,
   };
 }
@@ -276,12 +474,12 @@ function providerModel() {
   };
 }
 
-function conversationSnapshot() {
-  if (activatedWorkspaceId === null) {
+function conversationSnapshot(state: QaProductRouteState) {
+  if (state.activatedWorkspaceId === null) {
     return {
       protocolVersion: 1,
-      generation: conversationGeneration,
-      authority: "rust-core",
+      generation: state.conversationGeneration,
+      authority: "qa-fixture-only",
       workspaceId: null,
       workspaceName: null,
       activeProjectId: null,
@@ -306,21 +504,30 @@ function conversationSnapshot() {
   }
   return {
     protocolVersion: 1,
-    generation: conversationGeneration,
-    authority: "rust-core",
-    workspaceId: activatedWorkspaceId,
-    workspaceName: activatedWorkspaceName,
+    generation: state.conversationGeneration,
+    authority: "qa-fixture-only",
+    workspaceId: state.activatedWorkspaceId,
+    workspaceName: state.activatedWorkspaceName,
     activeProjectId: "project-qa-0001",
     activeSessionId: "chat-qa-0001",
     pending: null,
     draft: {
-      prompt: "",
-      attachments: [],
-      nextAttachmentReference: 1,
-      providerId: null,
-      modelId: null,
-      reasoningMode: null,
-      mode: "chat",
+      prompt: state.draftPrompt,
+      attachments: [
+        {
+          attachmentId: "attachment:qa-concept-board",
+          displayName: "concept-board.png",
+          mediaType: "image/png",
+          byteLength: 284_672,
+          stableReference: "qa-fixture:concept-board.png",
+          originalReference: 1,
+        },
+      ],
+      nextAttachmentReference: 2,
+      providerId: state.draftProviderId,
+      modelId: state.draftModelId,
+      reasoningMode: state.draftReasoningMode,
+      mode: state.draftMode,
       replyTargetId: null,
     },
     projects: [
@@ -331,6 +538,20 @@ function conversationSnapshot() {
         position: 0,
         gitVersioned: true,
       },
+      {
+        projectId: "project-qa-0002",
+        displayName: "quotable-ai",
+        pathState: "found",
+        position: 1,
+        gitVersioned: true,
+      },
+      {
+        projectId: "project-qa-0003",
+        displayName: "legacy-ui",
+        pathState: "missing",
+        position: 2,
+        gitVersioned: false,
+      },
     ],
     sessions: [
       {
@@ -339,31 +560,77 @@ function conversationSnapshot() {
         title: "QA Chat",
         updatedAtMs: 1_784_390_400_000,
       },
+      {
+        sessionId: "chat-qa-0002",
+        projectId: "project-qa-0001",
+        title: "Design workspace projects",
+        updatedAtMs: 1_784_390_399_000,
+      },
+      {
+        sessionId: "chat-qa-0003",
+        projectId: "project-qa-0002",
+        title: "Establish project knowledge base",
+        updatedAtMs: 1_784_390_398_000,
+      },
     ],
     activeConversation: {
       sessionId: "chat-qa-0001",
       title: "QA Chat",
-      turns: [],
+      turns: [
+        {
+          turnId: "turn:qa-user",
+          prompt: "Build the **workspace shell**.",
+          attachments: [],
+          artifactContext: null,
+          mcpProvenance: null,
+          submittedAtMs: 1_784_390_400_000,
+        },
+      ],
       attempts: [],
       activeAttemptId: null,
     },
-    models: [],
+    models: [
+      {
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        modelId: "moonshotai/kimi-k2",
+        selected: state.draftModelId === "moonshotai/kimi-k2",
+        available: true,
+        supportsVision: false,
+        supportsTools: true,
+        supportsReasoning: false,
+        supportsAudio: false,
+        contextTokens: 128_000,
+      },
+      {
+        providerId: "openai",
+        providerName: "OpenAI",
+        modelId: "openai/gpt-5",
+        selected: state.draftModelId === "openai/gpt-5",
+        available: true,
+        supportsVision: true,
+        supportsTools: true,
+        supportsReasoning: true,
+        supportsAudio: false,
+        contextTokens: 400_000,
+      },
+    ],
     branchControl: null,
   };
 }
 
-function workspaceStartSnapshot() {
+function workspaceStartSnapshot(state: QaProductRouteState) {
   return {
     protocolVersion: 1,
-    generation: workspaceGeneration,
-    authority: "rust-core",
+    generation: state.workspaceGeneration,
+    authority: "qa-fixture-only",
     recents: QA_RECENT_WORKSPACES.map((recent, index) => ({
       workspaceId: recent.id,
       displayName: recent.name,
       lastOpenedAt: 1_784_390_400 - index * 86_400,
       isMissing: recent.isMissing ?? false,
     })),
-    activeRecoveryNotice,
+    activeRecoveryNotice: state.activeRecoveryNotice,
   };
 }
 
@@ -394,4 +661,38 @@ function integer(value: unknown): number {
     throw new Error("Invalid QA fixture generation");
   }
   return value as number;
+}
+
+function nullableText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return text(value);
+}
+
+function composerMode(
+  value: unknown,
+): "chat" | "files" | "browser" | "terminal" {
+  if (
+    value === "chat" ||
+    value === "files" ||
+    value === "browser" ||
+    value === "terminal"
+  ) {
+    return value;
+  }
+  throw new Error("Invalid QA fixture Composer mode");
+}
+
+function reasoningMode(
+  value: unknown,
+): "off" | "low" | "medium" | "high" | null {
+  if (value === null || value === undefined) return null;
+  if (
+    value === "off" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high"
+  ) {
+    return value;
+  }
+  throw new Error("Invalid QA fixture reasoning mode");
 }

@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
+import { shouldSubscribeToNativeShellEvents } from "#qa-native-transport";
 
 import { App } from "./App";
 import { navigateAppRoute } from "./app/router";
@@ -18,6 +19,7 @@ import {
 import { shellDraftActions } from "./features/shell/state";
 import {
   ingestNativeShellProjections,
+  listenForReducedMotionChanges,
   nativeResumeRoute,
 } from "./features/shell/native-bootstrap";
 import "./styles.css";
@@ -32,19 +34,22 @@ const rendererRoot = root;
 
 async function start() {
   await bootstrapPlatformTheme({ readNativeSnapshot: readPlatformSnapshot });
-  void listenForNativeSettings((route) => {
-    const currentRoute = window.location.hash.slice(1) || "/start";
-    store.dispatch(
-      shellDraftActions.settingsVisited(
-        createSettingsVisit(
-          store.getState(),
-          currentRoute,
-          readActiveShellFocusTarget(),
+  listenForReducedMotionChanges(store.dispatch);
+  if (shouldSubscribeToNativeShellEvents()) {
+    void listenForNativeSettings((route) => {
+      const currentRoute = window.location.hash.slice(1) || "/start";
+      store.dispatch(
+        shellDraftActions.settingsVisited(
+          createSettingsVisit(
+            store.getState(),
+            currentRoute,
+            readActiveShellFocusTarget(),
+          ),
         ),
-      ),
-    );
-    void navigateAppRoute(route);
-  }).catch(() => undefined);
+      );
+      void navigateAppRoute(route);
+    }).catch(() => undefined);
+  }
 
   createRoot(rendererRoot).render(
     <StrictMode>
@@ -58,6 +63,7 @@ async function start() {
   // available native domain publishes atomically; unavailable domains stay
   // fail-closed for their later service-integration owners.
   void ingestNativeShellProjections(store.dispatch).then((result) => {
+    if (import.meta.env.VITE_C4OS_QA_FIXTURES === "1") return;
     const currentRoute = window.location.hash.slice(1) || "/";
     const destination = nativeResumeRoute(
       result,

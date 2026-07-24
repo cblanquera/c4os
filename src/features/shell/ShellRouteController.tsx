@@ -17,6 +17,7 @@ import type { AppRoutePath } from "../../app/route-contract";
 import { Notice } from "../../components/accessible";
 import {
   Composer,
+  type ComposerMode,
   type ComposerReplyReference,
 } from "../conversation/composer";
 import { GitBranchControl } from "../conversation/branch-control";
@@ -234,6 +235,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const navigationState = location.state as ShellNavigationState | null;
   const focusRestoreRequest = navigationState?.focusRestoreRequest ?? null;
   const [searchQuery, setSearchQuery] = useState("");
+  const priorSearchRoute = useRef<AppRoutePath | null>(null);
   const [expandedProjects, setExpandedProjects] =
     useState<ReadonlySet<string> | null>(null);
   const [pendingPickerGrantIds, setPendingPickerGrantIds] = useState<
@@ -332,6 +334,27 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       Math.max(panelBounds.minimum, uiDraft.panel.width),
     ),
   );
+
+  useEffect(() => {
+    const enteredSearchRoute =
+      route === "/chat-search" && priorSearchRoute.current !== route;
+    priorSearchRoute.current = route;
+    if (qaEnabled && enteredSearchRoute) {
+      setSearchQuery("project");
+    }
+  }, [qaEnabled, route]);
+
+  useEffect(() => {
+    const directMode = composerModeForRoute(route);
+    if (
+      directMode === null ||
+      uiDraft.focusedArtifactId !== null ||
+      composerDraft.mode === directMode
+    ) {
+      return;
+    }
+    dispatch(shellDraftActions.composerModeChanged(directMode));
+  }, [composerDraft.mode, dispatch, route, uiDraft.focusedArtifactId]);
 
   useEffect(() => {
     const target = uiDraft.focusRestoreTarget;
@@ -2529,7 +2552,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
             void renameProject(projectId, displayName)
           }
           onProjectReveal={(projectId) => void revealProject(projectId)}
-          onSearchClear={() => undefined}
+          onSearchClear={() => setSearchQuery("")}
           onSearchQueryChange={setSearchQuery}
           onSessionActivate={(sessionId) => void activateSession(sessionId)}
           onSessionRemove={(sessionId) => void removeSession(sessionId)}
@@ -2601,11 +2624,22 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       {conversationError}
     </Notice>
   ) : null;
-  const ordinaryRouteContent =
-    route === "/chat" ? (
+  const conversationRouteContent =
+    route === "/chat-capabilities" ? (
       <>
         {conversationNotice}
-        {hasPendingChat ? (
+        <CapabilityRouteReview
+          attachments={composerAttachments}
+          model={
+            modelControlModels.find(({ isSelected }) => isSelected) ?? null
+          }
+        />
+        {conversationTranscript}
+      </>
+    ) : (
+      <>
+        {conversationNotice}
+        {route === "/chat" && hasPendingChat ? (
           <PendingConversationPrompt
             projectName={
               workspace.value.projects.find(
@@ -2617,12 +2651,19 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           conversationTranscript
         )}
       </>
+    );
+  const ordinaryRouteContent =
+    route === "/chat" ||
+    route === "/chat-search" ||
+    route === "/chat-capabilities" ||
+    route === "/files" ||
+    route === "/browser" ||
+    route === "/terminal" ? (
+      conversationRouteContent
     ) : (
       <ProjectedRouteContent
         route={route}
-        conversation={conversation}
         launch={launch}
-        sessions={sessions}
         settings={settings}
         extensionSettings={extensionSettings}
         mcpSettings={mcpSettings}
@@ -3334,8 +3375,6 @@ function useViewportWidth(): number {
 }
 
 type WorkspaceState = ReturnType<typeof selectWorkspace>;
-type SessionsState = ReturnType<typeof selectSessions>;
-type ConversationState = ReturnType<typeof selectConversation>;
 type SettingsState = ReturnType<typeof selectSettingsProjection>;
 type LaunchState = ReturnType<typeof selectLaunch>;
 
@@ -3343,8 +3382,6 @@ interface ProjectedRouteContentProps {
   readonly route: AppRoutePath;
   readonly launch: LaunchState;
   readonly workspace: WorkspaceState;
-  readonly sessions: SessionsState;
-  readonly conversation: ConversationState;
   readonly settings: SettingsState;
   readonly extensionSettings: ExtensionSettingsProjection;
   readonly mcpSettings: McpSettingsProjection;
@@ -3356,8 +3393,6 @@ function ProjectedRouteContent({
   route,
   launch,
   workspace,
-  sessions,
-  conversation,
   settings,
   extensionSettings,
   mcpSettings,
@@ -3422,34 +3457,6 @@ function ProjectedRouteContent({
     );
   }
 
-  if (route === "/chat") {
-    if (conversation.generation === UNINITIALIZED_GENERATION) {
-      return projectionNotice(
-        conversation.generation,
-        "Conversation unavailable",
-        "C4OS is waiting for an authoritative conversation projection.",
-      );
-    }
-    return (
-      <div className="shell-projection-list" aria-label="Conversation turns">
-        {conversation.value.turns.map((turn) => (
-          <article key={turn.id} data-author={turn.author}>
-            <strong>{turn.author === "user" ? "You" : "C4OS"}</strong>
-            <p>{turn.markdown}</p>
-          </article>
-        ))}
-      </div>
-    );
-  }
-
-  if (route === "/chat-search") {
-    return projectionList(
-      sessions.generation,
-      "Saved chat sessions",
-      sessions.value.sessions.map((session) => session.title),
-    );
-  }
-
   if (route.startsWith("/settings/")) {
     return projectionNotice(
       settings.generation,
@@ -3484,27 +3491,6 @@ function projectionNotice(
   );
 }
 
-function projectionList(
-  generation: number,
-  label: string,
-  items: readonly string[],
-) {
-  if (generation === UNINITIALIZED_GENERATION) {
-    return projectionNotice(
-      generation,
-      `${label} unavailable`,
-      "C4OS is waiting for authoritative session state.",
-    );
-  }
-  return (
-    <ul className="shell-projection-list" aria-label={label}>
-      {items.map((item) => (
-        <li key={item}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
 function routeTitle(route: AppRoutePath): string {
   return route
     .split("/")
@@ -3513,6 +3499,63 @@ function routeTitle(route: AppRoutePath): string {
     .split("-")
     .map((word) => `${word[0]?.toLocaleUpperCase()}${word.slice(1)}`)
     .join(" ");
+}
+
+function composerModeForRoute(route: AppRoutePath): ComposerMode | null {
+  if (route === "/files") return "files";
+  if (route === "/browser") return "browser";
+  if (route === "/terminal") return "terminal";
+  return null;
+}
+
+interface CapabilityRouteReviewProps {
+  readonly attachments: readonly {
+    readonly compatibility: string;
+    readonly fileName: string;
+  }[];
+  readonly model: ModelControlModel | null;
+}
+
+/** Summarizes the same model and attachment state controlled by the Composer. */
+function CapabilityRouteReview({
+  attachments,
+  model,
+}: CapabilityRouteReviewProps) {
+  return (
+    <section
+      aria-labelledby="capability-route-review-title"
+      className="shell-capability-review"
+    >
+      <h2 id="capability-route-review-title">Capability preflight</h2>
+      <dl>
+        <div>
+          <dt>Active model</dt>
+          <dd>{model?.name ?? "No model selected"}</dd>
+        </div>
+        <div>
+          <dt>Effective capabilities</dt>
+          <dd>
+            {model?.capabilities.length
+              ? model.capabilities.map(capitalize).join(", ")
+              : "Text only"}
+          </dd>
+        </div>
+        <div>
+          <dt>Draft attachments</dt>
+          <dd>
+            {attachments.length === 0
+              ? "No attachments"
+              : attachments
+                  .map(
+                    ({ compatibility, fileName }) =>
+                      `${fileName}: ${compatibility.replaceAll("-", " ")}`,
+                  )
+                  .join("; ")}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
 }
 
 function asShellFocusTarget(value: string | null): ShellFocusTarget | null {

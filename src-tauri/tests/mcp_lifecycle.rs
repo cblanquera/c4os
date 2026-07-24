@@ -158,6 +158,8 @@ struct FakeFactory {
     calls: Arc<AtomicUsize>,
     invalid_output: Arc<AtomicBool>,
     order: Arc<Mutex<Vec<&'static str>>>,
+    discovery_started: Arc<AtomicBool>,
+    block_discovery: Arc<AtomicBool>,
 }
 
 impl McpTransportFactory for FakeFactory {
@@ -174,9 +176,16 @@ impl McpTransportFactory for FakeFactory {
         let calls = Arc::clone(&self.calls);
         let invalid_output = Arc::clone(&self.invalid_output);
         let order = Arc::clone(&self.order);
+        let discovery_started = Arc::clone(&self.discovery_started);
+        let block_discovery = Arc::clone(&self.block_discovery);
         Box::pin(async move {
-            Ok(Box::new(FakeConnection::new(calls, invalid_output, order))
-                as Box<dyn McpConnection>)
+            Ok(Box::new(FakeConnection::new(
+                calls,
+                invalid_output,
+                order,
+                discovery_started,
+                block_discovery,
+            )) as Box<dyn McpConnection>)
         })
     }
 }
@@ -186,6 +195,8 @@ struct FakeConnection {
     calls: Arc<AtomicUsize>,
     invalid_output: Arc<AtomicBool>,
     order: Arc<Mutex<Vec<&'static str>>>,
+    discovery_started: Arc<AtomicBool>,
+    block_discovery: Arc<AtomicBool>,
 }
 
 impl FakeConnection {
@@ -193,6 +204,8 @@ impl FakeConnection {
         calls: Arc<AtomicUsize>,
         invalid_output: Arc<AtomicBool>,
         order: Arc<Mutex<Vec<&'static str>>>,
+        discovery_started: Arc<AtomicBool>,
+        block_discovery: Arc<AtomicBool>,
     ) -> Self {
         Self {
             handshake: McpHandshakeSnapshot {
@@ -209,6 +222,8 @@ impl FakeConnection {
             calls,
             invalid_output,
             order,
+            discovery_started,
+            block_discovery,
         }
     }
 }
@@ -226,6 +241,8 @@ impl McpConnection for FakeConnection {
         &'a self,
         _timeout_ms: u64,
     ) -> McpFuture<'a, Result<Vec<McpToolSnapshot>, McpError>> {
+        let discovery_started = Arc::clone(&self.discovery_started);
+        let block_discovery = Arc::clone(&self.block_discovery);
         let input_schema = echo_input_schema();
         let input_schema_sha256 = sha256_value(&input_schema);
         let output_schema = json!({
@@ -236,6 +253,10 @@ impl McpConnection for FakeConnection {
         });
         let output_schema_sha256 = sha256_value(&output_schema);
         Box::pin(async move {
+            discovery_started.store(true, Ordering::SeqCst);
+            while block_discovery.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
             Ok(vec![McpToolSnapshot {
                 name: "echo".into(),
                 title: Some("Echo".into()),
@@ -385,6 +406,88 @@ fn tool_call(snapshot: &McpServiceSnapshot) -> McpToolCallInput {
         session_id: "session-1".into(),
         turn_id: "turn-1".into(),
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lifecycle_cancellation_interrupts_inflight_server_test_discovery() {
+    let repository = Arc::new(MemoryRepository::default());
+    let authority = Arc::new(FakeAuthority::default());
+    let discovery_started = Arc::new(AtomicBool::new(false));
+    let block_discovery = Arc::new(AtomicBool::new(true));
+    let factory = Arc::new(FakeFactory {
+        discovery_started: Arc::clone(&discovery_started),
+        block_discovery,
+        ..FakeFactory::default()
+    });
+    let mut service = McpService::restore(repository, authority, factory, 1).expect("restore");
+    let snapshot = service
+        .upsert_server(
+            definition(service.snapshot().generation),
+            McpDefinitionSource::User,
+            2,
+        )
+        .expect("save definition");
+    let definition_sha256 = service
+        .definition_sha256("fixture")
+        .expect("definition digest");
+    let action_binding_sha256 = format!("sha256:{}", "1".repeat(64));
+    let snapshot = service
+        .record_trust_approval(
+            &McpServerMutationInput {
+                expected_generation: snapshot.generation,
+                server_id: "fixture".into(),
+            },
+            McpPendingTrustApproval {
+                prompt_id: "approval:cancellable-test".into(),
+                definition_sha256: definition_sha256.clone(),
+                action_binding_sha256: action_binding_sha256.clone(),
+                action_configuration_version: snapshot.generation,
+                requested_at_ms: 3,
+                expires_at_ms: 300,
+                state: McpTrustApprovalState::Pending,
+            },
+            3,
+        )
+        .expect("record trust approval");
+    let snapshot = service
+        .trust_server(
+            &McpServerMutationInput {
+                expected_generation: snapshot.generation,
+                server_id: "fixture".into(),
+            },
+            "approval:cancellable-test",
+            &action_binding_sha256,
+            &definition_sha256,
+            4,
+        )
+        .expect("trust definition");
+    let cancellation = McpCancellation::default();
+    let cancel_when_discovery_starts = {
+        let cancellation = cancellation.clone();
+        tokio::spawn(async move {
+            while !discovery_started.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            cancellation.cancel();
+        })
+    };
+
+    let result = service
+        .test_server_cancellable(
+            &McpServerMutationInput {
+                expected_generation: snapshot.generation,
+                server_id: "fixture".into(),
+            },
+            5,
+            cancellation,
+        )
+        .await;
+    cancel_when_discovery_starts.await.expect("canceller");
+    assert!(matches!(result, Err(McpError::Cancelled)));
+    assert_eq!(
+        service.snapshot().servers[0].lifecycle,
+        McpLifecycle::Failed
+    );
 }
 
 #[tokio::test]

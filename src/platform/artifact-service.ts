@@ -46,6 +46,10 @@ import type { ArtifactTerminalRunInput as GeneratedArtifactTerminalRunInput } fr
 import type { ArtifactTerminalSnapshot as GeneratedArtifactTerminalSnapshot } from "../generated/ArtifactTerminalSnapshot";
 import type { ArtifactTerminalStdinInput as GeneratedArtifactTerminalStdinInput } from "../generated/ArtifactTerminalStdinInput";
 import type { ArtifactWorkspaceSnapshot as GeneratedArtifactWorkspaceSnapshot } from "../generated/ArtifactWorkspaceSnapshot";
+import {
+  isAcceptedQaAwareAuthority,
+  type QaAwareAuthority,
+} from "../qa/authority";
 
 export type ArtifactShellStatus = Omit<
   Readonly<GeneratedArtifactShellStatusSnapshot>,
@@ -272,7 +276,7 @@ export type ArtifactWorkspaceSnapshot = Omit<
 > & {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly generation: StateGeneration;
-  readonly authority: "rust-core";
+  readonly authority: QaAwareAuthority<"rust-core">;
   readonly workspaceId: WorkspaceId | null;
   readonly activeProjectId: ProjectId | null;
   readonly activeSessionId: SessionId | null;
@@ -802,7 +806,7 @@ function parseWorkspaceSnapshot(raw: unknown): ArtifactWorkspaceSnapshot {
   const value = record(raw, "Artifact Workspace snapshot");
   if (
     value.protocolVersion !== PROTOCOL_VERSION ||
-    value.authority !== "rust-core"
+    !isAcceptedQaAwareAuthority(value.authority, "rust-core")
   ) {
     throw boundary("invalidPayload", "Artifact authority is invalid.");
   }
@@ -829,7 +833,7 @@ function parseWorkspaceSnapshot(raw: unknown): ArtifactWorkspaceSnapshot {
   return {
     protocolVersion: PROTOCOL_VERSION,
     generation: nonnegative(value.generation, "generation") as StateGeneration,
-    authority: "rust-core",
+    authority: value.authority,
     workspaceId: nullableIdentifier(
       value.workspaceId,
       "Workspace ID",

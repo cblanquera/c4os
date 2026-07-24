@@ -112,6 +112,9 @@ const shellAuthoritySlice = createSlice({
         },
       } as ShellAuthorityState;
     },
+    platformReducedMotionChanged(state, { payload }: PayloadAction<boolean>) {
+      state.platform.value.reducedMotion = payload;
+    },
   },
 });
 

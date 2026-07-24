@@ -28,6 +28,7 @@ use thiserror::Error;
 pub const DATABASE_BUSY_TIMEOUT: Duration = Duration::from_millis(1_500);
 pub const DATABASE_QUEUE_CAPACITY: usize = 32;
 pub const MAX_READ_RECORDS: usize = 250;
+const MAX_RUNTIME_DIAGNOSTIC_REPLACEMENT_IDS: usize = MAX_READ_RECORDS * 2;
 pub const MAX_SECURITY_CURRENT_RECORDS: usize = 4_096;
 pub const MAX_SECURITY_BATCH_RECORDS: usize = MAX_SECURITY_CURRENT_RECORDS;
 pub const MAX_CONCURRENT_AUXILIARY_CONNECTIONS: usize = 32;
@@ -1059,7 +1060,7 @@ impl DatabaseActor {
     ) -> DatabaseResult<u64> {
         self.require_app()?;
         if diagnostics.len() > MAX_READ_RECORDS
-            || diagnostic_ids_to_replace.len() > MAX_READ_RECORDS
+            || diagnostic_ids_to_replace.len() > MAX_RUNTIME_DIAGNOSTIC_REPLACEMENT_IDS
             || retain_after < 0
             || max_records == 0
             || max_records > MAX_READ_RECORDS
@@ -3526,7 +3527,7 @@ fn write_runtime_state_with_diagnostics(
     max_records: usize,
 ) -> DatabaseResult<u64> {
     if diagnostics.len() > MAX_READ_RECORDS
-        || diagnostic_ids_to_replace.len() > MAX_READ_RECORDS
+        || diagnostic_ids_to_replace.len() > MAX_RUNTIME_DIAGNOSTIC_REPLACEMENT_IDS
         || retain_after < 0
         || max_records == 0
         || max_records > MAX_READ_RECORDS

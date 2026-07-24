@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { isQaFixtureBuildEnabled } from "../qa/fixture";
-import { invokeQaProductRoute } from "../qa/product-route-native";
+import { invokeQaProductRoute } from "#qa-native-transport";
 
 export type NativeCommand =
   | "platform_snapshot"
@@ -132,9 +131,8 @@ export function invokeNative(
   command: NativeCommand,
   args: Readonly<Record<string, unknown>>,
 ): Promise<unknown> {
-  if (isQaFixtureBuildEnabled() && !("__TAURI_INTERNALS__" in globalThis)) {
-    const fixture = invokeQaProductRoute(command, args);
-    if (fixture !== null) return fixture;
+  if (import.meta.env.VITE_C4OS_QA_FIXTURES === "1") {
+    return invokeQaProductRoute(command, args);
   }
   return invoke(command, args);
 }

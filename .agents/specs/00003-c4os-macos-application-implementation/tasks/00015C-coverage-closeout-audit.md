@@ -1,6 +1,6 @@
 # Side Quest 00015C — Coverage And Closeout Audit
 
-Status: open
+Status: verified
 
 Coverage: all 50 Feature Coverage IDs and every Spec 00003 task, evidence, documentation, context, validation, worktree, and local-commit requirement.
 
@@ -27,18 +27,20 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 ## Agent Acceptance
 
-Result: failed — implementation and closeout evidence are incomplete.
+Result: passed — all 50 IDs, all 18 task/side-quest records, final evidence, context disposition, validators, scoped worktree, and local checkpoint history reconcile with P0 = 0 and P1 = 0.
 
 Required evidence: 50-row closed ledger; 18 verified/passed task records; evidence-link audit; context-promotion decision; validator and regression results; clean scoped worktree; coherent local commits; residual external gates only.
 
 ## Implementation Notes
 
-Not started. Coverage closes from production evidence, not from plan text, source existence, proof success, or wireframe review.
+Completed 2026-07-24 after Tasks 00015, 00015A, and 00015B passed. All 50 normative IDs trace to verified primary/supporting tasks and the final integrated matrix. UX-014 now explicitly includes Tasks 00009 and 00015C because retained Terminal continuity through Chat inactivation and the final no-delete/process audit complete that cross-domain path. Every task file retains the exact acceptance override, uses `verified`, and reports passed Agent Acceptance.
 
 ## Verification Notes
 
-Not run.
+Machine-readable closeout confirms 50/50 coverage rows closed, 18/18 task records verified/passed, and 18/18 exact acceptance overrides. The Agent Workspace validator passes. `git diff --cached --check` passes for the explicitly staged Task 00015 slice; the unrelated generated-TypeScript trailing whitespace and unrelated tracked/untracked artifacts remain unstaged. Final bundle identity, regression/native tiers, evidence links, reviewer results, and external gates are recorded in `output/native/task-00015-acceptance.md`.
+
+Context promotion was reviewed with no change. The deterministic QA harness and bounded diagnostic replacement transaction are implementation/verification mechanisms, not new reusable product truth. Accepted product/runtime authority remains unchanged in Context.
 
 ## Agent Acceptance Notes
 
-Any mismatch reopens the owning task and prevents terminal completion.
+Independent policy/configuration result: P0 = 0, P1 = 0, P2 = 2, P3 = 0. Retained limitations are Terminal containment-metadata overstatement and a conservative sticky policy-recovery projection until observer reconciliation/restart. The MCP terminal-commit recovery P2 is closed, and the encrypted credential orphan window is secret-safe and authority-free. Signing, notarization, distribution, signed update feeds, public marketplace governance, other-platform claims, Codex import, active cross-runtime migration, and deferred UX remain external gates. No closeout mismatch remains.

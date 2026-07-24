@@ -18,11 +18,11 @@ Plan state: Accepted 2026-07-18. Allowed task statuses: `open`, `started`, `veri
 | [00012 MCP lifecycle](00012-mcp-lifecycle.md) | verified | passed | SET-009 |
 | [00013 Onboarding and Settings integration](00013-onboarding-settings-integration.md) | verified | passed | SET-001, SET-004 through SET-006 |
 | [00014 Updates, recovery, diagnostics, and degraded-state integration](00014-updates-recovery-diagnostics.md) | verified | passed | UX-010, UX-013; update/recovery support |
-| [00015 Deterministic QA and integrated Agent Acceptance](00015-integrated-agent-acceptance.md) | open | failed | UX-002, UX-009, QA-001, QA-002 |
-| [00015A Security audit](00015A-security-audit.md) | open | failed | Cross-cutting security audit |
-| [00015B Accessibility and native macOS audit](00015B-accessibility-native-audit.md) | open | failed | Cross-cutting rendered/native audit |
-| [00015C Coverage and closeout audit](00015C-coverage-closeout-audit.md) | open | failed | All 50 IDs and final records |
+| [00015 Deterministic QA and integrated Agent Acceptance](00015-integrated-agent-acceptance.md) | verified | passed | UX-002, UX-009, QA-001, QA-002 |
+| [00015A Security audit](00015A-security-audit.md) | verified | passed | Cross-cutting security audit |
+| [00015B Accessibility and native macOS audit](00015B-accessibility-native-audit.md) | verified | passed | Cross-cutting rendered/native audit |
+| [00015C Coverage and closeout audit](00015C-coverage-closeout-audit.md) | verified | passed | All 50 IDs and final records |
 
 ## Current Blockers
 
-None. Tasks 00001 through 00014 passed Agent Acceptance. Task 00015 deterministic QA and integrated Agent Acceptance is next after the scoped Task 00014 checkpoint.
+None. Tasks 00001 through 00015C are verified with passed Agent Acceptance, and all 50 Feature Coverage IDs are closed. Signing, notarization, distribution, signed updater evidence, public marketplace governance, other-platform claims, and explicitly deferred product scope remain external gates.

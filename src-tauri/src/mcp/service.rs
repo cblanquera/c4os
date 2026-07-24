@@ -643,6 +643,16 @@ where
         input: &McpServerMutationInput,
         now_ms: u64,
     ) -> Result<McpServiceSnapshot, McpError> {
+        self.test_server_cancellable(input, now_ms, McpCancellation::default())
+            .await
+    }
+
+    pub async fn test_server_cancellable(
+        &mut self,
+        input: &McpServerMutationInput,
+        now_ms: u64,
+        cancellation: McpCancellation,
+    ) -> Result<McpServiceSnapshot, McpError> {
         let server =
             self.preflight_connect(input, &[McpLifecycle::Disabled, McpLifecycle::Failed])?;
         self.commit_lifecycle(
@@ -651,8 +661,16 @@ where
             "lifecycle.testing",
             now_ms,
         )?;
-        match self.connect_and_discover(&server).await {
+        match self
+            .connect_and_discover(&server, cancellation.clone())
+            .await
+        {
             Ok((connection, handshake, tools, resources, _notification_epoch)) => {
+                if cancellation.is_cancelled() {
+                    let _ = connection.close(server.timeout_ms).await;
+                    self.record_failure(&server.server_id, &McpError::Cancelled, now_ms)?;
+                    return Err(McpError::Cancelled);
+                }
                 let mut replacement = self.snapshot.clone();
                 let target = server_mut(&mut replacement, &server.server_id)?;
                 apply_discovery(target, &handshake, tools, resources, now_ms);
@@ -683,7 +701,17 @@ where
         input: &McpServerMutationInput,
         now_ms: u64,
     ) -> Result<McpServiceSnapshot, McpError> {
-        self.connect_server(input, &[McpLifecycle::Disabled], now_ms)
+        self.enable_server_cancellable(input, now_ms, McpCancellation::default())
+            .await
+    }
+
+    pub async fn enable_server_cancellable(
+        &mut self,
+        input: &McpServerMutationInput,
+        now_ms: u64,
+        cancellation: McpCancellation,
+    ) -> Result<McpServiceSnapshot, McpError> {
+        self.connect_server(input, &[McpLifecycle::Disabled], now_ms, cancellation)
             .await
     }
 
@@ -692,6 +720,7 @@ where
         input: &McpServerMutationInput,
         allowed: &[McpLifecycle],
         now_ms: u64,
+        cancellation: McpCancellation,
     ) -> Result<McpServiceSnapshot, McpError> {
         let server = self.preflight_connect(input, allowed)?;
         self.commit_lifecycle(
@@ -700,8 +729,16 @@ where
             "lifecycle.connecting",
             now_ms,
         )?;
-        match self.connect_and_discover(&server).await {
+        match self
+            .connect_and_discover(&server, cancellation.clone())
+            .await
+        {
             Ok((connection, handshake, tools, resources, notification_epoch)) => {
+                if cancellation.is_cancelled() {
+                    let _ = connection.close(server.timeout_ms).await;
+                    self.record_failure(&server.server_id, &McpError::Cancelled, now_ms)?;
+                    return Err(McpError::Cancelled);
+                }
                 let mut replacement = self.snapshot.clone();
                 let target = server_mut(&mut replacement, &server.server_id)?;
                 target.lifecycle_generation = target
@@ -896,6 +933,16 @@ where
         input: &McpServerMutationInput,
         now_ms: u64,
     ) -> Result<McpServiceSnapshot, McpError> {
+        self.recover_server_cancellable(input, now_ms, McpCancellation::default())
+            .await
+    }
+
+    pub async fn recover_server_cancellable(
+        &mut self,
+        input: &McpServerMutationInput,
+        now_ms: u64,
+        cancellation: McpCancellation,
+    ) -> Result<McpServiceSnapshot, McpError> {
         self.require_generation(input.expected_generation)?;
         let server = self.server(&input.server_id)?.clone();
         if !has_current_trust_binding(&server)? {
@@ -926,6 +973,7 @@ where
             },
             &[McpLifecycle::Restarting],
             now_ms,
+            cancellation,
         )
         .await
     }
@@ -1602,6 +1650,7 @@ where
     async fn connect_and_discover(
         &self,
         server: &McpServerSnapshot,
+        cancellation: McpCancellation,
     ) -> Result<
         (
             Box<dyn McpConnection>,
@@ -1613,10 +1662,17 @@ where
         McpError,
     > {
         let launch = self.authority.resolve_launch(server)?;
-        let connection = self
-            .factory
-            .connect(&server.transport, launch, server.timeout_ms)
-            .await?;
+        let connection = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(McpError::Cancelled),
+            connection = self.factory.connect(&server.transport, launch, server.timeout_ms) => {
+                connection?
+            }
+        };
+        if cancellation.is_cancelled() {
+            let _ = connection.close(server.timeout_ms).await;
+            return Err(McpError::Cancelled);
+        }
         let handshake = connection.handshake().clone();
         if handshake.protocol_version != super::MCP_PROTOCOL_VERSION {
             let _ = connection.close(server.timeout_ms).await;
@@ -1627,7 +1683,11 @@ where
         // incorrectly marked observed with a stale catalog.
         let notification_epoch = connection.notification_epoch();
         let tools = if handshake.capabilities.tools {
-            connection.list_tools(server.timeout_ms).await
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(McpError::Cancelled),
+                tools = connection.list_tools(server.timeout_ms) => tools,
+            }
         } else {
             Ok(Vec::new())
         };
@@ -1646,7 +1706,11 @@ where
             }
         };
         let resources = if handshake.capabilities.resources {
-            connection.list_resources(server.timeout_ms).await
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(McpError::Cancelled),
+                resources = connection.list_resources(server.timeout_ms) => resources,
+            }
         } else {
             Ok(Vec::new())
         };
@@ -1657,6 +1721,10 @@ where
                 return Err(error);
             }
         };
+        if cancellation.is_cancelled() {
+            let _ = connection.close(server.timeout_ms).await;
+            return Err(McpError::Cancelled);
+        }
         Ok((connection, handshake, tools, resources, notification_epoch))
     }
 
