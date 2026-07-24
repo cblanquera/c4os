@@ -32,6 +32,8 @@ const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_RUNTIME_INSTALLATIONS: usize = 128;
 const MAX_TRACE_EVENTS: usize = 4_096;
+const MAX_AUTOMATIC_RESTART_ATTEMPTS: u16 = 5;
+const MAX_RESTART_BACKOFF_MS: u64 = 300_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -165,6 +167,12 @@ pub enum HealthState {
     Unhealthy,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRecoveryAction {
+    ReviewRuntimeCrashLoop,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeRecord {
@@ -176,6 +184,12 @@ pub struct RuntimeRecord {
     pub process_id: Option<u32>,
     pub checked_at_ms: u64,
     pub last_exit_code: Option<i32>,
+    #[serde(default)]
+    pub restart_attempts: u16,
+    #[serde(default)]
+    pub next_restart_at_ms: Option<u64>,
+    #[serde(default)]
+    pub recovery_action: Option<RuntimeRecoveryAction>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -210,6 +224,7 @@ pub enum RuntimeTraceKind {
     Stopped,
     Exited,
     RecoveredInterrupted,
+    RecoveryReviewed,
 }
 
 struct ManagedProcess {
@@ -307,6 +322,11 @@ impl RuntimeSupervisor {
             };
             record.health = HealthState::Unknown;
             record.process_id = None;
+            if was_active {
+                let recovered_at_ms = record.checked_at_ms.max(1);
+                apply_crash_backoff(&mut record, recovered_at_ms);
+            }
+            validate_restart_state(&record)?;
             let runtime_id = record.installation.runtime_id.clone();
             let generation = record.process_generation;
             let checked_at_ms = record.checked_at_ms;
@@ -391,6 +411,9 @@ impl RuntimeSupervisor {
                 process_id: None,
                 checked_at_ms,
                 last_exit_code: None,
+                restart_attempts: 0,
+                next_restart_at_ms: None,
+                recovery_action: None,
             },
         );
         self.trace(
@@ -454,10 +477,11 @@ impl RuntimeSupervisor {
                 CompatibilityState::Incompatible
             };
             let runtime_id = installation.runtime_id.clone();
-            let process_generation = self
-                .records
-                .get(&runtime_id)
-                .map_or(0, |record| record.process_generation);
+            let previous_record = self.records.get(&runtime_id);
+            let matching_record = previous_record.filter(|record| {
+                record.installation == installation && record.compatibility == compatibility
+            });
+            let process_generation = previous_record.map_or(0, |record| record.process_generation);
             let record = RuntimeRecord {
                 installation,
                 compatibility,
@@ -471,6 +495,9 @@ impl RuntimeSupervisor {
                 process_id: None,
                 checked_at_ms,
                 last_exit_code: None,
+                restart_attempts: matching_record.map_or(0, |record| record.restart_attempts),
+                next_restart_at_ms: matching_record.and_then(|record| record.next_restart_at_ms),
+                recovery_action: matching_record.and_then(|record| record.recovery_action),
             };
             if records.insert(runtime_id.clone(), record).is_some()
                 || compatibility_by_runtime
@@ -538,6 +565,7 @@ impl RuntimeSupervisor {
             if record.compatibility != CompatibilityState::Compatible {
                 return Err(SupervisorError::Incompatible);
             }
+            require_restart_budget(record, at_ms)?;
             (record.installation.clone(), record.process_generation)
         };
         verify_executable(&installation)?;
@@ -616,6 +644,7 @@ impl RuntimeSupervisor {
         if record.compatibility != CompatibilityState::Compatible {
             return Err(SupervisorError::Incompatible);
         }
+        require_restart_budget(record, at_ms)?;
         if record.process_id.is_some()
             || matches!(
                 record.lifecycle,
@@ -698,6 +727,11 @@ impl RuntimeSupervisor {
             }
         };
         record.checked_at_ms = at_ms;
+        if health == HealthState::Healthy {
+            record.restart_attempts = 0;
+            record.next_restart_at_ms = None;
+            record.recovery_action = None;
+        }
         self.trace(
             runtime_id,
             process_generation,
@@ -741,6 +775,7 @@ impl RuntimeSupervisor {
         record.lifecycle = RuntimeLifecycle::Stopped;
         record.health = HealthState::Unknown;
         record.checked_at_ms = at_ms;
+        apply_crash_backoff(record, at_ms);
         self.trace(
             runtime_id,
             process_generation,
@@ -823,6 +858,15 @@ impl RuntimeSupervisor {
             HealthState::Unhealthy => RuntimeLifecycle::Failed,
         };
         record.checked_at_ms = at_ms;
+        match health {
+            HealthState::Healthy => {
+                record.restart_attempts = 0;
+                record.next_restart_at_ms = None;
+                record.recovery_action = None;
+            }
+            HealthState::Unhealthy => apply_crash_backoff(record, at_ms),
+            HealthState::Unknown | HealthState::Degraded => {}
+        }
         let kind = match health {
             HealthState::Healthy => RuntimeTraceKind::Ready,
             HealthState::Degraded => RuntimeTraceKind::Degraded,
@@ -845,6 +889,45 @@ impl RuntimeSupervisor {
                 .checked_add(1)
                 .ok_or(SupervisorError::InvalidTimestamp)?,
         )
+    }
+
+    pub fn review_crash_loop(
+        &mut self,
+        runtime_id: &str,
+        process_generation: u64,
+        at_ms: u64,
+    ) -> Result<(), SupervisorError> {
+        if at_ms == 0 {
+            return Err(SupervisorError::InvalidTimestamp);
+        }
+        let record = self
+            .records
+            .get(runtime_id)
+            .ok_or(SupervisorError::NotFound)?;
+        if record.process_generation != process_generation
+            || record.process_id.is_some()
+            || record.recovery_action != Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop)
+        {
+            return Err(SupervisorError::RecoveryUnavailable);
+        }
+        self.bump_state_generation()?;
+        let record = self
+            .records
+            .get_mut(runtime_id)
+            .ok_or(SupervisorError::NotFound)?;
+        record.restart_attempts = 0;
+        record.next_restart_at_ms = None;
+        record.recovery_action = None;
+        record.lifecycle = RuntimeLifecycle::Stopped;
+        record.health = HealthState::Unknown;
+        record.checked_at_ms = at_ms;
+        self.trace(
+            runtime_id,
+            process_generation,
+            at_ms,
+            RuntimeTraceKind::RecoveryReviewed,
+        );
+        Ok(())
     }
 
     pub fn shutdown(
@@ -946,6 +1029,7 @@ impl RuntimeSupervisor {
         record.process_id = None;
         record.checked_at_ms = at_ms;
         record.last_exit_code = exit_code(status);
+        apply_crash_backoff(record, at_ms);
         let generation = record.process_generation;
         self.trace(runtime_id, generation, at_ms, RuntimeTraceKind::Exited);
         Ok(())
@@ -981,6 +1065,50 @@ impl RuntimeSupervisor {
             .ok_or(SupervisorError::GenerationExhausted)?;
         Ok(())
     }
+}
+
+fn require_restart_budget(record: &RuntimeRecord, at_ms: u64) -> Result<(), SupervisorError> {
+    if record.recovery_action == Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop) {
+        return Err(SupervisorError::CrashLoopBudgetExceeded);
+    }
+    if record
+        .next_restart_at_ms
+        .is_some_and(|next_restart| at_ms < next_restart)
+    {
+        return Err(SupervisorError::RestartBackoff);
+    }
+    Ok(())
+}
+
+fn validate_restart_state(record: &RuntimeRecord) -> Result<(), SupervisorError> {
+    if record.restart_attempts > MAX_AUTOMATIC_RESTART_ATTEMPTS
+        || (record.restart_attempts >= MAX_AUTOMATIC_RESTART_ATTEMPTS
+            && (record.next_restart_at_ms.is_some()
+                || record.recovery_action != Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop)))
+        || (record.restart_attempts < MAX_AUTOMATIC_RESTART_ATTEMPTS
+            && record.recovery_action.is_some())
+    {
+        return Err(SupervisorError::InvalidSnapshot);
+    }
+    Ok(())
+}
+
+fn apply_crash_backoff(record: &mut RuntimeRecord, at_ms: u64) {
+    record.restart_attempts = record
+        .restart_attempts
+        .saturating_add(1)
+        .min(MAX_AUTOMATIC_RESTART_ATTEMPTS);
+    if record.restart_attempts >= MAX_AUTOMATIC_RESTART_ATTEMPTS {
+        record.next_restart_at_ms = None;
+        record.recovery_action = Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop);
+        return;
+    }
+    let exponent = u32::from(record.restart_attempts.saturating_sub(1));
+    let delay_ms = 1_000_u64
+        .saturating_mul(2_u64.saturating_pow(exponent))
+        .min(MAX_RESTART_BACKOFF_MS);
+    record.next_restart_at_ms = Some(at_ms.saturating_add(delay_ms));
+    record.recovery_action = None;
 }
 
 impl Drop for RuntimeSupervisor {
@@ -1232,6 +1360,12 @@ pub enum SupervisorError {
     CapacityExceeded,
     #[error("runtime process is already running")]
     AlreadyRunning,
+    #[error("runtime restart is waiting for bounded backoff")]
+    RestartBackoff,
+    #[error("runtime crash-loop restart budget is exhausted")]
+    CrashLoopBudgetExceeded,
+    #[error("runtime crash-loop recovery action is unavailable")]
+    RecoveryUnavailable,
     #[error("runtime process is owned by the production adapter")]
     ExternallyManaged,
     #[error("runtime process event is stale")]

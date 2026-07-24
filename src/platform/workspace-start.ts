@@ -10,8 +10,8 @@ import {
   type StateGeneration,
   type WorkspaceId,
   type WorkspaceRecentSnapshot,
-  type WorkspaceStartSnapshot,
-  type WorkspaceStartSnapshotEnvelope,
+  type WorkspaceRecoveryNoticeSnapshot as ProtocolWorkspaceRecoveryNoticeSnapshot,
+  type WorkspaceStartSnapshot as ProtocolWorkspaceStartSnapshot,
 } from "./protocol";
 import { ProtocolBoundaryError } from "./tauri-adapter";
 
@@ -27,13 +27,16 @@ export const WORKSPACE_START_CLONE_REPOSITORY_COMMAND =
   "workspace_start_clone_repository" as const;
 export const WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND =
   "workspace_start_answer_clone_approval" as const;
+export const WORKSPACE_RECOVERY_ACKNOWLEDGE_COMMAND =
+  "workspace_recovery_acknowledge" as const;
 type WorkspaceStartCommand =
   | typeof WORKSPACE_START_SNAPSHOT_COMMAND
   | typeof WORKSPACE_START_OPEN_FOLDER_COMMAND
   | typeof WORKSPACE_START_OPEN_ARCHIVE_COMMAND
   | typeof WORKSPACE_START_OPEN_RECENT_COMMAND
   | typeof WORKSPACE_START_CLONE_REPOSITORY_COMMAND
-  | typeof WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND;
+  | typeof WORKSPACE_START_ANSWER_CLONE_APPROVAL_COMMAND
+  | typeof WORKSPACE_RECOVERY_ACKNOWLEDGE_COMMAND;
 const MAX_RECENTS = 3;
 const MAX_DISPLAY_NAME_BYTES = 512;
 
@@ -49,7 +52,12 @@ export interface WorkspaceStartOpenResult {
   readonly workspaceId: WorkspaceId;
   readonly workspaceName: string;
   readonly recovered: boolean;
+  readonly recoveryNotice: WorkspaceRecoveryNotice | null;
 }
+
+export type WorkspaceRecoveryNotice = ProtocolWorkspaceRecoveryNoticeSnapshot;
+
+export type WorkspaceStartSnapshot = ProtocolWorkspaceStartSnapshot;
 
 export type WorkspaceStartCloneResult =
   | ({ readonly state: "opened" } & WorkspaceStartOpenResult)
@@ -74,6 +82,9 @@ export interface WorkspaceStartAdapter {
     promptId: string,
     answer: "allow" | "deny",
   ): Promise<WorkspaceStartCloneResult>;
+  acknowledgeRecovery(
+    notice: WorkspaceRecoveryNotice,
+  ): Promise<WorkspaceStartSnapshot>;
 }
 
 const nativeAdapter = createWorkspaceStartAdapter({
@@ -101,6 +112,8 @@ export const answerWorkspaceCloneApproval = (
   promptId: string,
   answer: "allow" | "deny",
 ) => nativeAdapter.answerCloneApproval(promptId, answer);
+export const acknowledgeWorkspaceRecovery = (notice: WorkspaceRecoveryNotice) =>
+  nativeAdapter.acknowledgeRecovery(notice);
 
 export function createWorkspaceStartAdapter(
   transport: WorkspaceStartTransport,
@@ -200,6 +213,9 @@ export function createWorkspaceStartAdapter(
         answer,
       });
     },
+    acknowledgeRecovery(notice) {
+      return invokeRecoveryAcknowledge(notice);
+    },
   };
 
   async function invokeOpen(
@@ -284,6 +300,65 @@ export function createWorkspaceStartAdapter(
     currentGeneration = envelope.generation;
     return payload;
   }
+
+  async function invokeRecoveryAcknowledge(
+    notice: WorkspaceRecoveryNotice,
+  ): Promise<WorkspaceStartSnapshot> {
+    const requestId = requestIdFactory();
+    const correlationId = correlationIdFactory();
+    const expectedGeneration = currentGeneration;
+    const request: SnapshotRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      requestId,
+      correlationId,
+      expectedGeneration,
+    };
+    let raw: unknown;
+    try {
+      raw = await transport.invoke(WORKSPACE_RECOVERY_ACKNOWLEDGE_COMMAND, {
+        request,
+        input: {
+          expectedGeneration,
+          recoveryId: asIdentifier(notice.recoveryId, "Workspace recovery ID"),
+          workspaceId: asIdentifier(
+            notice.workspaceId,
+            "recovered Workspace ID",
+          ),
+          workingGeneration: asGeneration(notice.workingGeneration),
+          archiveGeneration: asGeneration(notice.archiveGeneration),
+        },
+      });
+    } catch (error) {
+      throw normalizeCoreFailure(error);
+    }
+    const envelope = parseEnvelope(raw);
+    if (
+      envelope.requestId !== requestId ||
+      envelope.correlationId !== correlationId
+    ) {
+      throw new ProtocolBoundaryError(
+        "correlationMismatch",
+        "The Workspace recovery acknowledgement identity did not match its request.",
+      );
+    }
+    if (
+      envelope.generation < currentGeneration ||
+      envelope.payload.generation !== envelope.generation
+    ) {
+      throw new ProtocolBoundaryError(
+        "staleGeneration",
+        "The Workspace recovery acknowledgement was stale.",
+      );
+    }
+    if (envelope.payload.activeRecoveryNotice !== null) {
+      throw invalidPayload(
+        "The Workspace recovery acknowledgement was not reflected in the refreshed snapshot.",
+      );
+    }
+
+    currentGeneration = envelope.generation;
+    return envelope.payload;
+  }
 }
 
 function parseCloneResult(raw: unknown): WorkspaceStartCloneResult {
@@ -302,7 +377,13 @@ function parseCloneResult(raw: unknown): WorkspaceStartCloneResult {
   throw invalidPayload("The Workspace clone result state is invalid.");
 }
 
-function parseEnvelope(raw: unknown): WorkspaceStartSnapshotEnvelope {
+function parseEnvelope(raw: unknown): {
+  readonly protocolVersion: typeof PROTOCOL_VERSION;
+  readonly requestId: RequestId;
+  readonly correlationId: CorrelationId;
+  readonly generation: StateGeneration;
+  readonly payload: WorkspaceStartSnapshot;
+} {
   const envelope = parseRawEnvelope(raw);
   return {
     protocolVersion: PROTOCOL_VERSION,
@@ -348,14 +429,68 @@ function parseOpenResult(raw: unknown): WorkspaceStartOpenResult {
   if (typeof result.recovered !== "boolean") {
     throw invalidPayload("The Workspace recovery state is invalid.");
   }
+  const recoveryNotice =
+    result.recoveryNotice === null || result.recoveryNotice === undefined
+      ? null
+      : parseRecoveryNotice(result.recoveryNotice);
+  if (result.recovered !== (recoveryNotice !== null)) {
+    throw invalidPayload(
+      "The Workspace recovery notice does not match the recovery state.",
+    );
+  }
+  const workspaceId = asIdentifier(
+    result.workspaceId,
+    "Workspace ID",
+  ) as WorkspaceId;
+  if (
+    recoveryNotice !== null &&
+    (recoveryNotice.workspaceId !== workspaceId ||
+      recoveryNotice.workspaceName !== workspaceName)
+  ) {
+    throw invalidPayload(
+      "The Workspace recovery notice does not match the opened Workspace.",
+    );
+  }
   return {
     authority: "rust-workspace-service",
-    workspaceId: asIdentifier(
-      result.workspaceId,
-      "Workspace ID",
-    ) as WorkspaceId,
+    workspaceId,
     workspaceName,
     recovered: result.recovered,
+    recoveryNotice,
+  };
+}
+
+function parseRecoveryNotice(raw: unknown): WorkspaceRecoveryNotice {
+  const notice = requireRecord(raw, "Workspace recovery notice");
+  if (
+    notice.action !== "review_recovered_workspace_before_save" ||
+    notice.mustNotifyBeforeNextSave !== true
+  ) {
+    throw invalidPayload("The Workspace recovery action is invalid.");
+  }
+  return {
+    recoveryId: asIdentifier(notice.recoveryId, "Workspace recovery ID"),
+    correlationId: asIdentifier(
+      notice.correlationId,
+      "Workspace recovery correlation ID",
+    ) as CorrelationId,
+    workspaceId: asIdentifier(
+      notice.workspaceId,
+      "recovered Workspace ID",
+    ) as WorkspaceId,
+    workspaceName: boundedText(
+      notice.workspaceName,
+      "recovered Workspace name",
+      MAX_DISPLAY_NAME_BYTES,
+    ),
+    summary: boundedText(notice.summary, "Workspace recovery summary", 1_024),
+    action: "review_recovered_workspace_before_save",
+    workingGeneration: asGeneration(notice.workingGeneration),
+    archiveGeneration: asGeneration(notice.archiveGeneration),
+    mustNotifyBeforeNextSave: asBoolean(
+      notice.mustNotifyBeforeNextSave,
+      "Workspace recovery notification state",
+    ),
   };
 }
 
@@ -383,6 +518,11 @@ function parseSnapshot(raw: unknown): WorkspaceStartSnapshot {
     generation: asGeneration(snapshot.generation),
     authority: "rust-core",
     recents: snapshot.recents.map(parseRecent),
+    activeRecoveryNotice:
+      snapshot.activeRecoveryNotice === null ||
+      snapshot.activeRecoveryNotice === undefined
+        ? null
+        : parseRecoveryNotice(snapshot.activeRecoveryNotice),
   };
 }
 
@@ -485,6 +625,13 @@ function asIdentifier(value: unknown, label: string): string {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string") {
+    throw invalidPayload(`The ${label} is invalid.`);
+  }
+  return value;
+}
+
+function asBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
     throw invalidPayload(`The ${label} is invalid.`);
   }
   return value;

@@ -42,6 +42,7 @@ export type NativeCommand =
   | "workspace_start_open_recent"
   | "workspace_start_clone_repository"
   | "workspace_start_answer_clone_approval"
+  | "workspace_recovery_acknowledge"
   | "conversation_snapshot"
   | "artifact_snapshot"
   | "artifact_run_terminal"
@@ -107,10 +108,21 @@ export type NativeCommand =
   | "policy_save"
   | "policy_revoke_exception"
   | "runtime_core_snapshot"
+  | "runtime_review_crash_loop"
   | "runtime_production_activate"
   | "runtime_production_shutdown"
   | "runtime_production_pump"
-  | "runtime_production_answer_approval";
+  | "runtime_production_answer_approval"
+  | "update_snapshot"
+  | "update_stage_local"
+  | "update_activate"
+  | "update_rollback"
+  | "update_revoke"
+  | "update_recover"
+  | "diagnostics_snapshot"
+  | "diagnostics_export"
+  | "startup_recovery_snapshot"
+  | "startup_recovery_action";
 
 /**
  * The only renderer import of Tauri's generic invoke primitive. Product

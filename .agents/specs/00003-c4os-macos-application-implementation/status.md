@@ -4,11 +4,11 @@
 
 - Phase: Frozen implementation contract
 - Freeze state: Frozen 2026-07-18
-- Last updated: 2026-07-23
+- Last updated: 2026-07-24
 - User acceptance: Complete 2026-07-18; the complete contract and passing Browser Proof disposition were explicitly accepted.
 - Context promotion: Complete; accepted product/runtime rules remain in Runtime Context and the seven Frozen technical baselines are promoted into `context/implementation-architecture.md`.
 - Implementation planning: Accepted 2026-07-18 under the user's advance maintainability-first plan authorization; the task package is active under `tasks/`.
-- Implementation status: Active; Tasks 00001 through 00013 are verified with passed Agent Acceptance. Tasks 00014 through 00015C remain open.
+- Implementation status: Active; Tasks 00001 through 00014 are verified with passed Agent Acceptance. Tasks 00015 through 00015C remain open.
 
 ## Work Items
 
@@ -39,8 +39,8 @@ Research from Specs 00001 and 00002 is inherited through Context. All seven narr
 
 ## Proof Status
 
-Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00013 now carry their own scoped production, deterministic, security, bundle, native, rendered, and independent-review evidence; remaining updates/recovery/diagnostics, release, accessibility, integrated, and human-acceptance verification stays open in the later task epochs.
+Inherited feasibility Proofs do not count as production verification. Tasks 00001 through 00014 now carry their own scoped production, deterministic, security, bundle, native, rendered, recovery, diagnostic, and independent-review evidence; remaining deterministic QA, release, accessibility, integrated security, coverage, and human-acceptance verification stays open in the later task epochs.
 
 ## Recommended Next Action
 
-Complete Task 00014 as the next isolated updates, recovery, diagnostics, and degraded-state integration epoch after the Task 00013 checkpoint. Preserve the declarative extension, immutable authority, Action Gateway, runtime-capability, restart-recovery, and no-peer-authority boundaries; close an ID only after every named primary/supporting task and integrated audit passes.
+Create the scoped Task 00014 checkpoint, then begin Task 00015 deterministic QA and integrated Agent Acceptance. Preserve the declarative extension, immutable authority, Action Gateway, runtime-capability, restart-recovery, redaction, and no-peer-authority boundaries; close an ID only after every named primary/supporting task and integrated audit passes.

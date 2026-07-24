@@ -1,9 +1,13 @@
-import { QA_RECENT_WORKSPACES } from "./workspace-fixture";
+import {
+  QA_RECENT_WORKSPACES,
+  QA_WORKSPACE_RECOVERY_NOTICE,
+} from "./workspace-fixture";
 
 type Request = {
   readonly protocolVersion: number;
   readonly requestId: string;
   readonly correlationId: string;
+  readonly expectedGeneration: number;
 };
 
 type Args = Readonly<Record<string, unknown>>;
@@ -15,6 +19,8 @@ let provider: Record<string, unknown> | null = null;
 let workspaceGeneration = 51;
 let conversationGeneration = 51;
 let activatedWorkspaceId: string | null = null;
+let activatedWorkspaceName: string | null = null;
+let activeRecoveryNotice: typeof QA_WORKSPACE_RECOVERY_NOTICE | null = null;
 
 export function invokeQaProductRoute(
   command: string,
@@ -25,33 +31,50 @@ export function invokeQaProductRoute(
   }
   if (command === "workspace_start_snapshot") {
     return Promise.resolve(
-      envelope(args, workspaceGeneration, {
-        protocolVersion: 1,
-        generation: workspaceGeneration,
-        authority: "rust-core",
-        recents: QA_RECENT_WORKSPACES.map((recent, index) => ({
-          workspaceId: recent.id,
-          displayName: recent.name,
-          lastOpenedAt: 1_784_390_400 - index * 86_400,
-          isMissing: recent.isMissing ?? false,
-        })),
-      }),
+      envelope(args, workspaceGeneration, workspaceStartSnapshot()),
     );
   }
   if (command === "workspace_start_open_recent") {
     const input = record(args.input);
     const workspaceId = text(input.workspaceId);
     const recent = QA_RECENT_WORKSPACES.find(({ id }) => id === workspaceId);
+    const payload = activateWorkspace(workspaceId, recent);
+    return Promise.resolve(envelope(args, workspaceGeneration, payload));
+  }
+  if (command === "workspace_start_open_archive") {
+    const input = record(args.input);
+    if (text(input.pickerGrantId) !== "picker-grant:legacy-workspace") {
+      throw new Error("The QA Workspace archive grant is invalid.");
+    }
+    const recent = QA_RECENT_WORKSPACES.find(
+      ({ id }) => id === QA_WORKSPACE_RECOVERY_NOTICE.workspaceId,
+    );
+    const payload = activateWorkspace(
+      QA_WORKSPACE_RECOVERY_NOTICE.workspaceId,
+      recent,
+    );
+    return Promise.resolve(envelope(args, workspaceGeneration, payload));
+  }
+  if (command === "workspace_recovery_acknowledge") {
+    const request = record(args.request);
+    const input = record(args.input);
+    if (
+      activeRecoveryNotice === null ||
+      integer(request.expectedGeneration) !== workspaceGeneration ||
+      integer(input.expectedGeneration) !== workspaceGeneration ||
+      text(input.recoveryId) !== activeRecoveryNotice.recoveryId ||
+      text(input.workspaceId) !== activeRecoveryNotice.workspaceId ||
+      integer(input.workingGeneration) !==
+        activeRecoveryNotice.workingGeneration ||
+      integer(input.archiveGeneration) !==
+        activeRecoveryNotice.archiveGeneration
+    ) {
+      throw new Error("The QA Workspace recovery identity is stale.");
+    }
     workspaceGeneration += 1;
-    conversationGeneration += 1;
-    activatedWorkspaceId = workspaceId;
+    activeRecoveryNotice = null;
     return Promise.resolve(
-      envelope(args, workspaceGeneration, {
-        authority: "rust-workspace-service",
-        workspaceId,
-        workspaceName: recent?.name ?? "QA Workspace",
-        recovered: recent?.isMissing ?? false,
-      }),
+      envelope(args, workspaceGeneration, workspaceStartSnapshot()),
     );
   }
   if (command === "conversation_snapshot") {
@@ -61,6 +84,22 @@ export function invokeQaProductRoute(
   }
   if (command === "platform_pick") {
     const picker = record(args.picker);
+    if (picker.purpose === "openWorkspaceArchive") {
+      return Promise.resolve(
+        envelope(args, 0, {
+          type: "selected",
+          contractVersion: 1,
+          requestId: text(picker.requestId),
+          grants: [
+            {
+              grantId: "picker-grant:legacy-workspace",
+              objectKind: "file",
+              displayName: "Legacy UI.c4workspace",
+            },
+          ],
+        }),
+      );
+    }
     return Promise.resolve(
       envelope(args, 0, {
         type: "cancelled",
@@ -70,6 +109,25 @@ export function invokeQaProductRoute(
     );
   }
   return null;
+}
+
+function activateWorkspace(
+  workspaceId: string,
+  recent: (typeof QA_RECENT_WORKSPACES)[number] | undefined,
+) {
+  workspaceGeneration += 1;
+  conversationGeneration += 1;
+  activatedWorkspaceId = workspaceId;
+  activatedWorkspaceName = recent?.name ?? "QA Workspace";
+  activeRecoveryNotice =
+    recent?.isMissing === true ? QA_WORKSPACE_RECOVERY_NOTICE : null;
+  return {
+    authority: "rust-workspace-service",
+    workspaceId,
+    workspaceName: activatedWorkspaceName,
+    recovered: activeRecoveryNotice !== null,
+    recoveryNotice: activeRecoveryNotice,
+  };
 }
 
 function providerCommand(command: string, args: Args): unknown {
@@ -251,7 +309,7 @@ function conversationSnapshot() {
     generation: conversationGeneration,
     authority: "rust-core",
     workspaceId: activatedWorkspaceId,
-    workspaceName: "AI Desktop UI",
+    workspaceName: activatedWorkspaceName,
     activeProjectId: "project-qa-0001",
     activeSessionId: "chat-qa-0001",
     pending: null,
@@ -294,6 +352,21 @@ function conversationSnapshot() {
   };
 }
 
+function workspaceStartSnapshot() {
+  return {
+    protocolVersion: 1,
+    generation: workspaceGeneration,
+    authority: "rust-core",
+    recents: QA_RECENT_WORKSPACES.map((recent, index) => ({
+      workspaceId: recent.id,
+      displayName: recent.name,
+      lastOpenedAt: 1_784_390_400 - index * 86_400,
+      isMissing: recent.isMissing ?? false,
+    })),
+    activeRecoveryNotice,
+  };
+}
+
 function envelope(args: Args, generation: number, payload: unknown) {
   const request = record(args.request) as unknown as Request;
   return {
@@ -314,4 +387,11 @@ function record(value: unknown): Record<string, unknown> {
 function text(value: unknown): string {
   if (typeof value !== "string") throw new Error("Invalid QA fixture input");
   return value;
+}
+
+function integer(value: unknown): number {
+  if (!Number.isSafeInteger(value)) {
+    throw new Error("Invalid QA fixture generation");
+  }
+  return value as number;
 }

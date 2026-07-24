@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use c4os_lib::runtime::pi::PI_NATIVE_VERSION;
 use c4os_lib::runtime::supervisor::{
     CompatibilityState, HealthState, OPENCODE_NATIVE_VERSION, RUNTIME_PROTOCOL_VERSION,
-    RuntimeInstallation, RuntimeKind, RuntimeLifecycle, RuntimeSupervisor, RuntimeTraceKind,
-    SupervisorError, sha256_file,
+    RuntimeInstallation, RuntimeKind, RuntimeLifecycle, RuntimeRecoveryAction, RuntimeSupervisor,
+    RuntimeTraceKind, SupervisorError, pinned_compatibility, sha256_file,
 };
 use tempfile::TempDir;
 
@@ -160,6 +160,50 @@ fn workspace_installation_batch_is_all_or_nothing_in_one_generation() {
 }
 
 #[test]
+fn exact_workspace_rebinding_preserves_crash_loop_recovery_state() {
+    let temporary = TempDir::new().unwrap();
+    let mut supervisor = RuntimeSupervisor::pinned();
+    let installation = installation(temporary.path(), OPENCODE_NATIVE_VERSION);
+    supervisor
+        .register_installation(installation.clone(), NOW)
+        .unwrap();
+    let mut next_start_ms = NOW + 1;
+    for attempt in 1_u16..=5 {
+        let generation = supervisor
+            .reserve_managed_start("opencode-primary", next_start_ms)
+            .unwrap();
+        let failed_at_ms = next_start_ms + 1;
+        supervisor
+            .abort_managed_start("opencode-primary", generation, failed_at_ms)
+            .unwrap();
+        if attempt < 5 {
+            next_start_ms = failed_at_ms + (1_u64 << (attempt - 1)) * 1_000;
+        }
+    }
+    let before = supervisor.snapshot().records[0].clone();
+
+    supervisor
+        .replace_workspace_installations("workspace-1", vec![installation.clone()], NOW + 50_000)
+        .unwrap();
+    let rebound = &supervisor.snapshot().records[0];
+    assert_eq!(rebound.process_generation, before.process_generation);
+    assert_eq!(rebound.restart_attempts, before.restart_attempts);
+    assert_eq!(rebound.next_restart_at_ms, before.next_restart_at_ms);
+    assert_eq!(rebound.recovery_action, before.recovery_action);
+
+    let mut changed = installation;
+    changed.arguments.push("--replacement-binding".into());
+    supervisor
+        .replace_workspace_installations("workspace-1", vec![changed], NOW + 50_001)
+        .unwrap();
+    let replaced = &supervisor.snapshot().records[0];
+    assert_eq!(replaced.process_generation, before.process_generation);
+    assert_eq!(replaced.restart_attempts, 0);
+    assert_eq!(replaced.next_restart_at_ms, None);
+    assert_eq!(replaced.recovery_action, None);
+}
+
+#[test]
 fn health_is_bound_to_the_exact_process_generation_and_restart_advances_it() {
     let temporary = TempDir::new().unwrap();
     let mut supervisor = RuntimeSupervisor::pinned();
@@ -268,6 +312,166 @@ fn failed_production_prepare_aborts_reserved_generation_without_publishing_a_pid
     assert_eq!(stopped.lifecycle, RuntimeLifecycle::Stopped);
     assert_eq!(stopped.process_generation, generation);
     assert_eq!(stopped.process_id, None);
+}
+
+#[test]
+fn crash_loop_backoff_is_bounded_persisted_and_requires_explicit_review() {
+    let temporary = TempDir::new().unwrap();
+    let mut supervisor = RuntimeSupervisor::pinned();
+    supervisor
+        .register_installation(installation(temporary.path(), OPENCODE_NATIVE_VERSION), NOW)
+        .unwrap();
+    let mut next_start_ms = NOW + 1;
+    for attempt in 1_u16..=5 {
+        let generation = supervisor
+            .reserve_managed_start("opencode-primary", next_start_ms)
+            .unwrap();
+        let failed_at_ms = next_start_ms + 1;
+        supervisor
+            .abort_managed_start("opencode-primary", generation, failed_at_ms)
+            .unwrap();
+        let record = &supervisor.snapshot().records[0];
+        assert_eq!(record.restart_attempts, attempt);
+        if attempt < 5 {
+            let retry_at_ms = failed_at_ms + (1_u64 << (attempt - 1)) * 1_000;
+            assert_eq!(record.next_restart_at_ms, Some(retry_at_ms));
+            assert_eq!(record.recovery_action, None);
+            assert!(matches!(
+                supervisor.reserve_managed_start("opencode-primary", retry_at_ms - 1),
+                Err(SupervisorError::RestartBackoff)
+            ));
+            next_start_ms = retry_at_ms;
+        } else {
+            assert_eq!(record.next_restart_at_ms, None);
+            assert_eq!(
+                record.recovery_action,
+                Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop)
+            );
+        }
+    }
+    assert!(matches!(
+        supervisor.reserve_managed_start("opencode-primary", next_start_ms + 1),
+        Err(SupervisorError::CrashLoopBudgetExceeded)
+    ));
+
+    let mut restored =
+        RuntimeSupervisor::restore(pinned_compatibility(), supervisor.snapshot()).unwrap();
+    let record = &restored.snapshot().records[0];
+    let process_generation = record.process_generation;
+    assert_eq!(record.restart_attempts, 5);
+    assert_eq!(
+        record.recovery_action,
+        Some(RuntimeRecoveryAction::ReviewRuntimeCrashLoop)
+    );
+    assert!(matches!(
+        restored.review_crash_loop("opencode-primary", process_generation + 1, NOW + 50_000,),
+        Err(SupervisorError::RecoveryUnavailable)
+    ));
+    restored
+        .review_crash_loop("opencode-primary", process_generation, NOW + 50_001)
+        .expect("explicit crash-loop review");
+    let reviewed = &restored.snapshot().records[0];
+    assert_eq!(reviewed.restart_attempts, 0);
+    assert_eq!(reviewed.recovery_action, None);
+    assert!(
+        restored
+            .snapshot()
+            .events
+            .iter()
+            .any(|event| event.kind == RuntimeTraceKind::RecoveryReviewed)
+    );
+    restored
+        .reserve_managed_start("opencode-primary", NOW + 50_002)
+        .expect("review reauthorizes a fresh bounded start");
+}
+
+#[test]
+fn healthy_attachment_resets_crash_budget_and_restart_overflow_stays_blocked() {
+    let temporary = TempDir::new().unwrap();
+    let mut supervisor = RuntimeSupervisor::pinned();
+    supervisor
+        .register_installation(installation(temporary.path(), OPENCODE_NATIVE_VERSION), NOW)
+        .unwrap();
+    let first = supervisor
+        .reserve_managed_start("opencode-primary", NOW + 1)
+        .unwrap();
+    supervisor
+        .abort_managed_start("opencode-primary", first, NOW + 2)
+        .unwrap();
+    let retry_at = supervisor.snapshot().records[0].next_restart_at_ms.unwrap();
+    let second = supervisor
+        .reserve_managed_start("opencode-primary", retry_at)
+        .unwrap();
+    supervisor
+        .attach_managed_process(
+            "opencode-primary",
+            second,
+            42,
+            HealthState::Healthy,
+            retry_at + 1,
+        )
+        .unwrap();
+    let healthy = &supervisor.snapshot().records[0];
+    assert_eq!(healthy.restart_attempts, 0);
+    assert_eq!(healthy.next_restart_at_ms, None);
+    assert_eq!(healthy.recovery_action, None);
+
+    supervisor
+        .finish_managed_shutdown("opencode-primary", second, u64::MAX - 501)
+        .unwrap();
+    let third = supervisor
+        .reserve_managed_start("opencode-primary", u64::MAX - 500)
+        .unwrap();
+    supervisor
+        .abort_managed_start("opencode-primary", third, u64::MAX - 499)
+        .unwrap();
+    assert_eq!(
+        supervisor.snapshot().records[0].next_restart_at_ms,
+        Some(u64::MAX)
+    );
+    assert!(matches!(
+        supervisor.reserve_managed_start("opencode-primary", u64::MAX - 1),
+        Err(SupervisorError::RestartBackoff)
+    ));
+}
+
+#[test]
+fn restoring_an_active_runtime_drops_pid_authority_and_never_replays_a_lease() {
+    let temporary = TempDir::new().unwrap();
+    let mut supervisor = RuntimeSupervisor::pinned();
+    supervisor
+        .register_installation(installation(temporary.path(), OPENCODE_NATIVE_VERSION), NOW)
+        .unwrap();
+    let generation = supervisor
+        .reserve_managed_start("opencode-primary", NOW + 1)
+        .unwrap();
+    supervisor
+        .attach_managed_process(
+            "opencode-primary",
+            generation,
+            42,
+            HealthState::Degraded,
+            NOW + 2,
+        )
+        .unwrap();
+
+    let mut restored =
+        RuntimeSupervisor::restore(pinned_compatibility(), supervisor.snapshot()).unwrap();
+    let recovered = &restored.snapshot().records[0];
+    assert_eq!(recovered.lifecycle, RuntimeLifecycle::Stopped);
+    assert_eq!(recovered.process_id, None);
+    assert_eq!(recovered.restart_attempts, 1);
+    assert!(
+        restored
+            .snapshot()
+            .events
+            .iter()
+            .any(|event| event.kind == RuntimeTraceKind::RecoveredInterrupted)
+    );
+    assert!(matches!(
+        restored.reserve_managed_start("opencode-primary", NOW + 2),
+        Err(SupervisorError::RestartBackoff)
+    ));
 }
 
 #[test]

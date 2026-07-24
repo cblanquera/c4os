@@ -1,0 +1,220 @@
+.diagnostic-settings,
+.diagnostic-records,
+.diagnostic-record,
+.diagnostic-record dl,
+.diagnostic-export,
+.diagnostic-export dl {
+  display: grid;
+  min-width: 0;
+}
+
+.diagnostic-settings {
+  gap: 14px;
+  margin-block-start: 28px;
+  padding-block-start: 24px;
+  border-block-start: 1px solid var(--border-separator);
+}
+
+.diagnostic-settings__heading,
+.diagnostic-settings__actions,
+.diagnostic-record > header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagnostic-settings__heading h2,
+.diagnostic-settings__heading p,
+.diagnostic-record h3,
+.diagnostic-record p,
+.diagnostic-record dl,
+.diagnostic-export h3,
+.diagnostic-export dl {
+  margin: 0;
+}
+
+.diagnostic-settings__heading h2 {
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.diagnostic-settings__heading p {
+  max-width: 68ch;
+  margin-block-start: 5px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.diagnostic-settings-state {
+  margin-block-start: 24px;
+}
+
+.diagnostic-settings-state--loading,
+.diagnostic-settings__status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--border-separator);
+  border-radius: 11px;
+  background: var(--surface-raised);
+}
+
+.diagnostic-settings-state--loading > span:last-child,
+.diagnostic-settings__status {
+  min-width: 0;
+}
+
+.diagnostic-settings-state--loading > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.diagnostic-settings-state--loading span span,
+.diagnostic-settings__status > span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.diagnostic-settings__status {
+  display: grid;
+  gap: 3px;
+}
+
+.diagnostic-settings__status-focus {
+  outline: none;
+}
+
+.diagnostic-settings__status-focus:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 56%, transparent);
+}
+
+.diagnostic-settings__status[data-state="degraded"] {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border-separator));
+}
+
+.diagnostic-settings-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid var(--border-control);
+  border-block-start-color: var(--accent);
+  border-radius: 50%;
+  animation: diagnostic-settings-spin 700ms linear infinite;
+}
+
+.diagnostic-settings__actions {
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.diagnostic-records {
+  gap: 10px;
+}
+
+.diagnostic-record,
+.diagnostic-export {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-separator);
+  border-radius: 11px;
+  background: var(--surface-raised);
+}
+
+.diagnostic-record[data-severity="error"] {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border-separator));
+}
+
+.diagnostic-record[data-severity="warning"] {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border-separator));
+}
+
+.diagnostic-record > header time {
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+}
+
+.diagnostic-record__severity {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 730;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.diagnostic-record[data-severity="error"] .diagnostic-record__severity {
+  color: var(--danger);
+}
+
+.diagnostic-record[data-severity="warning"] .diagnostic-record__severity {
+  color: var(--warning);
+}
+
+.diagnostic-record h3,
+.diagnostic-export h3 {
+  font-size: 0.9rem;
+}
+
+.diagnostic-record p {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.diagnostic-record dl,
+.diagnostic-export dl {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.diagnostic-record dt,
+.diagnostic-export dt {
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+}
+
+.diagnostic-record dd,
+.diagnostic-export dd {
+  overflow-wrap: anywhere;
+  margin: 3px 0 0;
+  font-size: 0.75rem;
+}
+
+@keyframes diagnostic-settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 720px) {
+  .diagnostic-settings__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .diagnostic-settings__actions,
+  .diagnostic-settings__actions .c4-button {
+    width: 100%;
+  }
+
+  .diagnostic-settings__actions .c4-button {
+    flex: 1 1 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .diagnostic-settings__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .diagnostic-record dl,
+  .diagnostic-export dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

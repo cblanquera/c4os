@@ -29,6 +29,23 @@ const providerMocks = vi.hoisted(() => ({
 const runtimeMocks = vi.hoisted(() => ({
   readRuntimeCoreSnapshot: vi.fn(),
 }));
+const configurationMocks = vi.hoisted(() => ({
+  openConfigurationExternal: vi.fn(),
+  readConfigurationSettings: vi.fn(),
+  saveConfigurationSettings: vi.fn(),
+}));
+const updateMocks = vi.hoisted(() => ({
+  activateUpdate: vi.fn(),
+  readUpdateSnapshot: vi.fn(),
+  recoverUpdate: vi.fn(),
+  revokeUpdate: vi.fn(),
+  rollbackUpdate: vi.fn(),
+  stageLocalUpdate: vi.fn(),
+}));
+const diagnosticMocks = vi.hoisted(() => ({
+  exportDiagnosticsSnapshot: vi.fn(),
+  readDiagnosticsSnapshot: vi.fn(),
+}));
 
 vi.mock("../../platform/policy-service", async (importOriginal) => {
   const original =
@@ -46,6 +63,26 @@ vi.mock("../../platform/runtime-core", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../../platform/runtime-core")>();
   return { ...original, ...runtimeMocks };
+});
+
+vi.mock("../../platform/configuration-service", async (importOriginal) => {
+  const original =
+    await importOriginal<
+      typeof import("../../platform/configuration-service")
+    >();
+  return { ...original, ...configurationMocks };
+});
+
+vi.mock("../../platform/update-service", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../../platform/update-service")>();
+  return { ...original, ...updateMocks };
+});
+
+vi.mock("../../platform/diagnostic-service", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../../platform/diagnostic-service")>();
+  return { ...original, ...diagnosticMocks };
 });
 
 function categories(): Record<PolicySettingKey, null> {
@@ -278,5 +315,73 @@ describe("CoreSettingsController model refresh authority", () => {
     expect(await screen.findByText("Model refresh failed")).toBeInTheDocument();
     expect(screen.queryByText("Models refreshed")).not.toBeInTheDocument();
     expect(providerMocks.testProviderConnection).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CoreSettingsController recovery composition", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    configurationMocks.readConfigurationSettings.mockResolvedValue({
+      authority: "rust-configuration-service",
+      generation: 3,
+      coordinatorGeneration: 4,
+      policyVersion: 2,
+      defaultApprovalPreset: "ask_for_approval",
+      restoreLastWorkspace: true,
+      inheritShellEnvironment: false,
+      shellEnvironmentAllowlist: [],
+      browserEnvironment: "workspace_project",
+      defaultRuntime: "opencode",
+      defaultEnvironment: "local",
+      modelRoute: null,
+      hasExternalError: false,
+    });
+    updateMocks.readUpdateSnapshot.mockResolvedValue({
+      schemaVersion: 1,
+      generation: 5,
+      channels: [
+        {
+          channel: "application",
+          componentId: "c4os",
+          state: "current",
+          currentVersion: "0.1.0",
+          candidateVersion: null,
+          lastKnownGoodVersion: null,
+          stagedArtifactSha256: null,
+          revoked: false,
+          recoveryAction: null,
+          failureCode: null,
+          updatedAtMs: 1_784_476_800_000,
+        },
+      ],
+      candidates: [],
+      pendingOperations: [],
+      recoveryNotices: [],
+    });
+    diagnosticMocks.readDiagnosticsSnapshot.mockResolvedValue({
+      schemaVersion: 1,
+      generation: 6,
+      records: [],
+      truncated: false,
+    });
+  });
+
+  it("loads update and redacted diagnostic authority on the production Configuration route", async () => {
+    render(
+      <CoreSettingsController
+        onNavigate={vi.fn()}
+        route="/settings/configuration"
+      />,
+    );
+
+    expect(await screen.findByText("Application defaults")).toBeVisible();
+    expect(await screen.findByText("Updates and recovery")).toBeVisible();
+    expect(await screen.findByText("Diagnostics")).toBeVisible();
+    expect(screen.getByText("Not established")).toBeVisible();
+    expect(configurationMocks.readConfigurationSettings).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(updateMocks.readUpdateSnapshot).toHaveBeenCalledTimes(1);
+    expect(diagnosticMocks.readDiagnosticsSnapshot).toHaveBeenCalledTimes(1);
   });
 });

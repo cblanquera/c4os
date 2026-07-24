@@ -8,7 +8,7 @@ use tempfile::TempDir;
 fn start_app(temp: &TempDir) -> (DatabaseDescriptor, DatabaseActor) {
     let descriptor = DatabaseDescriptor::app(temp.path());
     let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("app database");
-    assert_eq!(report.current_version, 8);
+    assert_eq!(report.current_version, 9);
     (descriptor, actor)
 }
 
@@ -167,7 +167,7 @@ fn current_security_state_and_every_transition_survive_restart() {
     drop(actor);
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("reopen app database");
-    assert_eq!(report.previous_version, 8);
+    assert_eq!(report.previous_version, 9);
     assert_eq!(
         actor
             .security_records(SnapshotQuery::new(10).expect("query"))
@@ -403,7 +403,7 @@ fn app_schema_three_migrates_to_app_owned_security_journal() {
     let descriptor = DatabaseDescriptor::app(temp.path());
     {
         let (_actor, report) = DatabaseActor::start(descriptor.clone()).expect("current app db");
-        assert_eq!(report.current_version, 8);
+        assert_eq!(report.current_version, 9);
     }
     let connection = Connection::open(&descriptor.path).expect("open seed database");
     connection
@@ -422,7 +422,7 @@ fn app_schema_three_migrates_to_app_owned_security_journal() {
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("migrate v3 to current");
     assert_eq!(report.previous_version, 3);
-    assert_eq!(report.current_version, 8);
+    assert_eq!(report.current_version, 9);
     assert!(report.backup_path.is_some_and(|path| path.exists()));
     assert!(
         actor

@@ -23,6 +23,13 @@ use c4os_lib::mcp::{
     McpTrustApprovalState, McpTrustRequestInput, McpTrustRequestStatus, McpTrustResponse,
     McpTrustState, McpWorkingDirectory,
 };
+use c4os_lib::update::{
+    DiagnosticCategory, DiagnosticSeverity, DiagnosticsExportInput, DiagnosticsExportSnapshot,
+    DiagnosticsSnapshot, LocalUpdateStageInput, UpdateActionInput, UpdateCandidateSnapshot,
+    UpdateChannel, UpdateComponentSnapshot, UpdateCoordinatorSnapshot, UpdateDiagnosticRecord,
+    UpdateLifecycleState, UpdateOperationState, UpdatePendingOperation, UpdateRecoveryAction,
+    UpdateRecoveryInput, UpdateRecoveryNotice, UpdateRevocationInput,
+};
 use protocol::*;
 use std::collections::BTreeMap;
 use std::fs;
@@ -379,6 +386,7 @@ fn workspace_start_snapshot_is_bounded_and_allows_snapshot_catch_up() {
         protocol_version: PROTOCOL_VERSION,
         generation: StateGeneration(4),
         authority: "rust-core".into(),
+        active_recovery_notice: None,
         recents: vec![WorkspaceRecentSnapshot {
             workspace_id: WorkspaceId::new("workspace-1").unwrap(),
             display_name: "C4OS Workspace".into(),
@@ -395,6 +403,7 @@ fn workspace_start_snapshot_is_bounded_and_allows_snapshot_catch_up() {
         protocol_version: PROTOCOL_VERSION,
         generation: StateGeneration(4),
         authority: "rust-core".into(),
+        active_recovery_notice: None,
         recents: (0..=MAX_RECENT_WORKSPACES)
             .map(|index| WorkspaceRecentSnapshot {
                 workspace_id: WorkspaceId::new(format!("workspace-{index}")).unwrap(),
@@ -775,6 +784,25 @@ fn export_protocol_types(config: &Config) {
     McpTrustState::export_all(config).unwrap();
     McpLifecycle::export_all(config).unwrap();
     McpInvocationStatus::export_all(config).unwrap();
+    UpdateCoordinatorSnapshot::export_all(config).unwrap();
+    UpdateComponentSnapshot::export_all(config).unwrap();
+    UpdateCandidateSnapshot::export_all(config).unwrap();
+    UpdatePendingOperation::export_all(config).unwrap();
+    UpdateRecoveryNotice::export_all(config).unwrap();
+    UpdateDiagnosticRecord::export_all(config).unwrap();
+    DiagnosticsSnapshot::export_all(config).unwrap();
+    DiagnosticsExportSnapshot::export_all(config).unwrap();
+    LocalUpdateStageInput::export_all(config).unwrap();
+    UpdateActionInput::export_all(config).unwrap();
+    UpdateRevocationInput::export_all(config).unwrap();
+    UpdateRecoveryInput::export_all(config).unwrap();
+    DiagnosticsExportInput::export_all(config).unwrap();
+    UpdateChannel::export_all(config).unwrap();
+    UpdateLifecycleState::export_all(config).unwrap();
+    UpdateOperationState::export_all(config).unwrap();
+    UpdateRecoveryAction::export_all(config).unwrap();
+    DiagnosticSeverity::export_all(config).unwrap();
+    DiagnosticCategory::export_all(config).unwrap();
 }
 
 fn read_generated_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

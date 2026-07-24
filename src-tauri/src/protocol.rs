@@ -663,6 +663,28 @@ pub struct WorkspaceRecentSnapshot {
     pub is_missing: bool,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum WorkspaceRecoveryAction {
+    ReviewRecoveredWorkspaceBeforeSave,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspaceRecoveryNoticeSnapshot {
+    pub recovery_id: String,
+    pub correlation_id: CorrelationId,
+    pub workspace_id: WorkspaceId,
+    pub workspace_name: String,
+    pub summary: String,
+    pub action: WorkspaceRecoveryAction,
+    pub working_generation: u64,
+    pub archive_generation: u64,
+    pub must_notify_before_next_save: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -671,6 +693,7 @@ pub struct WorkspaceStartSnapshot {
     pub generation: StateGeneration,
     pub authority: String,
     pub recents: Vec<WorkspaceRecentSnapshot>,
+    pub active_recovery_notice: Option<WorkspaceRecoveryNoticeSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1850,6 +1873,29 @@ pub fn workspace_start_snapshot(
             return Err(ProtocolError::new(
                 ProtocolErrorCode::InvalidPayload,
                 "Workspace display name is invalid",
+                false,
+            ));
+        }
+    }
+    if let Some(notice) = &payload.active_recovery_notice {
+        validate_identifier("WorkspaceRecoveryId", &notice.recovery_id)?;
+        notice.correlation_id.validate()?;
+        notice.workspace_id.validate()?;
+        if notice.working_generation <= notice.archive_generation
+            || !notice.must_notify_before_next_save
+            || notice.workspace_name.trim().is_empty()
+            || notice.workspace_name.len() > MAX_DISPLAY_NAME_BYTES
+            || notice.summary.trim().is_empty()
+            || notice.summary.len() > MAX_DISPLAY_NAME_BYTES
+            || notice
+                .workspace_name
+                .chars()
+                .chain(notice.summary.chars())
+                .any(char::is_control)
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidPayload,
+                "Workspace recovery notice is invalid",
                 false,
             ));
         }

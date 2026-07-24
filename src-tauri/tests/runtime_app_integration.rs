@@ -1133,6 +1133,78 @@ fn production_managed_runtime_lifecycle_is_durable_across_reserve_attach_and_shu
 }
 
 #[test]
+fn crash_loop_review_is_generation_checked_and_durable_through_application_service() {
+    let temporary = TempDir::new().unwrap();
+    let service = app_service(temporary.path());
+    let runtime_root = temporary.path().join("runtime-crash-loop");
+    let started_marker = temporary.path().join("crash-loop-runtime-must-not-spawn");
+    service
+        .register_runtime(
+            0,
+            runnable_runtime_installation(&runtime_root, &started_marker),
+            NOW + 1,
+        )
+        .unwrap();
+    let mut expected_generation = 1;
+    let mut next_start_ms = NOW + 2;
+    let mut process_generation = 0;
+    for attempt in 1_u16..=5 {
+        let reserved = service
+            .reserve_managed_runtime_start(expected_generation, "opencode-primary", next_start_ms)
+            .unwrap();
+        expected_generation = reserved.coordinator_generation;
+        process_generation = reserved.value;
+        let failed_at_ms = next_start_ms + 1;
+        let aborted = service
+            .abort_managed_runtime_start(
+                expected_generation,
+                "opencode-primary",
+                process_generation,
+                failed_at_ms,
+            )
+            .unwrap();
+        expected_generation = aborted.coordinator_generation;
+        if attempt < 5 {
+            next_start_ms = failed_at_ms + (1_u64 << (attempt - 1)) * 1_000;
+        }
+    }
+    let crash_loop = service.snapshot(NOW + 50_000).unwrap();
+    let record = &crash_loop.runtimes.records[0];
+    assert_eq!(record.restart_attempts, 5);
+    assert_eq!(
+        record.recovery_action,
+        Some(c4os_lib::runtime::supervisor::RuntimeRecoveryAction::ReviewRuntimeCrashLoop)
+    );
+    assert!(matches!(
+        service.review_runtime_crash_loop(
+            expected_generation - 1,
+            "opencode-primary",
+            process_generation,
+            NOW + 50_001,
+        ),
+        Err(RuntimeApplicationError::Generation { .. })
+    ));
+    let reviewed = service
+        .review_runtime_crash_loop(
+            expected_generation,
+            "opencode-primary",
+            process_generation,
+            NOW + 50_002,
+        )
+        .unwrap();
+    assert!(reviewed.coordinator_generation > expected_generation);
+    let current = service.snapshot(NOW + 50_003).unwrap();
+    assert_eq!(current.runtimes.records[0].restart_attempts, 0);
+    assert_eq!(current.runtimes.records[0].recovery_action, None);
+
+    drop(service);
+    let restored = app_service(temporary.path());
+    let durable = restored.snapshot(NOW + 50_004).unwrap();
+    assert_eq!(durable.runtimes.records[0].restart_attempts, 0);
+    assert_eq!(durable.runtimes.records[0].recovery_action, None);
+}
+
+#[test]
 fn application_service_preflight_uses_only_registry_owned_typed_evidence() {
     let temporary = TempDir::new().unwrap();
     let service = app_service(temporary.path());

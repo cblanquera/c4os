@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAppStore } from "../../app/store";
 import type { ConversationSnapshot } from "../../platform/conversation-service";
+import { ProtocolBoundaryError } from "../../platform/tauri-adapter";
 import { WorkspaceStartRoute } from "./WorkspaceStartRoute";
 
 const conversationMocks = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const platformMocks = vi.hoisted(() => ({
   pickNative: vi.fn(),
 }));
 const workspaceMocks = vi.hoisted(() => ({
+  acknowledgeWorkspaceRecovery: vi.fn(),
   answerWorkspaceCloneApproval: vi.fn(),
   cloneWorkspaceRepository: vi.fn(),
   openRecentWorkspace: vi.fn(),
@@ -99,6 +101,7 @@ describe("WorkspaceStartRoute", () => {
       protocolVersion: 1,
       generation: 11,
       authority: "rust-workspace-service",
+      activeRecoveryNotice: null,
       recents: [],
     });
     platformMocks.pickNative.mockResolvedValue({
@@ -118,6 +121,14 @@ describe("WorkspaceStartRoute", () => {
       workspaceId: "workspace:activated",
       workspaceName: "Activated Workspace",
       recovered: false,
+      recoveryNotice: null,
+    });
+    workspaceMocks.acknowledgeWorkspaceRecovery.mockResolvedValue({
+      protocolVersion: 1,
+      generation: 14,
+      authority: "rust-core",
+      activeRecoveryNotice: null,
+      recents: [],
     });
   });
 
@@ -160,5 +171,420 @@ describe("WorkspaceStartRoute", () => {
     );
     expect(workspaceMocks.openWorkspaceFolder).toHaveBeenCalledTimes(1);
     expect(platformMocks.pickNative).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks Chat navigation until a structured recovery notice is reviewed", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Recovered generation 13 after an interrupted archive save.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    workspaceMocks.openWorkspaceFolder.mockResolvedValueOnce({
+      authority: "rust-workspace-service",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      recovered: true,
+      recoveryNotice,
+    });
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open a folder/u }),
+    );
+    const notice = await screen.findByText(
+      /Recovered Activated Workspace. Review before the next save/u,
+    );
+    expect(notice).toBeVisible();
+    expect(screen.queryByText("Hydrated Chat")).not.toBeInTheDocument();
+    await waitFor(() => expect(notice.parentElement).toHaveFocus());
+
+    workspaceMocks.acknowledgeWorkspaceRecovery.mockClear();
+    conversationMocks.readConversationSnapshot.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Chat" }));
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledWith(
+      recoveryNotice,
+    );
+    const acknowledgementOrder =
+      workspaceMocks.acknowledgeWorkspaceRecovery.mock.invocationCallOrder[0];
+    const hydrationOrder =
+      conversationMocks.readConversationSnapshot.mock.invocationCallOrder[0];
+    if (acknowledgementOrder === undefined || hydrationOrder === undefined) {
+      throw new Error("Expected acknowledgement and hydration calls.");
+    }
+    expect(acknowledgementOrder).toBeLessThan(hydrationOrder);
+    expect(workspaceMocks.openWorkspaceFolder).toHaveBeenCalledTimes(1);
+    expect(platformMocks.pickNative).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers an automatic startup recovery notice before native resume", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Startup restored generation 13 from validated state.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    workspaceMocks.readWorkspaceStartSnapshot.mockResolvedValueOnce({
+      protocolVersion: 1,
+      generation: 13,
+      authority: "rust-workspace-service",
+      activeRecoveryNotice: recoveryNotice,
+      recents: [],
+    });
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    expect(
+      await screen.findByText(
+        /Recovered Activated Workspace. Review before the next save/u,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("Hydrated Chat")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Chat" }));
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledWith(
+      recoveryNotice,
+    );
+    expect(platformMocks.pickNative).not.toHaveBeenCalled();
+    expect(workspaceMocks.openWorkspaceFolder).not.toHaveBeenCalled();
+  });
+
+  it("keeps Chat blocked and offers a bounded retry when recovery acknowledgement fails", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Startup restored generation 13 from validated state.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    workspaceMocks.readWorkspaceStartSnapshot.mockResolvedValueOnce({
+      protocolVersion: 1,
+      generation: 13,
+      authority: "rust-core",
+      activeRecoveryNotice: recoveryNotice,
+      recents: [
+        {
+          workspaceId: "workspace:other",
+          displayName: "Other Workspace",
+          lastOpenedAt: 1_784_476_800,
+          isMissing: false,
+        },
+      ],
+    });
+    workspaceMocks.acknowledgeWorkspaceRecovery
+      .mockRejectedValueOnce(new Error("stale recovery identity"))
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 14,
+        authority: "rust-core",
+        activeRecoveryNotice: null,
+        recents: [],
+      });
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    await screen.findByRole("button", { name: "Continue to Chat" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Chat" }));
+
+    expect(
+      await screen.findByText(/could not record that recovery review/u),
+    ).toBeVisible();
+    expect(screen.queryByText("Hydrated Chat")).not.toBeInTheDocument();
+    expect(conversationMocks.readConversationSnapshot).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /Open a folder/u }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Other Workspace/u }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Open a folder/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Other Workspace/u }));
+    expect(platformMocks.pickNative).not.toHaveBeenCalled();
+    expect(workspaceMocks.openRecentWorkspace).not.toHaveBeenCalled();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledTimes(
+      1,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry recovery review" }),
+    );
+
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledTimes(
+      2,
+    );
+  });
+
+  it("continues after a stale acknowledgement refresh finds no active notice", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Startup restored generation 13 from validated state.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    workspaceMocks.readWorkspaceStartSnapshot
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 13,
+        authority: "rust-core",
+        activeRecoveryNotice: recoveryNotice,
+        recents: [],
+      })
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 14,
+        authority: "rust-core",
+        activeRecoveryNotice: null,
+        recents: [],
+      });
+    workspaceMocks.acknowledgeWorkspaceRecovery.mockRejectedValueOnce(
+      new ProtocolBoundaryError(
+        "staleGeneration",
+        "Recovery state changed.",
+        true,
+      ),
+    );
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue to Chat" }),
+    );
+
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.readWorkspaceStartSnapshot).toHaveBeenCalledTimes(2);
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
+  it("refreshes and retries the exact same recovery identity after a stale acknowledgement", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Startup restored generation 13 from validated state.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    const refreshedNotice = {
+      ...recoveryNotice,
+      correlationId: "correlation:recovery-13-refreshed",
+      summary: "The same recovered generations still require review.",
+    };
+    workspaceMocks.readWorkspaceStartSnapshot
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 13,
+        authority: "rust-core",
+        activeRecoveryNotice: recoveryNotice,
+        recents: [],
+      })
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 14,
+        authority: "rust-core",
+        activeRecoveryNotice: refreshedNotice,
+        recents: [],
+      });
+    workspaceMocks.acknowledgeWorkspaceRecovery
+      .mockRejectedValueOnce(
+        new ProtocolBoundaryError(
+          "invalidGeneration",
+          "Recovery state changed.",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 15,
+        authority: "rust-core",
+        activeRecoveryNotice: null,
+        recents: [],
+      });
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue to Chat" }),
+    );
+
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenNthCalledWith(
+      2,
+      refreshedNotice,
+    );
+  });
+
+  it("replaces a stale recovery notice and requires an exact new Continue", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-activated:13:12",
+      correlationId: "correlation:recovery-13",
+      workspaceId: "workspace:activated",
+      workspaceName: "Activated Workspace",
+      summary: "Startup restored generation 13 from validated state.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 13,
+      archiveGeneration: 12,
+      mustNotifyBeforeNextSave: true,
+    };
+    const replacement = {
+      ...recoveryNotice,
+      recoveryId: "recovery:workspace-activated:14:13",
+      correlationId: "correlation:recovery-14",
+      summary: "A newer recovery replaced the notice under review.",
+      workingGeneration: 14,
+      archiveGeneration: 13,
+    };
+    workspaceMocks.readWorkspaceStartSnapshot
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 13,
+        authority: "rust-core",
+        activeRecoveryNotice: recoveryNotice,
+        recents: [],
+      })
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 14,
+        authority: "rust-core",
+        activeRecoveryNotice: replacement,
+        recents: [],
+      });
+    workspaceMocks.acknowledgeWorkspaceRecovery
+      .mockRejectedValueOnce(
+        new ProtocolBoundaryError(
+          "conflict",
+          "Recovery identity changed.",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        generation: 15,
+        authority: "rust-core",
+        activeRecoveryNotice: null,
+        recents: [],
+      });
+    conversationMocks.readConversationSnapshot.mockResolvedValue(
+      conversationSnapshot(),
+    );
+    const router = createMemoryRouter(
+      [
+        { path: "/start", element: <WorkspaceStartRoute /> },
+        { path: "/chat", element: <main>Hydrated Chat</main> },
+      ],
+      { initialEntries: ["/start"] },
+    );
+    render(
+      <Provider store={createAppStore(undefined)}>
+        <RouterProvider router={router} />
+      </Provider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue to Chat" }),
+    );
+
+    expect(await screen.findByText(replacement.summary)).toBeVisible();
+    expect(screen.queryByText("Hydrated Chat")).not.toBeInTheDocument();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenCalledTimes(
+      1,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Chat" }));
+
+    expect(await screen.findByText("Hydrated Chat")).toBeVisible();
+    expect(workspaceMocks.acknowledgeWorkspaceRecovery).toHaveBeenNthCalledWith(
+      2,
+      replacement,
+    );
   });
 });

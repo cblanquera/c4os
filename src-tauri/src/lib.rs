@@ -9,6 +9,8 @@ pub mod platform;
 pub mod protocol;
 pub mod runtime;
 pub mod security;
+pub mod startup_recovery;
+pub mod update;
 
 #[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
 mod production_mcp_broker_tests;
@@ -131,10 +133,16 @@ use security::policy::{
     PolicyConfiguration, PolicyDecision, PolicyGroup, RepositoryState, RuleMatcher,
 };
 use serde::{Deserialize, Serialize};
+use startup_recovery::{
+    StartupRecoveryAction, StartupRecoveryActionInput, StartupRecoveryActionOutcome,
+    StartupRecoveryBoundary, StartupRecoveryController, StartupRecoveryFailureInput,
+    StartupRecoverySnapshot,
+};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::Write as _;
-#[cfg(all(debug_assertions, unix))]
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -816,6 +824,7 @@ struct AppCoreState {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     mcp_sampling_approvals: mcp::production_sampling::ProductionMcpSamplingApprovalRegistry,
     extensions: Mutex<extension::service::ExtensionService>,
+    updates: Mutex<update::UpdateCoordinator>,
     hook_supervisor: Mutex<Option<extension::hook::HookSupervisor>>,
     configuration: Arc<Mutex<core::services::ManagedAppConfiguration>>,
     active_workspace: Arc<Mutex<Option<core::services::ActiveWorkspace>>>,
@@ -831,12 +840,185 @@ struct AppCoreState {
     runtime_production: Arc<ManagedProductionRuntime>,
     runtime: Arc<RuntimeApplicationService>,
     platform: PlatformService,
-    platform_snapshot: PlatformSnapshot,
+    workspace_recovery_review: Mutex<Option<WorkspaceRecoveryReviewIdentity>>,
     picker_grants: Mutex<PickerGrantRegistry>,
     pending_workspace_clones: Mutex<BTreeMap<String, PendingWorkspaceClone>>,
     pending_provider_operations: Mutex<BTreeMap<String, PendingProviderOperation>>,
     conversation_drop: Mutex<NativeConversationDropState>,
     conversation_branch: Mutex<NativeConversationBranchState>,
+}
+
+struct BootstrapState {
+    platform_snapshot: PlatformSnapshot,
+    startup_recovery: Mutex<StartupRecoveryController>,
+    recovery_location: Mutex<Option<RecoveryDirectoryAuthority>>,
+    validated_migration_backup: Mutex<Option<core::database::ValidatedMigrationBackup>>,
+}
+
+#[derive(Clone, Debug)]
+struct RecoveryDirectoryAuthority {
+    c4os_home: PathBuf,
+    directory: PathBuf,
+    device: u64,
+    inode: u64,
+}
+
+impl RecoveryDirectoryAuthority {
+    fn new(c4os_home: &Path) -> Result<Self, std::io::Error> {
+        let home_metadata = std::fs::symlink_metadata(c4os_home)?;
+        let canonical_home = c4os_home.canonicalize()?;
+        if !home_metadata.file_type().is_dir() || canonical_home != c4os_home {
+            return Err(std::io::Error::other(
+                "C4OS Home recovery authority is invalid",
+            ));
+        }
+        let mut directory = canonical_home.clone();
+        for component in ["state", "recovery"] {
+            let child = directory.join(component);
+            let metadata = std::fs::symlink_metadata(&child)?;
+            if !metadata.file_type().is_dir() {
+                return Err(std::io::Error::other(
+                    "C4OS recovery directory authority is invalid",
+                ));
+            }
+            let canonical = child.canonicalize()?;
+            if canonical != child || canonical.parent() != Some(directory.as_path()) {
+                return Err(std::io::Error::other(
+                    "C4OS recovery directory escaped its authority",
+                ));
+            }
+            directory = canonical;
+        }
+        let metadata = std::fs::symlink_metadata(&directory)?;
+        Ok(Self {
+            c4os_home: canonical_home,
+            directory,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    fn validated_directory(&self) -> Result<PathBuf, std::io::Error> {
+        let current = Self::new(&self.c4os_home)?;
+        if current.directory != self.directory
+            || current.device != self.device
+            || current.inode != self.inode
+        {
+            return Err(std::io::Error::other(
+                "C4OS recovery directory authority changed",
+            ));
+        }
+        Ok(current.directory)
+    }
+}
+
+fn recovery_location_command(directory: &Path) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg("-R").arg("--").arg(directory);
+    command
+}
+
+fn validated_backup_available_for_boundary(
+    boundary: StartupRecoveryBoundary,
+    has_validated_backup: bool,
+) -> bool {
+    boundary == StartupRecoveryBoundary::Database && has_validated_backup
+}
+
+#[cfg(all(test, unix))]
+mod startup_native_authority_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn recovery_directory_authority_rejects_rebinding_and_reveals_without_launching() {
+        let home = tempfile::TempDir::new().expect("C4OS home");
+        let home_root = home.path().canonicalize().expect("canonical C4OS home");
+        std::fs::create_dir_all(home_root.join("state/recovery")).expect("recovery directory");
+        let authority = RecoveryDirectoryAuthority::new(&home_root).expect("recovery authority");
+        let directory = authority
+            .validated_directory()
+            .expect("validated recovery directory");
+        let command = recovery_location_command(&directory);
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                std::ffi::OsStr::new("-R"),
+                std::ffi::OsStr::new("--"),
+                directory.as_os_str(),
+            ]
+        );
+
+        let external = tempfile::TempDir::new().expect("external root");
+        let external_root = external
+            .path()
+            .canonicalize()
+            .expect("canonical external root");
+        let external_app = external_root.join("Untrusted.app");
+        std::fs::create_dir(&external_app).expect("external app bundle");
+        std::fs::rename(
+            home_root.join("state/recovery"),
+            home_root.join("state/recovery-original"),
+        )
+        .expect("move recovery directory");
+        symlink(&external_app, home_root.join("state/recovery"))
+            .expect("rebind recovery directory");
+        assert!(authority.validated_directory().is_err());
+        assert!(RecoveryDirectoryAuthority::new(&home_root).is_err());
+    }
+
+    #[test]
+    fn validated_migration_backup_is_available_only_for_database_failures() {
+        assert!(validated_backup_available_for_boundary(
+            StartupRecoveryBoundary::Database,
+            true,
+        ));
+        for boundary in [
+            StartupRecoveryBoundary::Configuration,
+            StartupRecoveryBoundary::BrowserRegistry,
+            StartupRecoveryBoundary::Extension,
+            StartupRecoveryBoundary::Workspace,
+            StartupRecoveryBoundary::Runtime,
+            StartupRecoveryBoundary::Mcp,
+            StartupRecoveryBoundary::Update,
+        ] {
+            assert!(!validated_backup_available_for_boundary(boundary, true));
+        }
+        assert!(!validated_backup_available_for_boundary(
+            StartupRecoveryBoundary::Database,
+            false,
+        ));
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WorkspaceRecoveryReviewIdentity {
+    recovery_id: String,
+    workspace_id: WorkspaceId,
+    working_generation: u64,
+    archive_generation: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceRecoveryAcknowledgeInput {
+    expected_generation: u64,
+    recovery_id: String,
+    workspace_id: WorkspaceId,
+    working_generation: u64,
+    archive_generation: u64,
+}
+
+fn workspace_recovery_review_identity(
+    notice: &protocol::WorkspaceRecoveryNoticeSnapshot,
+) -> WorkspaceRecoveryReviewIdentity {
+    WorkspaceRecoveryReviewIdentity {
+        recovery_id: notice.recovery_id.clone(),
+        workspace_id: notice.workspace_id.clone(),
+        working_generation: notice.working_generation,
+        archive_generation: notice.archive_generation,
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1614,6 +1796,23 @@ struct RuntimeCoreSnapshot {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeCrashLoopReviewInput {
+    expected_coordinator_generation: u64,
+    runtime_id: String,
+    process_generation: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeCrashLoopReview {
+    authority: &'static str,
+    runtime_id: String,
+    process_generation: u64,
+    coordinator_generation: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderProfileInput {
     expected_coordinator_generation: u64,
     expected_provider_generation: u64,
@@ -1799,6 +1998,7 @@ enum WorkspaceStartCloneSnapshot {
         workspace_id: String,
         workspace_name: String,
         recovered: bool,
+        recovery_notice: Option<protocol::WorkspaceRecoveryNoticeSnapshot>,
     },
     PendingApproval {
         prompt_id: String,
@@ -1814,6 +2014,7 @@ impl From<WorkspaceStartOpenSnapshot> for WorkspaceStartCloneSnapshot {
             workspace_id: snapshot.workspace_id,
             workspace_name: snapshot.workspace_name,
             recovered: snapshot.recovered,
+            recovery_notice: snapshot.recovery_notice,
         }
     }
 }
@@ -1825,6 +2026,7 @@ struct WorkspaceStartOpenSnapshot {
     workspace_id: String,
     workspace_name: String,
     recovered: bool,
+    recovery_notice: Option<protocol::WorkspaceRecoveryNoticeSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -3886,6 +4088,26 @@ impl RuntimeApplicationService {
         Ok(operation)
     }
 
+    pub fn review_runtime_crash_loop(
+        &self,
+        expected_coordinator_generation: u64,
+        runtime_id: &str,
+        process_generation: u64,
+        at_ms: u64,
+    ) -> Result<CoordinatorOperation<()>, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(&coordinator, expected_coordinator_generation, at_ms)?;
+        let previous = coordinator.snapshot(at_ms);
+        let operation =
+            coordinator.review_runtime_crash_loop(runtime_id, process_generation, at_ms)?;
+        let snapshot = coordinator.snapshot(at_ms);
+        if let Err(error) = self.save_current_control_plane(snapshot.runtimes, at_ms) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error);
+        }
+        Ok(operation)
+    }
+
     /// Records protocol-aware shutdown only after the production peer has
     /// terminated its exact native process group.
     pub fn finish_managed_runtime_shutdown(
@@ -5710,6 +5932,323 @@ fn extension_boundary_error(
     platform_boundary_error(correlation_id, code, message, retryable)
 }
 
+fn update_boundary_error(
+    error: update::UpdateError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        update::UpdateError::InvalidInput | update::UpdateError::BoundExceeded => (
+            ProtocolErrorCode::InvalidPayload,
+            "The update request exceeds its bound",
+            false,
+        ),
+        update::UpdateError::Conflict => (
+            ProtocolErrorCode::Conflict,
+            "Update state changed before the operation completed",
+            true,
+        ),
+        update::UpdateError::NotFound => (
+            ProtocolErrorCode::Unavailable,
+            "The requested update component is unavailable",
+            true,
+        ),
+        update::UpdateError::Revoked => (
+            ProtocolErrorCode::Forbidden,
+            "Update authority has been revoked",
+            false,
+        ),
+        update::UpdateError::InvalidState
+        | update::UpdateError::Persistence
+        | update::UpdateError::InjectedFault(_) => (
+            ProtocolErrorCode::Unavailable,
+            "The update coordinator is unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+fn plugin_update_state(plugin: &extension::PluginSnapshot) -> update::UpdateLifecycleState {
+    match plugin.lifecycle {
+        extension::ExtensionLifecycle::Revoked => update::UpdateLifecycleState::Revoked,
+        extension::ExtensionLifecycle::Failed => update::UpdateLifecycleState::Failed,
+        extension::ExtensionLifecycle::RolledBack => update::UpdateLifecycleState::RolledBack,
+        _ => update::UpdateLifecycleState::Current,
+    }
+}
+
+fn synchronize_plugin_update_truth(
+    coordinator: &mut update::UpdateCoordinator,
+    extensions: &extension::ExtensionServiceSnapshot,
+    discover_candidates: bool,
+    correlation_id: &str,
+    now_ms: u64,
+) -> Result<update::UpdateCoordinatorSnapshot, update::UpdateError> {
+    let mut snapshot = coordinator.snapshot();
+    for plugin in &extensions.plugins {
+        snapshot = coordinator.reconcile_plugin_component(
+            &plugin.package_id,
+            &plugin.version,
+            plugin.staged_version.as_deref(),
+            plugin.staged_digest.as_deref(),
+            plugin.last_known_good_version.as_deref(),
+            matches!(plugin.trust, extension::ExtensionTrustState::Revoked)
+                || matches!(plugin.lifecycle, extension::ExtensionLifecycle::Revoked),
+            plugin
+                .failure_code
+                .as_deref()
+                .or(plugin.revocation_reason.as_deref()),
+            plugin_update_state(plugin),
+            correlation_id,
+            now_ms,
+        )?;
+        if discover_candidates
+            && let (Some(version), Some(digest)) = (
+                plugin.available_version.as_deref(),
+                plugin.available_digest.as_deref(),
+            )
+        {
+            snapshot = coordinator.register_extension_candidate(
+                &plugin.package_id,
+                version,
+                digest,
+                &plugin.compatibility,
+                correlation_id,
+                now_ms,
+            )?;
+        }
+    }
+    Ok(snapshot)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalDevelopmentCandidateManifest {
+    schema_version: u16,
+    version: String,
+    compatibility: String,
+}
+
+fn canonical_local_update_child(
+    parent: &Path,
+    component: &str,
+) -> Result<Option<PathBuf>, update::UpdateError> {
+    if component.is_empty() || component.contains('/') || component.contains('\\') {
+        return Err(update::UpdateError::InvalidInput);
+    }
+    let child = parent.join(component);
+    let metadata = match std::fs::symlink_metadata(&child) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(update::UpdateError::InvalidInput),
+    };
+    if !metadata.file_type().is_dir() {
+        return Err(update::UpdateError::InvalidInput);
+    }
+    let canonical = child
+        .canonicalize()
+        .map_err(|_| update::UpdateError::InvalidInput)?;
+    if canonical != child || canonical.parent() != Some(parent) {
+        return Err(update::UpdateError::InvalidInput);
+    }
+    Ok(Some(canonical))
+}
+
+fn canonical_local_update_inbox(c4os_home: &Path) -> Result<Option<PathBuf>, update::UpdateError> {
+    let home_metadata =
+        std::fs::symlink_metadata(c4os_home).map_err(|_| update::UpdateError::InvalidInput)?;
+    let canonical_home = c4os_home
+        .canonicalize()
+        .map_err(|_| update::UpdateError::InvalidInput)?;
+    if !home_metadata.file_type().is_dir() || canonical_home != c4os_home {
+        return Err(update::UpdateError::InvalidInput);
+    }
+    let Some(updates) = canonical_local_update_child(&canonical_home, "updates")? else {
+        return Ok(None);
+    };
+    canonical_local_update_child(&updates, "inbox")
+}
+
+fn canonical_local_update_candidate_root(
+    inbox: &Path,
+    channel: update::UpdateChannel,
+    component_id: &str,
+) -> Result<Option<PathBuf>, update::UpdateError> {
+    let Some(channel_root) = canonical_local_update_child(inbox, channel.configuration_key())?
+    else {
+        return Ok(None);
+    };
+    canonical_local_update_child(&channel_root, component_id)
+}
+
+fn discover_local_development_updates(
+    coordinator: &mut update::UpdateCoordinator,
+    c4os_home: &Path,
+    update_policies: &BTreeMap<String, core::configuration::UpdatePolicy>,
+    now_ms: u64,
+) -> Result<(), update::UpdateError> {
+    if [
+        update::UpdateChannel::Application,
+        update::UpdateChannel::Runtime,
+    ]
+    .into_iter()
+    .all(|channel| {
+        !update_policy_allows(
+            update_policies.get(channel.configuration_key()).copied(),
+            UpdatePolicyOperation::Discovery,
+        )
+    }) {
+        return Ok(());
+    }
+    let inbox = canonical_local_update_inbox(c4os_home)?;
+    for (channel, component_id, compatibility) in [
+        (
+            update::UpdateChannel::Application,
+            "c4os",
+            format!("c4os-local-development:{}", env!("CARGO_PKG_VERSION")),
+        ),
+        (
+            update::UpdateChannel::Runtime,
+            "opencode",
+            format!(
+                "runtime-adapter:opencode:{}",
+                runtime::supervisor::OPENCODE_NATIVE_VERSION
+            ),
+        ),
+        (
+            update::UpdateChannel::Runtime,
+            "pi",
+            format!(
+                "runtime-adapter:pi:{}",
+                runtime::supervisor::PI_NATIVE_VERSION
+            ),
+        ),
+    ] {
+        if !update_policy_allows(
+            update_policies.get(channel.configuration_key()).copied(),
+            UpdatePolicyOperation::Discovery,
+        ) {
+            continue;
+        }
+        coordinator.register_authoritative_compatibility_binding(
+            channel,
+            component_id,
+            compatibility.as_bytes(),
+        )?;
+        let discovered = (|| {
+            let Some(inbox) = inbox.as_ref() else {
+                return Ok(());
+            };
+            let Some(candidate_root) =
+                canonical_local_update_candidate_root(inbox, channel, component_id)?
+            else {
+                return Ok(());
+            };
+            let manifest_path = candidate_root.join("candidate.toml");
+            let metadata =
+                std::fs::symlink_metadata(&manifest_path).map_err(|error| match error.kind() {
+                    std::io::ErrorKind::NotFound => update::UpdateError::NotFound,
+                    _ => update::UpdateError::InvalidInput,
+                });
+            let metadata = match metadata {
+                Ok(metadata) => metadata,
+                Err(update::UpdateError::NotFound) => return Ok(()),
+                Err(error) => return Err(error),
+            };
+            if !metadata.file_type().is_file() || metadata.len() > 16 * 1024 {
+                return Err(update::UpdateError::InvalidInput);
+            }
+            let canonical_manifest = manifest_path
+                .canonicalize()
+                .map_err(|_| update::UpdateError::InvalidInput)?;
+            if canonical_manifest.parent() != Some(candidate_root.as_path()) {
+                return Err(update::UpdateError::InvalidInput);
+            }
+            let manifest_text = std::fs::read_to_string(&canonical_manifest)
+                .map_err(|_| update::UpdateError::InvalidInput)?;
+            let manifest: LocalDevelopmentCandidateManifest =
+                toml::from_str(&manifest_text).map_err(|_| update::UpdateError::InvalidInput)?;
+            if manifest.schema_version != 1 || manifest.compatibility != compatibility {
+                return Err(update::UpdateError::InvalidInput);
+            }
+            coordinator.discover_file_candidate(
+                channel,
+                component_id,
+                &manifest.version,
+                &candidate_root.join("artifact.bin"),
+                compatibility.as_bytes(),
+                "startup:update-discovery",
+                now_ms,
+            )?;
+            Ok::<(), update::UpdateError>(())
+        })();
+        if discovered.is_err() {
+            coordinator.ingest_diagnostic(
+                channel.diagnostic_category(),
+                update::DiagnosticSeverity::Warning,
+                component_id,
+                "Local update candidate discovery failed closed",
+                Some(update::UpdateRecoveryAction::RetryStage),
+                "startup:update-discovery",
+                now_ms,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod local_update_authority_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn local_update_candidate_authority_rejects_symlinked_inbox_and_candidate_roots() {
+        let home = tempfile::TempDir::new().expect("C4OS home");
+        let home_root = home.path().canonicalize().expect("canonical C4OS home");
+        let external = tempfile::TempDir::new().expect("external root");
+        let external_root = external
+            .path()
+            .canonicalize()
+            .expect("canonical external root");
+        let inbox = home_root.join("updates/inbox");
+        std::fs::create_dir_all(inbox.join("application/c4os")).expect("candidate authority");
+        let canonical_inbox = canonical_local_update_inbox(&home_root)
+            .expect("validate inbox")
+            .expect("inbox");
+        assert!(
+            canonical_local_update_candidate_root(
+                &canonical_inbox,
+                update::UpdateChannel::Application,
+                "c4os",
+            )
+            .expect("validate candidate root")
+            .is_some()
+        );
+
+        std::fs::remove_dir(inbox.join("application/c4os")).expect("remove candidate root");
+        symlink(&external_root, inbox.join("application/c4os")).expect("symlink candidate root");
+        assert!(
+            canonical_local_update_candidate_root(
+                &canonical_inbox,
+                update::UpdateChannel::Application,
+                "c4os",
+            )
+            .is_err()
+        );
+
+        let second_home = tempfile::TempDir::new().expect("second C4OS home");
+        let second_home_root = second_home
+            .path()
+            .canonicalize()
+            .expect("canonical second C4OS home");
+        std::fs::create_dir_all(second_home_root.join("updates")).expect("updates authority");
+        symlink(&external_root, second_home_root.join("updates/inbox"))
+            .expect("symlink inbox root");
+        assert!(canonical_local_update_inbox(&second_home_root).is_err());
+    }
+}
+
 const MAX_EXTENSION_HOOK_ANNOTATION_BYTES: usize = 4 * 1024;
 
 enum ExtensionHookMediation {
@@ -6328,10 +6867,42 @@ macro_rules! extension_package_command {
 
 extension_package_command!(extension_install_disabled, install_disabled);
 extension_package_command!(extension_enable, enable);
-extension_package_command!(extension_stage_update, stage_update);
+
+#[tauri::command]
+fn extension_stage_update(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: extension::service::ExtensionPackageInput,
+) -> Result<ProtocolEnvelope<extension::ExtensionServiceSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_extension_input_generation(&request, input.expected_generation)?;
+    require_update_policy(
+        &core,
+        update::UpdateChannel::Plugin,
+        UpdatePolicyOperation::Stage,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_extension_generation(&request, extensions.snapshot().generation)?;
+    extensions
+        .preflight_package_mutation(
+            &input,
+            extension::service::ExtensionPackageMutation::StageUpdate,
+        )
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    let snapshot = extensions
+        .stage_update(input, now_ms)
+        .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?;
+    extension_snapshot_envelope(&core, request, snapshot)
+}
 
 macro_rules! extension_package_command_with_worker_termination {
-    ($command:ident, $method:ident, $mutation:ident) => {
+    ($command:ident, $method:ident, $mutation:ident $(, $update_operation:expr)?) => {
         #[tauri::command]
         fn $command(
             core: tauri::State<'_, AppCoreState>,
@@ -6343,6 +6914,14 @@ macro_rules! extension_package_command_with_worker_termination {
         > {
             validate_snapshot_request(&request)?;
             require_extension_input_generation(&request, input.expected_generation)?;
+            $(
+                require_update_policy(
+                    &core,
+                    update::UpdateChannel::Plugin,
+                    $update_operation,
+                    request.correlation_id.clone(),
+                )?;
+            )?
             let package_id = input.package_id.clone();
             let invalidated_generation = input.expected_generation;
             let now_ms = current_time_ms()
@@ -6379,7 +6958,8 @@ extension_package_command_with_worker_termination!(extension_disable, disable, D
 extension_package_command_with_worker_termination!(
     extension_activate_update,
     activate_staged_update,
-    ActivateStagedUpdate
+    ActivateStagedUpdate,
+    UpdatePolicyOperation::Activation
 );
 extension_package_command_with_worker_termination!(extension_rollback, rollback, Rollback);
 extension_package_command_with_worker_termination!(extension_uninstall, uninstall, Uninstall);
@@ -6935,7 +7515,9 @@ fn handle_conversation_drop_event<R: tauri::Runtime>(
     if window.label() != "main" {
         return;
     }
-    let core = window.state::<AppCoreState>();
+    let Some(core) = window.try_state::<AppCoreState>() else {
+        return;
+    };
     if !conversation_drop_is_active(&core) {
         clear_conversation_drop(&core);
         return;
@@ -6966,14 +7548,1022 @@ fn handle_conversation_drop_event<R: tauri::Runtime>(
 
 #[tauri::command]
 fn platform_snapshot(
-    core: tauri::State<'_, AppCoreState>,
+    bootstrap: tauri::State<'_, BootstrapState>,
     request: SnapshotRequest,
 ) -> Result<ProtocolEnvelope<PlatformSnapshot>, protocol::StructuredCoreError> {
     protocol::snapshot_envelope(
         request,
         StateGeneration::default(),
-        core.platform_snapshot.clone(),
+        bootstrap.platform_snapshot.clone(),
     )
+}
+
+fn startup_recovery_boundary_error(
+    error: startup_recovery::StartupRecoveryError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        startup_recovery::StartupRecoveryError::InvalidInput => (
+            ProtocolErrorCode::InvalidPayload,
+            "The startup recovery request is invalid",
+            false,
+        ),
+        startup_recovery::StartupRecoveryError::StaleGeneration { .. } => (
+            ProtocolErrorCode::Conflict,
+            "Startup recovery state changed before the operation completed",
+            true,
+        ),
+        startup_recovery::StartupRecoveryError::UnavailableAction => (
+            ProtocolErrorCode::Forbidden,
+            "The requested startup recovery action is unavailable",
+            false,
+        ),
+        startup_recovery::StartupRecoveryError::InvalidState
+        | startup_recovery::StartupRecoveryError::AttemptMismatch
+        | startup_recovery::StartupRecoveryError::GenerationExhausted => (
+            ProtocolErrorCode::Unavailable,
+            "Startup recovery state is unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+#[tauri::command]
+fn startup_recovery_snapshot(
+    bootstrap: tauri::State<'_, BootstrapState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<StartupRecoverySnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let snapshot = bootstrap
+        .startup_recovery
+        .lock()
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "Startup recovery state is unavailable",
+                true,
+            )
+        })?
+        .snapshot();
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
+}
+
+#[tauri::command]
+fn startup_recovery_action(
+    app: tauri::AppHandle,
+    bootstrap: tauri::State<'_, BootstrapState>,
+    request: SnapshotRequest,
+    input: StartupRecoveryActionInput,
+) -> Result<ProtocolEnvelope<StartupRecoverySnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Startup recovery input generation does not match the request",
+            true,
+        ));
+    }
+    let prepared = bootstrap
+        .startup_recovery
+        .lock()
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "Startup recovery state is unavailable",
+                true,
+            )
+        })?
+        .prepare_action(input)
+        .map_err(|error| startup_recovery_boundary_error(error, request.correlation_id.clone()))?;
+
+    let completed_at_ms = current_time_ms().map_err(|_| {
+        platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Unavailable,
+            "Startup recovery time is unavailable",
+            true,
+        )
+    })?;
+    let outcome = match prepared.action() {
+        StartupRecoveryAction::Retry => StartupRecoveryActionOutcome::Failed {
+            diagnostic_code: "startup-restart-requested".into(),
+            message: "C4OS will retry the failed startup boundary during restart.".into(),
+            completed_at_ms,
+        },
+        StartupRecoveryAction::RestoreValidatedBackup => {
+            let backup = (prepared.boundary() == StartupRecoveryBoundary::Database)
+                .then(|| {
+                    bootstrap
+                        .validated_migration_backup
+                        .lock()
+                        .ok()
+                        .and_then(|backup| backup.clone())
+                })
+                .flatten();
+            if backup.as_ref().is_some_and(|backup| {
+                core::database::restore_validated_migration_backup(backup).is_ok()
+            }) {
+                StartupRecoveryActionOutcome::Succeeded { completed_at_ms }
+            } else {
+                StartupRecoveryActionOutcome::Failed {
+                    diagnostic_code: "validated-backup-restore-failed".into(),
+                    message: "The internally validated startup backup could not be restored."
+                        .into(),
+                    completed_at_ms,
+                }
+            }
+        }
+        StartupRecoveryAction::OpenRecoveryLocation => {
+            let location = bootstrap
+                .recovery_location
+                .lock()
+                .ok()
+                .and_then(|location| location.clone())
+                .and_then(|authority| authority.validated_directory().ok());
+            let opened = location.is_some_and(|location| {
+                recovery_location_command(&location)
+                    .status()
+                    .is_ok_and(|status| status.success())
+            });
+            if opened {
+                StartupRecoveryActionOutcome::Succeeded { completed_at_ms }
+            } else {
+                StartupRecoveryActionOutcome::Failed {
+                    diagnostic_code: "recovery-location-unavailable".into(),
+                    message: "The native recovery location could not be opened.".into(),
+                    completed_at_ms,
+                }
+            }
+        }
+    };
+    let snapshot = bootstrap
+        .startup_recovery
+        .lock()
+        .map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "Startup recovery state is unavailable",
+                true,
+            )
+        })?
+        .complete_action(&prepared, outcome)
+        .map_err(|error| startup_recovery_boundary_error(error, request.correlation_id.clone()))?;
+    if prepared.action() == StartupRecoveryAction::Retry
+        || prepared.action() == StartupRecoveryAction::RestoreValidatedBackup
+            && snapshot.lifecycle == startup_recovery::StartupRecoveryLifecycle::Recovered
+    {
+        app.restart();
+    }
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UpdatePolicyOperation {
+    Discovery,
+    Stage,
+    Activation,
+    Rollback,
+    Revocation,
+    InterruptedRecovery,
+}
+
+fn update_policy_allows(
+    policy: Option<core::configuration::UpdatePolicy>,
+    operation: UpdatePolicyOperation,
+) -> bool {
+    !matches!(policy, Some(core::configuration::UpdatePolicy::Disabled))
+        || matches!(
+            operation,
+            UpdatePolicyOperation::Rollback
+                | UpdatePolicyOperation::Revocation
+                | UpdatePolicyOperation::InterruptedRecovery
+        )
+}
+
+fn require_update_policy(
+    core: &AppCoreState,
+    channel: update::UpdateChannel,
+    operation: UpdatePolicyOperation,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .snapshot()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .configuration;
+    if !update_policy_allows(
+        configuration
+            .updates
+            .get(channel.configuration_key())
+            .copied(),
+        operation,
+    ) {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::Forbidden,
+            "This update channel is disabled by application configuration",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod disabled_update_policy_tests {
+    use super::*;
+
+    const DISABLED: Option<core::configuration::UpdatePolicy> =
+        Some(core::configuration::UpdatePolicy::Disabled);
+
+    #[test]
+    fn disabled_update_policy_blocks_discovery_stage_and_activation() {
+        for operation in [
+            UpdatePolicyOperation::Discovery,
+            UpdatePolicyOperation::Stage,
+            UpdatePolicyOperation::Activation,
+        ] {
+            assert!(!update_policy_allows(DISABLED, operation));
+        }
+    }
+
+    #[test]
+    fn disabled_update_channels_skip_local_discovery_before_filesystem_access() {
+        let database_root = tempfile::TempDir::new().expect("update database root");
+        let canonical_database_root = database_root
+            .path()
+            .canonicalize()
+            .expect("canonical update database root");
+        let (database, _) = core::database::DatabaseActor::start(
+            core::database::DatabaseDescriptor::app(&canonical_database_root),
+        )
+        .expect("update database");
+        let mut coordinator =
+            update::UpdateCoordinator::restore(Arc::new(database), 1).expect("update coordinator");
+        let policies = BTreeMap::from([
+            (
+                update::UpdateChannel::Application
+                    .configuration_key()
+                    .to_owned(),
+                core::configuration::UpdatePolicy::Disabled,
+            ),
+            (
+                update::UpdateChannel::Runtime
+                    .configuration_key()
+                    .to_owned(),
+                core::configuration::UpdatePolicy::Disabled,
+            ),
+        ]);
+
+        discover_local_development_updates(
+            &mut coordinator,
+            &canonical_database_root.join("missing-home"),
+            &policies,
+            2,
+        )
+        .expect("disabled channels must not inspect the local update inbox");
+
+        assert!(coordinator.snapshot().candidates.is_empty());
+    }
+
+    #[test]
+    fn disabled_update_policy_allows_safety_reducing_rollback() {
+        assert!(update_policy_allows(
+            DISABLED,
+            UpdatePolicyOperation::Rollback
+        ));
+    }
+
+    #[test]
+    fn disabled_update_policy_allows_revocation() {
+        assert!(update_policy_allows(
+            DISABLED,
+            UpdatePolicyOperation::Revocation
+        ));
+    }
+
+    #[test]
+    fn disabled_update_policy_allows_interrupted_operation_recovery() {
+        assert!(update_policy_allows(
+            DISABLED,
+            UpdatePolicyOperation::InterruptedRecovery
+        ));
+    }
+}
+
+fn update_snapshot_envelope(
+    request: SnapshotRequest,
+    snapshot: update::UpdateCoordinatorSnapshot,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, ProtocolError> {
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
+}
+
+fn synchronize_update_snapshot(
+    core: &AppCoreState,
+    correlation_id: &str,
+    now_ms: u64,
+) -> Result<update::UpdateCoordinatorSnapshot, update::UpdateError> {
+    let extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| update::UpdateError::Persistence)?
+        .snapshot();
+    let mut updates = core
+        .updates
+        .lock()
+        .map_err(|_| update::UpdateError::Persistence)?;
+    let configuration = core
+        .configuration
+        .lock()
+        .map_err(|_| update::UpdateError::Persistence)?
+        .snapshot()
+        .map_err(|_| update::UpdateError::Persistence)?
+        .configuration;
+    updates.apply_diagnostic_preferences(
+        configuration.diagnostics_retention_days,
+        &configuration.diagnostic_redaction_patterns,
+        now_ms,
+    )?;
+    let discover_plugin_candidates = update_policy_allows(
+        configuration
+            .updates
+            .get(update::UpdateChannel::Plugin.configuration_key())
+            .copied(),
+        UpdatePolicyOperation::Discovery,
+    );
+    synchronize_plugin_update_truth(
+        &mut updates,
+        &extensions,
+        discover_plugin_candidates,
+        correlation_id,
+        now_ms,
+    )
+}
+
+#[tauri::command]
+fn update_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = synchronize_update_snapshot(&core, request.correlation_id.as_str(), now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    update_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+fn update_stage_local(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::LocalUpdateStageInput,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    require_update_policy(
+        &core,
+        input.channel,
+        UpdatePolicyOperation::Stage,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if input.channel != update::UpdateChannel::Plugin {
+        let snapshot = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .stage(&input, request.correlation_id.as_str(), now_ms)
+            .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+        return update_snapshot_envelope(request, snapshot);
+    }
+
+    let candidate = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .stage_candidate(&input)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let extensions = {
+        let mut extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let before = extensions.snapshot();
+        let plugin = before
+            .plugins
+            .iter()
+            .find(|plugin| plugin.package_id == input.component_id)
+            .ok_or_else(|| {
+                update_boundary_error(
+                    update::UpdateError::NotFound,
+                    request.correlation_id.clone(),
+                )
+            })?;
+        if plugin.available_version.as_deref() != Some(candidate.version.as_str())
+            || plugin.available_digest.as_deref() != Some(candidate.artifact_sha256.as_str())
+        {
+            return Err(update_boundary_error(
+                update::UpdateError::Conflict,
+                request.correlation_id.clone(),
+            ));
+        }
+        extensions
+            .stage_update(
+                extension::service::ExtensionPackageInput {
+                    expected_generation: before.generation,
+                    package_id: input.component_id.clone(),
+                },
+                now_ms,
+            )
+            .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let snapshot = {
+        let mut updates = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        synchronize_plugin_update_truth(
+            &mut updates,
+            &extensions,
+            true,
+            request.correlation_id.as_str(),
+            now_ms,
+        )
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?
+    };
+    update_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+fn update_activate(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::UpdateActionInput,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    require_update_policy(
+        &core,
+        input.channel,
+        UpdatePolicyOperation::Activation,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if input.channel != update::UpdateChannel::Plugin {
+        let (failure_code, action) = match input.channel {
+            update::UpdateChannel::Application => (
+                "application_rebuild_required",
+                update::UpdateRecoveryAction::RebuildApplication,
+            ),
+            update::UpdateChannel::Runtime => (
+                "runtime_rebuild_required",
+                update::UpdateRecoveryAction::RebuildRuntime,
+            ),
+            update::UpdateChannel::Plugin => unreachable!(),
+        };
+        let snapshot = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .defer_activation(
+                &input,
+                request.correlation_id.as_str(),
+                failure_code,
+                action,
+                now_ms,
+            )
+            .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+        return update_snapshot_envelope(request, snapshot);
+    }
+
+    let activating = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .begin_activation(&input, request.correlation_id.as_str(), now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let extension_result = {
+        let mut extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let expected_generation = extensions.snapshot().generation;
+        extensions.activate_staged_update(
+            extension::service::ExtensionPackageInput {
+                expected_generation,
+                package_id: input.component_id.clone(),
+            },
+            now_ms,
+        )
+    };
+    let completion_input = update::UpdateActionInput {
+        expected_generation: activating.generation,
+        channel: input.channel,
+        component_id: input.component_id.clone(),
+    };
+    let snapshot = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .complete_activation(
+            &completion_input,
+            request.correlation_id.as_str(),
+            extension_result.is_ok(),
+            extension_result
+                .as_ref()
+                .err()
+                .map(|_| "plugin_activation_failed"),
+            now_ms,
+        )
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    if let Err(error) = extension_result {
+        return Err(extension_boundary_error(
+            error,
+            request.correlation_id.clone(),
+        ));
+    }
+    update_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+fn update_rollback(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::UpdateActionInput,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    require_update_policy(
+        &core,
+        input.channel,
+        UpdatePolicyOperation::Rollback,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if input.channel != update::UpdateChannel::Plugin {
+        let snapshot = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .request_rollback(&input, request.correlation_id.as_str(), now_ms)
+            .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+        return update_snapshot_envelope(request, snapshot);
+    }
+    core.updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .require_action(&input)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let extensions = {
+        let mut extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let expected_generation = extensions.snapshot().generation;
+        extensions
+            .rollback(
+                extension::service::ExtensionPackageInput {
+                    expected_generation,
+                    package_id: input.component_id.clone(),
+                },
+                now_ms,
+            )
+            .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let snapshot = {
+        let mut updates = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        synchronize_plugin_update_truth(
+            &mut updates,
+            &extensions,
+            false,
+            request.correlation_id.as_str(),
+            now_ms,
+        )
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?
+    };
+    update_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+fn update_revoke(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::UpdateRevocationInput,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    require_update_policy(
+        &core,
+        input.channel,
+        UpdatePolicyOperation::Revocation,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if input.channel != update::UpdateChannel::Plugin {
+        let snapshot = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .revoke(&input, request.correlation_id.as_str(), now_ms)
+            .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+        return update_snapshot_envelope(request, snapshot);
+    }
+    core.updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .require_revocation(&input)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let extensions = {
+        let mut extensions = core
+            .extensions
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let expected_generation = extensions.snapshot().generation;
+        extensions
+            .revoke(
+                extension::service::ExtensionPackageInput {
+                    expected_generation,
+                    package_id: input.component_id.clone(),
+                },
+                &input.reason_code,
+                now_ms,
+            )
+            .map_err(|error| extension_boundary_error(error, request.correlation_id.clone()))?
+    };
+    let snapshot = {
+        let mut updates = core
+            .updates
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        synchronize_plugin_update_truth(
+            &mut updates,
+            &extensions,
+            false,
+            request.correlation_id.as_str(),
+            now_ms,
+        )
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?
+    };
+    update_snapshot_envelope(request, snapshot)
+}
+
+#[tauri::command]
+fn update_recover(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::UpdateRecoveryInput,
+) -> Result<ProtocolEnvelope<update::UpdateCoordinatorSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    require_update_policy(
+        &core,
+        input.channel,
+        UpdatePolicyOperation::InterruptedRecovery,
+        request.correlation_id.clone(),
+    )?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let snapshot = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .recover(&input, request.correlation_id.as_str(), now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    update_snapshot_envelope(request, snapshot)
+}
+
+fn redact_known_diagnostic_secrets(
+    core: &AppCoreState,
+    records: &mut [update::UpdateDiagnosticRecord],
+    correlation_id: protocol::CorrelationId,
+) -> Result<(), ProtocolError> {
+    let Some(vault) = &core.credential_vault else {
+        return Ok(());
+    };
+    for record in records {
+        record.message = vault.redact_text(&record.message).map_err(|_| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Unavailable,
+                "Diagnostic redaction is unavailable",
+                false,
+            )
+        })?;
+        record.component_boundary =
+            vault.redact_text(&record.component_boundary).map_err(|_| {
+                platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::Unavailable,
+                    "Diagnostic redaction is unavailable",
+                    false,
+                )
+            })?;
+    }
+    Ok(())
+}
+
+async fn collect_operational_diagnostics(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<
+    (
+        Vec<update::OperationalDiagnosticObservation>,
+        Option<u16>,
+        Vec<String>,
+    ),
+    ProtocolError,
+> {
+    use update::{
+        OperationalDiagnosticObservation as Observation, OperationalDiagnosticSignal as Signal,
+    };
+
+    let mut observations = Vec::new();
+    let (retention_days, redaction_patterns, configuration_failed) = {
+        let configuration = core
+            .configuration
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let failed = configuration.last_error().is_some();
+        let snapshot = configuration
+            .snapshot()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        (
+            snapshot.configuration.diagnostics_retention_days,
+            snapshot.configuration.diagnostic_redaction_patterns.clone(),
+            failed,
+        )
+    };
+    if configuration_failed {
+        observations.push(
+            Observation::from_signal(Signal::ConfigurationRecovery, "app")
+                .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+        );
+    }
+    {
+        let workspace = core
+            .active_workspace
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        if let Some(workspace) = workspace.as_ref() {
+            if workspace.configuration_last_error().is_some() {
+                observations.push(
+                    Observation::from_signal(Signal::ConfigurationRecovery, "workspace")
+                        .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+                );
+            }
+            if let Some(notice) = workspace.recovery_notice() {
+                observations.push(
+                    Observation::from_signal(
+                        Signal::WorkspaceRecovery,
+                        &notice.workspace_id.to_string(),
+                    )
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+                );
+            }
+        }
+    }
+    let runtime = core
+        .runtime
+        .snapshot(
+            current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?,
+        )
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    for record in runtime.runtimes.records {
+        let signal = if record.recovery_action
+            == Some(runtime::supervisor::RuntimeRecoveryAction::ReviewRuntimeCrashLoop)
+        {
+            Some(Signal::RuntimeCrashLoop)
+        } else if matches!(
+            record.lifecycle,
+            runtime::supervisor::RuntimeLifecycle::Failed
+                | runtime::supervisor::RuntimeLifecycle::Incompatible
+        ) || record.health == runtime::supervisor::HealthState::Unhealthy
+        {
+            Some(Signal::RuntimeFailure)
+        } else if record.lifecycle == runtime::supervisor::RuntimeLifecycle::Degraded
+            || record.health == runtime::supervisor::HealthState::Degraded
+        {
+            Some(Signal::RuntimeDegraded)
+        } else {
+            None
+        };
+        if let Some(signal) = signal {
+            observations.push(
+                Observation::from_signal(signal, &record.installation.runtime_id)
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    for provider in runtime.providers.providers {
+        if matches!(
+            provider.test_status,
+            runtime::provider::ProviderTestStatus::Failed { .. }
+                | runtime::provider::ProviderTestStatus::SucceededNoUsableModels { .. }
+        ) {
+            observations.push(
+                Observation::from_signal(Signal::ProviderFailure, &provider.profile.provider_id)
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    let extensions = core
+        .extensions
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .snapshot();
+    for plugin in extensions.plugins {
+        let signal = match plugin.lifecycle {
+            extension::ExtensionLifecycle::Failed => Some(Signal::ExtensionFailure),
+            extension::ExtensionLifecycle::Revoked => Some(Signal::ExtensionRevoked),
+            extension::ExtensionLifecycle::RolledBack => Some(Signal::ExtensionRollback),
+            _ if plugin.trust == extension::ExtensionTrustState::Revoked => {
+                Some(Signal::ExtensionRevoked)
+            }
+            _ => None,
+        };
+        if let Some(signal) = signal {
+            observations.push(
+                Observation::from_signal(signal, &plugin.package_id)
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    let mcp = core.mcp.lock().await.snapshot();
+    for server in mcp.servers {
+        let signal = match server.lifecycle {
+            mcp::McpLifecycle::Failed => Some(Signal::McpFailure),
+            mcp::McpLifecycle::Revoked => Some(Signal::McpRevoked),
+            mcp::McpLifecycle::Restarting => Some(Signal::McpRestarting),
+            _ if server.trust == mcp::McpTrustState::Revoked => Some(Signal::McpRevoked),
+            _ => None,
+        };
+        if let Some(signal) = signal {
+            observations.push(
+                Observation::from_signal(signal, &server.server_id)
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    for profile in core
+        .browser_profiles
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .snapshot()
+        .profiles
+    {
+        if matches!(
+            profile.lifecycle,
+            browser::profile::PersistentProfileLifecycle::ClearPending { .. }
+        ) {
+            observations.push(
+                Observation::from_signal(Signal::BrowserClearPending, &profile.profile_id)
+                    .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    for terminal in core
+        .terminal
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .session_snapshots()
+    {
+        if terminal.lifecycle != execution::terminal::TerminalLifecycle::Live {
+            observations.push(
+                Observation::from_signal(
+                    Signal::TerminalDormantRecovery,
+                    &terminal.terminal_session_id,
+                )
+                .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+            );
+        }
+    }
+    if core
+        .credential_fallback_required
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        observations.push(
+            Observation::from_signal(Signal::CredentialFallback, "vault")
+                .map_err(|error| update_boundary_error(error, correlation_id.clone()))?,
+        );
+    }
+    Ok((observations, retention_days, redaction_patterns))
+}
+
+#[tauri::command]
+async fn diagnostics_snapshot(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<update::DiagnosticsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (observations, retention_days, redaction_patterns) =
+        collect_operational_diagnostics(&core, request.correlation_id.clone()).await?;
+    let mut updates = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    updates
+        .apply_diagnostic_preferences(retention_days, &redaction_patterns, now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let mut snapshot = updates
+        .synchronize_operational_diagnostics(&observations, request.correlation_id.as_str(), now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    drop(updates);
+    redact_known_diagnostic_secrets(&core, &mut snapshot.records, request.correlation_id.clone())?;
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
+}
+
+#[tauri::command]
+async fn diagnostics_export(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: update::DiagnosticsExportInput,
+) -> Result<ProtocolEnvelope<update::DiagnosticsExportSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let (observations, retention_days, redaction_patterns) =
+        collect_operational_diagnostics(&core, request.correlation_id.clone()).await?;
+    let mut updates = core
+        .updates
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    updates
+        .apply_diagnostic_preferences(retention_days, &redaction_patterns, now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    updates
+        .synchronize_operational_diagnostics(&observations, request.correlation_id.as_str(), now_ms)
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    let synchronized_generation = updates.diagnostics_snapshot().generation;
+    if input.expected_generation != synchronized_generation {
+        return Err(update_boundary_error(
+            update::UpdateError::Conflict,
+            request.correlation_id.clone(),
+        ));
+    }
+    let mut snapshot = updates
+        .diagnostics_export(
+            input.expected_generation,
+            request.correlation_id.as_str(),
+            now_ms,
+        )
+        .map_err(|error| update_boundary_error(error, request.correlation_id.clone()))?;
+    drop(updates);
+    redact_known_diagnostic_secrets(&core, &mut snapshot.records, request.correlation_id.clone())?;
+    let canonical = serde_json::to_vec(&snapshot.records)
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    snapshot.sha256 = sha256_bytes(&canonical);
+    snapshot.export_id = format!(
+        "diagnostics-{}",
+        &snapshot.sha256.trim_start_matches("sha256:")[..24]
+    );
+    protocol::snapshot_envelope(request, StateGeneration(snapshot.generation), snapshot)
 }
 
 #[tauri::command]
@@ -7128,7 +8718,14 @@ fn workspace_start_snapshot(
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
 ) -> Result<ProtocolEnvelope<WorkspaceStartSnapshot>, protocol::StructuredCoreError> {
-    let correlation_id = request.correlation_id.clone();
+    let snapshot = build_workspace_start_snapshot(&core, request.correlation_id.clone())?;
+    protocol::workspace_start_snapshot(request, snapshot)
+}
+
+fn build_workspace_start_snapshot(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<WorkspaceStartSnapshot, ProtocolError> {
     let state = core::services::load_workspace_start_state(&core.database)
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     let recents = state
@@ -7144,15 +8741,201 @@ fn workspace_start_snapshot(
         })
         .collect::<Result<Vec<_>, ProtocolError>>()?;
 
-    protocol::workspace_start_snapshot(
-        request,
-        WorkspaceStartSnapshot {
-            protocol_version: protocol::PROTOCOL_VERSION,
-            generation: StateGeneration(state.generation),
-            authority: "rust-core".into(),
-            recents,
-        },
-    )
+    let (active_recovery_notice, active_generation) =
+        active_workspace_recovery_notice(core, correlation_id)?;
+    Ok(WorkspaceStartSnapshot {
+        protocol_version: protocol::PROTOCOL_VERSION,
+        generation: StateGeneration(state.generation.max(active_generation)),
+        authority: "rust-core".into(),
+        recents,
+        active_recovery_notice,
+    })
+}
+
+fn workspace_recovery_notice_snapshot(
+    notice: &core::workspace::RecoveryNotice,
+    workspace_name: &str,
+    correlation_id: protocol::CorrelationId,
+) -> Result<protocol::WorkspaceRecoveryNoticeSnapshot, ProtocolError> {
+    let workspace_id = WorkspaceId::new(notice.workspace_id.to_string())?;
+    Ok(protocol::WorkspaceRecoveryNoticeSnapshot {
+        recovery_id: format!(
+            "workspace-recovery-{}-{}-{}",
+            notice.workspace_id, notice.working_generation, notice.archive_generation
+        ),
+        correlation_id,
+        workspace_id,
+        workspace_name: workspace_name.to_owned(),
+        summary: "A newer validated working copy was recovered after interruption.".into(),
+        action: protocol::WorkspaceRecoveryAction::ReviewRecoveredWorkspaceBeforeSave,
+        working_generation: notice.working_generation,
+        archive_generation: notice.archive_generation,
+        must_notify_before_next_save: notice.must_notify_before_next_save,
+    })
+}
+
+fn active_workspace_recovery_notice(
+    core: &AppCoreState,
+    correlation_id: protocol::CorrelationId,
+) -> Result<(Option<protocol::WorkspaceRecoveryNoticeSnapshot>, u64), ProtocolError> {
+    let active = core
+        .active_workspace
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let Some(workspace) = active.as_ref() else {
+        if let Ok(mut review) = core.workspace_recovery_review.lock() {
+            *review = None;
+        }
+        return Ok((None, 0));
+    };
+    let Some(notice) = workspace.recovery_notice() else {
+        if let Ok(mut review) = core.workspace_recovery_review.lock() {
+            *review = None;
+        }
+        return Ok((None, workspace.manifest().generation));
+    };
+    let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let snapshot = workspace
+        .snapshot(query)
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let record = snapshot
+        .workspace
+        .as_ref()
+        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    let notice = workspace_recovery_notice_snapshot(notice, &record.display_name, correlation_id)?;
+    let identity = workspace_recovery_review_identity(&notice);
+    let acknowledged = core
+        .workspace_recovery_review
+        .lock()
+        .map(|mut review| {
+            if review.as_ref() == Some(&identity) {
+                true
+            } else {
+                *review = None;
+                false
+            }
+        })
+        .unwrap_or(false);
+    Ok((
+        (!acknowledged).then_some(notice),
+        snapshot.generation.max(identity.working_generation),
+    ))
+}
+
+#[tauri::command]
+fn workspace_recovery_acknowledge(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: WorkspaceRecoveryAcknowledgeInput,
+) -> Result<ProtocolEnvelope<WorkspaceStartSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Workspace recovery acknowledgement generation is stale",
+            true,
+        )
+        .into());
+    }
+    let mut snapshot = build_workspace_start_snapshot(&core, request.correlation_id.clone())?;
+    if snapshot.generation.0 != input.expected_generation {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Workspace recovery notice changed before acknowledgement",
+            true,
+        )
+        .into());
+    }
+    let Some(notice) = snapshot.active_recovery_notice.as_ref() else {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::NotFound,
+            "Workspace recovery notice is unavailable",
+            false,
+        )
+        .into());
+    };
+    let identity = WorkspaceRecoveryReviewIdentity {
+        recovery_id: input.recovery_id,
+        workspace_id: input.workspace_id,
+        working_generation: input.working_generation,
+        archive_generation: input.archive_generation,
+    };
+    let expected = workspace_recovery_review_identity(notice);
+    if identity != expected {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Workspace recovery acknowledgement identity is stale",
+            true,
+        )
+        .into());
+    }
+    *core
+        .workspace_recovery_review
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))? = Some(identity);
+    snapshot.active_recovery_notice = None;
+    protocol::workspace_start_snapshot(request, snapshot)
+}
+
+#[cfg(test)]
+mod workspace_recovery_review_tests {
+    use super::*;
+
+    fn notice() -> protocol::WorkspaceRecoveryNoticeSnapshot {
+        protocol::WorkspaceRecoveryNoticeSnapshot {
+            recovery_id: "workspace-recovery-workspace-7-6".into(),
+            correlation_id: protocol::CorrelationId::new("test:recovery").unwrap(),
+            workspace_id: WorkspaceId::new("workspace").unwrap(),
+            workspace_name: "Workspace".into(),
+            summary: "Recovered working copy requires review.".into(),
+            action: protocol::WorkspaceRecoveryAction::ReviewRecoveredWorkspaceBeforeSave,
+            working_generation: 7,
+            archive_generation: 6,
+            must_notify_before_next_save: true,
+        }
+    }
+
+    #[test]
+    fn recovery_review_identity_is_exact_and_process_local() {
+        let notice = notice();
+        let reviewed = workspace_recovery_review_identity(&notice);
+        assert_eq!(reviewed.recovery_id, notice.recovery_id);
+        assert_eq!(reviewed.workspace_id, notice.workspace_id);
+        assert_eq!(reviewed.working_generation, 7);
+        assert_eq!(reviewed.archive_generation, 6);
+
+        let mut changed_notice = notice;
+        changed_notice.working_generation += 1;
+        assert_ne!(
+            reviewed,
+            workspace_recovery_review_identity(&changed_notice)
+        );
+    }
+
+    #[test]
+    fn acknowledgement_input_rejects_any_stale_notice_identity() {
+        let notice = notice();
+        let expected = workspace_recovery_review_identity(&notice);
+        let input = WorkspaceRecoveryAcknowledgeInput {
+            expected_generation: 7,
+            recovery_id: notice.recovery_id,
+            workspace_id: notice.workspace_id,
+            working_generation: 7,
+            archive_generation: 5,
+        };
+        let actual = WorkspaceRecoveryReviewIdentity {
+            recovery_id: input.recovery_id,
+            workspace_id: input.workspace_id,
+            working_generation: input.working_generation,
+            archive_generation: input.archive_generation,
+        };
+        assert_ne!(actual, expected);
+    }
 }
 
 fn require_workspace_start_generation(
@@ -7256,7 +9039,13 @@ fn activate_workspace_from_start(
         .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
     let workspace_id = workspace_record.workspace_id.clone();
     let workspace_name = workspace_record.display_name.clone();
-    let recovered = workspace.recovery_notice().is_some();
+    let recovery_notice = workspace
+        .recovery_notice()
+        .map(|notice| {
+            workspace_recovery_notice_snapshot(notice, &workspace_name, correlation_id.clone())
+        })
+        .transpose()?;
+    let recovered = recovery_notice.is_some();
     let database = Arc::clone(workspace.database_actor());
     let persisted = database
         .conversation_state()
@@ -7427,6 +9216,9 @@ fn activate_workspace_from_start(
 
     let generation = snapshot.generation.max(runtime_generation);
     *conversation = restored_conversation;
+    if let Ok(mut review) = core.workspace_recovery_review.lock() {
+        *review = None;
+    }
     *active = Some(workspace);
     drop(conversation);
     drop(active);
@@ -7436,6 +9228,7 @@ fn activate_workspace_from_start(
             workspace_id,
             workspace_name,
             recovered,
+            recovery_notice,
         },
         generation,
     ))
@@ -23851,6 +25644,88 @@ fn runtime_core_snapshot(
     protocol::snapshot_envelope(request, generation, payload)
 }
 
+fn runtime_crash_loop_review_boundary_error(
+    error: RuntimeApplicationError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    let (code, message, retryable) = match error {
+        RuntimeApplicationError::Generation { .. }
+        | RuntimeApplicationError::Coordinator(CoordinatorError::Supervisor(
+            runtime::supervisor::SupervisorError::StaleGeneration,
+        )) => (
+            ProtocolErrorCode::StaleGeneration,
+            "Runtime recovery state changed before the operation completed",
+            true,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Supervisor(
+            runtime::supervisor::SupervisorError::NotFound,
+        )) => (
+            ProtocolErrorCode::NotFound,
+            "The runtime is unavailable",
+            false,
+        ),
+        RuntimeApplicationError::Coordinator(CoordinatorError::Supervisor(
+            runtime::supervisor::SupervisorError::RecoveryUnavailable,
+        )) => (
+            ProtocolErrorCode::Conflict,
+            "The runtime no longer requires crash-loop review",
+            true,
+        ),
+        _ => (
+            ProtocolErrorCode::Unavailable,
+            "Runtime recovery state is temporarily unavailable",
+            true,
+        ),
+    };
+    platform_boundary_error(correlation_id, code, message, retryable)
+}
+
+#[tauri::command]
+fn runtime_review_crash_loop(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: RuntimeCrashLoopReviewInput,
+) -> Result<ProtocolEnvelope<RuntimeCrashLoopReview>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    if request.expected_generation.0 != input.expected_coordinator_generation
+        || input.process_generation == 0
+        || RuntimeId::new(input.runtime_id.clone()).is_err()
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id.clone(),
+            ProtocolErrorCode::InvalidPayload,
+            "The runtime crash-loop review request is invalid",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let operation = core
+        .runtime
+        .review_runtime_crash_loop(
+            input.expected_coordinator_generation,
+            &input.runtime_id,
+            input.process_generation,
+            now_ms,
+        )
+        .map_err(|error| {
+            runtime_crash_loop_review_boundary_error(error, request.correlation_id.clone())
+        })?;
+    let coordinator_generation = operation.coordinator_generation;
+    protocol::snapshot_envelope(
+        request,
+        StateGeneration(coordinator_generation),
+        RuntimeCrashLoopReview {
+            authority: "rust-core",
+            runtime_id: input.runtime_id,
+            process_generation: input.process_generation,
+            coordinator_generation,
+        },
+    )
+    .map_err(Into::into)
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[tauri::command]
 fn runtime_production_activate(
@@ -25145,303 +27020,484 @@ pub fn run() {
             )
             .map_err(|error| std::io::Error::other(error.to_string()))?;
             let platform_snapshot = platform.initial_snapshot(initial_theme);
-            let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
-            let credential_service = CredentialServiceState::initialize(&c4os_home)
+            app.manage(BootstrapState {
+                platform_snapshot: platform_snapshot.clone(),
+                startup_recovery: Mutex::new(StartupRecoveryController::new()),
+                recovery_location: Mutex::new(None),
+                validated_migration_backup: Mutex::new(None),
+            });
+            let startup_boundary = Cell::new(StartupRecoveryBoundary::Configuration);
+            let initialization: Result<(), Box<dyn std::error::Error>> = (|| {
+                let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
+                let credential_service = CredentialServiceState::initialize(&c4os_home)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                let credential_vault = credential_service.vault();
+                let credential_protection = credential_service.protection();
+                let credential_fallback_required = credential_service.requires_explicit_fallback();
+                let application_resource_dir = app.path().resource_dir()?;
+                let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
+                startup_boundary.set(StartupRecoveryBoundary::Database);
+                let (database, migration_report) = core::database::DatabaseActor::start(
+                    core::database::DatabaseDescriptor::app(&c4os_home),
+                )?;
+                let recovery_authority = RecoveryDirectoryAuthority::new(&c4os_home)?;
+                if let Ok(mut recovery_location) =
+                    app.state::<BootstrapState>().recovery_location.lock()
+                {
+                    *recovery_location = Some(recovery_authority);
+                }
+                if let Some(validated_backup) = migration_report.validated_backup
+                    && let Ok(mut backup) = app
+                        .state::<BootstrapState>()
+                        .validated_migration_backup
+                        .lock()
+                {
+                    *backup = Some(validated_backup);
+                }
+                let database = Arc::new(database);
+                startup_boundary.set(StartupRecoveryBoundary::Configuration);
+                let configuration = core::services::ManagedAppConfiguration::start(
+                    Arc::clone(&database),
+                    home_layout.clone(),
+                    core::configuration::ManagedCeilings::default(),
+                    core::configuration::SecurityConstraints::default(),
+                )?;
+                startup_boundary.set(StartupRecoveryBoundary::BrowserRegistry);
+                let browser_profiles = browser::profile::BrowserProfileRegistry::load(
+                    home_layout.browser_profile_registry(),
+                )
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-            let credential_vault = credential_service.vault();
-            let credential_protection = credential_service.protection();
-            let credential_fallback_required = credential_service.requires_explicit_fallback();
-            let application_resource_dir = app.path().resource_dir()?;
-            let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
-            let (database, _) = core::database::DatabaseActor::start(
-                core::database::DatabaseDescriptor::app(&c4os_home),
-            )?;
-            let database = Arc::new(database);
-            let configuration = core::services::ManagedAppConfiguration::start(
-                Arc::clone(&database),
-                home_layout.clone(),
-                core::configuration::ManagedCeilings::default(),
-                core::configuration::SecurityConstraints::default(),
-            )?;
-            let browser_profiles = browser::profile::BrowserProfileRegistry::load(
-                home_layout.browser_profile_registry(),
-            )
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-            let pending_browser_profile_clears = browser_profiles
-                .snapshot()
-                .profiles
-                .into_iter()
-                .filter_map(|profile| {
-                    let browser::profile::PersistentProfileLifecycle::ClearPending {
-                        operation_id,
-                        ..
-                    } = profile.lifecycle
-                    else {
-                        return None;
-                    };
-                    Some((profile.profile_id, operation_id))
-                })
-                .collect::<Vec<_>>();
-            let now_ms = current_time_ms()?;
-            let initial_configuration = configuration.snapshot()?.configuration;
-            let initial_policy_preset =
-                runtime_approval_preset(initial_configuration.default_approval_preset);
-            let preferred_runtime = initial_configuration.default_runtime.clone();
-            let extensions = extension::service::ExtensionService::restore(
-                Arc::clone(&database),
-                &c4os_home,
-                now_ms,
-            )
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-            let active_workspace = core::services::restore_active_workspace(
-                &home_layout,
-                configuration
-                    .snapshot()?
-                    .configuration
-                    .restore_last_workspace,
-                env!("CARGO_PKG_VERSION"),
-                core::workspace::ArchiveLimits::default(),
-                core::workspace::WorkspaceLockOwner {
-                    process_id: std::process::id(),
-                    app_instance_id: Uuid::new_v4(),
-                    acquired_unix_ms: now_ms,
-                    label: "c4os-production".into(),
-                },
-            )?;
-            let runtime = Arc::new(RuntimeApplicationService::restore_with_initial_policy(
-                Arc::clone(&database),
-                now_ms,
-                Some(initial_policy_preset),
-            )?);
-            let unavailable_provider_credentials = runtime
-                .snapshot(now_ms)?
-                .providers
-                .providers
-                .into_iter()
-                .filter_map(|record| record.profile.credential_reference)
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(|reference| {
-                    let available = credential_vault
-                        .as_ref()
-                        .map(|vault| vault.contains(&reference))
-                        .transpose()
-                        .map_err(|error| std::io::Error::other(error.to_string()))?
-                        .unwrap_or(false);
-                    Ok::<_, std::io::Error>((!available).then_some(reference))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            for reference in unavailable_provider_credentials {
-                runtime.invalidate_provider_credential_reference(&reference, now_ms)?;
-            }
-            let provider_credential_observer = credential_vault
-                .as_ref()
-                .map(|vault| {
-                    let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
-                        Arc::new(ProductionProviderCredentialObserver {
-                            runtime: Arc::downgrade(&runtime),
-                        });
-                    vault
-                        .register_mutation_observer(Arc::clone(&observer))
-                        .map_err(|error| std::io::Error::other(error.to_string()))?;
-                    Ok::<_, std::io::Error>(observer)
-                })
-                .transpose()?;
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let runtime_resource_dir = application_resource_dir.clone();
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let hook_supervisor = Some(initialize_extension_hook_supervisor(
-                &c4os_home,
-                &runtime_resource_dir,
-            )?);
-            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-            let hook_supervisor = None;
-            if let Some(workspace) = &active_workspace {
-                runtime.bind_workspace(Arc::clone(workspace.database_actor()))?;
-            } else {
-                runtime.clear_runtime_installations_without_workspace(now_ms)?;
-            }
-            let conversation = if let Some(workspace) = &active_workspace {
-                let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)?;
-                let snapshot = workspace.snapshot(query)?;
-                let persisted = workspace.database_actor().conversation_state()?;
-                ConversationApplicationState::restore(Some(&snapshot), persisted.as_ref())
-            } else {
-                ConversationApplicationState::default()
-            };
-            let configuration = Arc::new(Mutex::new(configuration));
-            let active_workspace = Arc::new(Mutex::new(active_workspace));
-            let conversation = Arc::new(Mutex::new(conversation));
-            let app_policy_runtime = Arc::downgrade(&runtime);
-            let app_policy_workspace = Arc::clone(&active_workspace);
-            let app_policy_conversation = Arc::clone(&conversation);
-            configuration
-                .lock()
-                .map_err(|_| std::io::Error::other("app configuration is unavailable"))?
-                .set_activation_observer(
-                    runtime.policy_transition_gate(),
-                    Arc::new(move |app_configuration| {
-                        let runtime = app_policy_runtime.upgrade().ok_or(())?;
-                        let effective = resolve_active_configuration_snapshot(
-                            app_configuration,
-                            &app_policy_workspace,
-                            &app_policy_conversation,
-                        )?;
-                        let now_ms = current_time_ms().map_err(|_| ())?;
-                        runtime
-                            .reconcile_effective_configuration_policy(
-                                effective.configuration.as_ref(),
-                                now_ms,
-                            )
-                            .map_err(|_| ())
-                    }),
-                )?;
-            if let Some(workspace) = active_workspace
-                .lock()
-                .map_err(|_| std::io::Error::other("active Workspace is unavailable"))?
-                .as_ref()
-            {
-                install_workspace_configuration_activation_observer(
-                    workspace,
-                    Arc::clone(&configuration),
-                    Arc::clone(&active_workspace),
-                    Arc::clone(&conversation),
-                    &runtime,
-                )?;
-            }
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let mcp_sampling_broker = Arc::new(
-                mcp::production_sampling::ProductionMcpSamplingBroker::new(Arc::clone(&runtime)),
-            );
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let mcp_sampling_approvals = mcp_sampling_broker.approvals();
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let mcp_sampling_parents = mcp_sampling_broker.parents();
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let mcp_transport_factory = Arc::new(
-                mcp::transport::RmcpTransportFactory::with_sampling(mcp_sampling_broker),
-            );
-            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-            let mcp_transport_factory = Arc::new(mcp::transport::RmcpTransportFactory::default());
-            let mcp = Arc::new(tokio::sync::Mutex::new(
-                ProductionMcpService::restore(
-                    Arc::new(mcp::database::DatabaseMcpRepository::new(
-                        Arc::clone(&database),
-                        credential_vault.clone(),
-                    )),
-                    Arc::new(
-                        mcp::authority::ProductionMcpAuthority::new(
-                            c4os_home.clone(),
-                            credential_vault.clone(),
-                            Arc::clone(&active_workspace),
-                            Arc::clone(&runtime),
-                        )
-                        .map_err(|error| std::io::Error::other(error.to_string()))?,
-                    ),
-                    mcp_transport_factory,
+                let pending_browser_profile_clears = browser_profiles
+                    .snapshot()
+                    .profiles
+                    .into_iter()
+                    .filter_map(|profile| {
+                        let browser::profile::PersistentProfileLifecycle::ClearPending {
+                            operation_id,
+                            ..
+                        } = profile.lifecycle
+                        else {
+                            return None;
+                        };
+                        Some((profile.profile_id, operation_id))
+                    })
+                    .collect::<Vec<_>>();
+                let now_ms = current_time_ms()?;
+                let initial_configuration = configuration.snapshot()?.configuration;
+                let initial_policy_preset =
+                    runtime_approval_preset(initial_configuration.default_approval_preset);
+                let preferred_runtime = initial_configuration.default_runtime.clone();
+                startup_boundary.set(StartupRecoveryBoundary::Extension);
+                let extensions = extension::service::ExtensionService::restore(
+                    Arc::clone(&database),
+                    &c4os_home,
                     now_ms,
                 )
-                .map_err(|error| std::io::Error::other(error.to_string()))?,
-            ));
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let mcp_cancellations = ProductionMcpCancellationRegistry::default();
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            if let Ok(service) = mcp.try_lock() {
-                mcp_cancellations.refresh_credential_bindings(&service.snapshot());
-            }
-            let mcp_credential_observer = credential_vault
-                .as_ref()
-                .map(|vault| {
-                    let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
-                        Arc::new(ProductionMcpCredentialObserver {
-                            service: Arc::downgrade(&mcp),
-                            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                            cancellations: mcp_cancellations.clone(),
-                        });
-                    vault
-                        .register_mutation_observer(Arc::clone(&observer))
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                startup_boundary.set(StartupRecoveryBoundary::Workspace);
+                let active_workspace = core::services::restore_active_workspace(
+                    &home_layout,
+                    configuration
+                        .snapshot()?
+                        .configuration
+                        .restore_last_workspace,
+                    env!("CARGO_PKG_VERSION"),
+                    core::workspace::ArchiveLimits::default(),
+                    core::workspace::WorkspaceLockOwner {
+                        process_id: std::process::id(),
+                        app_instance_id: Uuid::new_v4(),
+                        acquired_unix_ms: now_ms,
+                        label: "c4os-production".into(),
+                    },
+                )?;
+                startup_boundary.set(StartupRecoveryBoundary::Runtime);
+                let runtime = Arc::new(RuntimeApplicationService::restore_with_initial_policy(
+                    Arc::clone(&database),
+                    now_ms,
+                    Some(initial_policy_preset),
+                )?);
+                startup_boundary.set(StartupRecoveryBoundary::Update);
+                let mut updates = update::UpdateCoordinator::restore(Arc::clone(&database), now_ms)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                updates
+                    .apply_diagnostic_preferences(
+                        initial_configuration.diagnostics_retention_days,
+                        &initial_configuration.diagnostic_redaction_patterns,
+                        now_ms,
+                    )
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                updates
+                    .reconcile_authoritative_component(
+                        update::UpdateChannel::Application,
+                        "c4os",
+                        env!("CARGO_PKG_VERSION"),
+                        "startup:update",
+                        now_ms,
+                    )
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                for (component_id, version) in [
+                    ("opencode", runtime::supervisor::OPENCODE_NATIVE_VERSION),
+                    ("pi", runtime::supervisor::PI_NATIVE_VERSION),
+                ] {
+                    updates
+                        .reconcile_authoritative_component(
+                            update::UpdateChannel::Runtime,
+                            component_id,
+                            version,
+                            "startup:update",
+                            now_ms,
+                        )
                         .map_err(|error| std::io::Error::other(error.to_string()))?;
-                    Ok::<_, std::io::Error>(observer)
-                })
-                .transpose()?;
-            let artifact_operation = Arc::new(Mutex::new(()));
-            let artifact = Arc::new(Mutex::new(ArtifactApplicationState::default()));
-            let terminal = Arc::new(Mutex::new(TerminalSupervisor::new()));
-            let browser_events = Arc::new(Mutex::new(
-                browser::native::NativeBrowserEventQueue::default(),
-            ));
-            let terminal_reconciliation = start_terminal_reconciliation_driver(
-                Arc::clone(&active_workspace),
-                Arc::clone(&artifact_operation),
-                Arc::clone(&artifact),
-                Arc::clone(&terminal),
-                Arc::clone(&runtime),
-            )?;
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let runtime_production = Arc::new(ManagedProductionRuntime::default());
-            app.manage(AppCoreState {
-                database,
-                c4os_home: c4os_home.clone(),
-                bundled_skill_root: application_resource_dir.join("skills"),
-                mcp: Arc::clone(&mcp),
-                credential_vault: credential_vault.clone(),
-                credential_protection,
-                credential_fallback_required: AtomicBool::new(credential_fallback_required),
-                _mcp_credential_observer: mcp_credential_observer,
-                _provider_credential_observer: provider_credential_observer,
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                mcp_cancellations: mcp_cancellations.clone(),
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                mcp_sampling_approvals: mcp_sampling_approvals.clone(),
-                extensions: Mutex::new(extensions),
-                hook_supervisor: Mutex::new(hook_supervisor),
-                configuration: Arc::clone(&configuration),
-                active_workspace: Arc::clone(&active_workspace),
-                conversation_operation: Mutex::new(()),
-                artifact_operation,
-                conversation: Arc::clone(&conversation),
-                artifact,
-                terminal,
-                browser_profiles: Mutex::new(browser_profiles),
-                browser_events: Arc::clone(&browser_events),
-                _terminal_reconciliation: terminal_reconciliation,
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                runtime_production: Arc::clone(&runtime_production),
-                runtime: Arc::clone(&runtime),
-                platform,
-                platform_snapshot,
-                picker_grants: Mutex::new(PickerGrantRegistry::default()),
-                pending_workspace_clones: Mutex::new(BTreeMap::new()),
-                pending_provider_operations: Mutex::new(BTreeMap::new()),
-                conversation_drop: Mutex::new(NativeConversationDropState::default()),
-                conversation_branch: Mutex::new(NativeConversationBranchState::default()),
-            });
-            for (profile_id, operation_id) in pending_browser_profile_clears {
-                browser::native::dispatch_clear_profile(
-                    app.handle(),
-                    Arc::clone(&browser_events),
-                    profile_id,
-                    operation_id,
+                }
+                discover_local_development_updates(
+                    &mut updates,
+                    &c4os_home,
+                    &initial_configuration.updates,
+                    now_ms,
                 )
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
+                synchronize_plugin_update_truth(
+                    &mut updates,
+                    &extensions.snapshot(),
+                    update_policy_allows(
+                        initial_configuration
+                            .updates
+                            .get(update::UpdateChannel::Plugin.configuration_key())
+                            .copied(),
+                        UpdatePolicyOperation::Discovery,
+                    ),
+                    "startup:update",
+                    now_ms,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                startup_boundary.set(StartupRecoveryBoundary::Runtime);
+                let unavailable_provider_credentials = runtime
+                    .snapshot(now_ms)?
+                    .providers
+                    .providers
+                    .into_iter()
+                    .filter_map(|record| record.profile.credential_reference)
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .map(|reference| {
+                        let available = credential_vault
+                            .as_ref()
+                            .map(|vault| vault.contains(&reference))
+                            .transpose()
+                            .map_err(|error| std::io::Error::other(error.to_string()))?
+                            .unwrap_or(false);
+                        Ok::<_, std::io::Error>((!available).then_some(reference))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
+                for reference in unavailable_provider_credentials {
+                    runtime.invalidate_provider_credential_reference(&reference, now_ms)?;
+                }
+                let provider_credential_observer = credential_vault
+                    .as_ref()
+                    .map(|vault| {
+                        let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
+                            Arc::new(ProductionProviderCredentialObserver {
+                                runtime: Arc::downgrade(&runtime),
+                            });
+                        vault
+                            .register_mutation_observer(Arc::clone(&observer))
+                            .map_err(|error| std::io::Error::other(error.to_string()))?;
+                        Ok::<_, std::io::Error>(observer)
+                    })
+                    .transpose()?;
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let runtime_resource_dir = application_resource_dir.clone();
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let hook_supervisor = Some(initialize_extension_hook_supervisor(
+                    &c4os_home,
+                    &runtime_resource_dir,
+                )?);
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let hook_supervisor = None;
+                if let Some(workspace) = &active_workspace {
+                    runtime.bind_workspace(Arc::clone(workspace.database_actor()))?;
+                } else {
+                    runtime.clear_runtime_installations_without_workspace(now_ms)?;
+                }
+                let conversation = if let Some(workspace) = &active_workspace {
+                    let query =
+                        core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)?;
+                    let snapshot = workspace.snapshot(query)?;
+                    let persisted = workspace.database_actor().conversation_state()?;
+                    ConversationApplicationState::restore(Some(&snapshot), persisted.as_ref())
+                } else {
+                    ConversationApplicationState::default()
+                };
+                let configuration = Arc::new(Mutex::new(configuration));
+                let active_workspace = Arc::new(Mutex::new(active_workspace));
+                let conversation = Arc::new(Mutex::new(conversation));
+                let app_policy_runtime = Arc::downgrade(&runtime);
+                let app_policy_workspace = Arc::clone(&active_workspace);
+                let app_policy_conversation = Arc::clone(&conversation);
+                configuration
+                    .lock()
+                    .map_err(|_| std::io::Error::other("app configuration is unavailable"))?
+                    .set_activation_observer(
+                        runtime.policy_transition_gate(),
+                        Arc::new(move |app_configuration| {
+                            let runtime = app_policy_runtime.upgrade().ok_or(())?;
+                            let effective = resolve_active_configuration_snapshot(
+                                app_configuration,
+                                &app_policy_workspace,
+                                &app_policy_conversation,
+                            )?;
+                            let now_ms = current_time_ms().map_err(|_| ())?;
+                            runtime
+                                .reconcile_effective_configuration_policy(
+                                    effective.configuration.as_ref(),
+                                    now_ms,
+                                )
+                                .map_err(|_| ())
+                        }),
+                    )?;
+                if let Some(workspace) = active_workspace
+                    .lock()
+                    .map_err(|_| std::io::Error::other("active Workspace is unavailable"))?
+                    .as_ref()
+                {
+                    install_workspace_configuration_activation_observer(
+                        workspace,
+                        Arc::clone(&configuration),
+                        Arc::clone(&active_workspace),
+                        Arc::clone(&conversation),
+                        &runtime,
+                    )?;
+                }
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_sampling_broker =
+                    Arc::new(mcp::production_sampling::ProductionMcpSamplingBroker::new(
+                        Arc::clone(&runtime),
+                    ));
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_sampling_approvals = mcp_sampling_broker.approvals();
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_sampling_parents = mcp_sampling_broker.parents();
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_transport_factory = Arc::new(
+                    mcp::transport::RmcpTransportFactory::with_sampling(mcp_sampling_broker),
+                );
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let mcp_transport_factory =
+                    Arc::new(mcp::transport::RmcpTransportFactory::default());
+                startup_boundary.set(StartupRecoveryBoundary::Mcp);
+                let mcp = Arc::new(tokio::sync::Mutex::new(
+                    ProductionMcpService::restore(
+                        Arc::new(mcp::database::DatabaseMcpRepository::new(
+                            Arc::clone(&database),
+                            credential_vault.clone(),
+                        )),
+                        Arc::new(
+                            mcp::authority::ProductionMcpAuthority::new(
+                                c4os_home.clone(),
+                                credential_vault.clone(),
+                                Arc::clone(&active_workspace),
+                                Arc::clone(&runtime),
+                            )
+                            .map_err(|error| std::io::Error::other(error.to_string()))?,
+                        ),
+                        mcp_transport_factory,
+                        now_ms,
+                    )
+                    .map_err(|error| std::io::Error::other(error.to_string()))?,
+                ));
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let mcp_cancellations = ProductionMcpCancellationRegistry::default();
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                if let Ok(service) = mcp.try_lock() {
+                    mcp_cancellations.refresh_credential_bindings(&service.snapshot());
+                }
+                let mcp_credential_observer = credential_vault
+                    .as_ref()
+                    .map(|vault| {
+                        let observer: Arc<dyn security::credentials::CredentialMutationObserver> =
+                            Arc::new(ProductionMcpCredentialObserver {
+                                service: Arc::downgrade(&mcp),
+                                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                                cancellations: mcp_cancellations.clone(),
+                            });
+                        vault
+                            .register_mutation_observer(Arc::clone(&observer))
+                            .map_err(|error| std::io::Error::other(error.to_string()))?;
+                        Ok::<_, std::io::Error>(observer)
+                    })
+                    .transpose()?;
+                for (category, boundary, message) in [
+                    (
+                        update::DiagnosticCategory::Persistence,
+                        "database",
+                        "Application database authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Configuration,
+                        "configuration",
+                        "Configuration last-known-good authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Runtime,
+                        "runtime-provider",
+                        "Runtime and provider durable authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Plugin,
+                        "extension",
+                        "Extension immutable-store authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Runtime,
+                        "mcp",
+                        "MCP durable authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Persistence,
+                        "browser-terminal",
+                        "Browser and Terminal recovery authority restored successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Security,
+                        "credential",
+                        "Credential protection authority initialized successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Persistence,
+                        "workspace",
+                        "Workspace recovery authority reconciled successfully",
+                    ),
+                    (
+                        update::DiagnosticCategory::Recovery,
+                        "startup",
+                        "Startup recovery authority completed successfully",
+                    ),
+                ] {
+                    updates
+                        .ingest_diagnostic(
+                            category,
+                            update::DiagnosticSeverity::Info,
+                            boundary,
+                            message,
+                            None,
+                            "startup:diagnostics",
+                            now_ms,
+                        )
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
+                }
+                let artifact_operation = Arc::new(Mutex::new(()));
+                let artifact = Arc::new(Mutex::new(ArtifactApplicationState::default()));
+                let terminal = Arc::new(Mutex::new(TerminalSupervisor::new()));
+                let browser_events = Arc::new(Mutex::new(
+                    browser::native::NativeBrowserEventQueue::default(),
+                ));
+                startup_boundary.set(StartupRecoveryBoundary::Runtime);
+                let terminal_reconciliation = start_terminal_reconciliation_driver(
+                    Arc::clone(&active_workspace),
+                    Arc::clone(&artifact_operation),
+                    Arc::clone(&artifact),
+                    Arc::clone(&terminal),
+                    Arc::clone(&runtime),
+                )?;
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let runtime_production = Arc::new(ManagedProductionRuntime::default());
+                startup_boundary.set(StartupRecoveryBoundary::BrowserRegistry);
+                for (profile_id, operation_id) in pending_browser_profile_clears {
+                    browser::native::dispatch_clear_profile(
+                        app.handle(),
+                        Arc::clone(&browser_events),
+                        profile_id,
+                        operation_id,
+                    )
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                }
+                startup_boundary.set(StartupRecoveryBoundary::Runtime);
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                start_runtime_production_initialization(
+                    app.handle().clone(),
+                    runtime_resource_dir,
+                    c4os_home.clone(),
+                    credential_vault.clone(),
+                    Arc::clone(&active_workspace),
+                    Arc::clone(&runtime),
+                    Arc::clone(&mcp),
+                    mcp_cancellations.clone(),
+                    mcp_sampling_parents.clone(),
+                    Arc::clone(&runtime_production),
+                    preferred_runtime,
+                )?;
+                app.manage(AppCoreState {
+                    database,
+                    c4os_home: c4os_home.clone(),
+                    bundled_skill_root: application_resource_dir.join("skills"),
+                    mcp: Arc::clone(&mcp),
+                    credential_vault: credential_vault.clone(),
+                    credential_protection,
+                    credential_fallback_required: AtomicBool::new(credential_fallback_required),
+                    _mcp_credential_observer: mcp_credential_observer,
+                    _provider_credential_observer: provider_credential_observer,
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    mcp_cancellations: mcp_cancellations.clone(),
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    mcp_sampling_approvals: mcp_sampling_approvals.clone(),
+                    extensions: Mutex::new(extensions),
+                    updates: Mutex::new(updates),
+                    hook_supervisor: Mutex::new(hook_supervisor),
+                    configuration: Arc::clone(&configuration),
+                    active_workspace: Arc::clone(&active_workspace),
+                    conversation_operation: Mutex::new(()),
+                    artifact_operation,
+                    conversation: Arc::clone(&conversation),
+                    artifact,
+                    terminal,
+                    browser_profiles: Mutex::new(browser_profiles),
+                    browser_events: Arc::clone(&browser_events),
+                    _terminal_reconciliation: terminal_reconciliation,
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    runtime_production: Arc::clone(&runtime_production),
+                    runtime: Arc::clone(&runtime),
+                    platform,
+                    workspace_recovery_review: Mutex::new(None),
+                    picker_grants: Mutex::new(PickerGrantRegistry::default()),
+                    pending_workspace_clones: Mutex::new(BTreeMap::new()),
+                    pending_provider_operations: Mutex::new(BTreeMap::new()),
+                    conversation_drop: Mutex::new(NativeConversationDropState::default()),
+                    conversation_branch: Mutex::new(NativeConversationBranchState::default()),
+                });
+                Ok(())
+            })();
+            if initialization.is_err() {
+                let failed_at_ms = current_time_ms().unwrap_or(1);
+                let failed_boundary = startup_boundary.get();
+                if let Ok(mut recovery) = app.state::<BootstrapState>().startup_recovery.lock() {
+                    let _ = recovery.report_failure(StartupRecoveryFailureInput {
+                        boundary: failed_boundary,
+                        correlation_id: format!("startup:{failed_at_ms}"),
+                        diagnostic_code: "startup-boundary-unavailable".into(),
+                        message: "A required startup boundary is unavailable.".into(),
+                        failed_at_ms,
+                        validated_backup_available: validated_backup_available_for_boundary(
+                            failed_boundary,
+                            app.state::<BootstrapState>()
+                                .validated_migration_backup
+                                .lock()
+                                .is_ok_and(|backup| backup.is_some()),
+                        ),
+                        recovery_location_available: app
+                            .state::<BootstrapState>()
+                            .recovery_location
+                            .lock()
+                            .is_ok_and(|location| {
+                                location.as_ref().is_some_and(|authority| {
+                                    authority.validated_directory().is_ok()
+                                })
+                            }),
+                    });
+                }
             }
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            start_runtime_production_initialization(
-                app.handle().clone(),
-                runtime_resource_dir,
-                c4os_home,
-                credential_vault,
-                active_workspace,
-                runtime,
-                mcp,
-                mcp_cancellations,
-                mcp_sampling_parents,
-                runtime_production,
-                preferred_runtime,
-            )?;
             let fallback_app = app.handle().clone();
             thread::Builder::new()
                 .name("c4os-initial-reveal-fallback".into())
@@ -25463,6 +27519,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             platform_snapshot,
             platform_reveal_main,
+            startup_recovery_snapshot,
+            startup_recovery_action,
+            update_snapshot,
+            update_stage_local,
+            update_activate,
+            update_rollback,
+            update_revoke,
+            update_recover,
+            diagnostics_snapshot,
+            diagnostics_export,
             platform_pick,
             extension_snapshot,
             extension_add_marketplace,
@@ -25494,6 +27560,7 @@ pub fn run() {
             mcp_delete_server,
             foundation_snapshot,
             workspace_start_snapshot,
+            workspace_recovery_acknowledge,
             workspace_start_open_folder,
             workspace_start_open_archive,
             workspace_start_open_recent,
@@ -25564,6 +27631,7 @@ pub fn run() {
             policy_save,
             policy_revoke_exception,
             runtime_core_snapshot,
+            runtime_review_crash_loop,
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             runtime_production_activate,
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

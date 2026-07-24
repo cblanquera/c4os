@@ -4,9 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use super::configuration::ConfigurationDiagnosticCode;
 use super::configuration::{
     ConfigurationError, ConfigurationScope, ConfigurationService, ConfigurationUpdate,
     ConfigurationWatcherNotice, ConfigurationWatcherPlan, EffectiveConfigurationSnapshot,
@@ -58,7 +62,7 @@ pub struct ManagedAppConfiguration {
     home: C4osHomeLayout,
     service: Arc<Mutex<ConfigurationService>>,
     _watcher: ParentDirectoryConfigurationWatcher,
-    last_error: Arc<Mutex<Option<&'static str>>>,
+    errors: Arc<Mutex<AppConfigurationErrorState>>,
     activation_coordinator: Arc<Mutex<Option<AppConfigurationActivationCoordinator>>>,
 }
 
@@ -66,6 +70,41 @@ pub struct ManagedAppConfiguration {
 struct AppConfigurationActivationCoordinator {
     gate: Arc<Mutex<()>>,
     observer: Arc<dyn Fn(Option<LastKnownGoodDocument>) -> Result<(), ()> + Send + Sync>,
+}
+
+#[derive(Default)]
+struct AppConfigurationErrorState {
+    message: Option<&'static str>,
+    recovery_required: bool,
+}
+
+impl AppConfigurationErrorState {
+    fn projected(&self) -> Option<&'static str> {
+        self.message
+    }
+
+    fn set(&mut self, message: &'static str) {
+        if !self.recovery_required {
+            self.message = Some(message);
+        }
+    }
+
+    fn set_policy_reconciled(&mut self, message: &'static str) {
+        self.message = Some(message);
+        self.recovery_required = false;
+    }
+
+    fn set_recovery_required(&mut self, message: &'static str) {
+        self.message = Some(message);
+        self.recovery_required = true;
+    }
+
+    fn clear(&mut self, policy_reconciled: bool) {
+        if policy_reconciled || !self.recovery_required {
+            self.message = None;
+            self.recovery_required = false;
+        }
+    }
 }
 
 impl ManagedAppConfiguration {
@@ -81,7 +120,7 @@ impl ManagedAppConfiguration {
             managed_ceilings,
             security_constraints,
         )?));
-        let last_error = Arc::new(Mutex::new(None));
+        let errors = Arc::new(Mutex::new(AppConfigurationErrorState::default()));
         let activation_coordinator =
             Arc::new(Mutex::new(None::<AppConfigurationActivationCoordinator>));
         let plan = ConfigurationWatcherPlan::new([WatchedConfiguration {
@@ -93,10 +132,11 @@ impl ManagedAppConfiguration {
         let callback_service = Arc::clone(&service);
         let callback_database = Arc::clone(&database);
         let callback_home = home.clone();
-        let callback_error = Arc::clone(&last_error);
+        let callback_error = Arc::clone(&errors);
         let callback_activation = Arc::clone(&activation_coordinator);
-        let watcher =
-            ParentDirectoryConfigurationWatcher::start(plan, move |notice| match notice {
+        let watcher = ParentDirectoryConfigurationWatcher::start(
+            plan,
+            move |notice| match notice {
                 ConfigurationWatcherNotice::Changed(targets) => {
                     for target in targets {
                         let activation = callback_activation
@@ -108,8 +148,7 @@ impl ManagedAppConfiguration {
                                 Ok(guard) => Some(guard),
                                 Err(_) => {
                                     if let Ok(mut error) = callback_error.lock() {
-                                        *error =
-                                            Some("configuration policy activation gate failed");
+                                        error.set("configuration policy activation gate failed");
                                     }
                                     continue;
                                 }
@@ -132,56 +171,66 @@ impl ManagedAppConfiguration {
                                 Ok((update, prior))
                             });
                         let mut observer_failed = false;
+                        let mut policy_reconciled = false;
                         if let Ok((ConfigurationUpdate::Activated { snapshot, record }, prior)) =
                             &result
                             && let Some(activation) = activation.as_ref()
-                            && (activation.observer)(Some(record.clone())).is_err()
                         {
-                            observer_failed = true;
-                            let rollback_text = prior
-                                .as_ref()
-                                .map(|record| record.canonical_toml.clone())
-                                .or_else(|| {
-                                    toml::to_string(
-                                        &super::configuration::ConfigurationDocument::default(),
-                                    )
-                                    .ok()
+                            if (activation.observer)(Some(record.clone())).is_err() {
+                                observer_failed = true;
+                                let rollback_text = prior
+                                    .as_ref()
+                                    .map(|record| record.canonical_toml.clone())
+                                    .or_else(|| {
+                                        toml::to_string(
+                                            &super::configuration::ConfigurationDocument::default(),
+                                        )
+                                        .ok()
+                                    });
+                                let compensated = rollback_text.is_some_and(|rollback_text| {
+                                    callback_service.lock().is_ok_and(|mut configuration| {
+                                        save_app_configuration(
+                                            &callback_database,
+                                            &callback_home,
+                                            &mut configuration,
+                                            &rollback_text,
+                                            snapshot.generation,
+                                            current_unix_seconds(),
+                                        )
+                                        .is_ok()
+                                    })
                                 });
-                            let compensated = rollback_text.is_some_and(|rollback_text| {
-                                callback_service.lock().is_ok_and(|mut configuration| {
-                                    save_app_configuration(
-                                        &callback_database,
-                                        &callback_home,
-                                        &mut configuration,
-                                        &rollback_text,
-                                        snapshot.generation,
-                                        current_unix_seconds(),
-                                    )
-                                    .is_ok()
-                                })
-                            });
-                            let policy_compensated =
-                                compensated && (activation.observer)(prior.clone()).is_ok();
-                            if let Ok(mut error) = callback_error.lock() {
-                                *error = Some(if policy_compensated {
-                                    "configuration policy activation failed and was rolled back"
-                                } else {
-                                    "configuration policy activation failed; recovery is required"
-                                });
+                                let policy_compensated =
+                                    compensated && (activation.observer)(prior.clone()).is_ok();
+                                if let Ok(mut error) = callback_error.lock() {
+                                    if policy_compensated {
+                                        error.set_policy_reconciled(
+                                            "configuration policy activation failed and was rolled back",
+                                        );
+                                    } else {
+                                        error.set_recovery_required(
+                                            "configuration policy activation failed; recovery is required",
+                                        );
+                                    }
+                                }
+                            } else {
+                                policy_reconciled = true;
                             }
                         }
                         if let Ok(mut error) = callback_error.lock() {
                             match &result {
-                                Err(_) => *error = Some("configuration watcher activation failed"),
+                                Err(_) => error.set("configuration watcher activation failed"),
                                 Ok((ConfigurationUpdate::Rejected { .. }, _)) => {
-                                    *error = Some("configuration watcher edit was rejected")
+                                    error.set("configuration watcher edit was rejected");
                                 }
                                 Ok((
                                     ConfigurationUpdate::Activated { .. }
                                     | ConfigurationUpdate::Unchanged { .. }
                                     | ConfigurationUpdate::DeduplicatedSelfWrite { .. },
                                     _,
-                                )) if !observer_failed => *error = None,
+                                )) if !observer_failed => {
+                                    error.clear(policy_reconciled);
+                                }
                                 Ok(_) => {}
                             }
                         }
@@ -189,10 +238,11 @@ impl ManagedAppConfiguration {
                 }
                 ConfigurationWatcherNotice::Error(_) => {
                     if let Ok(mut error) = callback_error.lock() {
-                        *error = Some("configuration watcher failed");
+                        error.set("configuration watcher failed");
                     }
                 }
-            })?;
+            },
+        )?;
 
         // Close the setup race between the initial stable read and watcher
         // registration. A self-write is deduplicated by the retained service.
@@ -213,7 +263,7 @@ impl ManagedAppConfiguration {
             home,
             service,
             _watcher: watcher,
-            last_error,
+            errors,
             activation_coordinator,
         })
     }
@@ -261,7 +311,10 @@ impl ManagedAppConfiguration {
     }
 
     pub fn last_error(&self) -> Option<&'static str> {
-        self.last_error.lock().ok().and_then(|error| *error)
+        self.errors
+            .lock()
+            .ok()
+            .and_then(|errors| errors.projected())
     }
 
     pub fn set_activation_observer(
@@ -280,8 +333,17 @@ impl ManagedAppConfiguration {
         let _guard = gate
             .lock()
             .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
-        observer(self.last_known_good()?)
-            .map_err(|_| ConfigurationPersistenceError::RecoveryRequired)?;
+        if observer(self.last_known_good()?).is_err() {
+            if let Ok(mut errors) = self.errors.lock() {
+                errors.set_recovery_required(
+                    "configuration policy activation failed; recovery is required",
+                );
+            }
+            return Err(ConfigurationPersistenceError::RecoveryRequired);
+        }
+        if let Ok(mut errors) = self.errors.lock() {
+            errors.clear(true);
+        }
         Ok(())
     }
 }
@@ -303,6 +365,115 @@ struct WorkspaceConfigurationCoordinatorState {
     global_generation: u64,
 }
 
+#[derive(Default)]
+struct WorkspaceConfigurationErrorState {
+    refresh_error: Option<&'static str>,
+    watcher_error: Option<&'static str>,
+    target_errors: BTreeMap<WatchedConfiguration, WorkspaceConfigurationTargetError>,
+}
+
+#[derive(Clone, Copy)]
+struct WorkspaceConfigurationTargetError {
+    message: &'static str,
+    recovery_required: bool,
+}
+
+impl WorkspaceConfigurationErrorState {
+    fn projected(&self) -> Option<&'static str> {
+        self.watcher_error.or(self.refresh_error).or_else(|| {
+            self.target_errors
+                .values()
+                .next()
+                .map(|error| error.message)
+        })
+    }
+
+    fn set_target(&mut self, target: WatchedConfiguration, error: &'static str) {
+        if self
+            .target_errors
+            .get(&target)
+            .is_some_and(|error| error.recovery_required)
+        {
+            return;
+        }
+        self.target_errors.insert(
+            target,
+            WorkspaceConfigurationTargetError {
+                message: error,
+                recovery_required: false,
+            },
+        );
+    }
+
+    fn set_target_policy_reconciled(&mut self, target: WatchedConfiguration, error: &'static str) {
+        self.target_errors.insert(
+            target,
+            WorkspaceConfigurationTargetError {
+                message: error,
+                recovery_required: false,
+            },
+        );
+    }
+
+    fn set_target_recovery_required(&mut self, target: WatchedConfiguration, error: &'static str) {
+        self.target_errors.insert(
+            target,
+            WorkspaceConfigurationTargetError {
+                message: error,
+                recovery_required: true,
+            },
+        );
+    }
+
+    fn clear_target(&mut self, target: &WatchedConfiguration, policy_reconciled: bool) {
+        if policy_reconciled
+            || self
+                .target_errors
+                .get(target)
+                .is_some_and(|error| !error.recovery_required)
+        {
+            self.target_errors.remove(target);
+        }
+    }
+}
+
+#[derive(Default)]
+struct WorkspaceConfigurationRefreshState {
+    epoch: u64,
+    pending_epoch: Option<u64>,
+    pending_reconciliation_targets: BTreeSet<WatchedConfiguration>,
+    worker_running: bool,
+}
+
+impl WorkspaceConfigurationRefreshState {
+    fn begin(&mut self) -> u64 {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.epoch = 1;
+        }
+        self.pending_epoch = Some(self.epoch);
+        self.epoch
+    }
+}
+
+fn settle_workspace_configuration_refresh_epoch(
+    state: &mut WorkspaceConfigurationRefreshState,
+    errors: &mut WorkspaceConfigurationErrorState,
+    epoch: u64,
+    succeeded: bool,
+) -> bool {
+    if state.pending_epoch != Some(epoch) {
+        return state.pending_epoch.is_some();
+    }
+    if succeeded && state.pending_reconciliation_targets.is_empty() {
+        state.pending_epoch = None;
+        errors.refresh_error = None;
+    } else {
+        errors.refresh_error = Some(WORKSPACE_CONFIGURATION_TARGET_REFRESH_FAILED);
+    }
+    state.pending_epoch.is_some()
+}
+
 /// Long-lived configuration authority retained by every writable Workspace.
 /// It serializes every scope identity through one generation allocator while
 /// watcher callbacks and UI saves publish to the same SQLite LKG store.
@@ -311,15 +482,109 @@ struct ManagedWorkspaceConfiguration {
     root: PathBuf,
     workspace_id: Uuid,
     state: Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
-    watcher: Mutex<ParentDirectoryConfigurationWatcher>,
-    last_error: Arc<Mutex<Option<&'static str>>>,
+    watcher: Arc<Mutex<ParentDirectoryConfigurationWatcher>>,
+    errors: Arc<Mutex<WorkspaceConfigurationErrorState>>,
     activation_coordinator: Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
+    refresh_state: Arc<Mutex<WorkspaceConfigurationRefreshState>>,
+    refresh_gate: Arc<Mutex<()>>,
+    refresh_retry_alive: Arc<AtomicBool>,
+    refresh_retry_workers: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
 struct WorkspaceConfigurationActivationCoordinator {
     gate: Arc<Mutex<()>>,
     observer: Arc<dyn Fn() -> Result<(), ()> + Send + Sync>,
+}
+
+#[derive(Clone)]
+struct WorkspaceConfigurationRefreshContext {
+    database: Arc<DatabaseActor>,
+    root: PathBuf,
+    workspace_id: Uuid,
+    state: Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
+    watcher: Arc<Mutex<ParentDirectoryConfigurationWatcher>>,
+    errors: Arc<Mutex<WorkspaceConfigurationErrorState>>,
+    activation_coordinator: Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
+    refresh_state: Arc<Mutex<WorkspaceConfigurationRefreshState>>,
+    refresh_gate: Arc<Mutex<()>>,
+}
+
+const WORKSPACE_CONFIGURATION_TARGET_REFRESH_FAILED: &str =
+    "Workspace configuration watcher target refresh failed";
+
+impl WorkspaceConfigurationRefreshContext {
+    fn refresh(&self) -> Result<Vec<WatchedConfiguration>, ConfigurationPersistenceError> {
+        refresh_workspace_configuration_targets(
+            &self.database,
+            &self.root,
+            self.workspace_id,
+            &self.state,
+            &self.watcher,
+        )
+    }
+
+    fn attempt(&self, epoch: u64) -> Option<bool> {
+        let _gate = self.refresh_gate.lock().ok()?;
+        if self
+            .refresh_state
+            .lock()
+            .ok()
+            .is_none_or(|state| state.pending_epoch != Some(epoch))
+        {
+            return None;
+        }
+        let added_targets = match self.refresh() {
+            Ok(targets) => targets,
+            Err(_) => return Some(false),
+        };
+        let reconciliation_targets = {
+            let mut refresh = self.refresh_state.lock().ok()?;
+            refresh.pending_reconciliation_targets.extend(added_targets);
+            if refresh.pending_epoch != Some(epoch) {
+                return None;
+            }
+            refresh
+                .pending_reconciliation_targets
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        for target in reconciliation_targets {
+            if reconcile_workspace_configuration_target(
+                &self.database,
+                &self.root,
+                self.workspace_id,
+                &self.state,
+                &self.errors,
+                &self.activation_coordinator,
+                target.clone(),
+            )
+            .is_err()
+            {
+                return Some(false);
+            }
+            let mut refresh = self.refresh_state.lock().ok()?;
+            refresh.pending_reconciliation_targets.remove(&target);
+            if refresh.pending_epoch != Some(epoch) {
+                return None;
+            }
+        }
+        Some(true)
+    }
+
+    fn settle(&self, epoch: u64, succeeded: bool) -> bool {
+        let Ok(mut state) = self.refresh_state.lock() else {
+            return false;
+        };
+        if state.pending_epoch != Some(epoch) {
+            return state.pending_epoch.is_some();
+        }
+        let Ok(mut errors) = self.errors.lock() else {
+            return false;
+        };
+        settle_workspace_configuration_refresh_epoch(&mut state, &mut errors, epoch, succeeded)
+    }
 }
 
 impl ManagedWorkspaceConfiguration {
@@ -337,7 +602,7 @@ impl ManagedWorkspaceConfiguration {
             &snapshot,
             &identities,
         )?));
-        let last_error = Arc::new(Mutex::new(None));
+        let errors = Arc::new(Mutex::new(WorkspaceConfigurationErrorState::default()));
         let activation_coordinator = Arc::new(Mutex::new(
             None::<WorkspaceConfigurationActivationCoordinator>,
         ));
@@ -346,7 +611,7 @@ impl ManagedWorkspaceConfiguration {
             root.clone(),
             workspace_id,
             Arc::clone(&state),
-            Arc::clone(&last_error),
+            Arc::clone(&errors),
             Arc::clone(&activation_coordinator),
             &identities,
         )?;
@@ -355,55 +620,114 @@ impl ManagedWorkspaceConfiguration {
             root,
             workspace_id,
             state,
-            watcher: Mutex::new(watcher),
-            last_error,
+            watcher: Arc::new(Mutex::new(watcher)),
+            errors,
             activation_coordinator,
+            refresh_state: Arc::new(Mutex::new(WorkspaceConfigurationRefreshState::default())),
+            refresh_gate: Arc::new(Mutex::new(())),
+            refresh_retry_alive: Arc::new(AtomicBool::new(true)),
+            refresh_retry_workers: Mutex::new(Vec::new()),
         })
     }
 
-    fn refresh_targets(&self) -> Result<(), ConfigurationPersistenceError> {
-        let (snapshot, _) = self.database.complete_workspace_snapshot(true)?;
-        let identities = workspace_configuration_identities(&snapshot, self.workspace_id)?;
-        ensure_workspace_configuration_parents(&self.root, &identities)?;
-        {
-            let mut state = self
-                .state
-                .lock()
-                .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
-            synchronize_workspace_configuration_services(
-                &mut state,
-                &self.root,
-                self.workspace_id,
-                &snapshot,
-                &identities,
-            )?;
+    fn refresh_context(&self) -> WorkspaceConfigurationRefreshContext {
+        WorkspaceConfigurationRefreshContext {
+            database: Arc::clone(&self.database),
+            root: self.root.clone(),
+            workspace_id: self.workspace_id,
+            state: Arc::clone(&self.state),
+            watcher: Arc::clone(&self.watcher),
+            errors: Arc::clone(&self.errors),
+            activation_coordinator: Arc::clone(&self.activation_coordinator),
+            refresh_state: Arc::clone(&self.refresh_state),
+            refresh_gate: Arc::clone(&self.refresh_gate),
         }
-        let replacement = start_workspace_configuration_watcher(
-            Arc::clone(&self.database),
-            self.root.clone(),
-            self.workspace_id,
-            Arc::clone(&self.state),
-            Arc::clone(&self.last_error),
-            Arc::clone(&self.activation_coordinator),
-            &identities,
-        )?;
-        let mut watcher = self
-            .watcher
-            .lock()
-            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
-        *watcher = replacement;
-        Ok(())
+    }
+
+    fn schedule_target_refresh_retry(&self) {
+        let should_spawn = self.refresh_state.lock().is_ok_and(|mut state| {
+            if state.pending_epoch.is_none() || state.worker_running {
+                false
+            } else {
+                state.worker_running = true;
+                true
+            }
+        });
+        if !should_spawn {
+            return;
+        }
+
+        let context = self.refresh_context();
+        let alive = Arc::clone(&self.refresh_retry_alive);
+        let spawn = thread::Builder::new()
+            .name("c4os-workspace-configuration-refresh".into())
+            .spawn(move || {
+                let mut delay = Duration::from_millis(25);
+                loop {
+                    thread::sleep(delay);
+                    if !alive.load(Ordering::Acquire) {
+                        if let Ok(mut state) = context.refresh_state.lock() {
+                            state.worker_running = false;
+                        }
+                        return;
+                    }
+                    let epoch = match context.refresh_state.lock() {
+                        Ok(mut state) => match state.pending_epoch {
+                            Some(epoch) => epoch,
+                            None => {
+                                state.worker_running = false;
+                                return;
+                            }
+                        },
+                        Err(_) => return,
+                    };
+                    let succeeded = context.attempt(epoch);
+                    if let Some(succeeded) = succeeded {
+                        context.settle(epoch, succeeded);
+                        if succeeded {
+                            delay = Duration::from_millis(25);
+                        } else {
+                            delay = delay.saturating_mul(2).min(Duration::from_millis(500));
+                        }
+                    }
+                    let mut state = match context.refresh_state.lock() {
+                        Ok(state) => state,
+                        Err(_) => return,
+                    };
+                    if state.pending_epoch.is_none() {
+                        state.worker_running = false;
+                        return;
+                    }
+                }
+            });
+        match spawn {
+            Ok(worker) => {
+                register_workspace_configuration_refresh_worker(
+                    &self.refresh_retry_workers,
+                    worker,
+                );
+            }
+            Err(_) => {
+                if let Ok(mut state) = self.refresh_state.lock() {
+                    state.worker_running = false;
+                }
+            }
+        }
     }
 
     /// Refreshing watcher coverage is ancillary once an operation has made a
     /// durable commit. Preserve the committed success and surface a degraded
-    /// watcher diagnostic so a later refresh can repair coverage without
-    /// falsely telling the caller that the state change failed.
+    /// watcher diagnostic while a single owned retry worker repairs coverage
+    /// without falsely telling the caller that the state change failed.
     fn refresh_targets_after_commit(&self) {
-        if self.refresh_targets().is_err()
-            && let Ok(mut error) = self.last_error.lock()
-        {
-            *error = Some("Workspace configuration watcher target refresh failed");
+        let epoch = match self.refresh_state.lock() {
+            Ok(mut state) => state.begin(),
+            Err(_) => return,
+        };
+        let context = self.refresh_context();
+        let succeeded = context.attempt(epoch).unwrap_or(false);
+        if context.settle(epoch, succeeded) {
+            self.schedule_target_refresh_retry();
         }
     }
 
@@ -416,6 +740,10 @@ impl ManagedWorkspaceConfiguration {
     ) -> Result<ConfigurationUpdate, ConfigurationPersistenceError> {
         let path = configuration_path(&self.root, identity.scope, &identity.persisted_scope_id())
             .map_err(|_| ConfigurationPersistenceError::InvalidScope)?;
+        let target = WatchedConfiguration {
+            scope: identity.scope,
+            path: path.clone(),
+        };
         let activation = self
             .activation_coordinator
             .lock()
@@ -502,13 +830,20 @@ impl ManagedWorkspaceConfiguration {
                 })
             });
             let policy_compensated = compensated && (activation.observer)().is_ok();
-            if let Ok(mut error) = self.last_error.lock() {
-                *error = Some(if policy_compensated {
-                    "Workspace configuration policy activation failed and was rolled back"
+            if let Ok(mut errors) = self.errors.lock() {
+                if policy_compensated {
+                    errors.set_target_policy_reconciled(
+                        target.clone(),
+                        "Workspace configuration policy activation failed and was rolled back",
+                    );
                 } else {
-                    "Workspace configuration policy activation failed; recovery is required"
-                });
+                    errors.set_target_recovery_required(
+                        target.clone(),
+                        "Workspace configuration policy activation failed; recovery is required",
+                    );
+                }
             }
+            drop(_activation_guard);
             self.refresh_targets_after_commit();
             return Err(if policy_compensated {
                 ConfigurationPersistenceError::PolicyActivation
@@ -516,9 +851,19 @@ impl ManagedWorkspaceConfiguration {
                 ConfigurationPersistenceError::RecoveryRequired
             });
         }
-        if let Ok(mut error) = self.last_error.lock() {
-            *error = None;
+        if let Ok(mut errors) = self.errors.lock() {
+            match &update {
+                ConfigurationUpdate::Activated { .. } => {
+                    errors.clear_target(&target, activation.is_some());
+                }
+                ConfigurationUpdate::Unchanged { .. } => {
+                    errors.clear_target(&target, false);
+                }
+                ConfigurationUpdate::Rejected { .. }
+                | ConfigurationUpdate::DeduplicatedSelfWrite { .. } => {}
+            }
         }
+        drop(_activation_guard);
         self.refresh_targets_after_commit();
         Ok(update)
     }
@@ -584,8 +929,90 @@ impl ManagedWorkspaceConfiguration {
     }
 
     fn last_error(&self) -> Option<&'static str> {
-        self.last_error.lock().ok().and_then(|error| *error)
+        self.errors
+            .lock()
+            .ok()
+            .and_then(|errors| errors.projected())
     }
+}
+
+fn register_workspace_configuration_refresh_worker(
+    workers: &Mutex<Vec<thread::JoinHandle<()>>>,
+    worker: thread::JoinHandle<()>,
+) {
+    let finished = {
+        let mut workers = workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut finished = Vec::new();
+        let mut index = 0;
+        while index < workers.len() {
+            if workers[index].is_finished() {
+                finished.push(workers.swap_remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        workers.push(worker);
+        finished
+    };
+    for worker in finished {
+        let _ = worker.join();
+    }
+}
+
+impl Drop for ManagedWorkspaceConfiguration {
+    fn drop(&mut self) {
+        self.refresh_retry_alive.store(false, Ordering::Release);
+        if let Ok(mut state) = self.refresh_state.lock() {
+            state.pending_epoch = None;
+        }
+        if let Ok(workers) = self.refresh_retry_workers.get_mut() {
+            for worker in workers.drain(..) {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+fn refresh_workspace_configuration_targets(
+    database: &Arc<DatabaseActor>,
+    root: &Path,
+    workspace_id: Uuid,
+    state: &Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
+    watcher: &Arc<Mutex<ParentDirectoryConfigurationWatcher>>,
+) -> Result<Vec<WatchedConfiguration>, ConfigurationPersistenceError> {
+    let (snapshot, _) = database.complete_workspace_snapshot(true)?;
+    let identities = workspace_configuration_identities(&snapshot, workspace_id)?;
+    ensure_workspace_configuration_parents(root, &identities)?;
+    {
+        let mut state = state
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        synchronize_workspace_configuration_services(
+            &mut state,
+            root,
+            workspace_id,
+            &snapshot,
+            &identities,
+        )?;
+    }
+    let targets = workspace_configuration_targets(root, &identities)?;
+    let added_targets = {
+        let mut watcher = watcher
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        let added_targets = targets
+            .iter()
+            .filter(|target| !watcher.plan().targets.contains(*target))
+            .cloned()
+            .collect::<Vec<_>>();
+        watcher
+            .extend_targets(targets)
+            .map_err(ConfigurationPersistenceError::Configuration)?;
+        added_targets
+    };
+    Ok(added_targets)
 }
 
 fn workspace_configuration_state(
@@ -1028,6 +1455,7 @@ impl ActiveWorkspace {
         let saved = pending.commit();
         self.workspace.manifest = saved.manifest.clone();
         self.workspace.archive_path = archive_path.to_path_buf();
+        self.workspace.recovery_notice = None;
         Ok(saved)
     }
 
@@ -1378,154 +1806,255 @@ fn ensure_workspace_configuration_parents(
     Ok(())
 }
 
+struct ReconciledMissingWorkspaceConfiguration {
+    prior: Option<LastKnownGoodDocument>,
+    update: ConfigurationUpdate,
+}
+
+fn reconcile_missing_workspace_configuration(
+    state: &mut WorkspaceConfigurationCoordinatorState,
+    identity: WorkspaceConfigurationIdentity,
+    path: &Path,
+) -> Result<Option<ReconciledMissingWorkspaceConfiguration>, ConfigurationPersistenceError> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let service = state
+                .services
+                .get_mut(&identity)
+                .ok_or(ConfigurationPersistenceError::InvalidScope)?;
+            let prior = service.last_known_good(identity.scope).cloned();
+            if let Some(record) = prior.as_ref() {
+                recover_missing_scope_file(
+                    identity.scope,
+                    path,
+                    &record.canonical_toml,
+                    record.activated_generation,
+                )?;
+            }
+            Ok(Some(ReconciledMissingWorkspaceConfiguration {
+                prior,
+                update: ConfigurationUpdate::Unchanged {
+                    snapshot: service.snapshot(),
+                },
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn workspace_configuration_targets(
+    root: &Path,
+    identities: &BTreeSet<WorkspaceConfigurationIdentity>,
+) -> Result<Vec<WatchedConfiguration>, ConfigurationPersistenceError> {
+    identities
+        .iter()
+        .map(|identity| {
+            Ok(WatchedConfiguration {
+                scope: identity.scope,
+                path: configuration_path(root, identity.scope, &identity.persisted_scope_id())
+                    .map_err(|_| ConfigurationPersistenceError::InvalidScope)?,
+            })
+        })
+        .collect()
+}
+
 fn start_workspace_configuration_watcher(
     database: Arc<DatabaseActor>,
     root: PathBuf,
     workspace_id: Uuid,
     state: Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
-    last_error: Arc<Mutex<Option<&'static str>>>,
+    errors: Arc<Mutex<WorkspaceConfigurationErrorState>>,
     activation_coordinator: Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
     identities: &BTreeSet<WorkspaceConfigurationIdentity>,
 ) -> Result<ParentDirectoryConfigurationWatcher, ConfigurationPersistenceError> {
-    let targets = identities
-        .iter()
-        .map(|identity| {
-            Ok(WatchedConfiguration {
-                scope: identity.scope,
-                path: configuration_path(&root, identity.scope, &identity.persisted_scope_id())
-                    .map_err(|_| ConfigurationPersistenceError::InvalidScope)?,
-            })
-        })
-        .collect::<Result<Vec<_>, ConfigurationPersistenceError>>()?;
+    let targets = workspace_configuration_targets(&root, identities)?;
     let plan = ConfigurationWatcherPlan::new(targets).map_err(configuration_io)?;
     ParentDirectoryConfigurationWatcher::start(plan, move |notice| match notice {
         ConfigurationWatcherNotice::Changed(targets) => {
+            if let Ok(mut errors) = errors.lock() {
+                errors.watcher_error = None;
+            }
             for target in targets {
-                let activation = activation_coordinator
-                    .lock()
-                    .ok()
-                    .and_then(|coordinator| coordinator.clone());
-                let _activation_guard = match activation.as_ref() {
-                    Some(coordinator) => match coordinator.gate.lock() {
-                        Ok(guard) => Some(guard),
-                        Err(_) => {
-                            if let Ok(mut error) = last_error.lock() {
-                                *error =
-                                    Some("Workspace configuration policy activation gate failed");
-                            }
-                            continue;
-                        }
-                    },
-                    None => None,
-                };
-                let result =
-                    workspace_configuration_identity_for_target(&root, workspace_id, &target)
-                        .and_then(|identity| {
-                            let text = stable_scope_text(identity.scope, &target.path).map_err(
-                                |diagnostic| {
-                                    if let Ok(mut state) = state.lock()
-                                        && let Some(service) = state.services.get_mut(&identity)
-                                    {
-                                        service.record_diagnostic(diagnostic);
-                                    }
-                                    ConfigurationPersistenceError::InvalidRecovery
-                                },
-                            )?;
-                            let mut state = state.lock().map_err(|_| {
-                                ConfigurationPersistenceError::CoordinatorUnavailable
-                            })?;
-                            let prior = state.services.get(&identity).and_then(|service| {
-                                service.last_known_good(identity.scope).cloned()
-                            });
-                            let update = commit_external_workspace_configuration(
-                                &mut state,
-                                identity,
-                                &target.path,
-                                &text,
-                                |record| {
-                                    database
-                                        .activate_configuration(ConfigurationSnapshotRecord {
-                                            workspace_id: workspace_id.to_string(),
-                                            scope_kind: identity.scope.as_str().into(),
-                                            scope_id: identity.persisted_scope_id(),
-                                            canonical_document: record.canonical_toml.clone(),
-                                            generation: record.activated_generation,
-                                            activated_at: current_unix_seconds(),
-                                        })
-                                        .map(|_| ())
-                                },
-                            )?;
-                            Ok((identity, prior, update))
-                        });
-                let policy_result = match (&result, activation.as_ref()) {
-                    (Ok((_, _, ConfigurationUpdate::Activated { .. })), Some(coordinator)) => {
-                        (coordinator.observer)().map(Some)
-                    }
-                    _ => Ok(None),
-                };
-                let compensated = if policy_result.is_err() {
-                    result
-                        .as_ref()
-                        .ok()
-                        .and_then(|(identity, prior, update)| {
-                            let ConfigurationUpdate::Activated { snapshot, .. } = update else {
-                                return None;
-                            };
-                            Some((*identity, prior.clone(), snapshot.generation))
-                        })
-                        .is_some_and(|(identity, prior, base_generation)| {
-                            let rollback_text = prior
-                                .as_ref()
-                                .map(|record| record.canonical_toml.clone())
-                                .or_else(|| {
-                                    toml::to_string(
-                                        &super::configuration::ConfigurationDocument::default(),
-                                    )
-                                    .ok()
-                                });
-                            rollback_text.is_some_and(|rollback_text| {
-                                state.lock().is_ok_and(|mut state| {
-                                    compensate_workspace_configuration_activation(
-                                        &database,
-                                        workspace_id,
-                                        &mut state,
-                                        identity,
-                                        &target.path,
-                                        &rollback_text,
-                                        base_generation,
-                                    )
-                                    .is_ok()
-                                })
-                            })
-                        })
-                        && activation
-                            .as_ref()
-                            .is_some_and(|coordinator| (coordinator.observer)().is_ok())
-                } else {
-                    false
-                };
-                if let Ok(mut error) = last_error.lock() {
-                    if result.is_err() {
-                        *error = Some("Workspace configuration watcher activation failed");
-                    } else if policy_result.is_err() {
-                        *error = Some(if compensated {
-                            "Workspace configuration policy activation failed and was rolled back"
-                        } else {
-                            "Workspace configuration policy activation failed; recovery is required"
-                        });
-                    } else {
-                        *error = None;
-                    }
-                }
+                let _ = reconcile_workspace_configuration_target(
+                    &database,
+                    &root,
+                    workspace_id,
+                    &state,
+                    &errors,
+                    &activation_coordinator,
+                    target,
+                );
             }
         }
         ConfigurationWatcherNotice::Error(_) => {
-            if let Ok(mut error) = last_error.lock() {
-                *error = Some("Workspace configuration watcher failed");
+            if let Ok(mut errors) = errors.lock() {
+                errors.watcher_error = Some("Workspace configuration watcher failed");
             }
         }
     })
     .map_err(ConfigurationPersistenceError::Configuration)
+}
+
+enum WorkspaceConfigurationTargetReconciliation {
+    Updated,
+    ContentRejected,
+}
+
+fn reconcile_workspace_configuration_target(
+    database: &Arc<DatabaseActor>,
+    root: &Path,
+    workspace_id: Uuid,
+    state: &Arc<Mutex<WorkspaceConfigurationCoordinatorState>>,
+    errors: &Arc<Mutex<WorkspaceConfigurationErrorState>>,
+    activation_coordinator: &Arc<Mutex<Option<WorkspaceConfigurationActivationCoordinator>>>,
+    target: WatchedConfiguration,
+) -> Result<WorkspaceConfigurationTargetReconciliation, ConfigurationPersistenceError> {
+    let activation = activation_coordinator
+        .lock()
+        .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?
+        .clone();
+    let _activation_guard = match activation.as_ref() {
+        Some(coordinator) => match coordinator.gate.lock() {
+            Ok(guard) => Some(guard),
+            Err(_) => {
+                if let Ok(mut errors) = errors.lock() {
+                    errors.set_target(
+                        target,
+                        "Workspace configuration policy activation gate failed",
+                    );
+                }
+                return Err(ConfigurationPersistenceError::CoordinatorUnavailable);
+            }
+        },
+        None => None,
+    };
+    let identity = workspace_configuration_identity_for_target(root, workspace_id, &target)?;
+    let missing = {
+        let mut state = state
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        reconcile_missing_workspace_configuration(&mut state, identity, &target.path)?
+    };
+    let result = if let Some(missing) = missing {
+        Ok((identity, missing.prior, missing.update))
+    } else {
+        let text = match stable_scope_text(identity.scope, &target.path) {
+            Ok(text) => text,
+            Err(diagnostic) => {
+                if let Ok(mut state) = state.lock()
+                    && let Some(service) = state.services.get_mut(&identity)
+                {
+                    service.record_diagnostic(diagnostic);
+                }
+                if let Ok(mut errors) = errors.lock() {
+                    errors.set_target(target, "Workspace configuration watcher activation failed");
+                }
+                return Ok(WorkspaceConfigurationTargetReconciliation::ContentRejected);
+            }
+        };
+        let mut state = state
+            .lock()
+            .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+        let prior = state
+            .services
+            .get(&identity)
+            .and_then(|service| service.last_known_good(identity.scope).cloned());
+        commit_external_workspace_configuration(
+            &mut state,
+            identity,
+            &target.path,
+            &text,
+            |record| {
+                database
+                    .activate_configuration(ConfigurationSnapshotRecord {
+                        workspace_id: workspace_id.to_string(),
+                        scope_kind: identity.scope.as_str().into(),
+                        scope_id: identity.persisted_scope_id(),
+                        canonical_document: record.canonical_toml.clone(),
+                        generation: record.activated_generation,
+                        activated_at: current_unix_seconds(),
+                    })
+                    .map(|_| ())
+            },
+        )
+        .map(|update| (identity, prior, update))
+    };
+    let policy_result = match (&result, activation.as_ref()) {
+        (Ok((_, _, ConfigurationUpdate::Activated { .. })), Some(coordinator)) => {
+            (coordinator.observer)().map(|_| true)
+        }
+        _ => Ok(false),
+    };
+    let compensated = if policy_result.is_err() {
+        result
+            .as_ref()
+            .ok()
+            .and_then(|(identity, prior, update)| {
+                let ConfigurationUpdate::Activated { snapshot, .. } = update else {
+                    return None;
+                };
+                Some((*identity, prior.clone(), snapshot.generation))
+            })
+            .is_some_and(|(identity, prior, base_generation)| {
+                let rollback_text = prior
+                    .as_ref()
+                    .map(|record| record.canonical_toml.clone())
+                    .or_else(|| {
+                        toml::to_string(&super::configuration::ConfigurationDocument::default())
+                            .ok()
+                    });
+                rollback_text.is_some_and(|rollback_text| {
+                    state.lock().is_ok_and(|mut state| {
+                        compensate_workspace_configuration_activation(
+                            database,
+                            workspace_id,
+                            &mut state,
+                            identity,
+                            &target.path,
+                            &rollback_text,
+                            base_generation,
+                        )
+                        .is_ok()
+                    })
+                })
+            })
+            && activation
+                .as_ref()
+                .is_some_and(|coordinator| (coordinator.observer)().is_ok())
+    } else {
+        false
+    };
+    let mut errors = errors
+        .lock()
+        .map_err(|_| ConfigurationPersistenceError::CoordinatorUnavailable)?;
+    if policy_result.is_err() {
+        if compensated {
+            errors.set_target_policy_reconciled(
+                target,
+                "Workspace configuration policy activation failed and was rolled back",
+            );
+            return Err(ConfigurationPersistenceError::PolicyActivation);
+        }
+        errors.set_target_recovery_required(
+            target,
+            "Workspace configuration policy activation failed; recovery is required",
+        );
+        return Err(ConfigurationPersistenceError::RecoveryRequired);
+    }
+    match &result {
+        Err(_) | Ok((_, _, ConfigurationUpdate::Rejected { .. })) => {
+            errors.set_target(target, "Workspace configuration watcher activation failed");
+        }
+        Ok((_, _, ConfigurationUpdate::Activated { .. })) => {
+            errors.clear_target(&target, policy_result.unwrap_or(false));
+        }
+        Ok((_, _, ConfigurationUpdate::Unchanged { .. })) => {
+            errors.clear_target(&target, false);
+        }
+        Ok((_, _, ConfigurationUpdate::DeduplicatedSelfWrite { .. })) => {}
+    }
+    drop(errors);
+    result.map(|_| WorkspaceConfigurationTargetReconciliation::Updated)
 }
 
 fn compensate_workspace_configuration_activation(
@@ -1711,15 +2240,38 @@ fn current_unix_seconds() -> i64 {
         .unwrap_or_default()
 }
 
+/// Injectable creation checkpoints used by host-level fault matrices. The
+/// production entrypoint supplies a no-op lifecycle; alternate callers can
+/// deterministically reject coordinator startup or one cleanup attempt without
+/// gaining any Workspace persistence authority.
+#[doc(hidden)]
+pub trait WorkspaceCreationLifecycle: Send + Sync {
+    fn before_configuration_coordinator_start(&self) -> WorkspaceResult<()> {
+        Ok(())
+    }
+
+    fn before_cleanup(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct ProductionWorkspaceCreationLifecycle;
+
+impl WorkspaceCreationLifecycle for ProductionWorkspaceCreationLifecycle {}
+
 struct PendingWorkspaceCreation {
     root: PathBuf,
     preserve_empty_root: bool,
     recovery_root: Option<(PathBuf, bool)>,
     finished: bool,
+    lifecycle: Arc<dyn WorkspaceCreationLifecycle>,
 }
 
 impl PendingWorkspaceCreation {
-    fn new(root: &Path) -> WorkspaceResult<Self> {
+    fn with_lifecycle(
+        root: &Path,
+        lifecycle: Arc<dyn WorkspaceCreationLifecycle>,
+    ) -> WorkspaceResult<Self> {
         let preserve_empty_root = match fs::symlink_metadata(root) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(WorkspaceError::Conflict(
@@ -1742,7 +2294,12 @@ impl PendingWorkspaceCreation {
             preserve_empty_root,
             recovery_root: None,
             finished: false,
+            lifecycle,
         })
+    }
+
+    fn before_configuration_coordinator_start(&self) -> WorkspaceResult<()> {
+        self.lifecycle.before_configuration_coordinator_start()
     }
 
     fn register_recovery_root(&mut self, root: PathBuf) -> WorkspaceResult<()> {
@@ -1771,6 +2328,7 @@ impl PendingWorkspaceCreation {
     }
 
     fn cleanup(&self) -> io::Result<()> {
+        self.lifecycle.before_cleanup()?;
         let recovery_result = self
             .recovery_root
             .as_ref()
@@ -1830,6 +2388,34 @@ pub fn create_workspace_from_project(
     lock_owner: WorkspaceLockOwner,
     created_at: i64,
 ) -> WorkspaceResult<ActiveWorkspace> {
+    create_workspace_from_project_with_lifecycle(
+        home,
+        project_folder,
+        project_display_name,
+        workspace_display_name,
+        current_app_version,
+        lock_owner,
+        created_at,
+        Arc::new(ProductionWorkspaceCreationLifecycle),
+    )
+}
+
+/// Runs the public Workspace creation transaction with deterministic lifecycle
+/// checkpoints. This is intentionally not exposed through the renderer or
+/// command layer; it exists so host integration tests can prove rollback and
+/// recovery behavior at otherwise unreachable operating-system boundaries.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn create_workspace_from_project_with_lifecycle(
+    home: &C4osHomeLayout,
+    project_folder: &Path,
+    project_display_name: &str,
+    workspace_display_name: &str,
+    current_app_version: &str,
+    lock_owner: WorkspaceLockOwner,
+    created_at: i64,
+    lifecycle: Arc<dyn WorkspaceCreationLifecycle>,
+) -> WorkspaceResult<ActiveWorkspace> {
     validate_display_name(workspace_display_name)?;
     if !project_folder.is_dir() {
         return Err(WorkspaceError::InvalidProject(
@@ -1846,7 +2432,7 @@ pub fn create_workspace_from_project(
         }
     };
     let working_root = home.active_workspace();
-    let mut pending_creation = PendingWorkspaceCreation::new(&working_root)?;
+    let mut pending_creation = PendingWorkspaceCreation::with_lifecycle(&working_root, lifecycle)?;
     let prepared = (|| {
         let manifest = create_untitled_working_copy(
             &writer_lock,
@@ -1933,6 +2519,7 @@ pub fn create_workspace_from_project(
         )?;
         let trusted_projects = [project.project_id].into_iter().collect();
         let database = Arc::new(database);
+        pending_creation.before_configuration_coordinator_start()?;
         let managed_configuration = ManagedWorkspaceConfiguration::start(
             Arc::clone(&database),
             working_root.clone(),
@@ -2667,6 +3254,170 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn stale_refresh_success_cannot_clear_a_newer_failed_epoch() {
+        let mut state = WorkspaceConfigurationRefreshState::default();
+        let mut errors = WorkspaceConfigurationErrorState::default();
+        let first = state.begin();
+        let second = state.begin();
+        assert!(settle_workspace_configuration_refresh_epoch(
+            &mut state,
+            &mut errors,
+            second,
+            false,
+        ));
+
+        assert!(settle_workspace_configuration_refresh_epoch(
+            &mut state,
+            &mut errors,
+            first,
+            true,
+        ));
+        assert_eq!(state.pending_epoch, Some(second));
+        assert_eq!(
+            errors.refresh_error,
+            Some(WORKSPACE_CONFIGURATION_TARGET_REFRESH_FAILED)
+        );
+
+        assert!(!settle_workspace_configuration_refresh_epoch(
+            &mut state,
+            &mut errors,
+            second,
+            true,
+        ));
+        assert_eq!(state.pending_epoch, None);
+        assert_eq!(errors.refresh_error, None);
+    }
+
+    #[test]
+    fn successful_target_cannot_clear_an_unrelated_target_error() {
+        let temp = TempDir::new().expect("temporary target-error root");
+        let project = WatchedConfiguration {
+            scope: ConfigurationScope::Project,
+            path: temp.path().join("project/config.toml"),
+        };
+        let chat = WatchedConfiguration {
+            scope: ConfigurationScope::Chat,
+            path: temp.path().join("chat/config.toml"),
+        };
+        let mut errors = WorkspaceConfigurationErrorState::default();
+        errors.set_target(
+            project.clone(),
+            "Workspace configuration watcher activation failed",
+        );
+        errors.set_target_recovery_required(
+            chat.clone(),
+            "Workspace configuration policy activation failed; recovery is required",
+        );
+
+        errors.clear_target(&project, false);
+
+        assert!(!errors.target_errors.contains_key(&project));
+        assert_eq!(
+            errors.target_errors.get(&chat).map(|error| error.message),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+        assert_eq!(
+            errors.projected(),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+    }
+
+    #[test]
+    fn refresh_worker_registration_reaps_completed_handles_and_retains_live_workers() {
+        let workers = Mutex::new(Vec::new());
+        let completed = thread::spawn(|| {});
+        while !completed.is_finished() {
+            thread::yield_now();
+        }
+        let (release_live, wait_for_release) = std::sync::mpsc::channel();
+        let live = thread::spawn(move || {
+            wait_for_release.recv().expect("live worker release");
+        });
+        {
+            let mut registered = workers.lock().expect("worker registry");
+            registered.push(completed);
+            registered.push(live);
+        }
+
+        register_workspace_configuration_refresh_worker(&workers, thread::spawn(|| {}));
+
+        assert_eq!(
+            workers.lock().expect("reaped worker registry").len(),
+            2,
+            "one completed handle is reaped while the live and new workers remain registered"
+        );
+        release_live.send(()).expect("release live worker");
+        let remaining = workers
+            .into_inner()
+            .expect("remaining worker registry after assertion");
+        for worker in remaining {
+            worker.join().expect("registered worker completion");
+        }
+    }
+
+    #[test]
+    fn missing_workspace_configuration_is_benign_without_lkg_and_recovers_with_lkg() {
+        let temp = TempDir::new().expect("temporary configuration root");
+        let identity = WorkspaceConfigurationIdentity {
+            scope: ConfigurationScope::Chat,
+            scope_id: Uuid::new_v4(),
+        };
+        let path = temp.path().join("chat/config.toml");
+        let mut state = WorkspaceConfigurationCoordinatorState {
+            services: BTreeMap::from([(
+                identity,
+                ConfigurationService::new(
+                    ManagedCeilings::default(),
+                    SecurityConstraints::default(),
+                ),
+            )]),
+            global_generation: 0,
+        };
+
+        let missing = reconcile_missing_workspace_configuration(&mut state, identity, &path)
+            .expect("missing unconfigured target")
+            .expect("missing target is reconciled");
+        assert!(missing.prior.is_none());
+        assert!(matches!(
+            missing.update,
+            ConfigurationUpdate::Unchanged { .. }
+        ));
+        assert!(
+            !path.exists(),
+            "a scope without LKG remains intentionally absent"
+        );
+
+        let service = state.services.get_mut(&identity).expect("Chat service");
+        service
+            .save_scope_text(
+                ConfigurationScope::Chat,
+                &path,
+                "schema_version = 1\ndefault_environment = \"fixture\"\n",
+                0,
+            )
+            .expect("seed Chat LKG");
+        let canonical = service
+            .last_known_good(ConfigurationScope::Chat)
+            .expect("seeded Chat LKG")
+            .canonical_toml
+            .clone();
+        fs::remove_file(&path).expect("remove LKG-owned target");
+
+        let missing = reconcile_missing_workspace_configuration(&mut state, identity, &path)
+            .expect("missing configured target")
+            .expect("missing configured target is reconciled");
+        assert!(missing.prior.is_some());
+        assert!(matches!(
+            missing.update,
+            ConfigurationUpdate::Unchanged { .. }
+        ));
+        assert_eq!(
+            fs::read_to_string(&path).expect("recovered Chat configuration"),
+            canonical
+        );
+    }
+
+    #[test]
     fn app_configuration_observer_reconciles_registration_and_rolls_back_failed_external_policy() {
         let temp = TempDir::new().expect("temporary app configuration root");
         let home = C4osHomeLayout::new(temp.path());
@@ -2735,6 +3486,91 @@ mod tests {
     }
 
     #[test]
+    fn app_recovery_required_error_requires_policy_reconciliation_to_clear() {
+        let mut errors = AppConfigurationErrorState::default();
+        errors
+            .set_recovery_required("configuration policy activation failed; recovery is required");
+
+        errors.set("configuration watcher edit was rejected");
+        errors.clear(false);
+        assert_eq!(
+            errors.projected(),
+            Some("configuration policy activation failed; recovery is required")
+        );
+
+        errors.clear(true);
+        assert_eq!(errors.projected(), None);
+    }
+
+    #[test]
+    fn app_compensation_self_write_preserves_recovery_required_until_observer_reconciliation() {
+        let temp = TempDir::new().expect("temporary app configuration root");
+        let home = C4osHomeLayout::new(temp.path());
+        let (database, _) =
+            DatabaseActor::start(DatabaseDescriptor::app(temp.path())).expect("app database");
+        let managed = ManagedAppConfiguration::start(
+            Arc::new(database),
+            home.clone(),
+            ManagedCeilings::default(),
+            SecurityConstraints::default(),
+        )
+        .expect("managed app configuration");
+        let reject = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observer_rejection = Arc::clone(&reject);
+        let observer_calls = Arc::clone(&calls);
+        managed
+            .set_activation_observer(
+                Arc::new(Mutex::new(())),
+                Arc::new(move |_| {
+                    observer_calls.fetch_add(1, Ordering::SeqCst);
+                    if observer_rejection.load(Ordering::SeqCst) {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                }),
+            )
+            .expect("initial observer reconciliation");
+
+        reject.store(true, Ordering::SeqCst);
+        let path = home.app_configuration();
+        fs::create_dir_all(path.parent().expect("configuration parent"))
+            .expect("configuration parent");
+        fs::write(
+            &path,
+            "schema_version = 1\ndefault_approval_preset = \"approve_for_me\"\n",
+        )
+        .expect("externally activated App configuration");
+        let recovery_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if calls.load(Ordering::SeqCst) >= 3
+                && managed.last_error()
+                    == Some("configuration policy activation failed; recovery is required")
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < recovery_deadline,
+                "failed observer compensation did not enter recovery-required state"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        thread::sleep(Duration::from_millis(550));
+        assert_eq!(
+            managed.last_error(),
+            Some("configuration policy activation failed; recovery is required"),
+            "the compensated self-write callback must not clear unproven recovery"
+        );
+
+        managed
+            .set_activation_observer(Arc::new(Mutex::new(())), Arc::new(|_| Ok(())))
+            .expect("successful current-LKG observer reconciliation");
+        assert_eq!(managed.last_error(), None);
+    }
+
+    #[test]
     fn rejected_external_app_configuration_sets_and_valid_activation_clears_error_state() {
         let temp = TempDir::new().expect("temporary app configuration root");
         let home = C4osHomeLayout::new(temp.path());
@@ -2790,8 +3626,11 @@ mod tests {
         let active = temp.path().join("workspace/active");
         let recovery = temp.path().join("workspace/recovery/workspace-id");
         fs::create_dir_all(&active).expect("pre-existing empty active root");
-        let mut pending =
-            PendingWorkspaceCreation::new(&active).expect("pending Workspace creation");
+        let mut pending = PendingWorkspaceCreation::with_lifecycle(
+            &active,
+            Arc::new(ProductionWorkspaceCreationLifecycle),
+        )
+        .expect("pending Workspace creation");
         pending
             .register_recovery_root(recovery.clone())
             .expect("pending recovery root");
@@ -3120,6 +3959,481 @@ mod tests {
         assert_eq!(
             effective.configuration.default_approval_preset,
             initial_preset
+        );
+    }
+
+    #[test]
+    fn workspace_target_refresh_retry_reconciles_configuration_present_before_repair() {
+        let temp = TempDir::new().expect("temporary Workspace home");
+        let temp_root = temp
+            .path()
+            .canonicalize()
+            .expect("canonical temporary Workspace root");
+        let home = C4osHomeLayout::new(temp_root.join("home"));
+        let project = temp_root.join("project");
+        fs::create_dir_all(&project).expect("fixture Project");
+        let mut workspace = create_workspace_from_project(
+            &home,
+            &project,
+            "Fixture Project",
+            "Fixture Workspace",
+            "0.1.0",
+            WorkspaceLockOwner {
+                process_id: std::process::id(),
+                app_instance_id: Uuid::new_v4(),
+                acquired_unix_ms: 1,
+                label: "workspace-refresh-preexisting-configuration-test".into(),
+            },
+            1,
+        )
+        .expect("active Workspace");
+        let project_id = workspace.manifest().projects[0].project_id;
+        let chat_id = Uuid::new_v4();
+        let chat_configuration =
+            WorkspaceLayout::new(workspace.working_root()).chat_configuration(chat_id);
+        let chat_parent = chat_configuration
+            .parent()
+            .expect("Chat configuration parent")
+            .to_path_buf();
+        fs::write(&chat_parent, b"blocks watcher coverage").expect("watcher target blocker");
+        workspace
+            .configuration
+            .refresh_retry_alive
+            .store(false, Ordering::Release);
+
+        workspace
+            .create_chat(project_id, chat_id, "Durably Created", 2)
+            .expect("durable Chat creation");
+        let stopped_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let running = workspace
+                .configuration
+                .refresh_state
+                .lock()
+                .expect("refresh state")
+                .worker_running;
+            if !running {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < stopped_deadline,
+                "disabled refresh worker did not stop"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some(WORKSPACE_CONFIGURATION_TARGET_REFRESH_FAILED)
+        );
+
+        let prepared_parent = workspace
+            .working_root()
+            .join(".prepared-chat-configuration");
+        fs::create_dir(&prepared_parent).expect("prepared Chat configuration parent");
+        fs::write(
+            prepared_parent.join(
+                chat_configuration
+                    .file_name()
+                    .expect("Chat configuration file name"),
+            ),
+            "schema_version = 1\ndefault_environment = \"recovered.chat\"\n",
+        )
+        .expect("preexisting Chat configuration");
+        fs::remove_file(&chat_parent).expect("remove watcher target blocker");
+        fs::rename(prepared_parent, &chat_parent)
+            .expect("atomically restore the preexisting configuration parent");
+
+        workspace
+            .configuration
+            .refresh_retry_alive
+            .store(true, Ordering::Release);
+        workspace.configuration.schedule_target_refresh_retry();
+        let recovery_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = workspace
+                .snapshot(SnapshotQuery::new(20).expect("snapshot query"))
+                .expect("Workspace snapshot");
+            if snapshot.configurations.iter().any(|record| {
+                record.scope_kind == "chat"
+                    && record.scope_id == chat_id.to_string()
+                    && record.canonical_document.contains("recovered.chat")
+            }) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < recovery_deadline,
+                "retry did not reconcile the configuration present before target repair: {:?}",
+                workspace.configuration_last_error()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(workspace.configuration_last_error(), None);
+    }
+
+    #[test]
+    fn workspace_target_refresh_settles_persistent_oversized_configuration_with_one_diagnostic() {
+        let temp = TempDir::new().expect("temporary Workspace home");
+        let temp_root = temp
+            .path()
+            .canonicalize()
+            .expect("canonical temporary Workspace root");
+        let home = C4osHomeLayout::new(temp_root.join("home"));
+        let project = temp_root.join("project");
+        fs::create_dir_all(&project).expect("fixture Project");
+        let mut workspace = create_workspace_from_project(
+            &home,
+            &project,
+            "Fixture Project",
+            "Fixture Workspace",
+            "0.1.0",
+            WorkspaceLockOwner {
+                process_id: std::process::id(),
+                app_instance_id: Uuid::new_v4(),
+                acquired_unix_ms: 1,
+                label: "workspace-refresh-oversized-configuration-test".into(),
+            },
+            1,
+        )
+        .expect("active Workspace");
+        let project_id = workspace.manifest().projects[0].project_id;
+        let chat_id = Uuid::new_v4();
+        let chat_configuration =
+            WorkspaceLayout::new(workspace.working_root()).chat_configuration(chat_id);
+        let chat_parent = chat_configuration
+            .parent()
+            .expect("Chat configuration parent")
+            .to_path_buf();
+        fs::write(&chat_parent, b"blocks watcher coverage").expect("watcher target blocker");
+        workspace
+            .configuration
+            .refresh_retry_alive
+            .store(false, Ordering::Release);
+        workspace
+            .create_chat(project_id, chat_id, "Durably Created", 2)
+            .expect("durable Chat creation");
+        let stopped_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while workspace
+            .configuration
+            .refresh_state
+            .lock()
+            .expect("refresh state")
+            .worker_running
+        {
+            assert!(
+                std::time::Instant::now() < stopped_deadline,
+                "disabled refresh worker did not stop"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let prepared_parent = workspace
+            .working_root()
+            .join(".prepared-oversized-configuration");
+        fs::create_dir(&prepared_parent).expect("prepared Chat configuration parent");
+        fs::write(
+            prepared_parent.join(
+                chat_configuration
+                    .file_name()
+                    .expect("Chat configuration file name"),
+            ),
+            vec![b'x'; MAX_CONFIGURATION_BYTES + 1],
+        )
+        .expect("persistent oversized Chat configuration");
+        fs::remove_file(&chat_parent).expect("remove watcher target blocker");
+        fs::rename(prepared_parent, &chat_parent)
+            .expect("atomically restore the oversized configuration parent");
+
+        workspace
+            .configuration
+            .refresh_retry_alive
+            .store(true, Ordering::Release);
+        workspace.configuration.schedule_target_refresh_retry();
+        let settle_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let settled = {
+                let refresh = workspace
+                    .configuration
+                    .refresh_state
+                    .lock()
+                    .expect("refresh state");
+                refresh.pending_epoch.is_none()
+                    && refresh.pending_reconciliation_targets.is_empty()
+                    && !refresh.worker_running
+            };
+            if settled {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < settle_deadline,
+                "persistent content rejection kept the refresh retry active"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let identity = WorkspaceConfigurationIdentity {
+            scope: ConfigurationScope::Chat,
+            scope_id: chat_id,
+        };
+        let diagnostic_count = || {
+            workspace
+                .configuration
+                .state
+                .lock()
+                .expect("configuration state")
+                .services
+                .get(&identity)
+                .expect("Chat configuration service")
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.code == ConfigurationDiagnosticCode::SizeLimitExceeded
+                })
+                .count()
+        };
+        assert_eq!(diagnostic_count(), 1);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration watcher activation failed")
+        );
+        assert_eq!(
+            workspace
+                .configuration
+                .errors
+                .lock()
+                .expect("configuration errors")
+                .refresh_error,
+            None
+        );
+
+        thread::sleep(Duration::from_millis(550));
+        assert_eq!(diagnostic_count(), 1);
+        let refresh = workspace
+            .configuration
+            .refresh_state
+            .lock()
+            .expect("refresh state");
+        assert_eq!(refresh.pending_epoch, None);
+        assert!(refresh.pending_reconciliation_targets.is_empty());
+        assert!(!refresh.worker_running);
+    }
+
+    fn workspace_with_recovery_required_policy_error(
+        label: &'static str,
+    ) -> (TempDir, ActiveWorkspace, Arc<AtomicUsize>) {
+        let temp = TempDir::new().expect("temporary Workspace home");
+        let temp_root = temp
+            .path()
+            .canonicalize()
+            .expect("canonical temporary Workspace root");
+        let home = C4osHomeLayout::new(temp_root.join("home"));
+        let project = temp_root.join("project");
+        fs::create_dir_all(&project).expect("fixture Project");
+        let mut workspace = create_workspace_from_project(
+            &home,
+            &project,
+            "Fixture Project",
+            "Fixture Workspace",
+            "0.1.0",
+            WorkspaceLockOwner {
+                process_id: std::process::id(),
+                app_instance_id: Uuid::new_v4(),
+                acquired_unix_ms: 1,
+                label: label.into(),
+            },
+            1,
+        )
+        .expect("active Workspace");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observer_calls = Arc::clone(&calls);
+        workspace
+            .set_configuration_activation_observer(
+                Arc::new(Mutex::new(())),
+                Arc::new(move || {
+                    observer_calls.fetch_add(1, Ordering::SeqCst);
+                    Err(())
+                }),
+            )
+            .expect("Workspace observer");
+        let mut service = workspace
+            .restore_configuration_stack(
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("Workspace configuration");
+        let generation = service.snapshot().generation;
+        let workspace_id = workspace.manifest().workspace_id;
+        assert!(matches!(
+            workspace.save_configuration_scope(
+                &mut service,
+                ConfigurationScope::Workspace,
+                workspace_id,
+                "schema_version = 1\ndefault_approval_preset = \"approve_for_me\"\n",
+                generation,
+                2,
+            ),
+            Err(ConfigurationPersistenceError::RecoveryRequired)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+        (temp, workspace, calls)
+    }
+
+    #[test]
+    fn workspace_no_op_save_does_not_clear_recovery_required_policy_error() {
+        let (_temp, mut workspace, calls) =
+            workspace_with_recovery_required_policy_error("workspace-sticky-no-op-save-test");
+        let workspace_id = workspace.manifest().workspace_id;
+        let mut service = workspace
+            .restore_configuration_stack(
+                None,
+                None,
+                ManagedCeilings::default(),
+                SecurityConstraints::default(),
+            )
+            .expect("compensated Workspace configuration");
+        let generation = service.snapshot().generation;
+        let canonical = service
+            .last_known_good(ConfigurationScope::Workspace)
+            .expect("compensated Workspace LKG")
+            .canonical_toml
+            .clone();
+
+        let update = workspace
+            .save_configuration_scope(
+                &mut service,
+                ConfigurationScope::Workspace,
+                workspace_id,
+                &canonical,
+                generation,
+                3,
+            )
+            .expect("same-content save");
+
+        assert!(matches!(update, ConfigurationUpdate::Unchanged { .. }));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+    }
+
+    #[test]
+    fn workspace_same_content_watcher_reconciliation_does_not_clear_recovery_required_policy_error()
+    {
+        let (_temp, workspace, calls) = workspace_with_recovery_required_policy_error(
+            "workspace-sticky-watcher-reconciliation-test",
+        );
+        let target = WatchedConfiguration {
+            scope: ConfigurationScope::Workspace,
+            path: WorkspaceLayout::new(workspace.working_root()).workspace_configuration(),
+        };
+        let first = reconcile_workspace_configuration_target(
+            &workspace.configuration.database,
+            &workspace.configuration.root,
+            workspace.configuration.workspace_id,
+            &workspace.configuration.state,
+            &workspace.configuration.errors,
+            &workspace.configuration.activation_coordinator,
+            target.clone(),
+        )
+        .expect("consume compensated self-write");
+        assert!(matches!(
+            first,
+            WorkspaceConfigurationTargetReconciliation::Updated
+        ));
+        let same_content = reconcile_workspace_configuration_target(
+            &workspace.configuration.database,
+            &workspace.configuration.root,
+            workspace.configuration.workspace_id,
+            &workspace.configuration.state,
+            &workspace.configuration.errors,
+            &workspace.configuration.activation_coordinator,
+            target,
+        )
+        .expect("same-content watcher reconciliation");
+
+        assert!(matches!(
+            same_content,
+            WorkspaceConfigurationTargetReconciliation::Updated
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+    }
+
+    #[test]
+    fn workspace_content_rejection_and_same_content_reconciliation_preserve_recovery_required_error()
+     {
+        let (_temp, workspace, calls) = workspace_with_recovery_required_policy_error(
+            "workspace-sticky-content-rejection-test",
+        );
+        let target = WatchedConfiguration {
+            scope: ConfigurationScope::Workspace,
+            path: WorkspaceLayout::new(workspace.working_root()).workspace_configuration(),
+        };
+        let canonical = fs::read_to_string(&target.path).expect("compensated Workspace content");
+        let self_write = reconcile_workspace_configuration_target(
+            &workspace.configuration.database,
+            &workspace.configuration.root,
+            workspace.configuration.workspace_id,
+            &workspace.configuration.state,
+            &workspace.configuration.errors,
+            &workspace.configuration.activation_coordinator,
+            target.clone(),
+        )
+        .expect("consume compensated self-write");
+        assert!(matches!(
+            self_write,
+            WorkspaceConfigurationTargetReconciliation::Updated
+        ));
+
+        fs::write(&target.path, vec![b'x'; MAX_CONFIGURATION_BYTES + 1])
+            .expect("oversized Workspace configuration");
+        let rejection = reconcile_workspace_configuration_target(
+            &workspace.configuration.database,
+            &workspace.configuration.root,
+            workspace.configuration.workspace_id,
+            &workspace.configuration.state,
+            &workspace.configuration.errors,
+            &workspace.configuration.activation_coordinator,
+            target.clone(),
+        )
+        .expect("reject oversized Workspace configuration");
+        assert!(matches!(
+            rejection,
+            WorkspaceConfigurationTargetReconciliation::ContentRejected
+        ));
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed; recovery is required")
+        );
+
+        fs::write(&target.path, canonical).expect("restore compensated Workspace content");
+        let same_content = reconcile_workspace_configuration_target(
+            &workspace.configuration.database,
+            &workspace.configuration.root,
+            workspace.configuration.workspace_id,
+            &workspace.configuration.state,
+            &workspace.configuration.errors,
+            &workspace.configuration.activation_coordinator,
+            target,
+        )
+        .expect("same-content watcher reconciliation");
+        assert!(matches!(
+            same_content,
+            WorkspaceConfigurationTargetReconciliation::Updated
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            workspace.configuration_last_error(),
+            Some("Workspace configuration policy activation failed; recovery is required")
         );
     }
 }

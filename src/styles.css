@@ -923,12 +923,26 @@ select {
 }
 
 .workspace-start__notice {
+  min-width: 0;
   min-height: 46px;
+  overflow-wrap: anywhere;
   margin-top: 18px;
   padding: 12px 16px;
   border-radius: 12px;
   color: var(--text-secondary);
   font-size: 0.86rem;
+}
+
+.workspace-start__notice > strong,
+.workspace-start__notice > span,
+.workspace-start__notice > small {
+  display: block;
+  min-width: 0;
+}
+
+.workspace-start__notice > span,
+.workspace-start__notice > small {
+  margin-block-start: 4px;
 }
 
 .workspace-start__notice--opening,

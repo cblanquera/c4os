@@ -1508,7 +1508,7 @@ where
         } else {
             "resource.completed"
         };
-        self.commit(
+        if let Err(error) = self.commit(
             replacement,
             &server.server_id,
             lifecycle_generation,
@@ -1517,7 +1517,14 @@ where
             invocation_result(status),
             None,
             completed_at_ms,
-        )?;
+        ) {
+            // The terminal transport result cannot remain attached to an
+            // Executing projection when its durable CAS failed. Stop the
+            // worker and publish an explicit in-memory recovery state even
+            // though the failed database transition cannot be trusted.
+            self.fail_closed_worker_after_commit_failure(server).await;
+            return Err(error);
+        }
         if terminal_failure
             && let Some(worker) = self.workers.remove(&server.server_id)
             && let Some(connection) = worker.connection

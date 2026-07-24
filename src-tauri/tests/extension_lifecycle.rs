@@ -427,6 +427,48 @@ fn transactional_update_switches_once_and_rollback_returns_disabled_last_known_g
     );
 }
 
+#[test]
+fn staging_an_update_never_overwrites_an_executing_plugin_generation() {
+    let temporary = TempDir::new().unwrap();
+    let home = temporary.path().join("home");
+    let marketplace = temporary.path().join("marketplace");
+    fs::create_dir_all(&home).unwrap();
+    write_signed_marketplace(&marketplace);
+    let (database, _) = DatabaseActor::start(DatabaseDescriptor::app(&home)).unwrap();
+    let mut service = ExtensionService::restore(Arc::new(database), &home, 10).unwrap();
+    service
+        .add_marketplace(marketplace_input(&marketplace), 20)
+        .unwrap();
+    service.install_disabled(package_input(2), 30).unwrap();
+    let enabled = service.enable(package_input(3), 40).unwrap();
+    let reviewed = service
+        .review_hook(
+            ExtensionHookReviewInput {
+                expected_generation: enabled.generation,
+                package_id: PACKAGE_ID.into(),
+                hook_id: "before-turn".into(),
+            },
+            45,
+        )
+        .unwrap();
+    write_signed_update(&marketplace);
+    let available = service.refresh_catalogs(reviewed.generation, 50).unwrap();
+    let executing = service
+        .begin_hook_execution(available.generation, &[PACKAGE_ID.into()], 60)
+        .unwrap();
+    let before = service.snapshot();
+
+    assert!(matches!(
+        service.stage_update(package_input(executing.generation), 70),
+        Err(c4os_lib::extension::ExtensionError::InvalidState)
+    ));
+    assert_eq!(service.snapshot(), before);
+    assert_eq!(
+        service.snapshot().plugins[0].lifecycle,
+        ExtensionLifecycle::Executing
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn rollback_rejects_corrupted_last_known_good_bytes_before_lifecycle_change() {

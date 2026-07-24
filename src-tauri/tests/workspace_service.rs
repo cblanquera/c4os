@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::fs;
+use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,10 +11,11 @@ use c4os_lib::core::database::{
     DatabaseActor, DatabaseDescriptor, DatabaseSnapshot, SnapshotQuery,
 };
 use c4os_lib::core::services::{
-    ManagedAppConfiguration, WorkspaceServiceOpen, create_workspace_from_completed_clone,
-    create_workspace_from_project, load_workspace_start_state, open_workspace_with_database,
-    restore_active_workspace, restore_app_configuration, save_app_configuration,
-    validate_workspace_semantics,
+    ManagedAppConfiguration, WorkspaceCreationLifecycle, WorkspaceServiceOpen,
+    create_workspace_from_completed_clone, create_workspace_from_project,
+    create_workspace_from_project_with_lifecycle, load_workspace_start_state,
+    open_workspace_with_database, restore_active_workspace, restore_app_configuration,
+    save_app_configuration, validate_workspace_semantics,
 };
 use c4os_lib::core::workspace::{
     ArchiveLimits, ArchiveViolation, C4osHomeLayout, WorkspaceError, WorkspaceLayout,
@@ -800,7 +803,7 @@ fn active_save_rejects_a_valid_file_that_diverges_from_sqlite_lkg() {
 }
 
 #[test]
-fn committed_chat_creation_reports_success_when_watcher_refresh_degrades() {
+fn committed_chat_creation_repairs_watcher_targets_without_another_mutation() {
     let temp = TempDir::new().expect("temporary root");
     let home = C4osHomeLayout::new(temp.path().join("home"));
     let project = temp.path().join("project");
@@ -843,6 +846,203 @@ fn committed_chat_creation_reports_success_when_watcher_refresh_degrades() {
         active.configuration_last_error(),
         Some("Workspace configuration watcher target refresh failed")
     );
+
+    let workspace_configuration =
+        WorkspaceLayout::new(active.working_root()).workspace_configuration();
+    let existing_replacement = active
+        .working_root()
+        .join(".external-existing-coverage.toml");
+    fs::write(
+        &existing_replacement,
+        "schema_version = 1\ndefault_runtime = \"continuous.coverage\"\n",
+    )
+    .expect("write existing-target replacement during degradation");
+    fs::rename(existing_replacement, workspace_configuration)
+        .expect("activate existing-target replacement during degradation");
+    let existing_coverage_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = active
+            .snapshot(SnapshotQuery::new(20).expect("query"))
+            .expect("Workspace snapshot during watcher degradation");
+        if snapshot.configurations.iter().any(|record| {
+            record.scope_kind == "workspace"
+                && record.canonical_document.contains("continuous.coverage")
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < existing_coverage_deadline,
+            "existing watcher coverage did not remain live during target degradation: {:?}",
+            active.configuration_last_error()
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(
+        active.configuration_last_error(),
+        Some("Workspace configuration watcher target refresh failed"),
+        "a successful existing-target activation must not hide target degradation"
+    );
+
+    fs::remove_file(&chat_parent).expect("remove watcher target blocker");
+    fs::create_dir_all(&chat_parent).expect("restore watcher target directory");
+    let repair_deadline = Instant::now() + Duration::from_secs(5);
+    while active.configuration_last_error().is_some() {
+        assert!(
+            Instant::now() < repair_deadline,
+            "watcher target retry did not clear its degraded diagnostic: {:?}",
+            active.configuration_last_error()
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let chat_configuration =
+        WorkspaceLayout::new(active.working_root()).chat_configuration(chat_id);
+    let replacement = chat_parent.join(".external-recovered.toml");
+    fs::write(
+        &replacement,
+        "schema_version = 1\ndefault_environment = \"recovered.chat\"\n",
+    )
+    .expect("write recovered Chat configuration");
+    fs::rename(replacement, chat_configuration).expect("activate recovered Chat configuration");
+    let activation_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = active
+            .snapshot(SnapshotQuery::new(20).expect("query"))
+            .expect("Workspace snapshot after watcher repair");
+        if snapshot.configurations.iter().any(|record| {
+            record.scope_kind == "chat"
+                && record.scope_id == chat_id.to_string()
+                && record.canonical_document.contains("recovered.chat")
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < activation_deadline,
+            "repaired watcher did not observe its new Chat target: {:?}",
+            active.configuration_last_error()
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(active.configuration_last_error(), None);
+}
+
+struct RejectWorkspaceConfigurationCoordinatorStart;
+
+impl WorkspaceCreationLifecycle for RejectWorkspaceConfigurationCoordinatorStart {
+    fn before_configuration_coordinator_start(&self) -> Result<(), WorkspaceError> {
+        Err(WorkspaceError::Conflict(
+            "injected Workspace configuration coordinator start failure".into(),
+        ))
+    }
+}
+
+struct RejectCoordinatorAndFirstCleanup {
+    cleanup_attempts: Arc<AtomicUsize>,
+}
+
+impl WorkspaceCreationLifecycle for RejectCoordinatorAndFirstCleanup {
+    fn before_configuration_coordinator_start(&self) -> Result<(), WorkspaceError> {
+        Err(WorkspaceError::Conflict(
+            "injected Workspace configuration coordinator start failure".into(),
+        ))
+    }
+
+    fn before_cleanup(&self) -> io::Result<()> {
+        if self.cleanup_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err(io::Error::other(
+                "injected Workspace creation cleanup failure",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn assert_no_workspace_creation_residue(home: &C4osHomeLayout) {
+    assert!(
+        !home.active_workspace().exists(),
+        "failed creation must not retain an active working copy"
+    );
+    assert_eq!(
+        fs::read_dir(home.workspace_recovery_root())
+            .expect("Workspace recovery root")
+            .count(),
+        0,
+        "failed creation must not retain per-Workspace recovery state"
+    );
+    assert!(matches!(
+        acquire_workspace_writer_lock(&home.workspace_lock(), owner("creation-residue-check"))
+            .expect("failed creation releases the Workspace lock"),
+        WriterAccess::Writable(_)
+    ));
+}
+
+#[test]
+fn public_workspace_creation_fails_closed_when_configuration_coordinator_start_fails() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project).expect("Project");
+
+    let error = create_workspace_from_project_with_lifecycle(
+        &home,
+        &project,
+        "Primary Project",
+        "Coordinator Start Failure Fixture",
+        APP_VERSION,
+        owner("creation-coordinator-start-failure"),
+        NOW,
+        Arc::new(RejectWorkspaceConfigurationCoordinatorStart),
+    )
+    .err()
+    .expect("coordinator start failure must reject creation");
+
+    assert!(matches!(
+        error,
+        WorkspaceError::Conflict(message)
+            if message == "injected Workspace configuration coordinator start failure"
+    ));
+    assert_no_workspace_creation_residue(&home);
+}
+
+#[test]
+fn public_workspace_creation_cleanup_failure_reports_recovery_and_leaves_no_residue() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project).expect("Project");
+    let cleanup_attempts = Arc::new(AtomicUsize::new(0));
+
+    let error = create_workspace_from_project_with_lifecycle(
+        &home,
+        &project,
+        "Primary Project",
+        "Cleanup Failure Fixture",
+        APP_VERSION,
+        owner("creation-cleanup-failure"),
+        NOW,
+        Arc::new(RejectCoordinatorAndFirstCleanup {
+            cleanup_attempts: Arc::clone(&cleanup_attempts),
+        }),
+    )
+    .err()
+    .expect("cleanup fault must surface a recoverable creation error");
+
+    assert!(matches!(
+        error,
+        WorkspaceError::CommitRecovery {
+            operation: "create Workspace",
+            recovery_path,
+            message,
+        } if recovery_path == home.active_workspace()
+            && message == "injected Workspace creation cleanup failure"
+    ));
+    assert_eq!(
+        cleanup_attempts.load(Ordering::SeqCst),
+        2,
+        "Drop must make one bounded cleanup retry after the injected failure"
+    );
+    assert_no_workspace_creation_residue(&home);
 }
 
 #[test]

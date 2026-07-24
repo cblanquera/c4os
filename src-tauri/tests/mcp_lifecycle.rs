@@ -21,14 +21,20 @@ use c4os_lib::mcp::{
         broker_sampling_request,
     },
 };
+use c4os_lib::{
+    core::database::{DatabaseActor, DatabaseDescriptor},
+    mcp::database::DatabaseMcpRepository,
+};
 use rmcp::model::{CreateMessageRequestParams, CreateMessageResult, SamplingMessage};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tempfile::TempDir;
 
 #[derive(Default)]
 struct MemoryRepository {
     state: Mutex<Option<McpServiceSnapshot>>,
     events: Mutex<Vec<McpAuditEvent>>,
+    fail_next_terminal_compare_and_swap: AtomicBool,
 }
 
 impl McpRepository for MemoryRepository {
@@ -42,6 +48,17 @@ impl McpRepository for MemoryRepository {
         replacement: &McpServiceSnapshot,
         event: &McpAuditEvent,
     ) -> Result<(), McpError> {
+        if matches!(
+            event.event_kind.as_str(),
+            "tool.completed" | "resource.completed"
+        ) && self
+            .fail_next_terminal_compare_and_swap
+            .swap(false, Ordering::SeqCst)
+        {
+            return Err(McpError::Persistence(
+                "injected terminal commit failure".into(),
+            ));
+        }
         let mut state = self.state.lock().expect("state lock");
         if state.as_ref().map(|value| value.generation) != expected_generation {
             return Err(McpError::Conflict);
@@ -49,6 +66,13 @@ impl McpRepository for MemoryRepository {
         *state = Some(replacement.clone());
         self.events.lock().expect("events lock").push(event.clone());
         Ok(())
+    }
+}
+
+impl MemoryRepository {
+    fn fail_next_terminal_compare_and_swap(&self) {
+        self.fail_next_terminal_compare_and_swap
+            .store(true, Ordering::SeqCst);
     }
 }
 
@@ -492,6 +516,274 @@ async fn authority_lease_strictly_wraps_transport_and_denial_precedes_effect() {
         *authority.order.lock().expect("order lock"),
         vec!["begin", "call", "fail"]
     );
+}
+
+#[tokio::test]
+async fn terminal_commit_failure_closes_worker_and_publishes_recoverable_projection() {
+    let repository = Arc::new(MemoryRepository::default());
+    let authority = Arc::new(FakeAuthority::default());
+    let factory = Arc::new(FakeFactory {
+        order: Arc::clone(&authority.order),
+        ..FakeFactory::default()
+    });
+    let mut service = McpService::restore(
+        Arc::clone(&repository),
+        Arc::clone(&authority),
+        Arc::clone(&factory),
+        1,
+    )
+    .expect("restore");
+    let saved = service
+        .upsert_server(
+            definition(service.snapshot().generation),
+            McpDefinitionSource::User,
+            2,
+        )
+        .expect("save definition");
+    let definition_sha256 = service
+        .definition_sha256("fixture")
+        .expect("definition digest");
+    let binding_sha256 = format!("sha256:{}", "7".repeat(64));
+    let pending = service
+        .record_trust_approval(
+            &McpServerMutationInput {
+                expected_generation: saved.generation,
+                server_id: "fixture".into(),
+            },
+            McpPendingTrustApproval {
+                prompt_id: "approval:terminal-commit".into(),
+                definition_sha256: definition_sha256.clone(),
+                action_binding_sha256: binding_sha256.clone(),
+                action_configuration_version: saved.generation,
+                requested_at_ms: 3,
+                expires_at_ms: 300,
+                state: McpTrustApprovalState::Pending,
+            },
+            3,
+        )
+        .expect("record approval");
+    let trusted = service
+        .trust_server(
+            &McpServerMutationInput {
+                expected_generation: pending.generation,
+                server_id: "fixture".into(),
+            },
+            "approval:terminal-commit",
+            &binding_sha256,
+            &definition_sha256,
+            4,
+        )
+        .expect("trust definition");
+    let ready = service
+        .enable_server(
+            &McpServerMutationInput {
+                expected_generation: trusted.generation,
+                server_id: "fixture".into(),
+            },
+            5,
+        )
+        .await
+        .expect("enable server");
+
+    // mark_executing commits first; inject the fault only after transport and
+    // authority finalization have begun so the terminal CAS is deterministic.
+    repository.fail_next_terminal_compare_and_swap();
+    let result = service
+        .call_tool(&tool_call(&ready), McpCancellation::default(), 6)
+        .await;
+
+    assert!(matches!(result, Err(McpError::Persistence(_))));
+    let snapshot = service.snapshot();
+    assert_eq!(snapshot.active_workers, 0);
+    assert_eq!(snapshot.servers[0].lifecycle, McpLifecycle::Failed);
+    assert_eq!(snapshot.servers[0].active_requests, 0);
+    assert_eq!(
+        snapshot.servers[0].last_failure_code.as_deref(),
+        Some("persistence_commit_failed")
+    );
+    assert_eq!(factory.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(factory.connects.load(Ordering::SeqCst), 1);
+    let direct_enable = service
+        .enable_server(
+            &McpServerMutationInput {
+                expected_generation: snapshot.generation,
+                server_id: "fixture".into(),
+            },
+            7,
+        )
+        .await;
+    assert!(matches!(direct_enable, Err(McpError::InvalidState)));
+    assert_eq!(factory.connects.load(Ordering::SeqCst), 1);
+    assert_eq!(factory.calls.load(Ordering::SeqCst), 1);
+
+    let recovered = service
+        .recover_server(
+            &McpServerMutationInput {
+                expected_generation: snapshot.generation,
+                server_id: "fixture".into(),
+            },
+            8,
+        )
+        .await
+        .expect("explicit recovery restarts the worker");
+    assert_eq!(recovered.servers[0].lifecycle, McpLifecycle::Ready);
+    assert_eq!(recovered.active_workers, 1);
+    assert_eq!(factory.connects.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        factory.calls.load(Ordering::SeqCst),
+        1,
+        "the transport call completed before the CAS fault and must never replay"
+    );
+}
+
+#[tokio::test]
+async fn durable_executing_state_normalizes_on_database_restart_without_replay() {
+    let temporary = TempDir::new().expect("temporary app home");
+    let descriptor = DatabaseDescriptor::app(temporary.path());
+    let (database, _) = DatabaseActor::start(descriptor.clone()).expect("app database");
+    let database = Arc::new(database);
+    let repository = Arc::new(DatabaseMcpRepository::new(Arc::clone(&database), None));
+    let authority = Arc::new(FakeAuthority::default());
+    let factory = Arc::new(FakeFactory {
+        order: Arc::clone(&authority.order),
+        ..FakeFactory::default()
+    });
+    let mut service = McpService::restore(
+        Arc::clone(&repository),
+        Arc::clone(&authority),
+        Arc::clone(&factory),
+        1,
+    )
+    .expect("restore database service");
+    let saved = service
+        .upsert_server(
+            definition(service.snapshot().generation),
+            McpDefinitionSource::User,
+            2,
+        )
+        .expect("save definition");
+    let definition_sha256 = service
+        .definition_sha256("fixture")
+        .expect("definition digest");
+    let binding_sha256 = format!("sha256:{}", "8".repeat(64));
+    let pending = service
+        .record_trust_approval(
+            &McpServerMutationInput {
+                expected_generation: saved.generation,
+                server_id: "fixture".into(),
+            },
+            McpPendingTrustApproval {
+                prompt_id: "approval:restart-executing".into(),
+                definition_sha256: definition_sha256.clone(),
+                action_binding_sha256: binding_sha256.clone(),
+                action_configuration_version: saved.generation,
+                requested_at_ms: 3,
+                expires_at_ms: 300,
+                state: McpTrustApprovalState::Pending,
+            },
+            3,
+        )
+        .expect("record approval");
+    let trusted = service
+        .trust_server(
+            &McpServerMutationInput {
+                expected_generation: pending.generation,
+                server_id: "fixture".into(),
+            },
+            "approval:restart-executing",
+            &binding_sha256,
+            &definition_sha256,
+            4,
+        )
+        .expect("trust definition");
+    let ready = service
+        .enable_server(
+            &McpServerMutationInput {
+                expected_generation: trusted.generation,
+                server_id: "fixture".into(),
+            },
+            5,
+        )
+        .await
+        .expect("enable server");
+
+    let mut executing = ready.clone();
+    executing.generation += 1;
+    executing.last_event_id += 1;
+    executing.active_workers = 1;
+    executing.servers[0].lifecycle = McpLifecycle::Executing;
+    executing.servers[0].lifecycle_generation += 1;
+    executing.servers[0].active_requests = 1;
+    let executing_event = McpAuditEvent {
+        schema_version: MCP_STATE_SCHEMA_VERSION,
+        event_id: executing.last_event_id,
+        generation: executing.generation,
+        lifecycle_generation: executing.servers[0].lifecycle_generation,
+        operation_id: "operation:restart-executing".into(),
+        server_id: "fixture".into(),
+        event_kind: "tool.executing".into(),
+        target: Some("echo".into()),
+        result: "started".into(),
+        detail: None,
+        occurred_at_ms: 6,
+    };
+    repository
+        .compare_and_swap(Some(ready.generation), &executing, &executing_event)
+        .expect("persist crash boundary");
+    drop(service);
+    drop(repository);
+    drop(database);
+
+    let (database, _) = DatabaseActor::start(descriptor).expect("restart app database");
+    let repository = Arc::new(DatabaseMcpRepository::new(Arc::new(database), None));
+    let restart_factory = Arc::new(FakeFactory::default());
+    let mut restored = McpService::restore(
+        Arc::clone(&repository),
+        authority,
+        Arc::clone(&restart_factory),
+        7,
+    )
+    .expect("normalize executing state after restart");
+    let recovered = restored.snapshot();
+    assert_eq!(recovered.active_workers, 0);
+    assert_eq!(recovered.servers[0].active_requests, 0);
+    assert_eq!(recovered.servers[0].lifecycle, McpLifecycle::Failed);
+    assert_eq!(
+        recovered.servers[0].last_failure_code.as_deref(),
+        Some("restart_recovery_required")
+    );
+    assert_eq!(restart_factory.connects.load(Ordering::SeqCst), 0);
+    assert_eq!(restart_factory.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        repository
+            .load()
+            .expect("load normalized database state")
+            .is_some_and(|snapshot| snapshot == recovered)
+    );
+
+    let direct_enable = restored
+        .enable_server(
+            &McpServerMutationInput {
+                expected_generation: recovered.generation,
+                server_id: "fixture".into(),
+            },
+            8,
+        )
+        .await;
+    assert!(matches!(direct_enable, Err(McpError::InvalidState)));
+    let ready = restored
+        .recover_server(
+            &McpServerMutationInput {
+                expected_generation: recovered.generation,
+                server_id: "fixture".into(),
+            },
+            9,
+        )
+        .await
+        .expect("explicit recovery reconnects");
+    assert_eq!(ready.servers[0].lifecycle, McpLifecycle::Ready);
+    assert_eq!(restart_factory.connects.load(Ordering::SeqCst), 1);
+    assert_eq!(restart_factory.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

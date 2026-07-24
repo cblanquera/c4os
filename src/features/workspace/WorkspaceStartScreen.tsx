@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 
 import { ControlledModalDialog } from "../../components/accessible";
+import type { WorkspaceRecoveryNotice } from "../../platform/workspace-start";
 
 export type WorkspaceStartAction =
   | { readonly type: "openFolder" }
@@ -19,6 +20,7 @@ export interface RecentWorkspace {
 export interface WorkspaceOpenResult {
   readonly workspaceName: string;
   readonly recovered: boolean;
+  readonly recoveryNotice?: WorkspaceRecoveryNotice | null;
   readonly hydrationRequired?: boolean;
 }
 
@@ -28,10 +30,12 @@ export interface WorkspaceCloneApprovalRequest {
 }
 
 interface WorkspaceStartScreenProps {
+  readonly initialRecovery?: WorkspaceOpenResult | null;
   readonly recents: readonly RecentWorkspace[];
   readonly openWorkspace: (
     action: WorkspaceStartAction,
   ) => Promise<WorkspaceOpenResult | WorkspaceCloneApprovalRequest | null>;
+  readonly continueRecovery?: () => Promise<WorkspaceOpenResult>;
   readonly answerCloneApproval?: (
     promptId: string,
     answer: "allow" | "deny",
@@ -51,7 +55,14 @@ type OpenState =
       readonly result: WorkspaceOpenResult;
       readonly action: WorkspaceStartAction;
     }
-  | { readonly status: "error"; readonly message: string };
+  | {
+      readonly status: "error";
+      readonly message: string;
+      readonly retryRecovery?: {
+        readonly action: WorkspaceStartAction;
+        readonly label: string;
+      };
+    };
 
 const primaryActions = [
   {
@@ -75,19 +86,40 @@ const primaryActions = [
 ] as const;
 
 export function WorkspaceStartScreen({
+  initialRecovery = null,
   recents,
   openWorkspace,
+  continueRecovery,
   answerCloneApproval,
 }: WorkspaceStartScreenProps) {
-  const [openState, setOpenState] = useState<OpenState>({ status: "idle" });
+  const [openState, setOpenState] = useState<OpenState>(() =>
+    initialRecovery?.recoveryNotice == null
+      ? { status: "idle" }
+      : {
+          status: "opened",
+          result: initialRecovery,
+          action: {
+            type: "openRecent",
+            workspaceId: initialRecovery.recoveryNotice.workspaceId,
+          },
+        },
+  );
   const [showCloneForm, setShowCloneForm] = useState(false);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const requestGeneration = useRef(0);
   const operationInFlight = useRef(false);
   const cloneSubmit = useRef<HTMLButtonElement>(null);
+  const recoveryNotice = useRef<HTMLDivElement>(null);
   const restoreCloneFocus = useRef(false);
+  const recoveryReviewPending =
+    (openState.status === "opened" &&
+      !openState.result.hydrationRequired &&
+      openState.result.recoveryNotice != null) ||
+    (openState.status === "error" && openState.retryRecovery !== undefined);
   const busy =
-    openState.status === "opening" || openState.status === "approval";
+    openState.status === "opening" ||
+    openState.status === "approval" ||
+    recoveryReviewPending;
 
   const beginOpen = (action: WorkspaceStartAction, label: string) => {
     if (operationInFlight.current) return;
@@ -164,6 +196,37 @@ export function WorkspaceStartScreen({
     );
   };
 
+  const beginRecoveryReview = (action: WorkspaceStartAction, label: string) => {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    const generation = ++requestGeneration.current;
+    setOpenState({ status: "opening", label });
+    const review =
+      continueRecovery === undefined
+        ? Promise.reject(
+            new Error("Recovery review is unavailable in this surface."),
+          )
+        : continueRecovery();
+    void review.then(
+      (result) => {
+        operationInFlight.current = false;
+        if (requestGeneration.current === generation) {
+          setOpenState({ status: "opened", result, action });
+        }
+      },
+      (error: unknown) => {
+        operationInFlight.current = false;
+        if (requestGeneration.current === generation) {
+          setOpenState({
+            status: "error",
+            message: workspaceOpenFailure(error, true),
+            retryRecovery: { action, label },
+          });
+        }
+      },
+    );
+  };
+
   useEffect(() => {
     if (
       restoreCloneFocus.current &&
@@ -174,6 +237,19 @@ export function WorkspaceStartScreen({
       window.queueMicrotask(() => cloneSubmit.current?.focus());
     }
   }, [openState.status]);
+
+  useEffect(() => {
+    if (
+      openState.status === "opened" &&
+      !openState.result.hydrationRequired &&
+      openState.result.recoveryNotice != null
+    ) {
+      window.queueMicrotask(() => recoveryNotice.current?.focus());
+    }
+  }, [openState]);
+
+  const recoveryRetry =
+    openState.status === "error" ? openState.retryRecovery : undefined;
 
   return (
     <main className="workspace-start" aria-labelledby="workspace-start-title">
@@ -294,16 +370,33 @@ export function WorkspaceStartScreen({
 
         <div
           className={`workspace-start__notice workspace-start__notice--${openState.status}`}
+          aria-atomic="true"
           aria-live="polite"
-          role="status"
+          ref={recoveryNotice}
+          role={openState.status === "error" ? "alert" : "status"}
+          tabIndex={-1}
         >
           {openState.status === "opening" && `Opening ${openState.label}…`}
           {openState.status === "opened" &&
-            (openState.result.hydrationRequired
-              ? `${openState.result.workspaceName} is active, but Chat still needs to be refreshed.`
-              : openState.result.recovered
-                ? `Recovered ${openState.result.workspaceName}. Review the recovery notice before the next save.`
-                : `Opened ${openState.result.workspaceName}. Entering Chat…`)}
+            (openState.result.hydrationRequired ? (
+              `${openState.result.workspaceName} is active, but Chat still needs to be refreshed.`
+            ) : openState.result.recoveryNotice != null ? (
+              <>
+                <strong>
+                  Recovered {openState.result.workspaceName}. Review before the
+                  next save.
+                </strong>
+                <span>{openState.result.recoveryNotice.summary}</span>
+                <small>
+                  Working generation{" "}
+                  {openState.result.recoveryNotice.workingGeneration}; archive
+                  generation {openState.result.recoveryNotice.archiveGeneration}
+                  ; correlation {openState.result.recoveryNotice.correlationId}.
+                </small>
+              </>
+            ) : (
+              `Opened ${openState.result.workspaceName}. Entering Chat…`
+            ))}
           {openState.status === "approval" && "Clone approval required."}
           {openState.status === "error" && openState.message}
         </div>
@@ -312,6 +405,23 @@ export function WorkspaceStartScreen({
             onPress={() => beginOpen(openState.action, "the active Workspace")}
           >
             Retry Chat recovery
+          </Button>
+        ) : openState.status === "opened" &&
+          openState.result.recoveryNotice != null ? (
+          <Button
+            onPress={() =>
+              beginRecoveryReview(openState.action, "the active Workspace")
+            }
+          >
+            Continue to Chat
+          </Button>
+        ) : recoveryRetry !== undefined ? (
+          <Button
+            onPress={() =>
+              beginRecoveryReview(recoveryRetry.action, recoveryRetry.label)
+            }
+          >
+            Retry recovery review
           </Button>
         ) : null}
       </section>
@@ -333,7 +443,10 @@ export function WorkspaceStartScreen({
   );
 }
 
-function workspaceOpenFailure(error: unknown): string {
+function workspaceOpenFailure(error: unknown, recoveryReview = false): string {
   void error;
+  if (recoveryReview) {
+    return "C4OS could not record that recovery review. Chat remains blocked and your existing state is unchanged.";
+  }
   return "C4OS could not open that Workspace. Your existing state is unchanged.";
 }

@@ -16,6 +16,7 @@ import type { RunPhase as GeneratedRunPhase } from "../generated/RunPhase";
 import type { RuntimeHealth as GeneratedRuntimeHealth } from "../generated/RuntimeHealth";
 import type { SnapshotRequest as GeneratedSnapshotRequest } from "../generated/SnapshotRequest";
 import type { WorkspaceRecentSnapshot as GeneratedWorkspaceRecentSnapshot } from "../generated/WorkspaceRecentSnapshot";
+import type { WorkspaceRecoveryNoticeSnapshot as GeneratedWorkspaceRecoveryNoticeSnapshot } from "../generated/WorkspaceRecoveryNoticeSnapshot";
 import type { WorkspaceStartSnapshot as GeneratedWorkspaceStartSnapshot } from "../generated/WorkspaceStartSnapshot";
 
 export const PROTOCOL_VERSION = 1 as const;
@@ -235,11 +236,24 @@ export interface WorkspaceRecentSnapshot {
   readonly isMissing: boolean;
 }
 
+export interface WorkspaceRecoveryNoticeSnapshot {
+  readonly recoveryId: string;
+  readonly correlationId: CorrelationId;
+  readonly workspaceId: WorkspaceId;
+  readonly workspaceName: string;
+  readonly summary: string;
+  readonly action: "review_recovered_workspace_before_save";
+  readonly workingGeneration: number;
+  readonly archiveGeneration: number;
+  readonly mustNotifyBeforeNextSave: boolean;
+}
+
 export interface WorkspaceStartSnapshot {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly generation: StateGeneration;
   readonly authority: string;
   readonly recents: readonly WorkspaceRecentSnapshot[];
+  readonly activeRecoveryNotice: WorkspaceRecoveryNoticeSnapshot | null;
 }
 
 export interface ProtocolEnvelope<Payload> {
@@ -284,6 +298,32 @@ type WorkspaceRecentKeysMatch = Assert<
       : false
     : false
 >;
+type WorkspaceRecoveryNoticeKeysMatch = Assert<
+  keyof WorkspaceRecoveryNoticeSnapshot extends keyof GeneratedWorkspaceRecoveryNoticeSnapshot
+    ? keyof GeneratedWorkspaceRecoveryNoticeSnapshot extends keyof WorkspaceRecoveryNoticeSnapshot
+      ? true
+      : false
+    : false
+>;
+type WorkspaceRecoveryActionMatches = Assert<
+  WorkspaceRecoveryNoticeSnapshot["action"] extends GeneratedWorkspaceRecoveryNoticeSnapshot["action"]
+    ? GeneratedWorkspaceRecoveryNoticeSnapshot["action"] extends WorkspaceRecoveryNoticeSnapshot["action"]
+      ? true
+      : false
+    : false
+>;
+type WorkspaceRecoveryShapeCompatible = Assert<
+  WorkspaceRecoveryNoticeSnapshot extends GeneratedWorkspaceRecoveryNoticeSnapshot
+    ? true
+    : false
+>;
+type WorkspaceRecoveryPresenceCompatible = Assert<
+  WorkspaceStartSnapshot["activeRecoveryNotice"] extends GeneratedWorkspaceStartSnapshot["activeRecoveryNotice"]
+    ? null extends GeneratedWorkspaceStartSnapshot["activeRecoveryNotice"]
+      ? true
+      : false
+    : false
+>;
 type WorkspaceStartKeysMatch = Assert<
   keyof WorkspaceStartSnapshot extends keyof GeneratedWorkspaceStartSnapshot
     ? keyof GeneratedWorkspaceStartSnapshot extends keyof WorkspaceStartSnapshot
@@ -302,6 +342,10 @@ type EventDiscriminantsMatch = Assert<
 export type ProtocolCompatibilityChecks =
   | FoundationKeysMatch
   | WorkspaceRecentKeysMatch
+  | WorkspaceRecoveryNoticeKeysMatch
+  | WorkspaceRecoveryActionMatches
+  | WorkspaceRecoveryShapeCompatible
+  | WorkspaceRecoveryPresenceCompatible
   | WorkspaceStartKeysMatch
   | EnvelopeKeysMatch
   | SnapshotRequestKeysMatch

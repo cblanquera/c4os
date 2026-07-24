@@ -326,6 +326,17 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         self.operation(())
     }
 
+    pub fn review_runtime_crash_loop(
+        &mut self,
+        runtime_id: &str,
+        process_generation: u64,
+        at_ms: u64,
+    ) -> Result<CoordinatorOperation<()>, CoordinatorError> {
+        self.supervisor
+            .review_crash_loop(runtime_id, process_generation, at_ms)?;
+        self.operation(())
+    }
+
     pub fn finish_managed_runtime_shutdown(
         &mut self,
         runtime_id: &str,

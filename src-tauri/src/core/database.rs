@@ -1,6 +1,8 @@
 use std::fs;
-use std::io::Write as IoWrite;
+use std::io::{Read as IoRead, Seek, SeekFrom, Write as IoWrite};
 use std::ops::{Deref, DerefMut};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -48,7 +50,7 @@ pub const MAX_DIAGNOSTIC_MESSAGE_BYTES: usize = 16_384;
 pub const MAX_WORKSPACE_DISPLAY_NAME_BYTES: usize = 512;
 pub const MAX_PROJECT_DISPLAY_NAME_BYTES: usize = 256;
 
-const APP_SCHEMA_VERSION: usize = 8;
+const APP_SCHEMA_VERSION: usize = 9;
 const WORKSPACE_SCHEMA_VERSION: usize = 5;
 static AUXILIARY_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -195,6 +197,27 @@ pub struct MigrationReport {
     pub previous_version: usize,
     pub current_version: usize,
     pub backup_path: Option<PathBuf>,
+    pub validated_backup: Option<ValidatedMigrationBackup>,
+}
+
+/// Opaque native authority for one backup that was validated at the exact
+/// pre-migration schema version. Paths never cross the renderer boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatedMigrationBackup {
+    descriptor: DatabaseDescriptor,
+    backup_path: PathBuf,
+    backup_sha256: String,
+    backup_identity: NativeFileIdentity,
+    destination_identity: NativeFileIdentity,
+    destination_parent_identity: NativeFileIdentity,
+    previous_version: usize,
+    target_version: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeFileIdentity {
+    device: u64,
+    inode: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -516,6 +539,7 @@ pub struct AppSnapshot {
     pub installation: Option<InstallationRecord>,
     pub recents: Vec<RecentWorkspaceRecord>,
     pub configuration_lkg: Option<AppConfigurationSnapshotRecord>,
+    pub diagnostics: Vec<DiagnosticRecord>,
     pub generation: u64,
     pub truncated: bool,
 }
@@ -639,6 +663,11 @@ enum WriteCommand {
         record: DiagnosticRecord,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
+    PruneAppDiagnostics {
+        retain_after: i64,
+        max_records: usize,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
     SaveSecurityRecords {
         records: Vec<SecurityJournalRecord>,
         reply: mpsc::Sender<DatabaseResult<u64>>,
@@ -646,6 +675,15 @@ enum WriteCommand {
     SaveRuntimeStateDocument {
         record: RuntimeStateDocumentRecord,
         expected_generation: Option<u64>,
+        reply: mpsc::Sender<DatabaseResult<u64>>,
+    },
+    SaveRuntimeStateWithDiagnostics {
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        diagnostics: Vec<DiagnosticRecord>,
+        diagnostic_ids_to_replace: Vec<String>,
+        retain_after: i64,
+        max_records: usize,
         reply: mpsc::Sender<DatabaseResult<u64>>,
     },
     SavePolicyTransition {
@@ -899,8 +937,33 @@ impl DatabaseActor {
     }
 
     pub fn record_diagnostic(&self, record: DiagnosticRecord) -> DatabaseResult<u64> {
-        self.require_workspace()?;
         self.request(|reply| WriteCommand::RecordDiagnostic { record, reply })
+    }
+
+    pub fn app_diagnostics(&self, query: SnapshotQuery) -> DatabaseResult<Vec<DiagnosticRecord>> {
+        self.require_app()?;
+        let connection = open_read_connection(&self.descriptor.path)?;
+        connection.execute_batch("BEGIN DEFERRED")?;
+        let (records, _) = read_app_diagnostics(&connection, query.max_records)?;
+        Ok(records)
+    }
+
+    pub fn prune_app_diagnostics(
+        &self,
+        retain_after: i64,
+        max_records: usize,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        if retain_after < 0 || max_records == 0 || max_records > MAX_READ_RECORDS {
+            return Err(DatabaseError::InvalidInput(
+                "app diagnostic retention is invalid".into(),
+            ));
+        }
+        self.request(|reply| WriteCommand::PruneAppDiagnostics {
+            retain_after,
+            max_records,
+            reply,
+        })
     }
 
     /// Saves the latest state and appends the same canonical record to the
@@ -981,6 +1044,37 @@ impl DatabaseActor {
         self.request(|reply| WriteCommand::SaveRuntimeStateDocument {
             record,
             expected_generation,
+            reply,
+        })
+    }
+
+    pub fn save_runtime_state_with_diagnostics(
+        &self,
+        record: RuntimeStateDocumentRecord,
+        expected_generation: Option<u64>,
+        diagnostics: Vec<DiagnosticRecord>,
+        diagnostic_ids_to_replace: Vec<String>,
+        retain_after: i64,
+        max_records: usize,
+    ) -> DatabaseResult<u64> {
+        self.require_app()?;
+        if diagnostics.len() > MAX_READ_RECORDS
+            || diagnostic_ids_to_replace.len() > MAX_READ_RECORDS
+            || retain_after < 0
+            || max_records == 0
+            || max_records > MAX_READ_RECORDS
+        {
+            return Err(DatabaseError::InvalidInput(
+                "runtime diagnostic transition is invalid".into(),
+            ));
+        }
+        self.request(|reply| WriteCommand::SaveRuntimeStateWithDiagnostics {
+            record,
+            expected_generation,
+            diagnostics,
+            diagnostic_ids_to_replace,
+            retain_after,
+            max_records,
             reply,
         })
     }
@@ -1483,6 +1577,14 @@ fn writer_loop(
                 reply,
                 write_diagnostic(&mut connection, &descriptor.kind, record),
             ),
+            WriteCommand::PruneAppDiagnostics {
+                retain_after,
+                max_records,
+                reply,
+            } => reply_result(
+                reply,
+                prune_app_diagnostics(&mut connection, retain_after, max_records),
+            ),
             WriteCommand::SaveSecurityRecords { records, reply } => {
                 reply_result(reply, write_security_records(&mut connection, records))
             }
@@ -1493,6 +1595,26 @@ fn writer_loop(
             } => reply_result(
                 reply,
                 write_runtime_state_document(&mut connection, record, expected_generation),
+            ),
+            WriteCommand::SaveRuntimeStateWithDiagnostics {
+                record,
+                expected_generation,
+                diagnostics,
+                diagnostic_ids_to_replace,
+                retain_after,
+                max_records,
+                reply,
+            } => reply_result(
+                reply,
+                write_runtime_state_with_diagnostics(
+                    &mut connection,
+                    record,
+                    expected_generation,
+                    diagnostics,
+                    diagnostic_ids_to_replace,
+                    retain_after,
+                    max_records,
+                ),
             ),
             WriteCommand::SavePolicyTransition {
                 record,
@@ -1795,11 +1917,39 @@ fn open_and_migrate(
         return Err(error);
     }
 
+    let validated_backup = backup_path
+        .as_ref()
+        .map(
+            |backup_path| -> Result<ValidatedMigrationBackup, DatabaseError> {
+                let mut backup_file = open_nofollow_regular_file(backup_path)?;
+                let destination_file = open_nofollow_regular_file(&descriptor.path)?;
+                let destination_parent =
+                    open_nofollow_directory(descriptor.path.parent().ok_or_else(|| {
+                        DatabaseError::InvalidInput(
+                            "database recovery destination has no parent".into(),
+                        )
+                    })?)?;
+                Ok(ValidatedMigrationBackup {
+                    descriptor: descriptor.clone(),
+                    backup_path: backup_path.clone(),
+                    backup_sha256: file_sha256(&mut backup_file)?,
+                    backup_identity: native_file_identity(&backup_file.metadata()?),
+                    destination_identity: native_file_identity(&destination_file.metadata()?),
+                    destination_parent_identity: native_file_identity(
+                        &destination_parent.metadata()?,
+                    ),
+                    previous_version,
+                    target_version,
+                })
+            },
+        )
+        .transpose()?;
     Ok((
         connection,
         MigrationReport {
             previous_version,
             current_version: target_version,
+            validated_backup,
             backup_path,
         },
     ))
@@ -1849,7 +1999,14 @@ fn open_read_connection(path: &Path) -> DatabaseResult<BoundedConnection> {
 
 fn open_backup_connection(path: &Path) -> DatabaseResult<BoundedConnection> {
     let permit = AuxiliaryConnectionPermit::acquire()?;
-    let connection = Connection::open(path)?;
+    let normalized_path = normalize_sqlite_nofollow_path(path)?;
+    let connection = Connection::open_with_flags(
+        normalized_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
     Ok(BoundedConnection {
         connection,
         _permit: permit,
@@ -2039,6 +2196,37 @@ fn app_migrations() -> Migrations<'static> {
                 ON mcp_events(server_id, lifecycle_generation DESC, event_id DESC);",
         )
         .comment("app-owned MCP service state and append-only lifecycle journal"),
+        M::up(
+            "CREATE TABLE runtime_state_documents_v3 (
+                document_kind TEXT NOT NULL CHECK (
+                    document_kind IN (
+                        'provider-snapshot',
+                        'supervisor-snapshot',
+                        'runtime-control-plane',
+                        'update-coordinator'
+                    )
+                ),
+                document_id TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation >= 0),
+                canonical_document TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+                PRIMARY KEY (document_kind, document_id)
+            );
+            INSERT INTO runtime_state_documents_v3(
+                document_kind, document_id, generation, canonical_document,
+                document_sha256, updated_at_ms
+            )
+            SELECT document_kind, document_id, generation, canonical_document,
+                document_sha256, updated_at_ms
+            FROM runtime_state_documents;
+            DROP INDEX runtime_state_documents_updated;
+            DROP TABLE runtime_state_documents;
+            ALTER TABLE runtime_state_documents_v3 RENAME TO runtime_state_documents;
+            CREATE INDEX runtime_state_documents_updated
+                ON runtime_state_documents(document_kind, updated_at_ms DESC, document_id);",
+        )
+        .comment("app-owned update coordination and bounded diagnostic authority"),
     ])
 }
 
@@ -2536,10 +2724,19 @@ fn restore_validated_backup(
     backup_path: &Path,
     expected_version: usize,
 ) -> DatabaseResult<()> {
-    let source = open_read_connection(backup_path)?;
-    validate_quick_check(&source)?;
+    let source_file = open_nofollow_regular_file(backup_path)?;
+    let source = open_read_connection_from_file(&source_file)?;
+    restore_validated_backup_from_source(destination, &source, expected_version)
+}
+
+fn restore_validated_backup_from_source(
+    destination: &mut Connection,
+    source: &Connection,
+    expected_version: usize,
+) -> DatabaseResult<()> {
+    validate_quick_check(source)?;
     {
-        let backup = Backup::new(&source, destination)?;
+        let backup = Backup::new(source, destination)?;
         backup.run_to_completion(64, Duration::from_millis(2), None)?;
     }
     configure_write_connection(destination)?;
@@ -2551,6 +2748,184 @@ fn restore_validated_backup(
         )));
     }
     Ok(())
+}
+
+/// Restores a startup migration backup only while no database actor owns the
+/// destination. The opaque metadata is revalidated against the deterministic
+/// recovery path and schema bounds before native SQLite backup recovery runs.
+pub fn restore_validated_migration_backup(backup: &ValidatedMigrationBackup) -> DatabaseResult<()> {
+    restore_validated_migration_backup_inner(backup, || {})
+}
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn restore_validated_migration_backup_with_test_hook(
+    backup: &ValidatedMigrationBackup,
+    after_identity_capture: impl FnOnce(),
+) -> DatabaseResult<()> {
+    restore_validated_migration_backup_inner(backup, after_identity_capture)
+}
+
+fn restore_validated_migration_backup_inner(
+    backup: &ValidatedMigrationBackup,
+    after_identity_capture: impl FnOnce(),
+) -> DatabaseResult<()> {
+    validate_descriptor(&backup.descriptor)?;
+    if backup.previous_version == backup.target_version
+        || backup.target_version != target_schema_version(&backup.descriptor.kind)
+        || migration_backup_path(
+            &backup.descriptor,
+            backup.previous_version,
+            backup.target_version,
+        )? != backup.backup_path
+    {
+        return Err(DatabaseError::InvalidInput(
+            "validated migration backup metadata is invalid".into(),
+        ));
+    }
+    let _ownership_lock = acquire_writer_ownership(&backup.descriptor)?;
+    let mut source_file = open_nofollow_regular_file(&backup.backup_path)?;
+    let destination_file = open_nofollow_regular_file(&backup.descriptor.path)?;
+    let destination_parent_path = backup.descriptor.path.parent().ok_or_else(|| {
+        DatabaseError::InvalidInput("database recovery destination has no parent".into())
+    })?;
+    let destination_parent = open_nofollow_directory(destination_parent_path)?;
+    if native_file_identity(&source_file.metadata()?) != backup.backup_identity
+        || native_file_identity(&destination_file.metadata()?) != backup.destination_identity
+        || native_file_identity(&destination_parent.metadata()?)
+            != backup.destination_parent_identity
+    {
+        return Err(DatabaseError::Validation(
+            "validated migration recovery file identity changed".into(),
+        ));
+    }
+    if file_sha256(&mut source_file)? != backup.backup_sha256 {
+        return Err(DatabaseError::Validation(
+            "validated migration backup digest changed".into(),
+        ));
+    }
+    after_identity_capture();
+    if current_nofollow_identity(&backup.backup_path)? != backup.backup_identity
+        || current_nofollow_identity(&backup.descriptor.path)? != backup.destination_identity
+        || current_nofollow_identity(destination_parent_path)? != backup.destination_parent_identity
+    {
+        return Err(DatabaseError::Validation(
+            "validated migration recovery path was rebound".into(),
+        ));
+    }
+    let source = open_read_connection_from_file(&source_file)?;
+    let normalized_destination = normalize_sqlite_nofollow_path(&backup.descriptor.path)?;
+    let mut destination = Connection::open_with_flags(
+        normalized_destination,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
+    if current_nofollow_identity(&backup.descriptor.path)? != backup.destination_identity {
+        return Err(DatabaseError::Validation(
+            "database recovery destination identity changed while opening".into(),
+        ));
+    }
+    configure_write_connection(&destination)?;
+    restore_validated_backup_from_source(&mut destination, &source, backup.previous_version)?;
+    if current_nofollow_identity(&backup.descriptor.path)? != backup.destination_identity {
+        return Err(DatabaseError::Validation(
+            "database recovery destination was rebound during restore".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_sqlite_nofollow_path(path: &Path) -> DatabaseResult<PathBuf> {
+    let file_name = path.file_name().ok_or_else(|| {
+        DatabaseError::InvalidInput("SQLite no-follow path must name a file".into())
+    })?;
+    let parent = path.parent().ok_or_else(|| {
+        DatabaseError::InvalidInput("SQLite no-follow path must have a parent".into())
+    })?;
+    let canonical_parent = parent.canonicalize()?;
+    Ok(canonical_parent.join(file_name))
+}
+
+fn open_nofollow_regular_file(path: &Path) -> DatabaseResult<fs::File> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(false)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(DatabaseError::Validation(
+            "database recovery authority is not a regular file".into(),
+        ));
+    }
+    Ok(file)
+}
+
+fn open_nofollow_directory(path: &Path) -> DatabaseResult<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(DatabaseError::Validation(
+            "database recovery authority is not a directory".into(),
+        ));
+    }
+    Ok(directory)
+}
+
+fn native_file_identity(metadata: &fs::Metadata) -> NativeFileIdentity {
+    NativeFileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    }
+}
+
+fn current_nofollow_identity(path: &Path) -> DatabaseResult<NativeFileIdentity> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() && !metadata.file_type().is_dir() {
+        return Err(DatabaseError::Validation(
+            "database recovery path is not a native file authority".into(),
+        ));
+    }
+    Ok(native_file_identity(&metadata))
+}
+
+fn open_read_connection_from_file(file: &fs::File) -> DatabaseResult<BoundedConnection> {
+    let permit = AuxiliaryConnectionPermit::acquire()?;
+    let descriptor_uri = format!("file:/dev/fd/{}?immutable=1", file.as_raw_fd());
+    let connection = Connection::open_with_flags(
+        descriptor_uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    connection.busy_timeout(DATABASE_BUSY_TIMEOUT)?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(BoundedConnection {
+        connection,
+        _permit: permit,
+    })
+}
+
+fn file_sha256(file: &mut fs::File) -> DatabaseResult<String> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let digest = hasher.finalize();
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    file.seek(SeekFrom::Start(0))?;
+    Ok(encoded)
 }
 
 pub fn migration_diagnostic_path(descriptor: &DatabaseDescriptor) -> PathBuf {
@@ -3136,6 +3511,85 @@ fn write_runtime_state_document(
 ) -> DatabaseResult<u64> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     write_runtime_state_document_in_transaction(&transaction, record, expected_generation)?;
+    let durable_generation = bump_app_generation(&transaction)?;
+    transaction.commit()?;
+    Ok(durable_generation)
+}
+
+fn write_runtime_state_with_diagnostics(
+    connection: &mut Connection,
+    record: RuntimeStateDocumentRecord,
+    expected_generation: Option<u64>,
+    diagnostics: Vec<DiagnosticRecord>,
+    diagnostic_ids_to_replace: Vec<String>,
+    retain_after: i64,
+    max_records: usize,
+) -> DatabaseResult<u64> {
+    if diagnostics.len() > MAX_READ_RECORDS
+        || diagnostic_ids_to_replace.len() > MAX_READ_RECORDS
+        || retain_after < 0
+        || max_records == 0
+        || max_records > MAX_READ_RECORDS
+    {
+        return Err(DatabaseError::InvalidInput(
+            "runtime diagnostic transition is invalid".into(),
+        ));
+    }
+    for diagnostic in &diagnostics {
+        validate_diagnostic_record(diagnostic)?;
+    }
+    let replacement_ids = diagnostic_ids_to_replace
+        .into_iter()
+        .map(|diagnostic_id| {
+            require_nonempty("diagnostic_id", &diagnostic_id)?;
+            validate_text_field("diagnostic_id", &diagnostic_id, 256)?;
+            Ok(diagnostic_id)
+        })
+        .collect::<DatabaseResult<BTreeSet<_>>>()?;
+    if !diagnostics
+        .iter()
+        .all(|diagnostic| replacement_ids.contains(&diagnostic.diagnostic_id))
+    {
+        return Err(DatabaseError::InvalidInput(
+            "replacement scope must include every runtime diagnostic".into(),
+        ));
+    }
+    let limit = i64::try_from(max_records)
+        .map_err(|_| DatabaseError::InvalidInput("diagnostic limit is invalid".into()))?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    write_runtime_state_document_in_transaction(&transaction, record, expected_generation)?;
+    for diagnostic_id in replacement_ids {
+        transaction.execute(
+            "DELETE FROM app_diagnostics WHERE diagnostic_id = ?1",
+            [diagnostic_id],
+        )?;
+    }
+    for diagnostic in diagnostics {
+        transaction.execute(
+            "INSERT INTO app_diagnostics(
+                diagnostic_id, category, message, created_at
+             ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                diagnostic.diagnostic_id,
+                diagnostic.category,
+                diagnostic.message,
+                diagnostic.created_at
+            ],
+        )?;
+    }
+    transaction.execute(
+        "DELETE FROM app_diagnostics WHERE created_at < ?1",
+        [retain_after],
+    )?;
+    transaction.execute(
+        "DELETE FROM app_diagnostics
+         WHERE diagnostic_id IN (
+             SELECT diagnostic_id FROM app_diagnostics
+             ORDER BY created_at DESC, diagnostic_id
+             LIMIT -1 OFFSET ?1
+         )",
+        [limit],
+    )?;
     let durable_generation = bump_app_generation(&transaction)?;
     transaction.commit()?;
     Ok(durable_generation)
@@ -4947,10 +5401,18 @@ fn validate_runtime_document_identity(
 ) -> DatabaseResult<()> {
     if !matches!(
         document_kind,
-        "provider-snapshot" | "supervisor-snapshot" | "runtime-control-plane"
+        "provider-snapshot"
+            | "supervisor-snapshot"
+            | "runtime-control-plane"
+            | "update-coordinator"
     ) {
         return Err(DatabaseError::InvalidInput(
             "runtime document kind is unsupported".into(),
+        ));
+    }
+    if document_kind == "update-coordinator" && document_id != "local-development" {
+        return Err(DatabaseError::InvalidInput(
+            "update coordinator document id is unsupported".into(),
         ));
     }
     require_nonempty("runtime document id", document_id)?;
@@ -5416,22 +5878,70 @@ fn write_diagnostic(
     kind: &DatabaseKind,
     record: DiagnosticRecord,
 ) -> DatabaseResult<u64> {
-    let workspace_id = workspace_id(kind)?;
     validate_diagnostic_record(&record)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let generation = match kind {
+        DatabaseKind::App => {
+            transaction.execute(
+                "INSERT INTO app_diagnostics(
+                    diagnostic_id, category, message, created_at
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    record.diagnostic_id,
+                    record.category,
+                    record.message,
+                    record.created_at
+                ],
+            )?;
+            bump_app_generation(&transaction)?
+        }
+        DatabaseKind::Workspace { workspace_id } => {
+            transaction.execute(
+                "INSERT INTO workspace_diagnostics(
+                    workspace_id, diagnostic_id, category, message, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    workspace_id,
+                    record.diagnostic_id,
+                    record.category,
+                    record.message,
+                    record.created_at
+                ],
+            )?;
+            bump_workspace_generation(&transaction, workspace_id)?
+        }
+    };
+    transaction.commit()?;
+    Ok(generation)
+}
+
+fn prune_app_diagnostics(
+    connection: &mut Connection,
+    retain_after: i64,
+    max_records: usize,
+) -> DatabaseResult<u64> {
+    if retain_after < 0 || max_records == 0 || max_records > MAX_READ_RECORDS {
+        return Err(DatabaseError::InvalidInput(
+            "app diagnostic retention is invalid".into(),
+        ));
+    }
+    let limit = i64::try_from(max_records)
+        .map_err(|_| DatabaseError::InvalidInput("diagnostic limit is invalid".into()))?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     transaction.execute(
-        "INSERT INTO workspace_diagnostics(
-            workspace_id, diagnostic_id, category, message, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            workspace_id,
-            record.diagnostic_id,
-            record.category,
-            record.message,
-            record.created_at
-        ],
+        "DELETE FROM app_diagnostics WHERE created_at < ?1",
+        [retain_after],
     )?;
-    let generation = bump_workspace_generation(&transaction, workspace_id)?;
+    transaction.execute(
+        "DELETE FROM app_diagnostics
+         WHERE diagnostic_id IN (
+             SELECT diagnostic_id FROM app_diagnostics
+             ORDER BY created_at DESC, diagnostic_id
+             LIMIT -1 OFFSET ?1
+         )",
+        [limit],
+    )?;
+    let generation = bump_app_generation(&transaction)?;
     transaction.commit()?;
     Ok(generation)
 }
@@ -5880,6 +6390,23 @@ fn validate_app_snapshot_text_budget(
         [],
         "app configuration snapshot",
         &mut budget,
+    )?;
+    account_text_query(
+        connection,
+        "SELECT COALESCE(MAX(MAX(
+                    length(CAST(diagnostic_id AS BLOB)),
+                    length(CAST(category AS BLOB)),
+                    length(CAST(message AS BLOB)))), 0),
+                COALESCE(SUM(
+                    length(CAST(diagnostic_id AS BLOB)) +
+                    length(CAST(category AS BLOB)) +
+                    length(CAST(message AS BLOB))), 0)
+         FROM (SELECT diagnostic_id, category, message
+               FROM app_diagnostics
+               ORDER BY created_at DESC, diagnostic_id LIMIT ?1)",
+        [limit_plus_one(query.max_records)?],
+        "app diagnostic snapshot",
+        &mut budget,
     )
 }
 
@@ -6077,6 +6604,7 @@ fn read_app_snapshot(connection: &Connection, query: SnapshotQuery) -> DatabaseR
         )?;
     }
     let truncated = truncate(&mut recents, query.max_records);
+    let (diagnostics, diagnostics_truncated) = read_app_diagnostics(connection, query.max_records)?;
     let generation: i64 = connection.query_row(
         "SELECT generation FROM durable_generation WHERE singleton = 1",
         [],
@@ -6086,9 +6614,37 @@ fn read_app_snapshot(connection: &Connection, query: SnapshotQuery) -> DatabaseR
         installation,
         recents,
         configuration_lkg: read_app_configuration_lkg(connection)?,
+        diagnostics,
         generation: generation_to_u64(generation)?,
-        truncated,
+        truncated: truncated || diagnostics_truncated,
     })
+}
+
+fn read_app_diagnostics(
+    connection: &Connection,
+    max_records: usize,
+) -> DatabaseResult<(Vec<DiagnosticRecord>, bool)> {
+    let mut statement = connection.prepare(
+        "SELECT diagnostic_id, category, message, created_at
+         FROM app_diagnostics
+         ORDER BY created_at DESC, diagnostic_id LIMIT ?1",
+    )?;
+    let rows = statement.query_map([limit_plus_one(max_records)?], |row| {
+        Ok(DiagnosticRecord {
+            diagnostic_id: row.get(0)?,
+            category: row.get(1)?,
+            message: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+    let mut records = Vec::new();
+    for row in rows {
+        let record = row?;
+        validate_diagnostic_record(&record)?;
+        records.push(record);
+    }
+    let truncated = truncate(&mut records, max_records);
+    Ok((records, truncated))
 }
 
 fn read_app_configuration_lkg(

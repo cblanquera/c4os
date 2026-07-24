@@ -10,6 +10,7 @@ import {
 } from "./protocol";
 import {
   createWorkspaceStartAdapter,
+  WORKSPACE_RECOVERY_ACKNOWLEDGE_COMMAND,
   WORKSPACE_START_CLONE_REPOSITORY_COMMAND,
   WORKSPACE_START_OPEN_RECENT_COMMAND,
   WORKSPACE_START_SNAPSHOT_COMMAND,
@@ -29,6 +30,7 @@ function response(overrides: Record<string, unknown> = {}) {
       protocolVersion: PROTOCOL_VERSION,
       generation: 4,
       authority: "rust-core",
+      activeRecoveryNotice: null,
       recents: [
         {
           workspaceId: "workspace-1",
@@ -49,6 +51,7 @@ function openResponse(overrides: Record<string, unknown> = {}) {
       workspaceId: "workspace-opened",
       workspaceName: "Opened Workspace",
       recovered: false,
+      recoveryNotice: null,
     },
     ...overrides,
   });
@@ -160,6 +163,7 @@ describe("createWorkspaceStartAdapter", () => {
       workspaceId: "workspace-opened",
       workspaceName: "Opened Workspace",
       recovered: false,
+      recoveryNotice: null,
     });
     expect(fixture.adapter.currentGeneration).toBe(4);
     expect(fixture.transport.invoke).toHaveBeenCalledWith(
@@ -218,5 +222,125 @@ describe("createWorkspaceStartAdapter", () => {
         "https://example.com/repo\nname",
       ),
     ).toThrowError(/repository URL is invalid/);
+  });
+
+  it("validates a structured recovery notice and rejects mismatched recovery authority", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-opened:5:4",
+      correlationId: "correlation:recovery-1" as CorrelationId,
+      workspaceId: "workspace-opened",
+      workspaceName: "Opened Workspace",
+      summary: "Recovered the working generation after an interrupted save.",
+      action: "review_recovered_workspace_before_save",
+      workingGeneration: 5,
+      archiveGeneration: 4,
+      mustNotifyBeforeNextSave: true,
+    };
+    await expect(
+      adapter(
+        openResponse({
+          payload: {
+            authority: "rust-workspace-service",
+            workspaceId: "workspace-opened",
+            workspaceName: "Opened Workspace",
+            recovered: true,
+            recoveryNotice,
+          },
+        }),
+      ).adapter.openRecent("workspace-1" as WorkspaceId),
+    ).resolves.toMatchObject({
+      recovered: true,
+      recoveryNotice: {
+        recoveryId: "recovery:workspace-opened:5:4",
+        workingGeneration: 5,
+        archiveGeneration: 4,
+      },
+    });
+
+    await expect(
+      adapter(
+        openResponse({
+          payload: {
+            authority: "rust-workspace-service",
+            workspaceId: "workspace-opened",
+            workspaceName: "Opened Workspace",
+            recovered: true,
+            recoveryNotice: {
+              ...recoveryNotice,
+              workspaceId: "workspace:other",
+            },
+          },
+        }),
+      ).adapter.openRecent("workspace-1" as WorkspaceId),
+    ).rejects.toMatchObject({ code: "invalidPayload" });
+    await expect(
+      adapter(
+        openResponse({
+          payload: {
+            authority: "rust-workspace-service",
+            workspaceId: "workspace-opened",
+            workspaceName: "Opened Workspace",
+            recovered: true,
+            recoveryNotice: {
+              ...recoveryNotice,
+              action: "skip_recovery_review",
+            },
+          },
+        }),
+      ).adapter.openRecent("workspace-1" as WorkspaceId),
+    ).rejects.toMatchObject({ code: "invalidPayload" });
+  });
+
+  it("acknowledges only the exact recovery identity and requires native suppression", async () => {
+    const recoveryNotice = {
+      recoveryId: "recovery:workspace-opened:5:4",
+      correlationId: "correlation:recovery-1" as CorrelationId,
+      workspaceId: "workspace-opened" as WorkspaceId,
+      workspaceName: "Opened Workspace",
+      summary: "Recovered the working generation after an interrupted save.",
+      action: "review_recovered_workspace_before_save" as const,
+      workingGeneration: 5,
+      archiveGeneration: 4,
+      mustNotifyBeforeNextSave: true,
+    };
+    const fixture = adapter(response());
+
+    await expect(
+      fixture.adapter.acknowledgeRecovery(recoveryNotice),
+    ).resolves.toMatchObject({
+      generation: 4,
+      activeRecoveryNotice: null,
+    });
+    expect(fixture.transport.invoke).toHaveBeenCalledWith(
+      WORKSPACE_RECOVERY_ACKNOWLEDGE_COMMAND,
+      {
+        request: {
+          protocolVersion: PROTOCOL_VERSION,
+          requestId,
+          correlationId,
+          expectedGeneration: 3,
+        },
+        input: {
+          expectedGeneration: 3,
+          recoveryId: "recovery:workspace-opened:5:4",
+          workspaceId: "workspace-opened",
+          workingGeneration: 5,
+          archiveGeneration: 4,
+        },
+      },
+    );
+
+    const unsuppressed = response({
+      payload: {
+        protocolVersion: PROTOCOL_VERSION,
+        generation: 4,
+        authority: "rust-core",
+        activeRecoveryNotice: recoveryNotice,
+        recents: [],
+      },
+    });
+    await expect(
+      adapter(unsuppressed).adapter.acknowledgeRecovery(recoveryNotice),
+    ).rejects.toMatchObject({ code: "invalidPayload" });
   });
 });

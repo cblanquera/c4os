@@ -7,16 +7,15 @@ import {
   readRuntimeCoreSnapshot,
   type RuntimeCoreSnapshot,
 } from "../../platform/runtime-core";
-import { readWorkspaceStartSnapshot } from "../../platform/workspace-start";
+import {
+  readWorkspaceStartSnapshot,
+  type WorkspaceStartSnapshot,
+} from "../../platform/workspace-start";
 import {
   readConversationSnapshot,
   type ConversationSnapshot,
 } from "../../platform/conversation-service";
-import type {
-  RuntimeId,
-  StateGeneration,
-  WorkspaceStartSnapshot,
-} from "../../platform/protocol";
+import type { RuntimeId, StateGeneration } from "../../platform/protocol";
 import {
   shellAuthorityActions,
   shellDraftActions,
@@ -32,6 +31,7 @@ export interface NativeShellReaders {
 }
 
 export interface NativeShellIngestionResult {
+  readonly activeRecoveryNoticePending: boolean;
   readonly publishedDomains: readonly AuthoritativePublication["domain"][];
   readonly unavailableSources: readonly (
     "platform" | "runtime" | "workspaceStart" | "conversation"
@@ -45,6 +45,7 @@ export function nativeResumeRoute(
   currentRoute: string,
 ): "/chat" | null {
   if (currentRoute !== "/" && currentRoute !== "/start") return null;
+  if (result.activeRecoveryNoticePending) return null;
   if (result.unavailableSources.includes("conversation")) return null;
   const authority = state.shellAuthority;
   return authority.workspace.value.activeWorkspaceId !== null &&
@@ -122,6 +123,9 @@ export async function ingestNativeShellProjections(
   }
 
   return {
+    activeRecoveryNoticePending:
+      workspaceStart.status === "fulfilled" &&
+      workspaceStart.value.activeRecoveryNotice !== null,
     publishedDomains: publications.map(({ domain }) => domain),
     unavailableSources,
   };

@@ -1,6 +1,10 @@
 import { WorkspaceStartScreen } from "../features/workspace/WorkspaceStartScreen";
 import { isQaFixtureBuildEnabled } from "./fixture";
-import { openQaWorkspace, QA_RECENT_WORKSPACES } from "./workspace-fixture";
+import {
+  continueQaWorkspaceRecovery,
+  openQaWorkspace,
+  QA_RECENT_WORKSPACES,
+} from "./workspace-fixture";
 
 export const QA_WORKSPACE_PATH = "/qa/workspace";
 
@@ -17,6 +21,7 @@ export function QaWorkspaceRoute() {
   return (
     <div data-qa-fixture-mode="enabled">
       <WorkspaceStartScreen
+        continueRecovery={continueQaWorkspaceRecovery}
         recents={QA_RECENT_WORKSPACES}
         openWorkspace={openQaWorkspace}
       />

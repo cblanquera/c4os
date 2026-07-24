@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub const CONFIGURATION_SCHEMA_VERSION: u16 = 1;
 pub const MAX_CONFIGURATION_BYTES: usize = 1_048_576;
+const MAX_CONFIGURATION_DIAGNOSTICS: usize = 128;
 const DEFAULT_STABLE_READ_ATTEMPTS: usize = 4;
 const DEFAULT_STABLE_READ_DELAY: Duration = Duration::from_millis(8);
 const DEFAULT_WATCH_DEBOUNCE: Duration = Duration::from_millis(75);
@@ -614,7 +615,7 @@ impl ConfigurationService {
         scope: ConfigurationScope,
         path: impl Into<PathBuf>,
     ) {
-        self.diagnostics.push(ConfigurationDiagnostic {
+        self.record_diagnostic(ConfigurationDiagnostic {
             scope,
             path: path.into(),
             key: None,
@@ -624,6 +625,16 @@ impl ConfigurationService {
     }
 
     pub(crate) fn record_diagnostic(&mut self, diagnostic: ConfigurationDiagnostic) {
+        if self
+            .diagnostics
+            .iter()
+            .any(|existing| existing == &diagnostic)
+        {
+            return;
+        }
+        if self.diagnostics.len() == MAX_CONFIGURATION_DIAGNOSTICS {
+            self.diagnostics.remove(0);
+        }
         self.diagnostics.push(diagnostic);
     }
 
@@ -784,7 +795,7 @@ impl ConfigurationService {
     }
 
     fn reject(&mut self, diagnostic: ConfigurationDiagnostic) -> ConfigurationUpdate {
-        self.diagnostics.push(diagnostic.clone());
+        self.record_diagnostic(diagnostic.clone());
         ConfigurationUpdate::Rejected {
             diagnostic,
             snapshot: self.snapshot(),
@@ -1876,8 +1887,10 @@ where
 /// the callback can therefore perform one stable full-scope reconciliation.
 pub struct ParentDirectoryConfigurationWatcher {
     _native_watcher: RecommendedWatcher,
-    _poll_watcher: PollWatcher,
+    poll_watcher: PollWatcher,
+    poll_initial_scans: Arc<Mutex<BTreeSet<PathBuf>>>,
     _debouncer: ConfigurationEventDebouncer,
+    routed_plan: Arc<Mutex<ConfigurationWatcherPlan>>,
     plan: ConfigurationWatcherPlan,
 }
 
@@ -1899,17 +1912,22 @@ impl ParentDirectoryConfigurationWatcher {
     {
         let debouncer = ConfigurationEventDebouncer::start(debounce_window, callback);
         let event_sender = debouncer.command_sender();
-        let native_plan = plan.clone();
+        let routed_plan = Arc::new(Mutex::new(plan.clone()));
+        let native_plan = Arc::clone(&routed_plan);
         let native_sender = event_sender.clone();
         let mut native_watcher = notify::recommended_watcher(move |event| {
-            forward_configuration_event(event, &native_plan, &native_sender);
+            forward_configuration_event_with_routed_plan(event, &native_plan, &native_sender);
         })?;
         // Some supported filesystems and sandboxed macOS execution contexts do
         // not deliver native events reliably. A bounded parent-directory poll
         // closes that observability gap and shares the same deduplication path.
-        let poll_plan = plan.clone();
-        let mut poll_watcher = PollWatcher::new(
-            move |event| forward_configuration_event(event, &poll_plan, &event_sender),
+        let poll_plan = Arc::clone(&routed_plan);
+        let poll_initial_scans = Arc::new(Mutex::new(BTreeSet::new()));
+        let reported_initial_scans = Arc::clone(&poll_initial_scans);
+        let mut poll_watcher = PollWatcher::with_initial_scan(
+            move |event| {
+                forward_configuration_event_with_routed_plan(event, &poll_plan, &event_sender)
+            },
             // PollWatcher rounds mtimes to whole seconds. Configuration files
             // are bounded and live alone at these parent-directory roots, so
             // content comparison is required to observe rapid atomic replaces
@@ -1917,16 +1935,35 @@ impl ParentDirectoryConfigurationWatcher {
             Config::default()
                 .with_poll_interval(WATCH_POLL_FALLBACK_INTERVAL)
                 .with_compare_contents(true),
+            move |scan| {
+                if let Ok(path) = scan
+                    && let Ok(mut scans) = reported_initial_scans.lock()
+                {
+                    scans.insert(path);
+                }
+            },
         )?;
 
+        // Commit the complete parent set as one backend mutation. On macOS,
+        // adding each path through `watch` stops and restarts the FSEvents
+        // runloop for every parent; a multi-parent startup can otherwise pay
+        // that intrinsic latency repeatedly.
+        {
+            let mut native_paths = native_watcher.paths_mut();
+            for parent in &plan.parent_directories {
+                native_paths.add(parent, RecursiveMode::NonRecursive)?;
+            }
+            native_paths.commit()?;
+        }
         for parent in &plan.parent_directories {
-            native_watcher.watch(parent, RecursiveMode::NonRecursive)?;
-            poll_watcher.watch(parent, RecursiveMode::NonRecursive)?;
+            register_poll_watcher_parent(&mut poll_watcher, &poll_initial_scans, parent)?;
         }
         Ok(Self {
             _native_watcher: native_watcher,
-            _poll_watcher: poll_watcher,
+            poll_watcher,
+            poll_initial_scans,
             _debouncer: debouncer,
+            routed_plan,
             plan,
         })
     }
@@ -1934,6 +1971,142 @@ impl ParentDirectoryConfigurationWatcher {
     pub fn plan(&self) -> &ConfigurationWatcherPlan {
         &self.plan
     }
+
+    /// Extends live routing and polling coverage without restarting the native
+    /// watcher. Existing native coverage therefore remains continuous, while
+    /// the bounded content poll begins covering new parent directories
+    /// immediately. A complete restart builds native coverage for the merged
+    /// plan.
+    pub fn extend_targets(
+        &mut self,
+        targets: impl IntoIterator<Item = WatchedConfiguration>,
+    ) -> Result<(), ConfigurationError> {
+        let extended =
+            extend_configuration_watcher_plan(&self.plan, targets).map_err(|source| {
+                ConfigurationError::Io {
+                    operation: "extend configuration watcher plan",
+                    path: PathBuf::new(),
+                    source,
+                }
+            })?;
+        let added_parents = extended
+            .parent_directories
+            .difference(&self.plan.parent_directories)
+            .cloned()
+            .collect::<Vec<_>>();
+        for parent in added_parents {
+            register_poll_watcher_parent(
+                &mut self.poll_watcher,
+                &self.poll_initial_scans,
+                &parent,
+            )?;
+        }
+        *self
+            .routed_plan
+            .lock()
+            .map_err(|_| ConfigurationError::Io {
+                operation: "publish extended configuration watcher plan",
+                path: PathBuf::new(),
+                source: io::Error::other("configuration watcher plan lock is unavailable"),
+            })? = extended.clone();
+        self.plan = extended;
+        Ok(())
+    }
+}
+
+fn register_poll_watcher_parent(
+    watcher: &mut PollWatcher,
+    initial_scans: &Arc<Mutex<BTreeSet<PathBuf>>>,
+    parent: &Path,
+) -> Result<(), ConfigurationError> {
+    register_poll_watcher_parent_with(initial_scans, parent, |parent| {
+        watcher
+            .watch(parent, RecursiveMode::NonRecursive)
+            .map_err(ConfigurationError::Watcher)
+    })
+}
+
+fn register_poll_watcher_parent_with<F>(
+    initial_scans: &Arc<Mutex<BTreeSet<PathBuf>>>,
+    parent: &Path,
+    mut register: F,
+) -> Result<(), ConfigurationError>
+where
+    F: FnMut(&Path) -> Result<(), ConfigurationError>,
+{
+    let require_directory = || {
+        fs::metadata(parent)
+            .and_then(|metadata| {
+                if metadata.is_dir() {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(
+                        "configuration watcher parent is not a directory",
+                    ))
+                }
+            })
+            .map_err(|source| ConfigurationError::Io {
+                operation: "verify configuration poll watcher parent",
+                path: parent.to_path_buf(),
+                source,
+            })
+    };
+    require_directory()?;
+    {
+        let mut scans = initial_scans.lock().map_err(|_| ConfigurationError::Io {
+            operation: "prepare configuration poll watcher coverage proof",
+            path: parent.to_path_buf(),
+            source: io::Error::other("configuration poll watcher scan lock is unavailable"),
+        })?;
+        scans.retain(|scanned| !watch_paths_equivalent(scanned, parent));
+    }
+    register(parent)?;
+    require_directory()?;
+    let covered = initial_scans
+        .lock()
+        .map_err(|_| ConfigurationError::Io {
+            operation: "verify configuration poll watcher coverage",
+            path: parent.to_path_buf(),
+            source: io::Error::other("configuration poll watcher scan lock is unavailable"),
+        })?
+        .iter()
+        .any(|scanned| watch_paths_equivalent(scanned, parent));
+    if !covered {
+        return Err(ConfigurationError::Io {
+            operation: "verify configuration poll watcher coverage",
+            path: parent.to_path_buf(),
+            source: io::Error::other(
+                "poll watcher accepted the parent without establishing coverage",
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn extend_configuration_watcher_plan(
+    current: &ConfigurationWatcherPlan,
+    targets: impl IntoIterator<Item = WatchedConfiguration>,
+) -> io::Result<ConfigurationWatcherPlan> {
+    let mut merged = current.targets.iter().cloned().collect::<BTreeSet<_>>();
+    merged.extend(targets);
+    ConfigurationWatcherPlan::new(merged)
+}
+
+fn forward_configuration_event_with_routed_plan(
+    event: notify::Result<Event>,
+    plan: &Arc<Mutex<ConfigurationWatcherPlan>>,
+    sender: &mpsc::Sender<DebounceCommand>,
+) {
+    let plan = match plan.lock() {
+        Ok(plan) => plan.clone(),
+        Err(_) => {
+            let _ = sender.send(DebounceCommand::Error(
+                "configuration watcher plan lock is unavailable".into(),
+            ));
+            return;
+        }
+    };
+    forward_configuration_event(event, &plan, sender);
 }
 
 fn forward_configuration_event(
@@ -1998,6 +2171,45 @@ fn watch_path_identities(path: &Path) -> BTreeSet<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn configuration_diagnostics_are_deduplicated_and_bounded() {
+        let mut service =
+            ConfigurationService::new(ManagedCeilings::default(), SecurityConstraints::default());
+        let repeated = ConfigurationDiagnostic {
+            scope: ConfigurationScope::Chat,
+            path: PathBuf::from("/configuration/repeated.toml"),
+            key: None,
+            code: ConfigurationDiagnosticCode::SizeLimitExceeded,
+            message: "configuration file exceeds the byte limit".into(),
+        };
+        for _ in 0..(MAX_CONFIGURATION_DIAGNOSTICS * 2) {
+            service.record_diagnostic(repeated.clone());
+        }
+        assert_eq!(service.diagnostics(), &[repeated.clone()]);
+
+        for index in 0..=MAX_CONFIGURATION_DIAGNOSTICS {
+            service.record_diagnostic(ConfigurationDiagnostic {
+                scope: ConfigurationScope::Chat,
+                path: PathBuf::from(format!("/configuration/{index}.toml")),
+                key: None,
+                code: ConfigurationDiagnosticCode::Io,
+                message: "configuration file could not be read".into(),
+            });
+        }
+
+        assert_eq!(service.diagnostics().len(), MAX_CONFIGURATION_DIAGNOSTICS);
+        assert_eq!(
+            service
+                .diagnostics()
+                .last()
+                .map(|diagnostic| diagnostic.path.as_path()),
+            Some(Path::new(&format!(
+                "/configuration/{MAX_CONFIGURATION_DIAGNOSTICS}.toml"
+            )))
+        );
+        assert!(!service.diagnostics().contains(&repeated));
+    }
+
     #[cfg(unix)]
     #[test]
     fn watcher_matching_accepts_lexical_and_physical_path_aliases() {
@@ -2012,5 +2224,80 @@ mod tests {
         let lexical_target = alias_parent.join("config.toml");
         let physical_event = physical_parent.join("config.toml");
         assert!(watch_paths_equivalent(&lexical_target, &physical_event));
+    }
+
+    #[test]
+    fn watcher_plan_extension_deduplicates_targets_and_preserves_existing_coverage() {
+        let temp = tempfile::tempdir().expect("temporary watcher root");
+        let targets = (0..2)
+            .map(|index| {
+                let parent = temp.path().join(format!("scope-{index}"));
+                WatchedConfiguration {
+                    scope: ConfigurationScope::Chat,
+                    path: parent.join("config.toml"),
+                }
+            })
+            .collect::<Vec<_>>();
+        let plan = ConfigurationWatcherPlan::new(targets.clone()).expect("initial watcher plan");
+        let added = WatchedConfiguration {
+            scope: ConfigurationScope::Project,
+            path: temp.path().join("added/config.toml"),
+        };
+
+        let extended =
+            extend_configuration_watcher_plan(&plan, [targets[1].clone(), added.clone()])
+                .expect("extended watcher plan");
+
+        assert_eq!(extended.targets.len(), 3);
+        assert!(extended.targets.contains(&targets[0]));
+        assert!(extended.targets.contains(&targets[1]));
+        assert!(extended.targets.contains(&added));
+        assert_eq!(extended.parent_directories.len(), 3);
+    }
+
+    #[test]
+    fn poll_parent_registration_proves_coverage_and_rejects_a_disappeared_parent() {
+        let temp = tempfile::tempdir().expect("temporary poll watcher root");
+        let parent = temp.path().join("scope");
+        fs::create_dir_all(&parent).expect("poll watcher parent");
+        let initial_scans = Arc::new(Mutex::new(BTreeSet::new()));
+        let false_success = register_poll_watcher_parent_with(&initial_scans, &parent, |_| Ok(()))
+            .expect_err("registration success without a scan proof must fail");
+        assert!(matches!(
+            false_success,
+            ConfigurationError::Io {
+                operation: "verify configuration poll watcher coverage",
+                ..
+            }
+        ));
+
+        let reported_scans = Arc::clone(&initial_scans);
+        let mut watcher = PollWatcher::with_initial_scan(
+            |_| {},
+            Config::default().with_compare_contents(true),
+            move |scan| {
+                if let Ok(path) = scan {
+                    reported_scans
+                        .lock()
+                        .expect("reported initial scans")
+                        .insert(path);
+                }
+            },
+        )
+        .expect("poll watcher");
+
+        register_poll_watcher_parent(&mut watcher, &initial_scans, &parent)
+            .expect("existing parent has proven coverage");
+        fs::remove_dir(&parent).expect("remove watched parent");
+        let error = register_poll_watcher_parent(&mut watcher, &initial_scans, &parent)
+            .expect_err("disappeared parent cannot report successful coverage");
+
+        assert!(matches!(
+            error,
+            ConfigurationError::Io {
+                operation: "verify configuration poll watcher parent",
+                ..
+            }
+        ));
     }
 }

@@ -59,6 +59,11 @@ test("QA Workspace Start uses the production controller with a build-gated adapt
     page.locator('[data-qa-product-adapter="deterministic"]'),
   ).toHaveAttribute("data-route", "/start");
   await expect(page.getByRole("listitem")).toHaveCount(3);
+  await page.getByRole("button", { name: /Legacy UI/ }).click();
+  await expect(page.getByRole("status")).toContainText("Recovered Legacy UI");
+  await page.getByRole("button", { name: "Continue to Chat" }).click();
+  await expect(page).toHaveURL(/#\/chat$/);
+  await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
 });
 
 test("workspace QA route preserves the three-row start contract", async ({
@@ -86,7 +91,25 @@ test("workspace QA route preserves the three-row start contract", async ({
   });
 
   await page.getByRole("button", { name: /Legacy UI/ }).click();
-  await expect(page.getByRole("status")).toContainText("Recovered Legacy UI");
+  const recoveryStatus = page.getByRole("status");
+  await expect(recoveryStatus).toContainText("Recovered Legacy UI");
+  await expect(recoveryStatus).toHaveAttribute("aria-atomic", "true");
+  await expect(recoveryStatus).toBeFocused();
+  await expect(
+    page.getByRole("button", { name: "Continue to Chat" }),
+  ).toBeEnabled();
+  for (const primaryAction of await page
+    .getByRole("group", { name: "Open options" })
+    .getByRole("button")
+    .all()) {
+    await expect(primaryAction).toBeDisabled();
+  }
+  for (const recentAction of await page
+    .getByRole("listitem")
+    .getByRole("button")
+    .all()) {
+    await expect(recentAction).toBeDisabled();
+  }
   await page.screenshot({
     path: "output/playwright/task-00002-qa-workspace-recovery.png",
     fullPage: true,
@@ -98,6 +121,13 @@ test("workspace QA route preserves the three-row start contract", async ({
   ).toBeLessThanOrEqual(
     await page.evaluate(() => document.documentElement.clientWidth),
   );
+  await page.getByRole("button", { name: "Continue to Chat" }).click();
+  await expect(recoveryStatus).toContainText(
+    "Opened Legacy UI. Entering Chat…",
+  );
+  await expect(
+    page.getByRole("button", { name: /Open a folder/ }),
+  ).toBeEnabled();
 
   await page.waitForLoadState("networkidle");
   expect(consoleErrors).toEqual([]);

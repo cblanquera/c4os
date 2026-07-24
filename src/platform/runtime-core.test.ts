@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   type ApprovalId,
   type CorrelationId,
+  type ProcessGeneration,
   type RequestId,
   type RuntimeId,
   type SnapshotRequest,
@@ -12,6 +13,7 @@ import {
 import {
   createRuntimeCoreAdapter,
   RUNTIME_CORE_SNAPSHOT_COMMAND,
+  RUNTIME_REVIEW_CRASH_LOOP_COMMAND,
   RUNTIME_PRODUCTION_ACTIVATE_COMMAND,
   RUNTIME_PRODUCTION_ANSWER_APPROVAL_COMMAND,
   RUNTIME_PRODUCTION_PUMP_COMMAND,
@@ -267,6 +269,66 @@ describe("runtime core adapter", () => {
       code: "staleGeneration",
     });
     expect(adapter.currentGeneration).toBe(3);
+  });
+
+  it("reviews only the exact runtime crash-loop process under the shared cursor", async () => {
+    const invoke = vi.fn(
+      async (command, args: { readonly request: SnapshotRequest }) => {
+        expect(command).toBe(RUNTIME_REVIEW_CRASH_LOOP_COMMAND);
+        return envelope(args.request, 4, {
+          authority: "rust-core",
+          runtimeId,
+          processGeneration: 7,
+          coordinatorGeneration: 4,
+        });
+      },
+    );
+    const transport: RuntimeCoreTransport = {
+      invoke,
+    };
+    const adapter = adapterWithTransport(transport);
+
+    await expect(
+      adapter.reviewCrashLoop({
+        runtimeId,
+        processGeneration: 7 as ProcessGeneration,
+      }),
+    ).resolves.toEqual({
+      authority: "rust-core",
+      runtimeId,
+      processGeneration: 7,
+      coordinatorGeneration: 4,
+    });
+    expect(invoke).toHaveBeenCalledWith(RUNTIME_REVIEW_CRASH_LOOP_COMMAND, {
+      request: requestAt(3),
+      input: {
+        expectedCoordinatorGeneration: 3,
+        runtimeId,
+        processGeneration: 7,
+      },
+    });
+    expect(adapter.currentGeneration).toBe(4);
+  });
+
+  it("preserves structured crash-loop review failures", async () => {
+    const transport: RuntimeCoreTransport = {
+      invoke: vi.fn().mockRejectedValue({
+        code: "conflict",
+        message: "The crash-loop identity changed.",
+        retryable: true,
+      }),
+    };
+
+    await expect(
+      adapterWithTransport(transport).reviewCrashLoop({
+        runtimeId,
+        processGeneration: 7 as ProcessGeneration,
+      }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "The crash-loop identity changed.",
+      retryable: true,
+    });
   });
 
   it("publishes an informed MCP sampling approval without private prompt content", async () => {

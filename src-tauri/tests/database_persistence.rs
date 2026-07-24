@@ -669,7 +669,7 @@ fn app_database_round_trips_across_actor_restart() {
     {
         let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("open app database");
         assert_eq!(report.previous_version, 0);
-        assert_eq!(report.current_version, 8);
+        assert_eq!(report.current_version, 9);
         assert!(
             report
                 .backup_path
@@ -696,7 +696,7 @@ fn app_database_round_trips_across_actor_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("reopen app database");
-    assert_eq!(report.previous_version, 8);
+    assert_eq!(report.previous_version, 9);
     assert!(report.backup_path.is_none());
     let snapshot = match actor
         .snapshot(SnapshotQuery::new(3).expect("valid bounds"))
@@ -711,6 +711,189 @@ fn app_database_round_trips_across_actor_restart() {
     );
     assert_eq!(snapshot.recents.len(), 1);
     assert!(snapshot.generation > first_generation);
+}
+
+#[test]
+fn validated_migration_backup_restores_only_without_a_live_writer() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::app(temp.path());
+    let (actor, report) =
+        DatabaseActor::start(descriptor.clone()).expect("open migrated app database");
+    let backup_path = report.backup_path.clone().expect("migration backup path");
+    let validated_backup = report
+        .validated_backup
+        .expect("fresh migration exposes validated backup authority");
+    actor
+        .upsert_installation(InstallationRecord {
+            installation_id: "post-migration-write".into(),
+            created_at: NOW,
+            updated_at: NOW,
+        })
+        .expect("write after migration");
+    assert!(matches!(
+        database::restore_validated_migration_backup(&validated_backup),
+        Err(database::DatabaseError::Actor(_))
+    ));
+    drop(actor);
+
+    let original_backup = fs::read(&backup_path).expect("read validated backup");
+    let mut tampered_backup = original_backup.clone();
+    tampered_backup.extend_from_slice(b"tampered");
+    fs::write(&backup_path, tampered_backup).expect("tamper backup");
+    assert!(matches!(
+        database::restore_validated_migration_backup(&validated_backup),
+        Err(database::DatabaseError::Validation(_))
+    ));
+    fs::write(&backup_path, original_backup).expect("restore validated test fixture");
+    database::restore_validated_migration_backup(&validated_backup)
+        .expect("restore validated pre-migration backup");
+    let restored = Connection::open(&descriptor.path).expect("inspect restored database");
+    assert_eq!(
+        restored
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .expect("restored schema version"),
+        0
+    );
+    drop(restored);
+
+    let (reopened, migration) =
+        DatabaseActor::start(descriptor).expect("migrate restored backup on restart");
+    assert_eq!(migration.previous_version, 0);
+    assert!(match reopened
+        .snapshot(SnapshotQuery::new(3).expect("query"))
+        .expect("restored app snapshot")
+    {
+        DatabaseSnapshot::App(snapshot) => snapshot.installation.is_none(),
+        DatabaseSnapshot::Workspace(_) => false,
+    });
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn validated_backup_restore_rejects_source_rebinding_after_identity_capture() {
+    let temp = TempDir::new().expect("temp directory");
+    let root = temp
+        .path()
+        .canonicalize()
+        .expect("canonical temp directory");
+    let descriptor = DatabaseDescriptor::app(&root);
+    let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("open migrated database");
+    let backup_path = report.backup_path.clone().expect("migration backup");
+    let validated_backup = report.validated_backup.expect("validated backup");
+    actor
+        .upsert_installation(InstallationRecord {
+            installation_id: "must-remain".into(),
+            created_at: NOW,
+            updated_at: NOW,
+        })
+        .expect("post-migration write");
+    drop(actor);
+
+    let held_backup = backup_path.with_extension("held.sqlite3");
+    let error =
+        database::restore_validated_migration_backup_with_test_hook(&validated_backup, || {
+            fs::rename(&backup_path, &held_backup).expect("move validated backup");
+            fs::write(&backup_path, b"replacement backup").expect("replace backup path");
+        })
+        .expect_err("source rebinding must fail closed");
+    assert!(matches!(error, database::DatabaseError::Validation(_)));
+    let (reopened, _) = DatabaseActor::start(descriptor).expect("reopen unchanged destination");
+    let snapshot = match reopened
+        .snapshot(SnapshotQuery::new(3).expect("query"))
+        .expect("app snapshot")
+    {
+        DatabaseSnapshot::App(snapshot) => snapshot,
+        DatabaseSnapshot::Workspace(_) => panic!("expected app snapshot"),
+    };
+    assert_eq!(
+        snapshot.installation.expect("installation").installation_id,
+        "must-remain"
+    );
+}
+
+#[cfg(all(debug_assertions, unix))]
+#[test]
+fn validated_backup_restore_rejects_destination_symlink_rebinding() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new().expect("temp directory");
+    let root = temp
+        .path()
+        .canonicalize()
+        .expect("canonical temp directory");
+    let descriptor = DatabaseDescriptor::app(root.join("home"));
+    let (actor, report) = DatabaseActor::start(descriptor.clone()).expect("open migrated database");
+    let validated_backup = report.validated_backup.expect("validated backup");
+    drop(actor);
+    let external_path = root.join("Untrusted.app/external.sqlite3");
+    fs::create_dir_all(external_path.parent().expect("external parent"))
+        .expect("external app bundle");
+    let external = Connection::open(&external_path).expect("external database");
+    external
+        .execute_batch(
+            "CREATE TABLE external_marker(value TEXT NOT NULL);
+             INSERT INTO external_marker(value) VALUES ('untouched');",
+        )
+        .expect("external marker");
+    drop(external);
+    let displaced = descriptor.path.with_extension("displaced.sqlite3");
+
+    let error =
+        database::restore_validated_migration_backup_with_test_hook(&validated_backup, || {
+            fs::rename(&descriptor.path, &displaced).expect("move destination");
+            symlink(&external_path, &descriptor.path).expect("rebind destination");
+        })
+        .expect_err("destination rebinding must fail closed");
+    assert!(matches!(error, database::DatabaseError::Validation(_)));
+    let external = Connection::open(&external_path).expect("inspect external database");
+    assert_eq!(
+        external
+            .query_row("SELECT value FROM external_marker", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("external marker"),
+        "untouched"
+    );
+}
+
+#[cfg(all(debug_assertions, target_os = "macos"))]
+#[test]
+fn macos_lexical_var_alias_accepts_nofollow_backup_but_denies_final_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new().expect("temp directory");
+    let canonical_root = temp
+        .path()
+        .canonicalize()
+        .expect("canonical temp directory");
+    let var_relative = canonical_root
+        .strip_prefix("/private/var")
+        .expect("macOS temporary directory under /private/var");
+    let lexical_root = std::path::Path::new("/var").join(var_relative);
+    assert_eq!(
+        lexical_root
+            .canonicalize()
+            .expect("canonical lexical alias"),
+        canonical_root
+    );
+
+    let descriptor = DatabaseDescriptor::app(&lexical_root);
+    let (actor, report) =
+        DatabaseActor::start(descriptor).expect("open database through lexical /var alias");
+    let backup_path = report.backup_path.expect("migration backup");
+    let validated_backup = report.validated_backup.expect("validated backup");
+    drop(actor);
+
+    database::restore_validated_migration_backup(&validated_backup)
+        .expect("restore through lexical /var destination alias");
+
+    let held_backup = backup_path.with_extension("held.sqlite3");
+    fs::rename(&backup_path, &held_backup).expect("move validated backup");
+    symlink(&held_backup, &backup_path).expect("replace final backup file with symlink");
+    assert!(matches!(
+        database::restore_validated_migration_backup(&validated_backup),
+        Err(database::DatabaseError::Io(_))
+    ));
 }
 
 #[test]
@@ -740,7 +923,7 @@ fn app_configuration_lkg_round_trips_across_restart() {
     }
 
     let (actor, report) = DatabaseActor::start(descriptor).expect("restart app database");
-    assert_eq!(report.previous_version, 8);
+    assert_eq!(report.previous_version, 9);
     assert_eq!(
         actor
             .app_configuration_lkg()
@@ -817,6 +1000,82 @@ fn missing_app_diagnostics_schema_fails_closed() {
 }
 
 #[test]
+fn app_diagnostics_are_bounded_and_commit_atomically_with_runtime_state() {
+    let temp = TempDir::new().expect("temp directory");
+    let descriptor = DatabaseDescriptor::app(temp.path());
+    let (actor, _) = DatabaseActor::start(descriptor).expect("app database");
+    let diagnostics = (0..3)
+        .map(|index| database::DiagnosticRecord {
+            diagnostic_id: format!("update-diagnostic-{index}"),
+            category: "update.warning".into(),
+            message: format!("Safe update diagnostic {index}"),
+            created_at: NOW + index,
+        })
+        .collect::<Vec<_>>();
+    actor
+        .save_runtime_state_with_diagnostics(
+            database::RuntimeStateDocumentRecord {
+                document_kind: "update-coordinator".into(),
+                document_id: "local-development".into(),
+                generation: 1,
+                canonical_document: "{\"generation\":1}".into(),
+                updated_at_ms: u64::try_from(NOW).unwrap(),
+            },
+            None,
+            diagnostics.clone(),
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.diagnostic_id.clone())
+                .collect(),
+            NOW + 1,
+            1,
+        )
+        .expect("commit runtime state and bounded diagnostics");
+    assert_eq!(
+        actor
+            .runtime_state_document("update-coordinator", "local-development")
+            .expect("read runtime document")
+            .map(|record| record.generation),
+        Some(1)
+    );
+    let retained = actor
+        .app_diagnostics(SnapshotQuery::new(10).unwrap())
+        .expect("read app diagnostics");
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].diagnostic_id, "update-diagnostic-2");
+
+    let conflict = actor
+        .save_runtime_state_with_diagnostics(
+            database::RuntimeStateDocumentRecord {
+                document_kind: "update-coordinator".into(),
+                document_id: "local-development".into(),
+                generation: 2,
+                canonical_document: "{\"generation\":2}".into(),
+                updated_at_ms: u64::try_from(NOW + 3).unwrap(),
+            },
+            Some(99),
+            vec![database::DiagnosticRecord {
+                diagnostic_id: "must-not-commit".into(),
+                category: "security.error".into(),
+                message: "Safe conflict diagnostic".into(),
+                created_at: NOW + 3,
+            }],
+            vec!["must-not-commit".into()],
+            NOW,
+            10,
+        )
+        .expect_err("stale transition must fail atomically");
+    assert!(matches!(conflict, database::DatabaseError::Conflict(_)));
+    assert!(
+        actor
+            .app_diagnostics(SnapshotQuery::new(10).unwrap())
+            .expect("read unchanged diagnostics")
+            .iter()
+            .all(|record| record.diagnostic_id != "must-not-commit")
+    );
+}
+
+#[test]
 fn migration_creates_validated_online_backup_and_failure_preserves_source() {
     let temp = TempDir::new().expect("temp directory");
     let descriptor = DatabaseDescriptor::app(temp.path());
@@ -837,7 +1096,7 @@ fn migration_creates_validated_online_backup_and_failure_preserves_source() {
     };
     assert!(error.to_string().contains("migration"));
     let backup_path =
-        database::migration_backup_path(&descriptor, 99, 8).expect("deterministic backup path");
+        database::migration_backup_path(&descriptor, 99, 9).expect("deterministic backup path");
     assert!(backup_path.exists());
     let backup = Connection::open(backup_path).expect("open backup");
     assert_eq!(

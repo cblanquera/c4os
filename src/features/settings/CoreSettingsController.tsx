@@ -34,6 +34,7 @@ import {
   type ConfigurationSettingsSnapshot,
   type ConfigurationValues,
 } from "./configuration";
+import { DiagnosticSettingsController } from "./diagnostics";
 import {
   AdvancedPolicySettings,
   type PolicySettingsSnapshot,
@@ -56,6 +57,7 @@ import {
   type RuntimeOptionView,
   type RuntimeSettingsSnapshot,
 } from "./runtime";
+import { UpdateSettingsController } from "./updates";
 
 type CoreSettingsRoute = Extract<
   AppRoutePath,
@@ -595,16 +597,20 @@ function ConfigurationSettingsController({
   }
 
   return (
-    <ConfigurationSettings
-      actions={{
-        onNavigateAdvanced: async () =>
-          onNavigate("/settings/advanced-policies"),
-        onOpenConfigurationFile: openExternal,
-        onRetry: load,
-        onSaveConfiguration: saveValues,
-      }}
-      snapshot={projected}
-    />
+    <>
+      <ConfigurationSettings
+        actions={{
+          onNavigateAdvanced: async () =>
+            onNavigate("/settings/advanced-policies"),
+          onOpenConfigurationFile: openExternal,
+          onRetry: load,
+          onSaveConfiguration: saveValues,
+        }}
+        snapshot={projected}
+      />
+      <UpdateSettingsController />
+      <DiagnosticSettingsController />
+    </>
   );
 }
 

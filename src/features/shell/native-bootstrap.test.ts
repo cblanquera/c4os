@@ -5,10 +5,11 @@ import type { PlatformSnapshot } from "../../platform/platform-service";
 import type { RuntimeCoreSnapshot } from "../../platform/runtime-core";
 import type { ConversationSnapshot } from "../../platform/conversation-service";
 import type {
+  CorrelationId,
   StateGeneration,
   WorkspaceId,
-  WorkspaceStartSnapshot,
 } from "../../platform/protocol";
+import type { WorkspaceStartSnapshot } from "../../platform/workspace-start";
 import { shellDraftActions, UNINITIALIZED_GENERATION } from "./state";
 import {
   ingestNativeShellProjections,
@@ -41,6 +42,7 @@ describe("native shell projection ingestion", () => {
     );
 
     expect(result).toEqual({
+      activeRecoveryNoticePending: false,
       publishedDomains: [
         "platform",
         "runtime",
@@ -118,6 +120,35 @@ describe("native shell projection ingestion", () => {
       }),
     );
 
+    expect(nativeResumeRoute(result, store.getState(), "/start")).toBeNull();
+  });
+
+  it("suppresses automatic Chat resume while native recovery review is pending", async () => {
+    const store = createAppStore(undefined);
+    const base = workspaceStartSnapshot();
+    const result = await ingestNativeShellProjections(
+      store.dispatch,
+      readers({
+        readWorkspaceStart: () =>
+          Promise.resolve({
+            ...base,
+            activeRecoveryNotice: {
+              recoveryId: "recovery:workspace-native:8:7",
+              correlationId: "correlation:workspace-recovery" as CorrelationId,
+              workspaceId: "workspace:native" as WorkspaceId,
+              workspaceName: "Native Workspace",
+              summary:
+                "Startup retained the newer validated working generation.",
+              action: "review_recovered_workspace_before_save",
+              workingGeneration: 8,
+              archiveGeneration: 7,
+              mustNotifyBeforeNextSave: true,
+            },
+          }),
+      }),
+    );
+
+    expect(result.activeRecoveryNoticePending).toBe(true);
     expect(nativeResumeRoute(result, store.getState(), "/start")).toBeNull();
   });
 
@@ -571,6 +602,7 @@ function workspaceStartSnapshot(): WorkspaceStartSnapshot {
     protocolVersion: 1,
     generation,
     authority: "rust-core",
+    activeRecoveryNotice: null,
     recents: [
       {
         workspaceId: "workspace:native" as WorkspaceId,

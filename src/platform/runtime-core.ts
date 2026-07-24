@@ -13,6 +13,8 @@ import {
 import { ProtocolBoundaryError } from "./tauri-adapter";
 
 export const RUNTIME_CORE_SNAPSHOT_COMMAND = "runtime_core_snapshot" as const;
+export const RUNTIME_REVIEW_CRASH_LOOP_COMMAND =
+  "runtime_review_crash_loop" as const;
 export const RUNTIME_PRODUCTION_ACTIVATE_COMMAND =
   "runtime_production_activate" as const;
 export const RUNTIME_PRODUCTION_SHUTDOWN_COMMAND =
@@ -141,8 +143,19 @@ export type ProductionRuntimeApprovalSettlement = {
   readonly promptId: ApprovalId;
 };
 
+export type RuntimeCrashLoopReviewRequest = {
+  readonly runtimeId: RuntimeId;
+  readonly processGeneration: ProcessGeneration;
+};
+
+export type RuntimeCrashLoopReview = RuntimeCrashLoopReviewRequest & {
+  readonly authority: "rust-core";
+  readonly coordinatorGeneration: StateGeneration;
+};
+
 export type RuntimeCoreCommand =
   | typeof RUNTIME_CORE_SNAPSHOT_COMMAND
+  | typeof RUNTIME_REVIEW_CRASH_LOOP_COMMAND
   | typeof RUNTIME_PRODUCTION_ACTIVATE_COMMAND
   | typeof RUNTIME_PRODUCTION_SHUTDOWN_COMMAND
   | typeof RUNTIME_PRODUCTION_PUMP_COMMAND
@@ -151,6 +164,14 @@ export type RuntimeCoreCommand =
 export type RuntimeCoreTransportArguments = {
   readonly [RUNTIME_CORE_SNAPSHOT_COMMAND]: {
     readonly request: SnapshotRequest;
+  };
+  readonly [RUNTIME_REVIEW_CRASH_LOOP_COMMAND]: {
+    readonly request: SnapshotRequest;
+    readonly input: {
+      readonly expectedCoordinatorGeneration: StateGeneration;
+      readonly runtimeId: RuntimeId;
+      readonly processGeneration: ProcessGeneration;
+    };
   };
   readonly [RUNTIME_PRODUCTION_ACTIVATE_COMMAND]: {
     readonly request: SnapshotRequest;
@@ -184,6 +205,9 @@ export interface RuntimeCoreTransport {
 export interface RuntimeCoreAdapter {
   readonly currentGeneration: StateGeneration;
   readSnapshot(): Promise<RuntimeCoreSnapshot>;
+  reviewCrashLoop(
+    review: RuntimeCrashLoopReviewRequest,
+  ): Promise<RuntimeCrashLoopReview>;
   activateRuntime(runtimeId: RuntimeId): Promise<ActivatedProductionRuntime>;
   shutdownRuntime(runtimeId: RuntimeId): Promise<ProductionRuntimeShutdown>;
   pumpRuntime(runtimeId: RuntimeId): Promise<ProductionRuntimePump>;
@@ -201,6 +225,13 @@ const nativeAdapter = createRuntimeCoreAdapter({
 /** Reads the bounded Rust-owned runtime projection through an allowlisted command. */
 export function readRuntimeCoreSnapshot(): Promise<RuntimeCoreSnapshot> {
   return nativeAdapter.readSnapshot();
+}
+
+/** Records an exact native crash-loop review under the runtime CAS cursor. */
+export function reviewRuntimeCrashLoop(
+  review: RuntimeCrashLoopReviewRequest,
+): Promise<RuntimeCrashLoopReview> {
+  return nativeAdapter.reviewCrashLoop(review);
 }
 
 /** Activates one Rust-owned production runtime under the shared CAS cursor. */
@@ -341,7 +372,12 @@ export function createRuntimeCoreAdapter(
       correlationId,
       expectedGeneration: currentGeneration,
     };
-    const raw = await transport.invoke(command, createArguments(request));
+    let raw: unknown;
+    try {
+      raw = await transport.invoke(command, createArguments(request));
+    } catch (error) {
+      throw normalizeRuntimeFailure(error);
+    }
     const envelope = parseEnvelope(raw);
     if (
       envelope.requestId !== requestId ||
@@ -369,6 +405,34 @@ export function createRuntimeCoreAdapter(
         RUNTIME_CORE_SNAPSHOT_COMMAND,
         (request) => ({ request }),
         parseSnapshot,
+      );
+    },
+    async reviewCrashLoop(review): Promise<RuntimeCrashLoopReview> {
+      const expectedRuntimeId = identifier(
+        review.runtimeId,
+        "runtime ID",
+      ) as RuntimeId;
+      const expectedProcessGeneration = processGenerationValue(
+        review.processGeneration,
+        "process generation",
+      );
+      return invokeCommand(
+        RUNTIME_REVIEW_CRASH_LOOP_COMMAND,
+        (request) => ({
+          request,
+          input: {
+            expectedCoordinatorGeneration: request.expectedGeneration,
+            runtimeId: expectedRuntimeId,
+            processGeneration: expectedProcessGeneration,
+          },
+        }),
+        (payload, generation) =>
+          parseCrashLoopReview(
+            payload,
+            generation,
+            expectedRuntimeId,
+            expectedProcessGeneration,
+          ),
       );
     },
     async activateRuntime(runtimeId): Promise<ActivatedProductionRuntime> {
@@ -530,6 +594,50 @@ function parseSnapshot(
     runtimes: value.runtimes.map(parseRuntime),
     modelRoutes: value.modelRoutes.map(parseModelRoute),
     pendingApprovals: value.pendingApprovals.map(parsePendingApproval),
+  };
+}
+
+function parseCrashLoopReview(
+  raw: unknown,
+  generation: StateGeneration,
+  expectedRuntimeId: RuntimeId,
+  expectedProcessGeneration: ProcessGeneration,
+): RuntimeCrashLoopReview {
+  const value = exactRecord(raw, "runtime crash-loop review", [
+    "authority",
+    "runtimeId",
+    "processGeneration",
+    "coordinatorGeneration",
+  ]);
+  if (value.authority !== "rust-core") {
+    throw boundary(
+      "invalidPayload",
+      "The runtime crash-loop review authority is invalid.",
+    );
+  }
+  const processGeneration = processGenerationValue(
+    value.processGeneration,
+    "process generation",
+  );
+  if (processGeneration !== expectedProcessGeneration) {
+    throw boundary(
+      "correlationMismatch",
+      "The runtime crash-loop process generation did not match its request.",
+    );
+  }
+  return {
+    authority: "rust-core",
+    runtimeId: matchingIdentifier(
+      value.runtimeId,
+      expectedRuntimeId,
+      "runtime ID",
+    ) as RuntimeId,
+    processGeneration,
+    coordinatorGeneration: matchingGeneration(
+      value.coordinatorGeneration,
+      generation,
+      "coordinator generation",
+    ),
   };
 }
 
@@ -916,6 +1024,52 @@ function secureUuid(label: string): string {
   return globalThis.crypto.randomUUID();
 }
 
+function normalizeRuntimeFailure(error: unknown): ProtocolBoundaryError {
+  if (error instanceof ProtocolBoundaryError) return error;
+  if (typeof error === "object" && error !== null) {
+    const value = error as {
+      readonly code?: unknown;
+      readonly message?: unknown;
+      readonly retryable?: unknown;
+    };
+    if (
+      typeof value.code === "string" &&
+      typeof value.message === "string" &&
+      isRuntimeBoundaryCode(value.code)
+    ) {
+      return new ProtocolBoundaryError(
+        value.code,
+        value.message,
+        value.retryable === true,
+      );
+    }
+  }
+  return boundary("unavailable", "The native Runtime service is unavailable.");
+}
+
+function isRuntimeBoundaryCode(
+  code: string,
+): code is
+  | "invalidPayload"
+  | "unknownProtocolVersion"
+  | "correlationMismatch"
+  | "staleGeneration"
+  | "invalidGeneration"
+  | "notFound"
+  | "conflict"
+  | "unavailable" {
+  return [
+    "invalidPayload",
+    "unknownProtocolVersion",
+    "correlationMismatch",
+    "staleGeneration",
+    "invalidGeneration",
+    "notFound",
+    "conflict",
+    "unavailable",
+  ].includes(code);
+}
+
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw boundary("invalidPayload", `The ${label} is invalid.`);
@@ -1068,6 +1222,9 @@ function boundary(
     | "unknownProtocolVersion"
     | "correlationMismatch"
     | "staleGeneration"
+    | "invalidGeneration"
+    | "notFound"
+    | "conflict"
     | "unavailable",
   message: string,
 ) {

@@ -61,6 +61,7 @@ pub struct ExtensionPackageInput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExtensionPackageMutation {
+    StageUpdate,
     Disable,
     ActivateStagedUpdate,
     Rollback,
@@ -431,6 +432,24 @@ impl ExtensionService {
         let plugin = self.plugin(&input.package_id)?;
         let selector = self.store.read_selector(&input.package_id)?;
         match mutation {
+            ExtensionPackageMutation::StageUpdate => {
+                if plugin.trust != ExtensionTrustState::Trusted
+                    || !matches!(
+                        plugin.lifecycle,
+                        ExtensionLifecycle::Enabled | ExtensionLifecycle::UpdateStaged
+                    )
+                    || selector
+                        .as_ref()
+                        .and_then(|value| value.active_digest.as_deref())
+                        != Some(plugin.digest.as_str())
+                {
+                    // In particular, never overwrite Executing with
+                    // UpdateStaged. The caller may retry after the current
+                    // generation has quiesced.
+                    return Err(ExtensionError::InvalidState);
+                }
+                self.latest_candidate(&input.package_id)?;
+            }
             ExtensionPackageMutation::Disable => {
                 if !matches!(
                     plugin.lifecycle,
@@ -789,11 +808,8 @@ impl ExtensionService {
         input: ExtensionPackageInput,
         now_ms: u64,
     ) -> Result<ExtensionServiceSnapshot, ExtensionError> {
-        self.require_generation(input.expected_generation)?;
+        self.preflight_package_mutation(&input, ExtensionPackageMutation::StageUpdate)?;
         let plugin = self.plugin(&input.package_id)?.clone();
-        if plugin.trust != ExtensionTrustState::Trusted {
-            return Err(ExtensionError::Revoked);
-        }
         let candidate = self.latest_candidate(&input.package_id)?.clone();
         if Version::parse(&candidate.manifest.package.version)
             .map_err(|_| ExtensionError::InvalidInput)?

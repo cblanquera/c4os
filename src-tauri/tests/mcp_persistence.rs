@@ -59,7 +59,7 @@ fn mcp_transition_is_atomic_cas_and_restart_authoritative() {
     {
         let (database, report) =
             DatabaseActor::start(descriptor.clone()).expect("open app database");
-        assert_eq!(report.current_version, 8);
+        assert_eq!(report.current_version, 9);
         assert_eq!(database.mcp_state_document().unwrap(), None);
 
         database
@@ -84,7 +84,7 @@ fn mcp_transition_is_atomic_cas_and_restart_authoritative() {
     }
 
     let (database, report) = DatabaseActor::start(descriptor).expect("restart app database");
-    assert_eq!(report.previous_version, 8);
+    assert_eq!(report.previous_version, 9);
     assert_eq!(database.mcp_state_document().unwrap(), Some(state(2, 2)));
     let page = database
         .mcp_event_page(Some(2), SnapshotQuery::new(10).unwrap())
@@ -93,13 +93,13 @@ fn mcp_transition_is_atomic_cas_and_restart_authoritative() {
 }
 
 #[test]
-fn v7_database_migrates_to_empty_mcp_authority_without_touching_existing_state() {
+fn v7_database_migrates_to_current_mcp_authority_without_touching_existing_state() {
     let temporary = TempDir::new().expect("temporary home");
     let descriptor = DatabaseDescriptor::app(temporary.path());
     {
         let (_database, report) =
             DatabaseActor::start(descriptor.clone()).expect("seed current database");
-        assert_eq!(report.current_version, 8);
+        assert_eq!(report.current_version, 9);
     }
     let connection = Connection::open(&descriptor.path).expect("open seed database");
     connection
@@ -111,9 +111,9 @@ fn v7_database_migrates_to_empty_mcp_authority_without_touching_existing_state()
         .expect("restore exact pre-MCP schema");
     drop(connection);
 
-    let (database, report) = DatabaseActor::start(descriptor).expect("migrate v7 to v8");
+    let (database, report) = DatabaseActor::start(descriptor).expect("migrate v7 to current");
     assert_eq!(report.previous_version, 7);
-    assert_eq!(report.current_version, 8);
+    assert_eq!(report.current_version, 9);
     assert!(report.backup_path.is_some_and(|path| path.exists()));
     assert_eq!(database.mcp_state_document().unwrap(), None);
 }
