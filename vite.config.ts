@@ -40,8 +40,8 @@ export default defineConfig(() => {
     test: {
       environment: "jsdom",
       globals: true,
-      setupFiles: ["./src/frontend/test/setup.ts"],
-      include: ["src/frontend/**/*.test.{ts,tsx}"],
+      setupFiles: ["./tests/frontend/setup.ts"],
+      include: ["tests/frontend/**/*.test.{ts,tsx}"],
       coverage: {
         enabled: false,
       },

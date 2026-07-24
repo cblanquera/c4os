@@ -16,7 +16,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/frontend/**/*.{ts,tsx}'],
+    files: ['src/frontend/**/*.{ts,tsx}', 'tests/frontend/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,

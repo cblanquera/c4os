@@ -25,5 +25,5 @@
       "#qa-store": ["./src/frontend/qa/build-store.ts"]
     }
   },
-  "include": ["src/frontend"]
+  "include": ["src/frontend", "tests/frontend"]
 }

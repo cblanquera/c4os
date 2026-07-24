@@ -43,7 +43,7 @@
     "format:check": "prettier --check src/frontend tests scripts index.html vite.config.ts playwright.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json package.json",
     "test": "vitest run",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test",
+    "test:app": "playwright test",
     "test:rust": "cargo test --workspace",
     "protocol:generate": "cargo test -p c4os export_bindings -- --nocapture",
     "protocol:check": "npm run protocol:generate && git diff --exit-code -- src/frontend/generated",
