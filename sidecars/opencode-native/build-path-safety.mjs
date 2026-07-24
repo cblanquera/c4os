@@ -5,7 +5,7 @@ import process from "node:process";
 
 // Fixed location owned by the deterministic OpenCode reconstruction process.
 export const BUILD_OWNED_SOURCE_RELATIVE_PATH =
-  "target/c4os-opencode-source/v1.18.3";
+  ".build/app/c4os-opencode-source/v1.18.3";
 export const FIXED_GIT_EXECUTABLE = "/usr/bin/git";
 
 const ISOLATED_GIT_ENVIRONMENT = Object.freeze({

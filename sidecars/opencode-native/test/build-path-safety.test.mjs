@@ -33,8 +33,9 @@ function makeRepository(t) {
 }
 
 for (const symlinkedComponent of [
-  "target",
-  "target/c4os-opencode-source",
+  ".build",
+  ".build/app",
+  ".build/app/c4os-opencode-source",
   BUILD_OWNED_SOURCE_RELATIVE_PATH,
 ]) {
   test(`rejects symlinked ${symlinkedComponent} before a destructive action`, (t) => {

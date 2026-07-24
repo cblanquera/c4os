@@ -44,8 +44,8 @@ Completed 2026-07-18. Added the root npm/Rust workspace, exact npm and Cargo loc
 - `npm audit`: zero vulnerabilities across production and development dependencies.
 - `cargo audit`: zero vulnerabilities; 17 advisory warnings remain. The GTK/glib warnings are not in the arm64 macOS target tree; current-target `unic-*` warnings are unmaintained transitive Tauri/urlpattern crates, not reported vulnerabilities.
 - `npx tauri build --debug --bundles app`: passed; local binary SHA-256 `c1c551276b2fab463183b067909980fe2dfef44d71bbccf8758271f54d598962`.
-- Computer Use inspected the rebuilt `.app`: native 1100×761 screenshot, coherent accessibility tree, standard window controls/menu bar, disabled unfinished action, no visible overflow, and `Connected · Rust core` returned by the live command boundary. Evidence SHA-256 `faab40d445ee7af1aa0d68fae759e5676607f0bf723d12dc95b793131fdd543c`: `output/playwright/task-00001-native.png`.
-- Playwright CLI inspected the gated QA route, reset behavior, accessibility snapshot, corrected console state, and screenshot. Evidence: `output/playwright/task-00001-qa-route.png`.
+- Computer Use inspected the rebuilt `.app`: native 1100×761 screenshot, coherent accessibility tree, standard window controls/menu bar, disabled unfinished action, no visible overflow, and `Connected · Rust core` returned by the live command boundary. Evidence SHA-256 `faab40d445ee7af1aa0d68fae759e5676607f0bf723d12dc95b793131fdd543c`: `tests/results/playwright/task-00001-native.png`.
+- Playwright CLI inspected the gated QA route, reset behavior, accessibility snapshot, corrected console state, and screenshot. Evidence: `tests/results/playwright/task-00001-qa-route.png`.
 - Bundle/source scan found no Proof or wireframe imports. Renderer persistence remains absent; the only `localStorage` occurrence is an explanatory QA source comment.
 
 ## Agent Acceptance Notes

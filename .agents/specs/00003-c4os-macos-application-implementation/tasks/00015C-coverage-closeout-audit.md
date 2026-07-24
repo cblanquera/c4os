@@ -37,7 +37,7 @@ Completed 2026-07-24 after Tasks 00015, 00015A, and 00015B passed. All 50 normat
 
 ## Verification Notes
 
-Machine-readable closeout confirms 50/50 coverage rows closed, 18/18 task records verified/passed, and 18/18 exact acceptance overrides. The Agent Workspace validator passes. `git diff --cached --check` passes for the explicitly staged Task 00015 slice; the unrelated generated-TypeScript trailing whitespace and unrelated tracked/untracked artifacts remain unstaged. Final bundle identity, regression/native tiers, evidence links, reviewer results, and external gates are recorded in `output/native/task-00015-acceptance.md`.
+Machine-readable closeout confirms 50/50 coverage rows closed, 18/18 task records verified/passed, and 18/18 exact acceptance overrides. The Agent Workspace validator passes. `git diff --cached --check` passes for the explicitly staged Task 00015 slice; the unrelated generated-TypeScript trailing whitespace and unrelated tracked/untracked artifacts remain unstaged. Final bundle identity, regression/native tiers, evidence links, reviewer results, and external gates are recorded in `.agents/resources/native/task-00015-acceptance.md`.
 
 Context promotion was reviewed with no change. The deterministic QA harness and bounded diagnostic replacement transaction are implementation/verification mechanisms, not new reusable product truth. Accepted product/runtime authority remains unchanged in Context.
 

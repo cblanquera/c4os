@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "C4OS",
+  "version": "0.1.0",
+  "identifier": "com.c4os.desktop",
+  "build": {
+    "beforeDevCommand": {
+      "cwd": "../..",
+      "script": "npm run sidecar:node:record && npm run dev"
+    },
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": {
+      "cwd": "../..",
+      "script": "npm run sidecars:verify && npm run sidecar:node:record && npm run build:web"
+    },
+    "frontendDist": "../../.build/ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "C4OS",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 560,
+        "minHeight": 560,
+        "center": true,
+        "visible": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "resources": {
+      "../../sidecars/opencode-launcher/": "sidecars/opencode-launcher",
+      "../../sidecars/opencode-sdk/": "sidecars/opencode-sdk",
+      "../../sidecars/opencode-native/": "sidecars/opencode-native",
+      "../../sidecars/pi/": "sidecars/pi",
+      "../../.build/app/c4os-runtime-assets/node": "sidecars/node",
+      "../../.build/app/c4os-runtime-assets/node-runtime.json": "sidecars/node-runtime.json"
+    }
+  }
+}

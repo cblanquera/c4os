@@ -55,6 +55,6 @@ The renderer includes production-built Advanced Policies and approval-activity r
 
 ## Agent Acceptance Notes
 
-The independent Task 00003 security re-audit passed with P0=0 and P1=0 after four adversarial repair passes. Evidence includes `output/playwright/task-00003-advanced-policies.png`, `output/playwright/task-00003-approval-lifecycle.png`, `output/playwright/task-00003-native-advanced-policies.png`, and `output/playwright/task-00003-native-approval-denied.png`.
+The independent Task 00003 security re-audit passed with P0=0 and P1=0 after four adversarial repair passes. Evidence includes `tests/results/playwright/task-00003-advanced-policies.png`, `tests/results/playwright/task-00003-approval-lifecycle.png`, `tests/results/playwright/task-00003-native-advanced-policies.png`, and `tests/results/playwright/task-00003-native-approval-denied.png`.
 
 Two accepted P2 hardening items remain visible for Task 00015A and degraded-state integration: terminal security rows are retained in the bounded current-state table, so reaching 4,096 rows fails closed instead of compacting terminal rows; and the generic database journal boundary validates envelope/index identity, digests, size, and transitions but does not independently deserialize every record kind into its typed payload schema. Neither permits an unauthorized effect, secret release, state regression, or journal rebinding. Side quest 00015A independently repeats the security review after full integration.

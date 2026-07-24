@@ -48,7 +48,7 @@ function sha256File(path) {
 const pathSafetyPath = join(nativeRoot, "build-path-safety.mjs");
 if (
   sha256File(pathSafetyPath) !==
-  "sha256:a92ab20759dc8fe8efa36bcaea9eed1c10630a856457ce3bc192d4b36c11aa8c"
+  "sha256:06f0ef6260558ebb946ed1c3ffe7507de7a2471d4207ea6b00942a28c43f0ada"
 ) {
   throw new Error("unexpected OpenCode build-path safety helper digest");
 }
@@ -241,7 +241,7 @@ try {
         [
           "install",
           "--frozen-lockfile",
-          `--cache-dir=${join(repositoryRoot, "target/c4os-bun-cache")}`,
+          `--cache-dir=${join(repositoryRoot, ".build/app/c4os-bun-cache")}`,
         ],
         {
           cwd: canonicalSourceRoot,

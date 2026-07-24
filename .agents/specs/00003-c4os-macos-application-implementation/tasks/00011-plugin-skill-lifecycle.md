@@ -45,7 +45,7 @@ The completed path also covers all five Skill sources, deterministic precedence/
 - `npm run tauri:build`: passed and produced the rebuilt debug `C4OS.app` with verified bundled sidecars.
 - Native ignored hook acceptance: 1/1 passed outside the outer sandbox with the project-owned pinned Node runtime.
 - Native macOS UI/restart acceptance against `/private/tmp/c4os-task11-acceptance.iCeZD4`: the source-qualified selected Skill survived restart; the signed Plugin remained enabled; immediate Disable was available; signature, reviewed-hook argument, last-known-good, and recovery detail were visible.
-- Production evidence: `output/native/task-00011-plugin-details.jpg`, `task-00011-plugin-update-staged.jpg`, `task-00011-hook-review-invalidated.jpg`, `task-00011-skills-collisions.jpg`, and `task-00011-plugins-directory.jpg`.
+- Production evidence: `.agents/resources/native/task-00011-plugin-details.jpg`, `task-00011-plugin-update-staged.jpg`, `task-00011-hook-review-invalidated.jpg`, `task-00011-skills-collisions.jpg`, and `task-00011-plugins-directory.jpg`.
 
 ## Agent Acceptance Notes
 

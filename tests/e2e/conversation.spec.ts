@@ -401,7 +401,7 @@ test("production Chat renders the normal, preview, model, information, and searc
   await expect(page.getByRole("dialog")).toBeHidden();
   await expectNoDocumentOverflow(page);
   await page.screenshot({
-    path: "output/playwright/task-00007-chat-normal.png",
+    path: "tests/results/playwright/task-00007-chat-normal.png",
     fullPage: true,
   });
 
@@ -418,7 +418,7 @@ test("production Chat renders the normal, preview, model, information, and searc
   ).toBeVisible();
   await expect(page.getByText("Refine model controls")).toBeVisible();
   await page.screenshot({
-    path: "output/playwright/task-00007-chat-search.png",
+    path: "tests/results/playwright/task-00007-chat-search.png",
     fullPage: true,
   });
   await page.getByLabel("Search chats").press("Escape");
@@ -458,7 +458,7 @@ for (const state of ["pending", "streaming", "failure"] as const) {
     }
     await expectNoDocumentOverflow(page);
     await page.screenshot({
-      path: `output/playwright/task-00007-chat-${state}.png`,
+      path: `tests/results/playwright/task-00007-chat-${state}.png`,
       fullPage: true,
     });
   });
@@ -480,7 +480,7 @@ test("production Chat remains contained in the responsive overlay layout", async
   ).toBeVisible();
   await expectNoDocumentOverflow(page);
   await page.screenshot({
-    path: "output/playwright/task-00007-chat-responsive.png",
+    path: "tests/results/playwright/task-00007-chat-responsive.png",
     fullPage: true,
   });
 });

@@ -20,10 +20,10 @@
     "exactOptionalPropertyTypes": true,
     "types": ["vite/client", "vitest/globals"],
     "paths": {
-      "#qa-native-transport": ["./src/qa/build-native-transport.ts"],
-      "#qa-router": ["./src/qa/build-router.tsx"],
-      "#qa-store": ["./src/qa/build-store.ts"]
+      "#qa-native-transport": ["./src/frontend/qa/build-native-transport.ts"],
+      "#qa-router": ["./src/frontend/qa/build-router.tsx"],
+      "#qa-store": ["./src/frontend/qa/build-store.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src/frontend"]
 }

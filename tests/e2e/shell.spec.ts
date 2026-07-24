@@ -211,7 +211,7 @@ test("Settings Back restores exact workspace drafts, panel state, and focus", as
   await expect(resizer).toHaveAttribute("aria-valuenow", "240");
 
   await page.screenshot({
-    path: "output/native/task-00006-chat-settings-roundtrip.png",
+    path: "tests/results/playwright/task-00006-chat-settings-roundtrip.png",
     fullPage: true,
   });
 });
@@ -265,7 +265,7 @@ test("responsive overlay, compressed Settings, and deferred gates stay explicit"
   );
   await expectNoDocumentOverflow(page);
   await page.screenshot({
-    path: "output/native/task-00006-settings-compressed.png",
+    path: "tests/results/playwright/task-00006-settings-compressed.png",
     fullPage: true,
   });
 });

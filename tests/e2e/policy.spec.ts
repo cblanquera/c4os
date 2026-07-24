@@ -34,7 +34,7 @@ test("Advanced Policies preserves the seven-group and concrete-exception contrac
   await expect(page.getByRole("tab", { name: /Exceptions 1/i })).toBeVisible();
 
   await page.screenshot({
-    path: "output/playwright/task-00003-advanced-policies.png",
+    path: "tests/results/playwright/task-00003-advanced-policies.png",
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -67,7 +67,7 @@ test("approval activity exposes lifecycle and denial-before-effect", async ({
   );
   await expect(page.getByText(/0 pending · 1 queued/i)).toBeVisible();
   await page.screenshot({
-    path: "output/playwright/task-00003-approval-lifecycle.png",
+    path: "tests/results/playwright/task-00003-approval-lifecycle.png",
     fullPage: true,
   });
 });

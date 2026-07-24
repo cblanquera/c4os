@@ -28,7 +28,7 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 Result: passed — independent frozen-tree review reported P0=0, P1=0, P2=1, and P3=0.
 
-Required evidence: complete in `output/native/task-00012-acceptance.md` and the ten Task 00012 native captures.
+Required evidence: complete in `.agents/resources/native/task-00012-acceptance.md` and the ten Task 00012 native captures.
 
 ## Implementation Notes
 
@@ -54,7 +54,7 @@ The production renderer now has real MCP Settings list/empty/add/edit/test/trust
 - Supplementary `cargo clippy --workspace --all-targets -- -D warnings`: all Task 00012-introduced warnings were repaired; the command still exits 101 on exactly 17 inherited warnings in previously accepted Task 00011-or-earlier code and is not represented as a required-matrix pass.
 - `npm run tauri:build`: passed. Existing packaged OpenCode/Pi native golden path 1/1 passed in 55.07 seconds.
 - Native macOS acceptance against `/private/tmp/c4os-task12-acceptance.XICVo2`: real Settings create/trust/test/enable/disable/reconfigure/revoke/restart passed; one supervised worker was observed only while enabled; exact durable generation 22 and 22 journal events were inspected; secret/prompt persistence scans and final process cleanup passed.
-- Production evidence: `output/native/task-00012-acceptance.md` plus ten Task 00012 PNG captures covering Chat provenance, empty, trust, failure/recovery, ready/details, narrow, HTTP reference, revoked, and restart states.
+- Production evidence: `.agents/resources/native/task-00012-acceptance.md` plus ten Task 00012 PNG captures covering Chat provenance, empty, trust, failure/recovery, ready/details, narrow, HTTP reference, revoked, and restart states.
 
 ## Agent Acceptance Notes
 

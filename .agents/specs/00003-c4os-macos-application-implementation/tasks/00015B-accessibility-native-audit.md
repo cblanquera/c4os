@@ -36,7 +36,7 @@ Completed 2026-07-24 using the QA-composed native application for deterministic 
 
 ## Verification Notes
 
-The renderer matrix passed 79 files and 454 tests, including accessibility, focus, route, theme, reduced-motion, responsive, and overflow assertions. Playwright passed 45/45. The production bundle contains zero QA markers and zero frontend source maps. Final native launches showed standard macOS window/menu semantics, secure-field labels, session-only credential warning, onboarding hierarchy, and a path-free recovery projection. The saturated journal launched healthy repeatedly; the intentionally degraded Database fixture exposed only Retry/Refresh and remained blocked with a new correlation. Evidence and image hashes are indexed in `output/native/task-00015-acceptance.md`.
+The renderer matrix passed 79 files and 454 tests, including accessibility, focus, route, theme, reduced-motion, responsive, and overflow assertions. Playwright passed 45/45. The production bundle contains zero QA markers and zero frontend source maps. Final native launches showed standard macOS window/menu semantics, secure-field labels, session-only credential warning, onboarding hierarchy, and a path-free recovery projection. The saturated journal launched healthy repeatedly; the intentionally degraded Database fixture exposed only Retry/Refresh and remained blocked with a new correlation. Evidence and image hashes are indexed in `.agents/resources/native/task-00015-acceptance.md`.
 
 ## Agent Acceptance Notes
 

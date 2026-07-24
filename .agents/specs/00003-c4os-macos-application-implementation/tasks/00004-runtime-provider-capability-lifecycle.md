@@ -34,6 +34,9 @@ Required evidence: exact lock versions; upstream primary-source decisions; confo
 
 ## Implementation Notes
 
+The [historical paused-state handoff](handovers/historical-task-00004-handover-20260719.md)
+is preserved for provenance only and is superseded by this verified record.
+
 Implemented 2026-07-19 through 2026-07-20. RBL-003, RBL-004, and RBL-009 through RBL-013 govern the exact peer-runtime and native-evidence decisions.
 
 The task-owned production surface now includes:
@@ -70,23 +73,23 @@ Final bundle and native gates:
 - Ignored OpenCode native suite: `7/7`; authenticated OpenCode stream suite: `3/3`.
 - Packaged production bootstrap, packaged Pi ready/pump/shutdown, exact OpenCode attach-CAS descendant cleanup, and exact Pi attach-CAS cleanup each passed against the rebuilt bundle.
 - Opt-in macOS login-Keychain round trip passed; the exact disposable `dev.c4os.live-test.task00004-final-20260720-01.credential-vault` item was deleted and absence was verified immediately afterward.
-- Final `tools/run-task-00004-native-golden.zsh` rerun passed in `88.17s` after the last app rebuild. It recorded seven TLS 1.3 requests across the OpenCode allow/complete/deny/complete and Pi allow/deny/complete stages, exact image digest `sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460`, the exact `c4os_propose_action` and `c4os_read_resource` tools, one provider-credential digest with no raw secret, allow/deny receipts, durable completion, and process cleanup.
+- Final `scripts/run-task-00004-native-golden.zsh` rerun passed in `88.17s` after the last app rebuild. It recorded seven TLS 1.3 requests across the OpenCode allow/complete/deny/complete and Pi allow/deny/complete stages, exact image digest `sha256:431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460`, the exact `c4os_propose_action` and `c4os_read_resource` tools, one provider-credential digest with no raw secret, allow/deny receipts, durable completion, and process cleanup.
 
 Evidence:
 
-- `output/native/task-00004-provider-evidence.json`
-- `output/native/task-00004-providers.jpeg`
-- `output/native/task-00004-model-preflight-blocked.jpeg`
-- `output/native/task-00004-model-preflight-compatible.jpeg`
-- `output/native/task-00004-runtime-selection.jpeg`
-- `output/native/task-00004-recovery-blocked.jpeg`
-- `output/native/task-00004-recovery-ready.jpeg`
-- `output/native/task-00004-recovery-retried.jpeg`
-- `output/native/task-00004-recovery-cancelled.jpeg`
-- `output/native/task-00004-approval-pending.jpeg`
-- `output/native/task-00004-approval-allowed.jpeg`
-- `output/native/task-00004-approval-denied.jpeg`
-- `output/native/task-00004-responsive-820x620.jpeg`
+- `.agents/resources/native/task-00004-provider-evidence.json`
+- `.agents/resources/native/task-00004-providers.jpeg`
+- `.agents/resources/native/task-00004-model-preflight-blocked.jpeg`
+- `.agents/resources/native/task-00004-model-preflight-compatible.jpeg`
+- `.agents/resources/native/task-00004-runtime-selection.jpeg`
+- `.agents/resources/native/task-00004-recovery-blocked.jpeg`
+- `.agents/resources/native/task-00004-recovery-ready.jpeg`
+- `.agents/resources/native/task-00004-recovery-retried.jpeg`
+- `.agents/resources/native/task-00004-recovery-cancelled.jpeg`
+- `.agents/resources/native/task-00004-approval-pending.jpeg`
+- `.agents/resources/native/task-00004-approval-allowed.jpeg`
+- `.agents/resources/native/task-00004-approval-denied.jpeg`
+- `.agents/resources/native/task-00004-responsive-820x620.jpeg`
 
 Computer Use on the rebuilt native app verified provider profiles and zero/one/many discovery, blocked/compatible attachment preflight, OpenCode/Pi draft-save and restart generation, first-submit Chat binding, recovery conflicts, retry/cancel history, and the exact `820x620` responsive layout. The native app exposed no fabricated approval. The QA-gated policy surface supplied pending/allow/deny visual evidence; the real provider continuation was proven separately through the production golden path. A browser-only attempt to settle a runtime approval without Tauri failed closed as designed.
 

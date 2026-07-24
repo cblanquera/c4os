@@ -28,7 +28,7 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 Result: passed — the final local-development update, startup recovery, configuration recovery, diagnostics, degraded-state, rebuilt-native, restart, redaction, and cleanup matrices passed. Independent Rust/security, renderer/integration, and policy/configuration reviews each reported P0 = 0 and P1 = 0.
 
-Required evidence is recorded in `output/native/task-00014-acceptance.md`.
+Required evidence is recorded in `.agents/resources/native/task-00014-acceptance.md`.
 
 ## Implementation Notes
 
@@ -44,7 +44,7 @@ Distribution signing, notarization, signed updater evidence, publishing, deploym
 
 Complete renderer quality passed: formatting, lint, typecheck, 77 files and 441 unit tests, production and QA builds, and 43/43 Playwright scenarios. The serialized Rust workspace regression passed every runnable library, integration, and doc-test target; the two sandbox-only MCP STDIO fixture failures passed 2/2 in the exact host rerun. Final focused configuration regressions passed 10/10, the Workspace sticky-recovery regression passed 1/1, and the app sticky-recovery slice passed 3/3. Workspace check, exact protocol export, final debug app build, all three packaged-tree verifiers, ignored MCP/OpenCode/stream/packaged-runtime tiers, and the private-TLS native golden passed.
 
-Final rebuilt-native acceptance passed healthy staged recovery, action suppression for `rebuild_application`, redacted export, 624 px responsive containment, controlled restart persistence, blocked startup recovery with no Continue path, retry/relaunch, persistence/log/diagnostic scans, original-home restoration, and final process cleanup. Exact commands, timings, durable state, hashes, and limitations are in `output/native/task-00014-acceptance.md`.
+Final rebuilt-native acceptance passed healthy staged recovery, action suppression for `rebuild_application`, redacted export, 624 px responsive containment, controlled restart persistence, blocked startup recovery with no Continue path, retry/relaunch, persistence/log/diagnostic scans, original-home restoration, and final process cleanup. Exact commands, timings, durable state, hashes, and limitations are in `.agents/resources/native/task-00014-acceptance.md`.
 
 ## Agent Acceptance Notes
 

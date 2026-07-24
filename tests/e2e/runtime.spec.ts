@@ -29,7 +29,7 @@ test("runtime QA keeps capability conflicts explicit and responsive", async ({
     "attachment ready for submission",
   );
   await page.screenshot({
-    path: "output/playwright/task-00004-provider-capability-preflight.png",
+    path: "tests/results/playwright/task-00004-provider-capability-preflight.png",
     fullPage: true,
   });
 
@@ -65,7 +65,7 @@ test("runtime QA preserves immutable turns through recovery and cancel", async (
     page.getByRole("heading", { name: "Immutable prompt snapshot" }),
   ).toBeVisible();
   await page.screenshot({
-    path: "output/playwright/task-00004-session-recovery.png",
+    path: "tests/results/playwright/task-00004-session-recovery.png",
     fullPage: true,
   });
 });

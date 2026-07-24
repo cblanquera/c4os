@@ -715,7 +715,7 @@ test("production Terminal composes approval, focused stdin, output acknowledgeme
     focused.getByRole("textbox", { name: "Next command" }),
   ).toBeVisible();
   await page.screenshot({
-    path: "output/playwright/task-00009-terminal-stdin.png",
+    path: "tests/results/playwright/task-00009-terminal-stdin.png",
     fullPage: true,
   });
 
@@ -825,7 +825,7 @@ test("production Terminal Stop remains approval-bound, interrupts at 130, and re
     focused.getByRole("textbox", { name: "Next command" }),
   ).toBeVisible();
   await page.screenshot({
-    path: "output/playwright/task-00009-terminal-stop.png",
+    path: "tests/results/playwright/task-00009-terminal-stop.png",
     fullPage: true,
   });
   await expectNoDocumentOverflow(page);

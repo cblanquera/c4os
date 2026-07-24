@@ -1,2 +1,6 @@
 # Pinned Git patches preserve required context markers on blank lines.
 sidecars/opencode-native/patches/*.patch -whitespace
+
+# Generated bindings and verbatim raw handovers preserve upstream bytes.
+src/frontend/generated/** -whitespace
+.agents/resources/handovers/** -whitespace

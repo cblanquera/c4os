@@ -117,7 +117,7 @@ test("workspace QA route preserves the three-row start contract", async ({
   );
   await expect(page.getByRole("listitem")).toHaveCount(3);
   await page.screenshot({
-    path: "output/playwright/task-00002-qa-workspace-start.png",
+    path: "tests/results/playwright/task-00002-qa-workspace-start.png",
     fullPage: true,
   });
 
@@ -142,7 +142,7 @@ test("workspace QA route preserves the three-row start contract", async ({
     await expect(recentAction).toBeDisabled();
   }
   await page.screenshot({
-    path: "output/playwright/task-00002-qa-workspace-recovery.png",
+    path: "tests/results/playwright/task-00002-qa-workspace-recovery.png",
     fullPage: true,
   });
 

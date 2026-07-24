@@ -29,9 +29,12 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 Result: passed — three independent reviewers reported P0=0 and P1=0.
 
-Required evidence: complete in `output/native/task-00013-acceptance.md` and the 21 final Task 00013 native captures.
+Required evidence: complete in `.agents/resources/native/task-00013-acceptance.md` and the 21 final Task 00013 native captures.
 
 ## Implementation Notes
+
+The [historical paused-state handoff](handovers/historical-task-00013-handover-20260723.md)
+is preserved for provenance only and is superseded by this verified record.
 
 Started 2026-07-23 from verified Task 00012 checkpoint `eedc3e8`. Hardcoded r013 records and simulated connection success cannot be reused as authority.
 
@@ -48,7 +51,7 @@ The production renderer now composes real provider onboarding, Workspace Start, 
 - `npm run protocol:generate` passed Rust export 1/1, and generated protocol output was clean after excluding the unrelated `MarketplaceSnapshot.ts` whitespace diff.
 - `npm run tauri:build` rebuilt the exact debug `C4OS.app`. Three packaged-tree verifiers passed 1/1 each; ignored MCP, OpenCode native, OpenCode stream, and packaged-runtime tiers passed 2/2, 7/7, 3/3, and 4/4; the private-TLS OpenCode/Pi native golden passed 1/1.
 - Native macOS acceptance passed real provider onboarding, two approval continuations, two-model discovery, recommended defaults, Workspace Start, every Settings destination, native menu and `Cmd+,`, Back restoration, 1100/762/622 px containment, deterministic provider degradation/recovery, controlled restart, session credential re-entry, exact secret/log/process scans, and final cleanup.
-- Production evidence: `output/native/task-00013-acceptance.md` plus 21 Task 00013 JPG captures.
+- Production evidence: `.agents/resources/native/task-00013-acceptance.md` plus 21 Task 00013 JPG captures.
 
 ## Agent Acceptance Notes
 

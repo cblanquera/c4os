@@ -1,13 +1,26 @@
 .local/
-.playwright-cli/
+.playwright/
 node_modules/
-dist/
-target/
+.build/
+proofs/**/target/
 playwright-report/
-test-results/
-output/playwright/
-src-tauri/gen/
-backend/target/
-backend/gen/
+tests/results/
+src/backend/gen/
 tests/projects/*/.c4os/
-archives
+/archives/
+/wireframes/sites/
+
+# macOS
+.DS_Store
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Package-manager debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

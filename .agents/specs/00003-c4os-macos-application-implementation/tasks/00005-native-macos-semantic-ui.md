@@ -28,7 +28,7 @@ Acceptance criteria: none — implementation acceptance is delegated to the coor
 
 Result: passed — independent read-only review reported P0=0 and P1=0 on 2026-07-21.
 
-Evidence reviewed: native and renderer test results; source/diff inspection; production launch screenshots; live appearance switch; menu/shortcut/picker walkthrough; accessibility tree; width/overflow/contrast matrices; limitations and commands in `output/native/task-00005-acceptance.md`.
+Evidence reviewed: native and renderer test results; source/diff inspection; production launch screenshots; live appearance switch; menu/shortcut/picker walkthrough; accessibility tree; width/overflow/contrast matrices; limitations and commands in `.agents/resources/native/task-00005-acceptance.md`.
 
 ## Implementation Notes
 
@@ -36,7 +36,7 @@ Started 2026-07-20 from verified checkpoint `3e06b0b`. Static r013 grayscale is 
 
 ## Verification Notes
 
-Automated and native verification completed 2026-07-21; see `output/native/task-00005-acceptance.md`. The complete renderer and Rust regressions are green, the exact debug app rebuild passed, and the native Light/Dark, menu, shortcut, state-retention, picker, focus, dialog, minimum-width, narrow-Settings, overflow, and accessibility matrices passed. Agent Acceptance is pending an independent read-only review.
+Automated and native verification completed 2026-07-21; see `.agents/resources/native/task-00005-acceptance.md`. The complete renderer and Rust regressions are green, the exact debug app rebuild passed, and the native Light/Dark, menu, shortcut, state-retention, picker, focus, dialog, minimum-width, narrow-Settings, overflow, and accessibility matrices passed. Agent Acceptance is pending an independent read-only review.
 
 ## Agent Acceptance Notes
 

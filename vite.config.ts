@@ -7,7 +7,7 @@ export default defineConfig(() => {
   const qaModule = (name: string) =>
     resolve(
       __dirname,
-      `src/qa/${name}${qaBuild ? "" : ".production"}${
+      `src/frontend/qa/${name}${qaBuild ? "" : ".production"}${
         name === "build-router" ? ".tsx" : ".ts"
       }`,
     );
@@ -15,6 +15,7 @@ export default defineConfig(() => {
   return {
     clearScreen: false,
     plugins: [react()],
+    publicDir: "assets",
     resolve: {
       alias: {
         "#qa-native-transport": qaModule("build-native-transport"),
@@ -29,6 +30,7 @@ export default defineConfig(() => {
     },
     envPrefix: ["VITE_", "TAURI_ENV_"],
     build: {
+      outDir: ".build/ui",
       target: "safari16",
       // Production app bundles must not ship source maps that retain
       // compile-time-only QA modules or authority markers. QA builds keep maps
@@ -38,8 +40,8 @@ export default defineConfig(() => {
     test: {
       environment: "jsdom",
       globals: true,
-      setupFiles: ["./src/test/setup.ts"],
-      include: ["src/**/*.test.{ts,tsx}"],
+      setupFiles: ["./src/frontend/test/setup.ts"],
+      include: ["src/frontend/**/*.test.{ts,tsx}"],
       coverage: {
         enabled: false,
       },

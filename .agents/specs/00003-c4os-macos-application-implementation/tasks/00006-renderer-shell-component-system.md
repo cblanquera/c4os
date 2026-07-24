@@ -31,7 +31,7 @@ Result: passed — independent read-only review reported P0=0 and P1=0 on 2026-0
 
 Required evidence: automated results; state/typed-boundary diff inspection; direct-route screenshots; accessibility tree; keyboard walkthrough; wide/minimum/overlay matrices; no console/overflow; deferred affordance checks; evidence paths/commands and limitations.
 
-Evidence reviewed: production and QA renderer source; typed native snapshot ingestion; Redux authority/draft transitions; all direct routes; Settings round trip; responsive panel and ARIA reconciliation; focused-artifact gating; automated results; exact rebuilt-app accessibility walkthrough; screenshots, timing, limitations, and commands in `output/native/task-00006-acceptance.md`.
+Evidence reviewed: production and QA renderer source; typed native snapshot ingestion; Redux authority/draft transitions; all direct routes; Settings round trip; responsive panel and ARIA reconciliation; focused-artifact gating; automated results; exact rebuilt-app accessibility walkthrough; screenshots, timing, limitations, and commands in `.agents/resources/native/task-00006-acceptance.md`.
 
 ## Implementation Notes
 
