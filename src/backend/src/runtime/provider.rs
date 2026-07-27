@@ -1880,7 +1880,9 @@ fn parse_provider_catalog(
         } else {
             raw_model_id
         };
-        validate_model_id(model_id).map_err(|_| ProviderProbeFailure::Incompatible)?;
+        if validate_model_id(model_id).is_err() {
+            continue;
+        }
         if !identifiers.insert(model_id.to_owned()) {
             return Err(ProviderProbeFailure::Incompatible);
         }
@@ -1962,6 +1964,9 @@ fn bounded_catalog_limit(
     let Some(value) = value else {
         return Ok(None);
     };
+    if value.is_null() {
+        return Ok(None);
+    }
     let limit = value.as_u64().ok_or(ProviderProbeFailure::Incompatible)?;
     if limit == 0 || limit > 10_000_000_000 {
         return Err(ProviderProbeFailure::Incompatible);
@@ -2963,6 +2968,58 @@ mod endpoint_contract_tests {
         assert_eq!(model.model_id, "gemini-2.5-flash");
         assert!(model.input_modalities.contains("text"));
         assert!(model.output_modalities.contains("text"));
+    }
+
+    #[test]
+    fn openrouter_catalog_keeps_valid_models_around_optional_limits_and_aliases() {
+        let catalog = parse_provider_catalog(
+            br#"{"data":[
+                {
+                    "id":"~google/gemini-flash-latest",
+                    "name":"Google: Gemini Flash Latest",
+                    "architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+                    "supported_parameters":["tools"],
+                    "context_length":1048576,
+                    "top_provider":{"max_completion_tokens":null}
+                },
+                {
+                    "id":"google/gemini-2.5-flash-lite",
+                    "name":"Google: Gemini 2.5 Flash Lite",
+                    "architecture":{"input_modalities":["text","image","file","audio","video"],"output_modalities":["text"]},
+                    "supported_parameters":["tools","tool_choice","response_format"],
+                    "context_length":1048576,
+                    "top_provider":{"max_completion_tokens":65535}
+                },
+                {
+                    "id":"google/gemini-unknown-output",
+                    "name":"Google: Gemini Unknown Output",
+                    "architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+                    "supported_parameters":[],
+                    "context_length":32768,
+                    "top_provider":{"max_completion_tokens":null}
+                }
+            ]}"#,
+            "openai-compatible",
+        )
+        .expect("bounded OpenRouter catalog");
+
+        assert_eq!(catalog.models.len(), 2);
+        let requested = catalog
+            .models
+            .iter()
+            .find(|model| model.model_id == "google/gemini-2.5-flash-lite")
+            .expect("requested OpenRouter model");
+        assert_eq!(requested.context_tokens, Some(1_048_576));
+        assert_eq!(requested.output_tokens, Some(65_535));
+        assert!(requested.input_modalities.contains("text"));
+        assert!(requested.output_modalities.contains("text"));
+        assert!(
+            catalog
+                .models
+                .iter()
+                .find(|model| model.model_id == "google/gemini-unknown-output")
+                .is_some_and(|model| model.output_tokens.is_none())
+        );
     }
 
     #[test]

@@ -240,6 +240,7 @@ export function useProviderProfile({
       );
       if (saved.pendingApproval !== null) {
         setDraft((current) => ({ ...current, secret: "" }));
+        setShowValidation(false);
         onSnapshot(saved);
         return false;
       }
@@ -273,6 +274,7 @@ export function useProviderProfile({
       );
       if (saved.pendingApproval !== null) {
         setDraft((current) => ({ ...current, secret: "" }));
+        setShowValidation(false);
         onTestAfterSaveApproval?.(saved.pendingApproval.providerId);
         onSnapshot(saved);
         return;

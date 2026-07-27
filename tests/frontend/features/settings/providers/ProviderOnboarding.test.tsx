@@ -16,6 +16,7 @@ import { ProviderOnboarding } from "../../../../../src/frontend/features/setting
 
 const providerService = vi.hoisted(() => ({
   acceptProviderSessionCredentials: vi.fn(),
+  answerProviderApproval: vi.fn(),
   completeProviderOnboarding: vi.fn(),
   readProviderSnapshot: vi.fn(),
   saveProviderProfile: vi.fn(),
@@ -38,6 +39,7 @@ describe("ProviderOnboarding", () => {
       ...emptySnapshot(),
       credentialProtection: "session-only",
     });
+    providerService.answerProviderApproval.mockResolvedValue(emptySnapshot());
     providerService.saveProviderProfile.mockImplementation(
       async (draft: ProviderProfileDraft) =>
         snapshotWith(providerFromDraft(draft, { state: "untested" })),
@@ -143,6 +145,98 @@ describe("ProviderOnboarding", () => {
     expect(await screen.findByText("Connection passed")).toBeVisible();
     expect(screen.getByLabelText("API key")).toHaveValue("");
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
+  it("resumes Test Connection after approving a credential save", async () => {
+    const pendingSave = {
+      ...emptySnapshot(),
+      credentialProtection: "session-only" as const,
+      pendingApproval: {
+        promptId: "provider-save-prompt",
+        operation: "save-profile" as const,
+        providerId: "provider:openai-work",
+        providerName: "OpenAI Work",
+        expiresAtMs: 1_784_476_800_000,
+      },
+    };
+    const saved = {
+      ...snapshotWith(
+        providerRecord({
+          displayName: "OpenAI Work",
+          hasCredential: true,
+          testStatus: { state: "untested" },
+        }),
+      ),
+      credentialProtection: "session-only" as const,
+    };
+    const pendingTest = {
+      ...saved,
+      pendingApproval: {
+        promptId: "provider-test-prompt",
+        operation: "test-connection" as const,
+        providerId: "provider:openai-work",
+        providerName: "OpenAI Work",
+        expiresAtMs: 1_784_476_800_000,
+      },
+    };
+    const connected = {
+      ...snapshotWith(testedProvider({ generation: 3 })),
+      credentialProtection: "session-only" as const,
+    };
+    providerService.readProviderSnapshot.mockResolvedValueOnce({
+      ...emptySnapshot(),
+      credentialProtection: "session-only",
+    });
+    providerService.saveProviderProfile.mockResolvedValueOnce(pendingSave);
+    providerService.answerProviderApproval
+      .mockResolvedValueOnce(saved)
+      .mockResolvedValueOnce(connected);
+    providerService.testProviderConnection.mockResolvedValueOnce(pendingTest);
+
+    render(<ProviderOnboarding onComplete={vi.fn()} />);
+    await enterRequiredProviderFields();
+    fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
+
+    expect(
+      await screen.findByText(/change the securely stored credential/i),
+    ).toBeVisible();
+    expect(screen.getByLabelText("API key")).toHaveValue("");
+    expect(screen.queryByText("Enter an API key.")).not.toBeInTheDocument();
+    expect(providerService.saveProviderProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ secret: "test-key" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() =>
+      expect(providerService.testProviderConnection).toHaveBeenCalledWith(
+        "provider:openai-work",
+      ),
+    );
+    expect(providerService.saveProviderProfile).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByText(
+        /use the stored credential and contact OpenAI Work/i,
+      ),
+    ).toBeVisible();
+    expect(screen.getByLabelText("API key")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(await screen.findByText("Connection passed")).toBeVisible();
+    expect(
+      screen.queryByText("Provider approval required"),
+    ).not.toBeInTheDocument();
+    expect(providerService.answerProviderApproval).toHaveBeenNthCalledWith(
+      1,
+      "provider-save-prompt",
+      "allow",
+    );
+    expect(providerService.answerProviderApproval).toHaveBeenNthCalledWith(
+      2,
+      "provider-test-prompt",
+      "allow",
+    );
+    expect(providerService.testProviderConnection).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
 
   it("validates only compatible-provider fields that remain visible", async () => {

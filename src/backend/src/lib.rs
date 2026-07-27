@@ -27981,6 +27981,32 @@ fn current_time_ms() -> Result<u64, std::io::Error> {
 
 const DEBUG_ACCEPTANCE_HOME_ARGUMENT: &str = "--c4os-acceptance-home";
 
+fn application_resource_dir_for_startup(
+    resolved_resource_dir: Result<PathBuf, tauri::Error>,
+) -> Result<PathBuf, std::io::Error> {
+    match resolved_resource_dir {
+        Ok(resource_dir) => Ok(resource_dir),
+        Err(error) => {
+            let current_executable = std::env::current_exe()?;
+            application_resource_dir_from(error, &current_executable)
+        }
+    }
+}
+
+fn application_resource_dir_from(
+    resolution_error: tauri::Error,
+    current_executable: &Path,
+) -> Result<PathBuf, std::io::Error> {
+    #[cfg(debug_assertions)]
+    if let Some(output_directory) = current_executable.parent()
+        && output_directory.join(".cargo-lock").is_file()
+        && output_directory.join("sidecars").is_dir()
+    {
+        return Ok(output_directory.to_path_buf());
+    }
+    Err(std::io::Error::other(resolution_error.to_string()))
+}
+
 /// Selects an isolated native-acceptance home only in debug builds. Release
 /// binaries reject the switch and always retain the ordinary production home.
 fn c4os_home_for_startup(default_home: PathBuf) -> Result<PathBuf, std::io::Error> {
@@ -28084,6 +28110,39 @@ mod debug_acceptance_home_tests {
         fs::set_permissions(&canonical, fs::Permissions::from_mode(0o755))
             .expect("loosen acceptance permissions");
         assert!(validate_debug_acceptance_home(&canonical).is_err());
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod application_resource_dir_tests {
+    use super::application_resource_dir_from;
+    use std::fs;
+    use tauri::Error;
+    use tempfile::TempDir;
+
+    #[test]
+    fn custom_cargo_output_uses_its_copied_development_resources() {
+        let temporary = TempDir::new().expect("temporary Cargo output");
+        let output_directory = temporary.path().join("debug");
+        fs::create_dir_all(output_directory.join("sidecars"))
+            .expect("development sidecar resources");
+        fs::write(output_directory.join(".cargo-lock"), []).expect("Cargo output marker");
+
+        let resource_dir =
+            application_resource_dir_from(Error::UnknownPath, &output_directory.join("c4os"))
+                .expect("custom Cargo output resource directory");
+
+        assert_eq!(resource_dir, output_directory);
+    }
+
+    #[test]
+    fn unknown_non_cargo_resource_layout_stays_fail_closed() {
+        let temporary = TempDir::new().expect("temporary executable root");
+        let error =
+            application_resource_dir_from(Error::UnknownPath, &temporary.path().join("debug/c4os"))
+                .expect_err("unmarked output must not become resource authority");
+
+        assert_eq!(error.to_string(), "unknown path");
     }
 }
 
@@ -28355,7 +28414,8 @@ pub fn run() {
                 let credential_vault = credential_service.vault();
                 let credential_protection = credential_service.protection();
                 let credential_fallback_required = credential_service.requires_explicit_fallback();
-                let application_resource_dir = app.path().resource_dir()?;
+                let application_resource_dir =
+                    application_resource_dir_for_startup(app.path().resource_dir())?;
                 let home_layout = core::workspace::C4osHomeLayout::new(&c4os_home);
                 startup_boundary.set(StartupRecoveryBoundary::Database);
                 let (database, migration_report) = core::database::DatabaseActor::start(
@@ -28815,9 +28875,11 @@ pub fn run() {
                 });
                 Ok(())
             })();
-            if initialization.is_err() {
+            if let Err(error) = initialization {
                 let failed_at_ms = current_time_ms().unwrap_or(1);
                 let failed_boundary = startup_boundary.get();
+                #[cfg(debug_assertions)]
+                eprintln!("C4OS startup initialization failed at {failed_boundary:?}: {error}");
                 if let Ok(mut recovery) = app.state::<BootstrapState>().startup_recovery.lock() {
                     let _ = recovery.report_failure(StartupRecoveryFailureInput {
                         boundary: failed_boundary,
