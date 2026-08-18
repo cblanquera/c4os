@@ -219,6 +219,35 @@ function PolicyEditor({
       className="advanced-policy-editor"
       data-generation={authority.policyVersion}
     >
+      <div className="advanced-policy-toolbar">
+        <StatusRegion
+          className="advanced-policy-toolbar__state"
+          data-dirty={dirty}
+        >
+          {pendingAction === "saving"
+            ? "Saving policy changes…"
+            : dirty
+              ? "Unsaved policy changes"
+              : "No unsaved policy changes"}
+        </StatusRegion>
+        <div className="advanced-policy-toolbar__actions">
+          <Button
+            isDisabled={!dirty || busy}
+            onPress={revertPolicies}
+            variant="quiet"
+          >
+            Revert
+          </Button>
+          <Button
+            isDisabled={!dirty || busy}
+            onPress={() => void savePolicies()}
+            variant="primary"
+          >
+            {pendingAction === "saving" ? "Saving…" : "Save policies"}
+          </Button>
+        </div>
+      </div>
+
       <section
         aria-label="Current policy guardrails"
         className="advanced-policy-guardrail"
@@ -254,35 +283,6 @@ function PolicyEditor({
         </Notice>
       ) : null}
       {notice ? <StatusRegion>{notice}</StatusRegion> : null}
-
-      <div className="advanced-policy-toolbar">
-        <StatusRegion
-          className="advanced-policy-toolbar__state"
-          data-dirty={dirty}
-        >
-          {pendingAction === "saving"
-            ? "Saving policy changes…"
-            : dirty
-              ? "Unsaved policy changes"
-              : "No unsaved policy changes"}
-        </StatusRegion>
-        <div className="advanced-policy-toolbar__actions">
-          <Button
-            isDisabled={!dirty || busy}
-            onPress={revertPolicies}
-            variant="quiet"
-          >
-            Revert
-          </Button>
-          <Button
-            isDisabled={!dirty || busy}
-            onPress={() => void savePolicies()}
-            variant="primary"
-          >
-            {pendingAction === "saving" ? "Saving…" : "Save policies"}
-          </Button>
-        </div>
-      </div>
 
       <Tabs
         label="Advanced policy views"

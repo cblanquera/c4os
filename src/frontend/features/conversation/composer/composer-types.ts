@@ -44,6 +44,7 @@ export interface ComposerControlSlots {
   readonly approval?: ReactNode;
   readonly branch?: ReactNode;
   readonly model?: ReactNode;
+  readonly pending?: ReactNode;
   readonly reasoning?: ReactNode;
 }
 

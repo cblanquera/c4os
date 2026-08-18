@@ -7,14 +7,19 @@ use c4os_lib::runtime::{
         NumericCapabilityEvidence, NumericCapabilityKey, RouteIdentity, effective_intersection,
     },
     capability_evidence::{
-        CapabilityEvidenceError, CapabilityEvidenceRegistry, CapabilityRouteEpoch, FeatureClaim,
-        MAX_EVIDENCE_ROUTES, NumericClaim, ProviderDeclaredCatalogClaim, RuntimeObservationOutcome,
+        CapabilityEvidenceError, CapabilityEvidenceRegistry, CapabilityEvidenceSnapshot,
+        CapabilityRouteEpoch, FeatureClaim, MAX_EVIDENCE_ROUTES, MAX_HISTORICAL_EVIDENCE_ROUTES,
+        NumericClaim, ProviderDeclaredCatalogClaim, RuntimeObservationOutcome,
         RuntimeRouteObservation, opencode_adapter_evidence, opencode_observed_evidence,
         pi_adapter_evidence, pi_observed_evidence, provider_declared_evidence,
+        provider_model_declared_evidence,
     },
     opencode::{HealthSnapshot, OpenCodeCompatibilityManifest},
     pi::{PiCapabilityState, PiHealth, PiModelRoute, PiSidecarManifest},
-    provider::{ModelRoute, RouteAvailability},
+    provider::{
+        ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, ProviderModelDeclaration,
+        RouteAvailability,
+    },
 };
 
 const NOW: u64 = 1_721_300_000_000;
@@ -136,6 +141,45 @@ fn open_code_model_route(route: RouteIdentity, checked_at_ms: u64) -> ModelRoute
         },
         provider_declaration: None,
     }
+}
+
+#[test]
+fn provider_qualified_routes_preserve_model_ids_with_slashes() {
+    let mut route = open_code_route();
+    route.provider_id = "provider-openrouter".into();
+    route.endpoint_id = "openrouter-api".into();
+    route.provider_model_id = "provider:openrouter/openrouter/auto-beta".into();
+    let declaration = ProviderModelDeclaration {
+        schema_version: PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION,
+        provider_model_id: "openrouter/auto-beta".into(),
+        model_revision: route.model_revision.clone(),
+        lifecycle: ModelLifecycle::Active,
+        features: BTreeMap::new(),
+        numeric_limits: BTreeMap::new(),
+        raw_catalog_sha256: digest('d'),
+        declared_at_ms: NOW - 900,
+        expires_at_ms: NOW + 60_000,
+    };
+    let mut model = open_code_model_route(route.clone(), NOW - 900);
+    model.model_id = "openrouter/auto-beta".into();
+
+    let declared = provider_model_declared_evidence(&declaration, route.clone()).unwrap();
+    let adapter = opencode_adapter_evidence(&model).unwrap();
+
+    assert_eq!(declared.descriptor().route, route);
+    assert_eq!(adapter.descriptor().route, route);
+
+    let mut pi_route = route;
+    pi_route.provider_model_id = "openrouter/openrouter/auto-beta".into();
+    pi_route.adapter_kind = "pi".into();
+    pi_route.runtime_kind = "pi".into();
+    pi_route.native_runtime_version = "0.80.10".into();
+    let pi_model = PiModelRoute {
+        provider: "openrouter".into(),
+        model_id: "openrouter/auto-beta".into(),
+        base_url: "https://openrouter.ai/api/v1".into(),
+    };
+    assert!(pi_adapter_evidence(&pi_model, &pi_route, NOW - 900, NOW + 60_000).is_ok());
 }
 
 fn observation(route: RouteIdentity, checked_at_ms: u64) -> RuntimeRouteObservation {
@@ -491,6 +535,45 @@ fn older_replacement_is_rejected_and_restore_archives_active_truth() {
         restored.layers(&route, NOW),
         Err(CapabilityEvidenceError::RouteNotFound)
     ));
+}
+
+#[test]
+fn restore_compacts_legacy_history_to_the_newest_bounded_epochs() {
+    let historical_routes = (0..MAX_HISTORICAL_EVIDENCE_ROUTES + 5)
+        .map(|index| {
+            let mut route = open_code_route();
+            route.endpoint_id = format!("legacy-endpoint-{index}");
+            open_code_epoch(route)
+        })
+        .collect::<Vec<_>>();
+    let restored = CapabilityEvidenceRegistry::restore(CapabilityEvidenceSnapshot {
+        generation: 7,
+        active_routes: BTreeMap::new(),
+        active_processes: BTreeMap::new(),
+        historical_routes,
+        historical_routes_dropped: 3,
+    })
+    .unwrap();
+
+    let snapshot = restored.snapshot();
+    assert_eq!(
+        snapshot.historical_routes.len(),
+        MAX_HISTORICAL_EVIDENCE_ROUTES
+    );
+    assert_eq!(snapshot.historical_routes_dropped, 8);
+    assert_eq!(
+        snapshot.historical_routes[0].route().endpoint_id,
+        "legacy-endpoint-5"
+    );
+    assert_eq!(
+        snapshot
+            .historical_routes
+            .last()
+            .unwrap()
+            .route()
+            .endpoint_id,
+        format!("legacy-endpoint-{}", MAX_HISTORICAL_EVIDENCE_ROUTES + 4)
+    );
 }
 
 #[test]

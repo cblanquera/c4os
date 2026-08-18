@@ -77,7 +77,9 @@ function approvalMessage(
     case "save-profile":
       return `Allow C4OS to change the securely stored credential for ${providerName}?`;
     case "test-connection":
-      return `Allow C4OS to use the stored credential and contact ${providerName} for this connection test?`;
+      return `Allow C4OS to use the ${providerName} credential and contact the provider for this connection test?`;
+    case "complete-onboarding":
+      return `Allow C4OS to save the tested credential and finish setting up ${providerName}?`;
     case "delete-profile":
       return `Allow C4OS to remove the securely stored credential for ${providerName}?`;
   }

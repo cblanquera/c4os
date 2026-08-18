@@ -2,7 +2,7 @@
   display: grid;
   min-width: 0;
   gap: 22px;
-  margin-block-start: 26px;
+  margin-block-start: 0;
 }
 
 .extension-catalog {
@@ -19,13 +19,21 @@
 }
 
 .extension-section-heading h2,
+.extension-section-heading h3,
 .extension-section-heading p {
   margin: 0;
 }
 
-.extension-section-heading h2 {
+.extension-section-heading h2,
+.extension-section-heading h3 {
   font-size: 1.08rem;
   letter-spacing: -0.02em;
+}
+
+.extension-directory {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
 }
 
 .extension-section-heading p {
@@ -386,7 +394,7 @@
 }
 
 .c4-modal:has(.extension-detail) {
-  width: min(100%, 680px);
+  width: min(100%, var(--shell-dialog-regular));
 }
 
 .extension-detail {
@@ -543,6 +551,7 @@
 }
 
 .skill-row__copy p,
+.skill-row__copy small,
 .skill-row__metadata {
   color: var(--text-secondary);
   font-size: 0.76rem;

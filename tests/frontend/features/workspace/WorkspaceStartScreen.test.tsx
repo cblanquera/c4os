@@ -12,6 +12,7 @@ import {
   type RecentWorkspace,
   type WorkspaceOpenResult,
 } from "../../../../src/frontend/features/workspace/WorkspaceStartScreen";
+import { ProtocolBoundaryError } from "../../../../src/frontend/platform/tauri-adapter";
 
 const recents: readonly RecentWorkspace[] = [
   { id: "one", name: "One", detail: "Today" },
@@ -41,6 +42,20 @@ describe("WorkspaceStartScreen", () => {
     expect(screen.getByRole("button", { name: /Three/ })).toHaveTextContent(
       "Locate",
     );
+  });
+
+  it("bounds the visible recent-workspace list to three authoritative rows", () => {
+    render(
+      <WorkspaceStartScreen
+        recents={[...recents, { id: "four", name: "Four", detail: "Older" }]}
+        openWorkspace={() => Promise.reject(new Error("unused"))}
+      />,
+    );
+
+    expect(screen.getByRole("list").children).toHaveLength(3);
+    expect(
+      screen.queryByRole("button", { name: /Four/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("announces progress, disables competing actions, and reports recovery", async () => {
@@ -114,6 +129,52 @@ describe("WorkspaceStartScreen", () => {
     ).toBeVisible();
     expect(screen.getByRole("alert")).toHaveAttribute("aria-atomic", "true");
     expect(screen.queryByText("sensitive path")).not.toBeInTheDocument();
+  });
+
+  it("identifies an allowlisted activation boundary without exposing native details", async () => {
+    const failure = new ProtocolBoundaryError(
+      "unavailable",
+      "sensitive native failure",
+      true,
+      { stage: { kind: "text", value: "runtime-activation" } },
+    );
+    render(
+      <WorkspaceStartScreen
+        recents={recents}
+        openWorkspace={() => Promise.reject(failure)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Open a folder/ }));
+    expect(await screen.findByText(/during runtime activation/u)).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /Workspace state was preserved/u,
+    );
+    expect(
+      screen.queryByText("sensitive native failure"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a bounded protocol message when no activation stage is present", async () => {
+    const failure = new ProtocolBoundaryError(
+      "conflict",
+      "The Workspace request is stale.",
+      true,
+    );
+    render(
+      <WorkspaceStartScreen
+        recents={recents}
+        openWorkspace={() => Promise.reject(failure)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Open a workspace/ }));
+    expect(
+      await screen.findByText(/The Workspace request is stale/u),
+    ).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /existing Workspace state was preserved/u,
+    );
   });
 
   it("keeps recovery locked after Continue fails and retries only explicit review", async () => {

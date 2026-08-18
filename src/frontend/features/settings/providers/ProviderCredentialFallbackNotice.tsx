@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button, Notice } from "../../../components/accessible";
 import {
   acceptProviderSessionCredentials,
+  retryProviderSecureStorage,
   type ProviderSettingsSnapshot,
 } from "../../../platform/provider-service";
 
@@ -17,6 +18,7 @@ export function ProviderCredentialFallbackNotice({
   snapshot,
 }: ProviderCredentialFallbackNoticeProps) {
   const [isAccepting, setIsAccepting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
 
   if (snapshot.credentialProtection !== "session-only") return null;
@@ -37,11 +39,34 @@ export function ProviderCredentialFallbackNotice({
     }
   }
 
+  async function retrySecureStorage() {
+    setIsRetrying(true);
+    setOperationError(null);
+    try {
+      onSnapshot(await retryProviderSecureStorage());
+    } catch (error) {
+      setOperationError(
+        error instanceof Error
+          ? error.message
+          : "macOS secure credential storage is still unavailable.",
+      );
+      setIsRetrying(false);
+    }
+  }
+
   if (!snapshot.credentialFallbackRequired) {
     return (
       <Notice title="Session-only credentials active" tone="warning">
-        Credentials stay only in memory until C4OS quits. Provider profiles
-        remain saved, but keys must be re-entered after restart.
+        <p>
+          Credentials stay only in memory until C4OS quits. Provider profiles
+          remain saved, but keys must be re-entered after restart.
+        </p>
+        <Button
+          isDisabled={isRetrying}
+          onPress={() => void retrySecureStorage()}
+        >
+          {isRetrying ? "Retrying secure storage…" : "Retry secure storage"}
+        </Button>
       </Notice>
     );
   }
@@ -57,7 +82,16 @@ export function ProviderCredentialFallbackNotice({
         fallback storage.
       </p>
       {operationError ? <p>{operationError}</p> : null}
-      <Button isDisabled={isAccepting} onPress={() => void acceptSessionOnly()}>
+      <Button
+        isDisabled={isAccepting || isRetrying}
+        onPress={() => void retrySecureStorage()}
+      >
+        {isRetrying ? "Retrying secure storage…" : "Retry secure storage"}
+      </Button>
+      <Button
+        isDisabled={isAccepting || isRetrying}
+        onPress={() => void acceptSessionOnly()}
+      >
         {isAccepting
           ? "Enabling session-only credentials…"
           : "Use session-only credentials"}

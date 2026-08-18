@@ -115,7 +115,7 @@ export function isConfigurableProvider(
   return PROVIDER_TYPE_OPTIONS.some(({ kind }) => kind === provider.kind);
 }
 
-/** Finds the first explicitly production-ready model in recommendation order. */
+/** Finds the strongest production-ready model that C4OS can use by default. */
 export function recommendedProviderModel(
   models: readonly ProviderModel[],
 ): ProviderModel | null {
@@ -124,10 +124,17 @@ export function recommendedProviderModel(
       .filter(({ productionReady }) => productionReady)
       .sort(
         (left, right) =>
+          supportedFeatureCount(right) - supportedFeatureCount(left) ||
           left.recommendationRank - right.recommendationRank ||
-          left.displayName.localeCompare(right.displayName),
+          left.modelId.localeCompare(right.modelId),
       )[0] ?? null
   );
+}
+
+/** Counts model features whose normalized C4OS state is explicitly supported. */
+function supportedFeatureCount(model: ProviderModel): number {
+  return Object.values(model.features).filter((state) => state === "supported")
+    .length;
 }
 
 /** Builds a secret-free identity for deciding whether test evidence is fresh. */

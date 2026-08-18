@@ -83,3 +83,24 @@
   color: var(--text-secondary);
   text-align: center;
 }
+
+.artifact-shell[data-artifact-context="contextual"] .artifact-folder__header {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.artifact-shell[data-artifact-context="contextual"] .artifact-folder__entries {
+  min-width: 0;
+}
+
+.artifact-shell[data-artifact-context="contextual"]
+  .artifact-folder__entries
+  button {
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.artifact-shell[data-artifact-context="contextual"]
+  .artifact-folder__entries
+  small {
+  display: none;
+}

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type ChangeEvent,
   type ReactNode,
@@ -43,6 +44,19 @@ interface WorkspaceLayoutProps {
 }
 
 const COMPOSER_MODES = ["chat", "files", "browser", "terminal"] as const;
+const CONTEXTUAL_CHAT_MINIMUM_HEIGHT = 220;
+
+/** Derives the retained pane range from the live window height. */
+function contextualChatHeightBounds(viewportHeight: number) {
+  const maximum = Math.max(
+    Math.min(CONTEXTUAL_CHAT_MINIMUM_HEIGHT, viewportHeight),
+    Math.round(viewportHeight * 0.6),
+  );
+  return {
+    minimum: Math.min(CONTEXTUAL_CHAT_MINIMUM_HEIGHT, maximum),
+    maximum,
+  };
+}
 
 /** Renders the stateful workspace geometry without owning product state. */
 export function WorkspaceLayout({
@@ -69,8 +83,21 @@ export function WorkspaceLayout({
     contextualChatContent !== undefined && contextualChatContent !== null;
   const exposesContextualChat = showContextualChat || hasContextualChat;
   const stageRef = useRef<HTMLElement>(null);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window === "undefined" ? 720 : window.innerHeight,
+  );
+  const [contextualChatHeight, setContextualChatHeight] = useState(() =>
+    Math.round(
+      (typeof window === "undefined" ? 720 : window.innerHeight) * 0.4,
+    ),
+  );
   const minimumWidth = projectPanel.minimumWidth ?? 180;
   const maximumWidth = Math.max(minimumWidth, projectPanel.maximumWidth ?? 640);
+  const contextualChatBounds = contextualChatHeightBounds(viewportHeight);
+  const renderedContextualChatHeight = Math.min(
+    contextualChatBounds.maximum,
+    Math.max(contextualChatBounds.minimum, contextualChatHeight),
+  );
 
   /** Constrains view-level resize intent to the accepted panel range. */
   const requestPanelWidth = (width: number) => {
@@ -103,9 +130,16 @@ export function WorkspaceLayout({
       stage.removeEventListener("pointerdown", handleStagePointerDown);
   }, [onPanelOverlayDismiss, projectPanel.isOpen, projectPanel.mode]);
 
+  useEffect(() => {
+    const handleViewportResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", handleViewportResize);
+    return () => window.removeEventListener("resize", handleViewportResize);
+  }, []);
+
   const title = workspaceTitle ?? getShellRouteCopy(route).title;
   const panelStyle = {
     "--shell-project-panel-width": `${projectPanel.width}px`,
+    "--shell-contextual-chat-height": `${renderedContextualChatHeight}px`,
   } as CSSProperties;
 
   return (
@@ -158,23 +192,36 @@ export function WorkspaceLayout({
           inert={!projectPanel.isOpen ? true : undefined}
         >
           <div className="shell-project-panel__projects">
-            <div
-              className="shell-project-panel__heading"
-              data-content-heading={projectPanelContentOwnsHeading}
-            >
-              {projectPanelContentOwnsHeading ? null : <h2>Projects</h2>}
-              <IconButton
-                icon={<Icon name="chevron-right" />}
-                label="Hide project panel"
-                onPress={() => onPanelOpenChange(false)}
-              />
-            </div>
+            {projectPanelContentOwnsHeading ? null : (
+              <div className="shell-project-panel__heading">
+                <h2>Projects</h2>
+                <IconButton
+                  icon={<Icon name="chevron-right" />}
+                  label="Hide project panel"
+                  onPress={() => onPanelOpenChange(false)}
+                />
+              </div>
+            )}
             {projectPanelContent ?? <p>No project is open.</p>}
           </div>
           {hasContextualChat ? (
-            <div className="shell-project-panel__context">
-              {contextualChatContent}
-            </div>
+            <>
+              <Resizer
+                className="shell-project-panel__context-resizer"
+                direction={-1}
+                formatValue={(value) => `${value} pixels high`}
+                label="Resize contextual Chat"
+                max={contextualChatBounds.maximum}
+                min={contextualChatBounds.minimum}
+                onValueChange={setContextualChatHeight}
+                orientation="horizontal"
+                step={12}
+                value={renderedContextualChatHeight}
+              />
+              <div className="shell-project-panel__context">
+                {contextualChatContent}
+              </div>
+            </>
           ) : showContextualChat ? (
             <section
               className="shell-project-panel__context"
@@ -206,49 +253,51 @@ export function WorkspaceLayout({
 
         <div className="shell-workspace__center">
           <main className="shell-workspace__stage" ref={stageRef}>
-            <RouteSurface
-              compact={route === "/chat" && children !== undefined}
-              route={route}
-            >
+            <RouteSurface compact={children !== undefined} route={route}>
               {children}
               <RouteNegativeGates route={route} />
             </RouteSurface>
           </main>
 
-          {composerContent ?? (
-            <form
-              className="shell-composer"
-              aria-label="Message composer"
-              onSubmit={(event) => event.preventDefault()}
-            >
-              <label className="shell-composer__mode">
-                <span>Mode</span>
-                <select
-                  aria-label="Composer mode"
-                  value={composer.mode}
-                  disabled={composer.isModeLocked}
-                  onChange={handleModeChange}
-                >
-                  {COMPOSER_MODES.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {mode[0]?.toLocaleUpperCase()}
-                      {mode.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="shell-composer__draft">
-                <span className="shell-visually-hidden">Message</span>
-                <textarea
-                  rows={2}
-                  value={composer.draft}
-                  placeholder="Ask C4OS"
-                  data-shell-focus-target="composer-draft"
-                  onChange={handleDraftChange}
-                />
-              </label>
-            </form>
-          )}
+          <div
+            className="shell-composer-dock"
+            data-shell-region="composer-dock"
+          >
+            {composerContent ?? (
+              <form
+                className="shell-composer"
+                aria-label="Message composer"
+                onSubmit={(event) => event.preventDefault()}
+              >
+                <label className="shell-composer__mode">
+                  <span>Mode</span>
+                  <select
+                    aria-label="Composer mode"
+                    value={composer.mode}
+                    disabled={composer.isModeLocked}
+                    onChange={handleModeChange}
+                  >
+                    {COMPOSER_MODES.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode[0]?.toLocaleUpperCase()}
+                        {mode.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="shell-composer__draft">
+                  <span className="shell-visually-hidden">Message</span>
+                  <textarea
+                    rows={2}
+                    value={composer.draft}
+                    placeholder="Ask C4OS"
+                    data-shell-focus-target="composer-draft"
+                    onChange={handleDraftChange}
+                  />
+                </label>
+              </form>
+            )}
+          </div>
         </div>
       </div>
     </div>

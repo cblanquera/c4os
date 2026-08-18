@@ -46,14 +46,32 @@ const MAX_REAUTHENTICATION_TTL: Duration = Duration::from_secs(5 * 60);
 const PASSWORD_MEMORY_KIB: u32 = 65_536;
 const PASSWORD_ITERATIONS: u32 = 3;
 const PASSWORD_LANES: u32 = 1;
+const ERR_SEC_NOT_AVAILABLE: i32 = -25_291;
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
+const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25_308;
+pub(crate) const KEYCHAIN_OPERATION_MAX_ATTEMPTS: usize = 3;
+#[cfg(target_os = "macos")]
+const KEYCHAIN_RETRY_DELAY: Duration = Duration::from_millis(25);
+#[cfg(target_os = "macos")]
+const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
+const KEYCHAIN_INTERACTIVE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub type CredentialVaultResult<T> = Result<T, CredentialVaultError>;
 
 /// Errors never include credential values, derived keys, or plaintext payloads.
 #[derive(Debug, Error)]
 pub enum CredentialVaultError {
-    #[error("the operating-system credential service is unavailable")]
-    KeychainUnavailable,
+    #[error(
+        "the operating-system credential service failed during {operation} (OSStatus {os_status})"
+    )]
+    KeychainUnavailable {
+        operation: KeychainOperation,
+        os_status: i32,
+    },
+    #[error("the operating-system credential service timed out during {operation}")]
+    KeychainTimedOut { operation: KeychainOperation },
     #[error("the operating-system credential service returned an invalid installation key")]
     InvalidInstallationKey,
     #[error("the credential vault has an unsupported or malformed format")]
@@ -106,6 +124,24 @@ pub enum CredentialVaultError {
     Serialization,
 }
 
+/// A non-secret operation label retained alongside a macOS Keychain OSStatus.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeychainOperation {
+    ReadExistingInstallationKey,
+    CreateInstallationKey,
+    ReadCreatedInstallationKey,
+}
+
+impl fmt::Display for KeychainOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::ReadExistingInstallationKey => "reading the existing installation key",
+            Self::CreateInstallationKey => "creating the installation key",
+            Self::ReadCreatedInstallationKey => "reading the created installation key",
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VaultProtection {
     InstallationKey,
@@ -147,7 +183,7 @@ impl InstallationKey {
         Self(Zeroizing::new(bytes))
     }
 
-    fn from_slice(bytes: &[u8]) -> CredentialVaultResult<Self> {
+    pub(crate) fn from_slice(bytes: &[u8]) -> CredentialVaultResult<Self> {
         if bytes.len() != INSTALLATION_KEY_BYTES {
             return Err(CredentialVaultError::InvalidInstallationKey);
         }
@@ -223,61 +259,180 @@ impl EntropySource for OsEntropy {
     }
 }
 
+fn is_transient_keychain_status(os_status: i32) -> bool {
+    matches!(
+        os_status,
+        ERR_SEC_NOT_AVAILABLE | ERR_SEC_INTERACTION_NOT_ALLOWED
+    )
+}
+
+/// Executes one Keychain operation with a fixed attempt ceiling. The caller
+/// supplies the wait strategy so deterministic tests never need to sleep.
+pub(crate) fn execute_keychain_operation_with_retry<T>(
+    operation: KeychainOperation,
+    mut execute: impl FnMut() -> Result<T, i32>,
+    mut wait_before_retry: impl FnMut(),
+) -> CredentialVaultResult<T> {
+    for attempt in 1..=KEYCHAIN_OPERATION_MAX_ATTEMPTS {
+        match execute() {
+            Ok(value) => return Ok(value),
+            Err(os_status)
+                if is_transient_keychain_status(os_status)
+                    && attempt < KEYCHAIN_OPERATION_MAX_ATTEMPTS =>
+            {
+                wait_before_retry();
+            }
+            Err(os_status) => {
+                return Err(CredentialVaultError::KeychainUnavailable {
+                    operation,
+                    os_status,
+                });
+            }
+        }
+    }
+
+    unreachable!("the bounded Keychain operation loop always returns")
+}
+
+#[cfg(target_os = "macos")]
+fn execute_macos_keychain_operation<T>(
+    operation: KeychainOperation,
+    execute: impl FnMut() -> Result<T, i32>,
+) -> CredentialVaultResult<T> {
+    execute_keychain_operation_with_retry(operation, execute, || {
+        std::thread::sleep(KEYCHAIN_RETRY_DELAY);
+    })
+}
+
 /// macOS Keychain adapter for the one installation master key.
 #[cfg(target_os = "macos")]
 pub struct MacOsInstallationKeyStore {
     service: String,
     account: String,
+    read_timeout: Duration,
 }
 
 #[cfg(target_os = "macos")]
 impl MacOsInstallationKeyStore {
     pub fn new(bundle_identifier: impl Into<String>) -> Self {
+        Self::with_read_timeout(bundle_identifier, KEYCHAIN_READ_TIMEOUT)
+    }
+
+    /// Gives an explicit user-initiated recovery attempt enough time for
+    /// macOS to resolve or present the current application's Keychain access
+    /// request without weakening the bounded startup path.
+    pub(crate) fn new_for_interactive_recovery(bundle_identifier: impl Into<String>) -> Self {
+        Self::with_read_timeout(bundle_identifier, KEYCHAIN_INTERACTIVE_RECOVERY_TIMEOUT)
+    }
+
+    fn with_read_timeout(bundle_identifier: impl Into<String>, read_timeout: Duration) -> Self {
         Self {
             service: format!("{}.credential-vault", bundle_identifier.into()),
             account: "installation-master-key-v1".into(),
+            read_timeout,
         }
     }
 
-    fn read(&self) -> Result<Vec<u8>, security_framework::base::Error> {
+    /// Non-secret identity used to prove the Keychain item is scoped to the
+    /// configured application bundle rather than a development-only alias.
+    pub fn service_name(&self) -> &str {
+        &self.service
+    }
+
+    pub fn account_name(&self) -> &str {
+        &self.account
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_timeout(&self) -> Duration {
+        self.read_timeout
+    }
+
+    fn read(&self, operation: KeychainOperation) -> CredentialVaultResult<Vec<u8>> {
         use security_framework::passwords::{PasswordOptions, generic_password};
 
-        generic_password(PasswordOptions::new_generic_password(
-            &self.service,
-            &self.account,
-        ))
+        let service = self.service.clone();
+        let account = self.account.clone();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result =
+                generic_password(PasswordOptions::new_generic_password(&service, &account))
+                    .map_err(|error| error.code());
+            let _ = sender.send(result);
+        });
+        receive_macos_keychain_result(receiver, operation, self.read_timeout)
+    }
+
+    fn read_with_retry(&self, operation: KeychainOperation) -> CredentialVaultResult<Vec<u8>> {
+        for attempt in 1..=KEYCHAIN_OPERATION_MAX_ATTEMPTS {
+            match self.read(operation) {
+                Err(CredentialVaultError::KeychainUnavailable { os_status, .. })
+                    if is_transient_keychain_status(os_status)
+                        && attempt < KEYCHAIN_OPERATION_MAX_ATTEMPTS =>
+                {
+                    std::thread::sleep(KEYCHAIN_RETRY_DELAY);
+                }
+                result => return result,
+            }
+        }
+
+        unreachable!("the bounded Keychain read loop always returns")
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn receive_macos_keychain_result<T>(
+    receiver: std::sync::mpsc::Receiver<Result<T, i32>>,
+    operation: KeychainOperation,
+    timeout: Duration,
+) -> CredentialVaultResult<T> {
+    match receiver.recv_timeout(timeout) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(os_status)) => Err(CredentialVaultError::KeychainUnavailable {
+            operation,
+            os_status,
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(CredentialVaultError::KeychainTimedOut { operation })
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(CredentialVaultError::KeychainUnavailable {
+                operation,
+                os_status: ERR_SEC_NOT_AVAILABLE,
+            })
+        }
     }
 }
 
 #[cfg(target_os = "macos")]
 impl InstallationKeyStore for MacOsInstallationKeyStore {
     fn load_or_create(&self) -> CredentialVaultResult<InstallationKey> {
-        // Apple's errSecItemNotFound OSStatus. Other errors must not silently
-        // become a new key or a plaintext fallback.
-        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
-
-        match self.read() {
+        match self.read_with_retry(KeychainOperation::ReadExistingInstallationKey) {
             Ok(bytes) => {
                 let bytes = Zeroizing::new(bytes);
                 InstallationKey::from_slice(&bytes)
             }
-            Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => {
+            Err(CredentialVaultError::KeychainUnavailable {
+                operation: KeychainOperation::ReadExistingInstallationKey,
+                os_status: ERR_SEC_ITEM_NOT_FOUND,
+            }) => {
                 use security_framework::passwords::set_generic_password;
 
                 let mut generated = Zeroizing::new([0_u8; INSTALLATION_KEY_BYTES]);
                 OsEntropy.fill(&mut generated[..])?;
-                set_generic_password(&self.service, &self.account, &generated[..])
-                    .map_err(|_| CredentialVaultError::KeychainUnavailable)?;
+                execute_macos_keychain_operation(KeychainOperation::CreateInstallationKey, || {
+                    set_generic_password(&self.service, &self.account, &generated[..])
+                        .map_err(|error| error.code())
+                })?;
 
                 // Read back the authoritative value. This also avoids returning
                 // a local value that the credential service did not retain.
                 let stored = Zeroizing::new(
-                    self.read()
-                        .map_err(|_| CredentialVaultError::KeychainUnavailable)?,
+                    self.read_with_retry(KeychainOperation::ReadCreatedInstallationKey)?,
                 );
                 InstallationKey::from_slice(&stored)
             }
-            Err(_) => Err(CredentialVaultError::KeychainUnavailable),
+            Err(error) => Err(error),
         }
     }
 }

@@ -526,6 +526,10 @@ pub enum DecisionSource {
     UndeclaredAuthority,
     NonVersionControlledChatWrite,
     OutOfProjectChatWrite,
+    DirectIntentExactControl,
+    DirectIntentDestructive,
+    DirectIntentCredentialEgress,
+    DirectIntentPlatformInteraction,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -541,6 +545,46 @@ pub struct PolicyResolution {
     pub decision: PolicyDecision,
     pub controlling_sources: Vec<DecisionSource>,
     pub contributions: Vec<DecisionContribution>,
+}
+
+/// Rust-owned context for an exact product control. This context is never
+/// accepted from renderer input. Credential-bearing direct actions default to
+/// an unknown boundary so callers must explicitly bind the declared provider
+/// destination before preset-only approval can be elided.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DirectIntentContext {
+    credential_boundary_declared: bool,
+    platform_interaction_required: bool,
+}
+
+impl DirectIntentContext {
+    pub fn from_facts(facts: &ActionFacts) -> Self {
+        Self {
+            credential_boundary_declared: facts.sensitivity != ActionSensitivity::Credential,
+            platform_interaction_required: false,
+        }
+    }
+
+    pub fn declared_provider_boundary() -> Self {
+        Self {
+            credential_boundary_declared: true,
+            platform_interaction_required: false,
+        }
+    }
+
+    pub fn credential_egress() -> Self {
+        Self {
+            credential_boundary_declared: false,
+            platform_interaction_required: false,
+        }
+    }
+
+    pub fn platform_interaction() -> Self {
+        Self {
+            credential_boundary_declared: true,
+            platform_interaction_required: true,
+        }
+    }
 }
 
 /// Resolves one complete action using the most-restrictive-wins contract.
@@ -628,6 +672,73 @@ pub fn resolve_policy(
         controlling_sources,
         contributions,
     }
+}
+
+/// Resolves an exact Rust-authenticated direct user control. Only a preset Ask
+/// is replaced by the user's named gesture. Explicit rules, exceptions,
+/// ceilings, destructive actions, credential egress, and platform interaction
+/// remain interactive; every Deny remains final.
+pub fn resolve_direct_intent_policy(
+    facts: &ActionFacts,
+    configuration: &PolicyConfiguration,
+    context: DirectIntentContext,
+    now_ms: u64,
+) -> PolicyResolution {
+    let mut resolution = resolve_policy(facts, configuration, now_ms);
+    if facts.initiator != ActionInitiator::User
+        || facts.request_origin != ActionRequestOrigin::DirectUserEdit
+        || facts.confidence != ClassificationConfidence::Known
+        || !facts.target_resolved
+        || facts.canonical_target.is_empty()
+        || facts.declaration_exceeded
+    {
+        return resolution;
+    }
+
+    if resolution.decision == PolicyDecision::Deny {
+        return resolution;
+    }
+
+    if facts.reversibility == ActionReversibility::Destructive {
+        resolution.contributions.push(DecisionContribution {
+            decision: PolicyDecision::Ask,
+            source: DecisionSource::DirectIntentDestructive,
+        });
+    }
+    if facts.sensitivity == ActionSensitivity::Credential && !context.credential_boundary_declared {
+        resolution.contributions.push(DecisionContribution {
+            decision: PolicyDecision::Ask,
+            source: DecisionSource::DirectIntentCredentialEgress,
+        });
+    }
+    if context.platform_interaction_required {
+        resolution.contributions.push(DecisionContribution {
+            decision: PolicyDecision::Ask,
+            source: DecisionSource::DirectIntentPlatformInteraction,
+        });
+    }
+
+    for contribution in &mut resolution.contributions {
+        if contribution.decision == PolicyDecision::Ask
+            && contribution.source == DecisionSource::Preset
+        {
+            contribution.decision = PolicyDecision::Allow;
+            contribution.source = DecisionSource::DirectIntentExactControl;
+        }
+    }
+    resolution.decision = resolution
+        .contributions
+        .iter()
+        .fold(PolicyDecision::Allow, |current, item| {
+            current.strictest(item.decision)
+        });
+    resolution.controlling_sources = resolution
+        .contributions
+        .iter()
+        .filter(|item| item.decision == resolution.decision)
+        .map(|item| item.source.clone())
+        .collect();
+    resolution
 }
 
 fn safety_ceilings(facts: &ActionFacts) -> Vec<DecisionContribution> {

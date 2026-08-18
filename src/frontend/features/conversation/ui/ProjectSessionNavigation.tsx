@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
+import { Icon } from "../../../components/accessible";
 import type { ProjectNavigationItem } from "./types";
 import "./conversation-ui.css";
 
@@ -247,11 +248,19 @@ export function ProjectSessionNavigation({
       aria-label="Projects and chat sessions"
       className="conversation-navigation"
     >
-      <div className="conversation-navigation__search">
-        <label htmlFor="conversation-session-search">Search chats</label>
+      <div className="conversation-navigation__search" role="search">
+        <Icon aria-hidden="true" name="search" size={14} />
+        <label
+          className="conversation-visually-hidden"
+          htmlFor="conversation-session-search"
+        >
+          Search chat sessions
+        </label>
         <div className="conversation-navigation__search-control">
           <input
             id="conversation-session-search"
+            autoComplete="off"
+            placeholder="Search chat sessions"
             ref={searchInput}
             type="search"
             value={searchQuery}
@@ -264,7 +273,7 @@ export function ProjectSessionNavigation({
               aria-label="Clear chat search"
               onClick={clearSearch}
             >
-              Clear
+              <Icon aria-hidden="true" name="close" size={14} />
             </button>
           ) : null}
         </div>
@@ -322,7 +331,7 @@ export function ProjectSessionNavigation({
               aria-label="Add project"
               onClick={onAddProject}
             >
-              +
+              <Icon aria-hidden="true" name="add" size={14} />
             </button>
           </header>
           {projects.length === 0 ? (
@@ -388,7 +397,7 @@ export function ProjectSessionNavigation({
                           handleProjectKeyDown(event, project.id)
                         }
                       >
-                        <span aria-hidden="true">□</span>
+                        <Icon aria-hidden="true" name="project" size={14} />
                         <span>{project.name}</span>
                         {project.pathState === "missing" ? (
                           <span className="conversation-visually-hidden">
@@ -406,7 +415,7 @@ export function ProjectSessionNavigation({
                           aria-label={`New chat in ${project.name}`}
                           onClick={() => onNewChat(project.id)}
                         >
-                          +
+                          <Icon aria-hidden="true" name="add" size={14} />
                         </button>
                         <button
                           type="button"
@@ -428,7 +437,7 @@ export function ProjectSessionNavigation({
                             setOpenProjectMenuId(isMenuOpen ? null : project.id)
                           }
                         >
-                          ···
+                          <Icon aria-hidden="true" name="more" size={14} />
                         </button>
                         {isMenuOpen ? (
                           <div
@@ -562,7 +571,7 @@ export function ProjectSessionNavigation({
                                 onSessionRemove(session.id, project.id)
                               }
                             >
-                              Remove
+                              <Icon aria-hidden="true" name="close" size={14} />
                             </button>
                           </li>
                         ))}

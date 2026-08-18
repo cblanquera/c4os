@@ -22,6 +22,13 @@ test("runtime QA keeps capability conflicts explicit and responsive", async ({
   await expect(
     page.getByLabel("Rust runtime authority").getByText("26"),
   ).toBeVisible();
+  await expect(
+    page.getByText(/temporary use of the OpenAI credential/),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "output/playwright/task-00022-runtime-credential-approval.png",
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "Models & preflight" }).click();
   await expect(page.getByText("Needs Vision")).toBeVisible();
   await page.getByRole("button", { name: "Use compatible model" }).click();

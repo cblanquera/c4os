@@ -1,5 +1,7 @@
 import "./model-controls.css";
 
+export type { ApprovalPresetControlProps } from "./ApprovalPresetControl";
+export { ApprovalPresetControl } from "./ApprovalPresetControl";
 export type { ChatInformationPopoverProps } from "./ChatInformationPopover";
 export { ChatInformationPopover } from "./ChatInformationPopover";
 export type { ModelSelectorProps } from "./ModelSelector";
@@ -9,6 +11,7 @@ export { ReasoningEffortControl } from "./ReasoningEffortControl";
 export type {
   ChatContextUsage,
   ChatInformation,
+  ComposerApprovalPreset,
   ModelCapability,
   ModelCapabilityFilter,
   ModelControlModel,

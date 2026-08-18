@@ -14,8 +14,9 @@ use authorization::{
 use policy::{
     ActionEffect, ActionFacts, ActionInitiator, ActionRequestOrigin, ActionReversibility,
     ActionScope, ActionSensitivity, ActionSurface, ApprovalPreset, CategoryRule, CeilingRule,
-    ClassificationConfidence, ConcreteException, ExceptionDuration, POLICY_GROUPS,
-    PolicyConfiguration, PolicyDecision, PolicyGroup, RepositoryState, RuleMatcher, resolve_policy,
+    ClassificationConfidence, ConcreteException, DecisionSource, DirectIntentContext,
+    ExceptionDuration, POLICY_GROUPS, PolicyConfiguration, PolicyDecision, PolicyGroup,
+    RepositoryState, RuleMatcher, resolve_direct_intent_policy, resolve_policy,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -53,6 +54,132 @@ fn facts() -> ActionFacts {
         sandbox_allows: true,
         declaration_exceeded: false,
     }
+}
+
+fn direct_facts() -> ActionFacts {
+    let mut direct = facts();
+    direct.action_kind = "file.write".into();
+    direct.native_tool = "write_file".into();
+    direct.effects = set([ActionEffect::Modify]);
+    direct.initiator = ActionInitiator::User;
+    direct.request_origin = ActionRequestOrigin::DirectUserEdit;
+    direct
+}
+
+#[test]
+fn exact_direct_control_replaces_only_the_preset_ask() {
+    let direct = direct_facts();
+    let resolution = resolve_direct_intent_policy(
+        &direct,
+        &PolicyConfiguration::default(),
+        DirectIntentContext::from_facts(&direct),
+        10,
+    );
+    assert_eq!(resolution.decision, PolicyDecision::Allow);
+    assert!(
+        resolution
+            .controlling_sources
+            .contains(&DecisionSource::DirectIntentExactControl)
+    );
+
+    let mut delegated = direct.clone();
+    delegated.initiator = ActionInitiator::Agent;
+    delegated.request_origin = ActionRequestOrigin::RuntimeTool;
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &delegated,
+            &PolicyConfiguration::default(),
+            DirectIntentContext::from_facts(&delegated),
+            10,
+        )
+        .decision,
+        PolicyDecision::Ask
+    );
+}
+
+#[test]
+fn direct_intent_preserves_explicit_ask_and_managed_deny() {
+    let direct = direct_facts();
+    let explicit_ask = PolicyConfiguration {
+        category_rules: vec![CategoryRule {
+            id: "explicit-direct-ask".into(),
+            group: PolicyGroup::WorkspaceFiles,
+            decision: PolicyDecision::Ask,
+            matcher: RuleMatcher::default(),
+        }],
+        ..PolicyConfiguration::default()
+    };
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &direct,
+            &explicit_ask,
+            DirectIntentContext::from_facts(&direct),
+            10,
+        )
+        .decision,
+        PolicyDecision::Ask
+    );
+
+    let managed_deny = PolicyConfiguration {
+        managed_requirements: vec![
+            CeilingRule::new("managed-deny", PolicyDecision::Deny, RuleMatcher::default()).unwrap(),
+        ],
+        ..PolicyConfiguration::default()
+    };
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &direct,
+            &managed_deny,
+            DirectIntentContext::from_facts(&direct),
+            10,
+        )
+        .decision,
+        PolicyDecision::Deny
+    );
+}
+
+#[test]
+fn destructive_and_credential_egress_direct_controls_still_ask() {
+    let mut destructive = direct_facts();
+    destructive.reversibility = ActionReversibility::Destructive;
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &destructive,
+            &PolicyConfiguration::default(),
+            DirectIntentContext::from_facts(&destructive),
+            10,
+        )
+        .decision,
+        PolicyDecision::Ask
+    );
+
+    let mut credential = direct_facts();
+    credential.surface = ActionSurface::Credential;
+    credential.scope = ActionScope::Remote;
+    credential.sensitivity = ActionSensitivity::Credential;
+    credential.action_kind = "credential.use".into();
+    credential.native_tool = "c4os.provider.test".into();
+    credential.canonical_target = "https://provider.example/v1".into();
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &credential,
+            &PolicyConfiguration::default(),
+            DirectIntentContext::credential_egress(),
+            10,
+        )
+        .decision,
+        PolicyDecision::Ask
+    );
+    assert_eq!(
+        resolve_direct_intent_policy(
+            &credential,
+            &PolicyConfiguration::default(),
+            DirectIntentContext::declared_provider_boundary(),
+            10,
+        )
+        .decision,
+        PolicyDecision::Allow
+    );
 }
 
 fn action() -> CanonicalAction {

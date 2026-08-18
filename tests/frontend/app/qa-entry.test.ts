@@ -13,6 +13,11 @@ describe("build-gated native QA root entry", () => {
     expect(resolveBuildGatedQaRootEntry(false, "foundation")).toBeNull();
   });
 
+  it("permits direct first-run review only in a QA build", () => {
+    expect(resolveBuildGatedQaRootEntry(true, "onboarding")).toBe("onboarding");
+    expect(resolveBuildGatedQaRootEntry(false, "onboarding")).toBeNull();
+  });
+
   it("fails closed for absent and unknown entries", () => {
     expect(resolveBuildGatedQaRootEntry(true, undefined)).toBeNull();
     expect(resolveBuildGatedQaRootEntry(true, "detached-window")).toBeNull();

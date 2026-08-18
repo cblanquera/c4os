@@ -49,7 +49,11 @@ function model() {
   };
 }
 
-function payload(generation = 3, coordinatorGeneration = 8) {
+function payload(
+  generation = 3,
+  coordinatorGeneration = 8,
+  transientTest: Readonly<Record<string, unknown>> | null = null,
+) {
   return {
     authority: "rust-provider-service",
     coordinatorGeneration,
@@ -92,6 +96,7 @@ function payload(generation = 3, coordinatorGeneration = 8) {
     defaultRuntime: "opencode",
     defaultEnvironment: "local",
     pendingApproval: null,
+    transientTest,
   };
 }
 
@@ -138,13 +143,102 @@ describe("provider service adapter", () => {
     });
     expect(snapshot.providers[0]?.models[0]?.contextTokens).toBe(128_000);
 
-    await adapter.testConnection("provider-openai");
+    await adapter.testConnection({
+      providerId: "provider-openai",
+      kind: "open-ai",
+      displayName: "OpenAI",
+      endpoint: {
+        endpointId: "openai-api",
+        baseUrl: "https://api.openai.com/v1",
+        apiKind: "openai",
+      },
+      authentication: { type: "bearer" },
+      headers: {},
+      secret: "transient-provider-secret",
+      enabled: true,
+    });
     expect(transport.calls[1]?.args.input).toEqual({
       expectedCoordinatorGeneration: 8,
       expectedProviderGeneration: 3,
       providerId: "provider-openai",
+      kind: "open-ai",
+      displayName: "OpenAI",
+      endpoint: {
+        endpointId: "openai-api",
+        baseUrl: "https://api.openai.com/v1",
+        apiKind: "openai",
+      },
+      authentication: { type: "bearer" },
+      headers: {},
+      secret: "transient-provider-secret",
+      enabled: true,
     });
     expect(JSON.stringify(snapshot)).not.toContain("credential:1111");
+  });
+
+  it("parses a transient test projection and completes it with one token", async () => {
+    const calls: Array<{
+      command: ProviderCommand;
+      args: Readonly<Record<string, unknown>>;
+    }> = [];
+    const adapter = createProviderAdapter(
+      {
+        async invoke(command, args) {
+          calls.push({ command, args });
+          const request = args.request as {
+            requestId: string;
+            correlationId: string;
+          };
+          const generation = command === "provider_snapshot" ? 3 : 4;
+          return {
+            protocolVersion: PROTOCOL_VERSION,
+            requestId: request.requestId,
+            correlationId: request.correlationId,
+            generation,
+            payload: payload(
+              generation,
+              command === "provider_snapshot" ? 8 : 9,
+              command === "provider_complete_onboarding"
+                ? null
+                : {
+                    testToken:
+                      "provider-test:00000000-0000-4000-8000-000000000003",
+                    provider: payload().providers.providers[0],
+                  },
+            ),
+          };
+        },
+      },
+      {
+        requestIdFactory: () => REQUEST_ID as never,
+        correlationIdFactory: () => CORRELATION_ID as never,
+      },
+    );
+
+    const tested = await adapter.readSnapshot();
+    expect(tested.transientTest).toMatchObject({
+      testToken: "provider-test:00000000-0000-4000-8000-000000000003",
+      provider: { providerId: "provider-openai" },
+    });
+    expect(JSON.stringify(tested.transientTest)).not.toContain("secret");
+    await adapter.completeOnboarding(
+      "provider-test:00000000-0000-4000-8000-000000000003",
+      "gpt-4o-mini",
+    );
+    expect(calls[1]).toMatchObject({
+      command: "provider_complete_onboarding",
+      args: {
+        input: {
+          expectedCoordinatorGeneration: 8,
+          expectedProviderGeneration: 3,
+          expectedConfigurationGeneration: 4,
+          testToken: "provider-test:00000000-0000-4000-8000-000000000003",
+          modelId: "gpt-4o-mini",
+          runtimeId: "opencode",
+          environmentId: "local",
+        },
+      },
+    });
   });
 
   it("passes a raw key only in the save command and never places it in parsed state", async () => {
@@ -242,6 +336,74 @@ describe("provider service adapter", () => {
     expect(calls[3]?.args.input).toMatchObject({
       expectedCoordinatorGeneration: 9,
       expectedProviderGeneration: 3,
+    });
+  });
+
+  it("retries a stale pre-effect connection test with the same draft once", async () => {
+    const calls: Array<{
+      command: ProviderCommand;
+      args: Readonly<Record<string, unknown>>;
+    }> = [];
+    let coordinatorGeneration = 8;
+    let testAttempts = 0;
+    const adapter = createProviderAdapter(
+      {
+        async invoke(command, args) {
+          calls.push({ command, args });
+          const request = args.request as {
+            requestId: string;
+            correlationId: string;
+          };
+          if (command === "provider_test_connection" && testAttempts++ === 0) {
+            coordinatorGeneration = 9;
+            throw {
+              code: "staleGeneration",
+              message: "Provider state changed before the connection test",
+              retryable: true,
+            };
+          }
+          const generation = command === "provider_test_connection" ? 4 : 3;
+          return {
+            protocolVersion: PROTOCOL_VERSION,
+            requestId: request.requestId,
+            correlationId: request.correlationId,
+            generation,
+            payload: payload(generation, coordinatorGeneration),
+          };
+        },
+      },
+      {
+        requestIdFactory: () => REQUEST_ID as never,
+        correlationIdFactory: () => CORRELATION_ID as never,
+      },
+    );
+    const draft = {
+      providerId: "provider-compatible",
+      kind: "custom" as const,
+      displayName: "Local compatible",
+      endpoint: {
+        endpointId: "compatible-api",
+        baseUrl: "http://127.0.0.1:4010/v1",
+        apiKind: "openai-compatible" as const,
+      },
+      authentication: { type: "bearer" as const },
+      secret: "fixture-provider-secret",
+      headers: {},
+      enabled: true,
+    };
+
+    await adapter.readSnapshot();
+    await adapter.testConnection(draft);
+    expect(calls.map(({ command }) => command)).toEqual([
+      "provider_snapshot",
+      "provider_test_connection",
+      "provider_snapshot",
+      "provider_test_connection",
+    ]);
+    expect(calls[3]?.args.input).toMatchObject({
+      expectedCoordinatorGeneration: 9,
+      expectedProviderGeneration: 3,
+      secret: "fixture-provider-secret",
     });
   });
 

@@ -106,9 +106,11 @@ export function Composer({
   const markdownPreviewRef = useRef<HTMLPreElement>(null);
   const copy = MODE_COPY[mode];
   const isMarkdownMode = mode === "chat" || mode === "reply";
-  const showsAttachments = mode === "chat";
+  const showsAttachments = mode === "chat" || mode === "reply";
   const hasSubmission =
-    value.trim().length > 0 || (showsAttachments && attachments.length > 0);
+    mode === "files"
+      ? onBrowse !== undefined
+      : value.trim().length > 0 || (showsAttachments && attachments.length > 0);
   const canSubmit =
     !isDisabled && !isSubmitDisabled && !conflict && hasSubmission;
 
@@ -116,6 +118,13 @@ export function Composer({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit) {
+      return;
+    }
+
+    // File paths never cross the renderer boundary. Open invokes the same
+    // native opaque-grant picker as Browse File.
+    if (mode === "files" && onBrowse) {
+      onBrowse();
       return;
     }
 
@@ -290,7 +299,8 @@ export function Composer({
                 disabled={isDisabled}
                 onChange={(event) => onValueChange(event.currentTarget.value)}
                 placeholder={copy.placeholder}
-                value={value}
+                readOnly={mode === "files"}
+                value={mode === "files" ? "" : value}
               />
             </span>
           )}
@@ -406,6 +416,7 @@ function ComposerControls({ controls, mode }: ComposerControlsProps) {
         <ControlSlot label="Reasoning effort">{controls.reasoning}</ControlSlot>
         <ControlSlot label="Approval preset">{controls.approval}</ControlSlot>
         <ControlSlot label="Git branch">{controls.branch}</ControlSlot>
+        <ControlSlot label="Pending chat">{controls.pending}</ControlSlot>
       </>
     );
   }

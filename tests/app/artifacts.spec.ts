@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type ArtifactFixtureState = "conflict" | "file" | "folder" | "proposed";
+type ArtifactFixtureState =
+  "browser" | "conflict" | "file" | "folder" | "proposed";
 
 const ORIGINAL_FILE = [
   "# Artifact workspace",
@@ -170,6 +171,14 @@ async function installNativeArtifactFixture(
               ...artifactSnapshot,
               focusedArtifactId: artifact.artifactId,
             };
+          } else if (
+            command === "artifact_mount_browser" ||
+            command === "artifact_resize_browser" ||
+            command === "artifact_focus_native_browser" ||
+            command === "artifact_detach_browser"
+          ) {
+            // The browser fixture owns only renderer geometry evidence. Native
+            // WKWebView attachment remains covered by the Rust/native tier.
           } else if (command === "artifact_begin_file_edit") {
             commitArtifact("fileEditBegan", (current) => ({
               ...current,
@@ -508,6 +517,7 @@ function artifactWorkspace(state: ArtifactFixtureState) {
             currentVersionLabel: "Version 8",
           }
         : { phase: "read", content: ORIGINAL_FILE };
+  const browser = state === "browser";
   const folder = state === "folder";
   return {
     protocolVersion: 1,
@@ -519,73 +529,109 @@ function artifactWorkspace(state: ArtifactFixtureState) {
     focusedArtifactId: null,
     artifacts: [
       {
-        artifactId: folder ? "artifact:folder-project" : "artifact:file-readme",
+        artifactId: browser
+          ? "artifact:browser-docs"
+          : folder
+            ? "artifact:folder-project"
+            : "artifact:file-readme",
         projectId: "project:qa",
         sessionId: "session:qa",
-        providerType: folder ? "folder" : "file",
+        providerType: browser ? "browser" : folder ? "folder" : "file",
         providerVersion: 1,
         stateSchemaVersion: 1,
         recordRevision: 7,
-        title: folder ? "project" : "README.md",
+        title: browser
+          ? "C4OS documentation"
+          : folder
+            ? "project"
+            : "README.md",
         focusSupported: true,
         pendingApprovalId: null,
         status: { kind: "ready" },
-        sourceLabel: folder
-          ? "Trusted Project folder"
-          : "Trusted Project file · docs/README.md",
+        sourceLabel: browser
+          ? "Per-Project Browser"
+          : folder
+            ? "Trusted Project folder"
+            : "Trusted Project file · docs/README.md",
         resourceVersion: {
           sequence: 7,
           sha256: `sha256:${"1".repeat(64)}`,
           observedAtMs: 9_000,
         },
         history: [],
-        providerState: folder
+        providerState: browser
           ? {
-              type: "folder",
+              type: "browser",
               value: {
-                breadcrumbs: [{ id: "", label: "project", isCurrent: true }],
-                entries: [
+                currentUrl: "https://docs.example.test/c4os",
+                pageTitle: "C4OS documentation",
+                phase: "ready",
+                refreshing: false,
+                canGoBack: true,
+                canGoForward: false,
+                controllerGeneration: 4,
+                mountGeneration: 2,
+                environmentScope: "per-project",
+                pendingOperation: null,
+                pendingTargetUrl: null,
+                notices: [
                   {
-                    id: "entry:docs",
-                    kind: "folder",
-                    metadata: "2 items",
-                    name: "docs",
-                  },
-                  {
-                    id: "entry:src",
-                    kind: "folder",
-                    metadata: "8 items",
-                    name: "src",
-                  },
-                  {
-                    id: "entry:readme",
-                    kind: "file",
-                    metadata: "2 KB · Markdown",
-                    name: "README.md",
+                    id: "browser-notice:ready",
+                    kind: "information",
+                    title: "Browser ready",
+                    message:
+                      "The native page is attached to this exact artifact.",
                   },
                 ],
-                listing: { phase: "ready", message: null },
-                listingLimit: 3,
-                selectedEntryId: null,
               },
             }
-          : {
-              type: "file",
-              value: {
-                breadcrumbs: [
-                  { id: "", label: "project", isCurrent: false },
-                  { id: "docs", label: "docs", isCurrent: false },
-                  {
-                    id: "docs/README.md",
-                    label: "README.md",
-                    isCurrent: true,
-                  },
-                ],
-                languageLabel: "Markdown",
-                versionLabel: "Version 7",
-                state: fileState,
+          : folder
+            ? {
+                type: "folder",
+                value: {
+                  breadcrumbs: [{ id: "", label: "project", isCurrent: true }],
+                  entries: [
+                    {
+                      id: "entry:docs",
+                      kind: "folder",
+                      metadata: "2 items",
+                      name: "docs",
+                    },
+                    {
+                      id: "entry:src",
+                      kind: "folder",
+                      metadata: "8 items",
+                      name: "src",
+                    },
+                    {
+                      id: "entry:readme",
+                      kind: "file",
+                      metadata: "2 KB · Markdown",
+                      name: "README.md",
+                    },
+                  ],
+                  listing: { phase: "ready", message: null },
+                  listingLimit: 3,
+                  selectedEntryId: null,
+                },
+              }
+            : {
+                type: "file",
+                value: {
+                  breadcrumbs: [
+                    { id: "", label: "project", isCurrent: false },
+                    { id: "docs", label: "docs", isCurrent: false },
+                    {
+                      id: "docs/README.md",
+                      label: "README.md",
+                      isCurrent: true,
+                    },
+                  ],
+                  languageLabel: "Markdown",
+                  versionLabel: "Version 7",
+                  state: fileState,
+                },
               },
-            },
       },
     ],
   };
@@ -764,6 +810,9 @@ test("production File exposes a bounded proposed diff and both proposal decision
     "+This file is read through a bounded Reply proposal.",
   );
   await expect(file.getByRole("button", { name: "Approve" })).toBeEnabled();
+  await page.screenshot({
+    path: "output/playwright/task-00022-file-proposed.png",
+  });
   await file.getByRole("button", { name: "Reject" }).focus();
   await page.keyboard.press("Enter");
   await expect(file).toContainText("native capability");
@@ -793,6 +842,9 @@ test("production File conflict keeps or reloads the exact controlled draft", asy
   await expect(file.getByRole("alert")).toContainText(
     "README.md changed after this draft was captured · Version 8",
   );
+  await page.screenshot({
+    path: "output/playwright/task-00022-file-conflict.png",
+  });
   await file.getByRole("button", { name: "Keep draft" }).click();
   await expect(
     file.getByRole("textbox", { name: "Edit README.md" }),
@@ -832,6 +884,9 @@ test("production Folder presents and navigates a nested bounded listing before F
   await expect(
     folder.getByRole("button", { name: "Open folder docs" }),
   ).toContainText("2 items");
+  await page.screenshot({
+    path: "output/playwright/task-00022-folder-inline.png",
+  });
   await folder.getByRole("button", { name: "Open folder docs" }).focus();
   await page.keyboard.press("Enter");
 
@@ -909,6 +964,9 @@ test("production focus moves one real Chat DOM while File draft state remains co
   await expect(
     page.getByRole("button", { name: "Composer mode" }),
   ).toBeDisabled();
+  await page.screenshot({
+    path: "output/playwright/task-00022-file-focused-contextual.png",
+  });
 
   await page.getByRole("button", { name: "Restore Chat" }).click();
   await expect(
@@ -948,5 +1006,53 @@ test("production Folder stays accessible and contained in the responsive focused
   await page.getByRole("button", { name: "Show project panel" }).click();
   await expect(page.getByLabel("Contextual conversation")).toBeVisible();
   await expectNoDocumentOverflow(page);
+  await page.screenshot({
+    path: "output/playwright/task-00022-folder-focused-overlay.png",
+  });
+  expectNoBrowserFailures(failures);
+});
+
+test("production Browser shares the focused/contextual shell and restores Chat", async ({
+  page,
+}) => {
+  const failures = captureBrowserFailures(page);
+  await installNativeArtifactFixture(page, "browser");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/#/chat");
+
+  const browser = page.getByRole("article", {
+    name: "Browser response artifact: C4OS documentation",
+  });
+  await expect(browser).toContainText("https://docs.example.test/c4os");
+  await browser.getByRole("button", { name: "Expand" }).click();
+
+  const focused = page.getByRole("region", {
+    name: "Focused C4OS documentation",
+  });
+  await expect(
+    focused.getByRole("group", {
+      name: "Native Browser viewport: C4OS documentation",
+    }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Contextual conversation")).toBeVisible();
+  await page.screenshot({
+    path: "output/playwright/task-00022-browser-focused-contextual.png",
+  });
+
+  await page.setViewportSize({ width: 700, height: 840 });
+  await expectNoDocumentOverflow(page);
+  await page.screenshot({
+    path: "output/playwright/task-00022-browser-focused-overlay.png",
+  });
+
+  await focused.getByRole("button", { name: "Close" }).click();
+  await expect(
+    page.getByRole("region", { name: "Conversation", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("article", {
+      name: "Browser response artifact: C4OS documentation",
+    }),
+  ).toBeVisible();
   expectNoBrowserFailures(failures);
 });

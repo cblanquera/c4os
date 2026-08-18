@@ -49,7 +49,6 @@ export type ProviderProfileController = {
   readonly models: readonly ProviderModel[];
   readonly operation: ProviderProfileOperation;
   readonly operationError: string | null;
-  readonly recommendedModelId: string | null;
   readonly selectedModelId: string;
   readonly showValidation: boolean;
   readonly changeAuthentication: (
@@ -80,7 +79,6 @@ type UseProviderProfileOptions = {
 export function useProviderProfile({
   initialProvider,
   onComplete,
-  onTestAfterSaveApproval,
   onSnapshot,
   snapshot,
 }: UseProviderProfileOptions): ProviderProfileController {
@@ -104,6 +102,9 @@ export function useProviderProfile({
   const [syncedRecordGeneration, setSyncedRecordGeneration] = useState<
     number | null
   >(initialProvider?.generation ?? null);
+  const [syncedTransientToken, setSyncedTransientToken] = useState<
+    string | null
+  >(null);
   const operationInFlight = useRef(false);
 
   const errors = useMemo(
@@ -113,8 +114,15 @@ export function useProviderProfile({
   const currentProvider = snapshot.providers.find(
     ({ providerId }) => providerId === draft.providerId,
   );
-  const models = currentProvider?.models ?? initialProvider?.models ?? [];
-  const recommendedModel = recommendedProviderModel(models);
+  const transientTest =
+    snapshot.transientTest !== null &&
+    (draft.providerId.length === 0 ||
+      snapshot.transientTest.provider.providerId === draft.providerId)
+      ? snapshot.transientTest
+      : null;
+  const activeProvider =
+    transientTest?.provider ?? currentProvider ?? initialProvider;
+  const models = activeProvider?.models ?? [];
   const selectedModel = models.find(
     ({ modelId }) => modelId === selectedModelId,
   );
@@ -122,18 +130,55 @@ export function useProviderProfile({
   const isFresh =
     lastTestFingerprint !== null && lastTestFingerprint === fingerprint;
   const connection = providerConnectionView(
-    currentProvider ?? initialProvider,
+    activeProvider,
     isFresh,
     operation,
     operationError,
   );
+  const hasFreshSuccessfulTest =
+    transientTest !== null &&
+    isFresh &&
+    activeProvider?.testStatus.state === "succeeded";
   const canContinue =
     operation === "idle" &&
-    connection.state === "success" &&
+    hasFreshSuccessfulTest &&
     selectedModel?.productionReady === true &&
     Object.keys(errors).length === 0 &&
     (draft.authenticationType === "none" ||
-      (currentProvider ?? initialProvider)?.hasCredential === true);
+      activeProvider?.hasCredential === true);
+
+  useEffect(() => {
+    const nextTransient = snapshot.transientTest;
+    if (
+      nextTransient === null ||
+      operation !== "idle" ||
+      nextTransient.testToken === syncedTransientToken
+    ) {
+      return;
+    }
+    let active = true;
+    window.queueMicrotask(() => {
+      if (!active) return;
+      const nextDraft = draftFromProvider(nextTransient.provider);
+      const recommended = recommendedProviderModel(
+        nextTransient.provider.models,
+      );
+      const selected = nextTransient.provider.models.some(
+        (model) =>
+          model.modelId === nextTransient.provider.selectedModelId &&
+          model.productionReady,
+      )
+        ? nextTransient.provider.selectedModelId
+        : (recommended?.modelId ?? "");
+      setDraft(nextDraft);
+      setSelectedModelId(selected ?? "");
+      setLastTestFingerprint(providerTestFingerprint(nextDraft));
+      setSyncedTransientToken(nextTransient.testToken);
+    });
+    return () => {
+      active = false;
+    };
+  }, [operation, snapshot.transientTest, syncedTransientToken]);
 
   useEffect(() => {
     if (
@@ -224,6 +269,7 @@ export function useProviderProfile({
     setOperationError(null);
     setShowValidation(false);
     setSyncedRecordGeneration(initialProvider?.generation ?? null);
+    setSyncedTransientToken(null);
   }, [initialProvider]);
 
   /** Saves the visible draft and clears raw secret state after native success. */
@@ -260,7 +306,7 @@ export function useProviderProfile({
     }
   }
 
-  /** Saves first, then binds test evidence to the exact secret-free draft. */
+  /** Tests the exact renderer draft without creating durable Provider state. */
   async function testConnection(): Promise<void> {
     setShowValidation(true);
     if (Object.keys(errors).length > 0) return;
@@ -269,48 +315,37 @@ export function useProviderProfile({
     setOperation("testing");
     setOperationError(null);
     try {
-      const saved = await saveProviderProfile(
+      const tested = await testProviderConnection(
         providerProfileForSave(draft, snapshot.providers),
       );
-      if (saved.pendingApproval !== null) {
+      if (tested.pendingApproval !== null) {
         setDraft((current) => ({ ...current, secret: "" }));
         setShowValidation(false);
-        onTestAfterSaveApproval?.(saved.pendingApproval.providerId);
-        onSnapshot(saved);
-        return;
-      }
-      const savedProvider = findSavedProvider(saved, draft);
-      const savedDraft = draftFromProvider(savedProvider);
-
-      // The successful native save owns the credential now, so the renderer
-      // immediately replaces its raw input with the opaque credential state.
-      setDraft(savedDraft);
-      setSelectedModelId(savedProvider.selectedModelId ?? "");
-      onSnapshot(saved);
-
-      const tested = await testProviderConnection(savedProvider.providerId);
-      if (tested.pendingApproval !== null) {
+        setLastTestFingerprint(null);
         onSnapshot(tested);
         return;
       }
-      const testedProvider = tested.providers.find(
-        ({ providerId }) => providerId === savedProvider.providerId,
-      );
-      if (!testedProvider) {
-        throw new Error("The tested provider was absent from its snapshot.");
+      if (tested.transientTest === null) {
+        setDraft((current) => ({ ...current, secret: "" }));
+        throw new Error(
+          "The transient Provider test was absent from its snapshot.",
+        );
       }
-      const testedDraft = draftFromProvider(testedProvider);
-      const recommended = recommendedProviderModel(testedProvider.models);
-      const selected = testedProvider.models.some(
+      const testedDraft = draftFromProvider(tested.transientTest.provider);
+      const recommended = recommendedProviderModel(
+        tested.transientTest.provider.models,
+      );
+      const selected = tested.transientTest.provider.models.some(
         (model) =>
-          model.modelId === testedProvider.selectedModelId &&
+          model.modelId === tested.transientTest?.provider.selectedModelId &&
           model.productionReady,
       )
-        ? testedProvider.selectedModelId
+        ? tested.transientTest.provider.selectedModelId
         : (recommended?.modelId ?? "");
       setDraft(testedDraft);
       setSelectedModelId(selected ?? "");
       setLastTestFingerprint(providerTestFingerprint(testedDraft));
+      setSyncedTransientToken(tested.transientTest.testToken);
       onSnapshot(tested);
     } catch (error) {
       setLastTestFingerprint(null);
@@ -321,13 +356,18 @@ export function useProviderProfile({
     }
   }
 
-  /** Persists one explicit production-ready model selection. */
+  /** Keeps transient test selection local; durable edits retain explicit Save. */
   async function selectModel(modelId: string): Promise<void> {
-    const provider = currentProvider ?? initialProvider;
+    const provider = activeProvider;
     const model = provider?.models.find(
       (candidate) => candidate.modelId === modelId,
     );
     if (!provider || !model?.productionReady || operationInFlight.current) {
+      return;
+    }
+    if (transientTest !== null) {
+      setSelectedModelId(modelId);
+      setOperationError(null);
       return;
     }
     operationInFlight.current = true;
@@ -346,23 +386,17 @@ export function useProviderProfile({
     }
   }
 
-  /** Confirms the tested model with frozen OpenCode and Local defaults. */
+  /** Persists the automatically recommended model and fixed launch defaults. */
   async function continueOnboarding(): Promise<boolean> {
-    const provider = currentProvider ?? initialProvider;
-    if (!canContinue || !provider || operationInFlight.current) return false;
+    if (!canContinue || !transientTest || operationInFlight.current) {
+      return false;
+    }
     operationInFlight.current = true;
     setOperation("completing");
     setOperationError(null);
     try {
-      if (provider.selectedModelId !== selectedModelId) {
-        const selectedSnapshot = await selectProviderModel(
-          provider.providerId,
-          selectedModelId,
-        );
-        onSnapshot(selectedSnapshot);
-      }
       const completed = await completeProviderOnboarding(
-        provider.providerId,
+        transientTest.testToken,
         selectedModelId,
       );
       onSnapshot(completed);
@@ -387,7 +421,6 @@ export function useProviderProfile({
     models,
     operation,
     operationError,
-    recommendedModelId: recommendedModel?.modelId ?? null,
     selectedModelId,
     showValidation,
     changeAuthentication,
@@ -421,8 +454,7 @@ function providerConnectionView(
     return {
       state: "submitting",
       title: "Saving provider setup",
-      detail:
-        "C4OS is confirming the selected model, OpenCode, and Local defaults.",
+      detail: "C4OS is saving the provider and its strongest supported model.",
     };
   }
   if (operationError !== null) {

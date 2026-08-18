@@ -782,6 +782,12 @@ impl RuntimeDispatchRegistry {
             .peers
             .get_mut(&request.identity.runtime_id)
             .ok_or(DispatchError::PeerUnavailable)?;
+        // Native session correlation is process-local. Re-establish it after
+        // an application/runtime restart before a durable Chat retry or
+        // follow-up turn. Peer implementations keep this idempotent for an
+        // already-created session and preserve their own route/correlation
+        // validation before dispatch.
+        peer.create_session(request).map_err(DispatchError::Peer)?;
         peer.activate_broker_context(request)
             .map_err(DispatchError::Peer)?;
         if let Err(error) = peer.dispatch(request) {

@@ -78,57 +78,12 @@ function PluginCatalog({ actions, snapshot }: PluginCatalogProps) {
 
   return (
     <div className="extension-settings" data-generation={snapshot.generation}>
-      <section
-        className="extension-catalog"
-        aria-labelledby="plugin-marketplaces-title"
-      >
-        <div className="extension-section-heading">
-          <div>
-            <h2 id="plugin-marketplaces-title">Marketplaces</h2>
-            <p>
-              User-added sources resolve catalog entries to signed packages.
-            </p>
-          </div>
-          <div className="extension-heading-actions">
-            <Button
-              isDisabled={snapshot.catalogStatus === "checking"}
-              onPress={() => void actions.onRefreshCatalog()}
-              variant="secondary"
-            >
-              {snapshot.catalogStatus === "checking"
-                ? "Checking…"
-                : "Refresh catalog"}
-            </Button>
-            <AddMarketplaceDialog onAdd={actions.onAddMarketplace} />
-          </div>
+      <header className="extension-section-heading">
+        <div>
+          <h2>Plugins</h2>
+          <p>Manage installed Plugins and browse configured marketplaces.</p>
         </div>
-
-        <StatusRegion
-          aria-busy={snapshot.catalogStatus === "checking"}
-          className="extension-catalog__status"
-          data-state={snapshot.catalogStatus}
-        >
-          <strong>{stateLabel(snapshot.catalogStatus)}</strong>
-          <span>{snapshot.catalogDetail}</span>
-        </StatusRegion>
-
-        {snapshot.marketplaces.length === 0 ? (
-          <ExtensionEmpty
-            detail="Add a local or Git source to discover signed Plugin packages."
-            title="No marketplaces added"
-          />
-        ) : (
-          <div
-            className="marketplace-list"
-            role="list"
-            aria-label="Configured marketplaces"
-          >
-            {snapshot.marketplaces.map((marketplace) => (
-              <MarketplaceRow key={marketplace.id} marketplace={marketplace} />
-            ))}
-          </div>
-        )}
-      </section>
+      </header>
 
       <Tabs
         label="Plugin catalog sections"
@@ -149,7 +104,59 @@ function PluginCatalog({ actions, snapshot }: PluginCatalogProps) {
             id: "directory",
             label: "Directory",
             content: (
-              <>
+              <div className="extension-directory">
+                <section
+                  className="extension-catalog"
+                  aria-labelledby="plugin-marketplaces-title"
+                >
+                  <div className="extension-section-heading">
+                    <div>
+                      <h3 id="plugin-marketplaces-title">Marketplaces</h3>
+                      <p>Catalog sources available to this directory.</p>
+                    </div>
+                    <div className="extension-heading-actions">
+                      <Button
+                        isDisabled={snapshot.catalogStatus === "checking"}
+                        onPress={() => void actions.onRefreshCatalog()}
+                        variant="secondary"
+                      >
+                        {snapshot.catalogStatus === "checking"
+                          ? "Checking…"
+                          : "Refresh catalog"}
+                      </Button>
+                      <AddMarketplaceDialog onAdd={actions.onAddMarketplace} />
+                    </div>
+                  </div>
+
+                  <StatusRegion
+                    aria-busy={snapshot.catalogStatus === "checking"}
+                    className="extension-catalog__status"
+                    data-state={snapshot.catalogStatus}
+                  >
+                    <strong>{stateLabel(snapshot.catalogStatus)}</strong>
+                    <span>{snapshot.catalogDetail}</span>
+                  </StatusRegion>
+
+                  {snapshot.marketplaces.length === 0 ? (
+                    <ExtensionEmpty
+                      detail="Add a local or Git source to discover Plugin packages."
+                      title="No marketplaces added"
+                    />
+                  ) : (
+                    <div
+                      className="marketplace-list"
+                      role="list"
+                      aria-label="Configured marketplaces"
+                    >
+                      {snapshot.marketplaces.map((marketplace) => (
+                        <MarketplaceRow
+                          key={marketplace.id}
+                          marketplace={marketplace}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
                 <div className="extension-directory-toolbar">
                   <label>
                     <span>Search plugins</span>
@@ -183,7 +190,7 @@ function PluginCatalog({ actions, snapshot }: PluginCatalogProps) {
                   emptyTitle="No matching plugins"
                   plugins={directory}
                 />
-              </>
+              </div>
             ),
           },
         ]}

@@ -21,7 +21,7 @@
 
 .artifact-shell[data-artifact-context="contextual"] {
   width: 100%;
-  max-height: 360px;
+  max-height: min(360px, 52vh);
 }
 
 .artifact-shell__header,
@@ -46,6 +46,10 @@
 }
 
 .artifact-shell__icon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
   color: var(--text-secondary);
 }
 
@@ -137,6 +141,13 @@
   min-width: 112px;
   justify-content: end;
   gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.artifact-shell:hover .artifact-shell__actions,
+.artifact-shell:focus-within .artifact-shell__actions {
+  opacity: 1;
 }
 
 .artifact-shell button:focus-visible {
@@ -147,5 +158,11 @@
 @media (max-height: 640px) {
   .artifact-shell:not([data-artifact-context="focused"]) {
     max-height: 260px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-shell__actions {
+    transition-duration: 0.01ms;
   }
 }

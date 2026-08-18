@@ -394,9 +394,15 @@ test("production Chat renders the normal, preview, model, information, and searc
   await expect(
     page.getByRole("option", { name: /openai\/gpt-5-text/i }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "output/playwright/task-00022-chat-model-browser.png",
+  });
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Chat information" }).click();
   await expect(page.getByRole("dialog")).toContainText("Healthy runtime");
+  await page.screenshot({
+    path: "output/playwright/task-00022-chat-information.png",
+  });
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
   await expectNoDocumentOverflow(page);
@@ -412,7 +418,10 @@ test("production Chat renders the normal, preview, model, information, and searc
     page.getByRole("region", { name: "Conversation", exact: true }),
   ).toBeVisible();
 
-  await page.getByLabel("Search chats").fill("model");
+  const chatSearch = page.getByRole("searchbox", {
+    name: "Search chat sessions",
+  });
+  await chatSearch.fill("model");
   await expect(
     page.getByRole("heading", { name: "Search results", level: 2 }),
   ).toBeVisible();
@@ -421,7 +430,7 @@ test("production Chat renders the normal, preview, model, information, and searc
     path: "tests/results/playwright/task-00007-chat-search.png",
     fullPage: true,
   });
-  await page.getByLabel("Search chats").press("Escape");
+  await chatSearch.press("Escape");
   await expect(
     page.getByRole("heading", { name: "Projects", level: 2 }),
   ).toBeVisible();
@@ -497,6 +506,9 @@ test("production Chat preserves a durable Reply target through autosave and relo
   );
   await page.waitForTimeout(700);
   await expect(reply).toBeVisible();
+  await page.screenshot({
+    path: "output/playwright/task-00022-chat-reply.png",
+  });
 
   await page.reload();
   await expect(

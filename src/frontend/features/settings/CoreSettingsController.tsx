@@ -15,9 +15,9 @@ import {
   type PolicySettingsSnapshot as NativePolicySnapshot,
 } from "../../platform/policy-service";
 import {
+  refreshProviderConnection,
   readProviderSnapshot,
   setProviderModelsEnabled,
-  testProviderConnection,
   type ProviderModel,
   type ProviderRecord,
   type ProviderSettingsSnapshot,
@@ -34,7 +34,6 @@ import {
   type ConfigurationSettingsSnapshot,
   type ConfigurationValues,
 } from "./configuration";
-import { DiagnosticSettingsController } from "./diagnostics";
 import {
   AdvancedPolicySettings,
   type PolicySettingsSnapshot,
@@ -57,7 +56,6 @@ import {
   type RuntimeOptionView,
   type RuntimeSettingsSnapshot,
 } from "./runtime";
-import { UpdateSettingsController } from "./updates";
 
 type CoreSettingsRoute = Extract<
   AppRoutePath,
@@ -250,7 +248,7 @@ function ModelSettingsController() {
 
   async function continueRefresh(providerIds: readonly string[]) {
     for (const [index, providerId] of providerIds.entries()) {
-      const next = await testProviderConnection(providerId);
+      const next = await refreshProviderConnection(providerId);
       setNative(next);
       if (next.pendingApproval !== null) {
         setRefreshQueue(providerIds.slice(index + 1));
@@ -597,20 +595,16 @@ function ConfigurationSettingsController({
   }
 
   return (
-    <>
-      <ConfigurationSettings
-        actions={{
-          onNavigateAdvanced: async () =>
-            onNavigate("/settings/advanced-policies"),
-          onOpenConfigurationFile: openExternal,
-          onRetry: load,
-          onSaveConfiguration: saveValues,
-        }}
-        snapshot={projected}
-      />
-      <UpdateSettingsController />
-      <DiagnosticSettingsController />
-    </>
+    <ConfigurationSettings
+      actions={{
+        onNavigateAdvanced: async () =>
+          onNavigate("/settings/advanced-policies"),
+        onOpenConfigurationFile: openExternal,
+        onRetry: load,
+        onSaveConfiguration: saveValues,
+      }}
+      snapshot={projected}
+    />
   );
 }
 

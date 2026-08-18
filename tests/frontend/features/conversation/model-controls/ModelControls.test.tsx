@@ -8,6 +8,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ApprovalPresetControl,
   ChatInformationPopover,
   ModelSelector,
   ReasoningEffortControl,
@@ -16,6 +17,37 @@ import type {
   ModelControlModel,
   ModelControlProvider,
 } from "../../../../../src/frontend/features/conversation/model-controls/types";
+
+describe("ApprovalPresetControl", () => {
+  it("offers all accepted presets and restores focus after selection", async () => {
+    const onChange = vi.fn();
+    render(<ApprovalPresetControl onChange={onChange} value="ask" />);
+
+    const trigger = screen.getByRole("button", { name: "Approval preset" });
+    expect(trigger).toHaveTextContent("Ask");
+    fireEvent.click(trigger);
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitemradio")
+        .map((option) => option.textContent?.trim()),
+    ).toEqual([
+      "Ask for approval",
+      "Approve safe actions",
+      "Approve for me",
+      "Custom",
+    ]);
+    fireEvent.click(
+      within(menu).getByRole("menuitemradio", {
+        name: "Approve safe actions",
+      }),
+    );
+    expect(onChange).toHaveBeenCalledWith("approve-safe");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(trigger).toHaveFocus();
+  });
+});
 
 const PROVIDERS: readonly ModelControlProvider[] = [
   { id: "openai", name: "OpenAI" },

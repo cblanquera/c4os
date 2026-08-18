@@ -12,11 +12,29 @@ type Request = {
 
 type Args = Readonly<Record<string, unknown>>;
 
+type QaTransientProviderTest = {
+  readonly testToken: string;
+  readonly provider: Record<string, unknown>;
+};
+
+type QaPendingProviderApproval = {
+  readonly promptId: string;
+  readonly operation: "test-connection";
+  readonly providerId: string;
+  readonly providerName: string;
+  readonly expiresAtMs: number;
+};
+
 interface QaProductRouteState {
   providerGeneration: number;
   configurationGeneration: number;
   onboardingCompletedAtMs: number | null;
   provider: Record<string, unknown> | null;
+  transientProviderTest: QaTransientProviderTest | null;
+  pendingProviderApproval: QaPendingProviderApproval | null;
+  pendingProviderTest: QaTransientProviderTest | null;
+  runtimeGeneration: number;
+  runtimeApprovalPending: boolean;
   workspaceGeneration: number;
   conversationGeneration: number;
   activatedWorkspaceId: string | null;
@@ -53,6 +71,11 @@ function initialQaProductRouteState(): QaProductRouteState {
     configurationGeneration: 1,
     onboardingCompletedAtMs: null,
     provider: null,
+    transientProviderTest: null,
+    pendingProviderApproval: null,
+    pendingProviderTest: null,
+    runtimeGeneration: 26,
+    runtimeApprovalPending: true,
     workspaceGeneration: 51,
     conversationGeneration: 51,
     activatedWorkspaceId: "workspace-qa-0001",
@@ -168,6 +191,9 @@ function invokeQaProductRouteWithState(
         fallback: false,
       }),
     );
+  }
+  if (command.startsWith("runtime_")) {
+    return Promise.resolve(runtimeCommand(state, command, args));
   }
   if (command.startsWith("provider_")) {
     return Promise.resolve(providerCommand(state, command, args));
@@ -325,6 +351,8 @@ function providerCommand(
       break;
     case "provider_save_profile": {
       state.providerGeneration += 1;
+      state.pendingProviderApproval = null;
+      state.pendingProviderTest = null;
       const authentication = record(input.authentication);
       const existingProfile =
         state.provider === null ? null : record(state.provider.profile);
@@ -354,9 +382,90 @@ function providerCommand(
         selectedModelId: null,
         generation: state.providerGeneration,
       };
+      state.transientProviderTest = null;
       break;
     }
     case "provider_test_connection": {
+      state.providerGeneration += 1;
+      const authentication = record(input.authentication);
+      const requestedOutcome =
+        input.secret === "qa-renderer-failed-test" ||
+        input.displayName === "QA Failed Provider"
+          ? "failed"
+          : input.secret === "qa-renderer-no-model-test" ||
+              input.displayName === "QA No Models Provider"
+            ? "no-models"
+            : "succeeded";
+      const testStatus =
+        requestedOutcome === "failed"
+          ? {
+              state: "failed",
+              checkedAtMs: 1_784_390_400_000,
+              code: "authentication",
+              message: "The deterministic provider rejected this test.",
+            }
+          : requestedOutcome === "no-models"
+            ? {
+                state: "succeededNoUsableModels",
+                checkedAtMs: 1_784_390_400_000,
+                message: "The provider returned no production-ready models.",
+              }
+            : {
+                state: "succeeded",
+                checkedAtMs: 1_784_390_400_000,
+              };
+      const models =
+        requestedOutcome === "succeeded"
+          ? {
+              "openai/gpt-5-mini": providerMiniModel(),
+              "openai/gpt-5": providerModel(),
+            }
+          : {};
+      const tested: QaTransientProviderTest = {
+        testToken: "provider-test:qa-onboarding",
+        provider: {
+          profile: {
+            schemaVersion: 1,
+            providerId: text(input.providerId),
+            kind: text(input.kind),
+            displayName: text(input.displayName),
+            endpoint: input.endpoint,
+            authentication,
+            credentialReference:
+              authentication.type === "none" ? null : "credential-qa-provider",
+            headers: input.headers,
+            enabled: input.enabled,
+          },
+          testStatus,
+          connectionEvidence: null,
+          models,
+          disabledModelIds: [],
+          selectedModelId:
+            requestedOutcome === "succeeded" ? "openai/gpt-5" : null,
+          generation: state.providerGeneration,
+        },
+      };
+      const requiresExplicitAsk =
+        input.secret === "qa-renderer-explicit-ask" ||
+        input.displayName === "QA Ask Provider";
+      if (requiresExplicitAsk) {
+        state.transientProviderTest = null;
+        state.pendingProviderTest = tested;
+        state.pendingProviderApproval = {
+          promptId: "provider-approval:qa-explicit-ask",
+          operation: "test-connection",
+          providerId: text(input.providerId),
+          providerName: text(input.displayName),
+          expiresAtMs: 1_784_476_800_000,
+        };
+      } else {
+        state.transientProviderTest = tested;
+        state.pendingProviderTest = null;
+        state.pendingProviderApproval = null;
+      }
+      break;
+    }
+    case "provider_refresh_connection": {
       if (state.provider === null)
         throw new Error("QA provider is unavailable");
       state.providerGeneration += 1;
@@ -364,11 +473,15 @@ function providerCommand(
         ...state.provider,
         testStatus: { state: "succeeded", checkedAtMs: 1_784_390_400_000 },
         models: {
+          "openai/gpt-5-mini": providerMiniModel(),
           "openai/gpt-5": providerModel(),
         },
         selectedModelId: "openai/gpt-5",
         generation: state.providerGeneration,
       };
+      state.transientProviderTest = null;
+      state.pendingProviderApproval = null;
+      state.pendingProviderTest = null;
       break;
     }
     case "provider_select_model":
@@ -381,17 +494,26 @@ function providerCommand(
         generation: state.providerGeneration,
       };
       break;
-    case "provider_complete_onboarding":
+    case "provider_complete_onboarding": {
+      if (
+        state.transientProviderTest === null ||
+        text(input.testToken) !== state.transientProviderTest.testToken
+      ) {
+        throw new Error("The QA Provider test token is stale.");
+      }
       state.providerGeneration += 1;
       state.configurationGeneration += 1;
       state.onboardingCompletedAtMs = 1_784_390_400_000;
-      if (state.provider !== null) {
-        state.provider = {
-          ...state.provider,
-          generation: state.providerGeneration,
-        };
-      }
+      state.provider = {
+        ...state.transientProviderTest.provider,
+        selectedModelId: text(input.modelId),
+        generation: state.providerGeneration,
+      };
+      state.transientProviderTest = null;
+      state.pendingProviderApproval = null;
+      state.pendingProviderTest = null;
       break;
+    }
     case "provider_set_models_enabled":
       state.providerGeneration += 1;
       if (state.provider !== null) {
@@ -404,10 +526,34 @@ function providerCommand(
     case "provider_delete_profile":
       state.providerGeneration += 1;
       state.provider = null;
+      state.transientProviderTest = null;
+      state.pendingProviderApproval = null;
+      state.pendingProviderTest = null;
       state.onboardingCompletedAtMs = null;
       break;
-    case "provider_answer_approval":
+    case "provider_answer_approval": {
+      if (
+        state.pendingProviderApproval === null ||
+        text(input.promptId) !== state.pendingProviderApproval.promptId
+      ) {
+        throw new Error("The QA Provider approval identity is stale.");
+      }
+      state.providerGeneration += 1;
+      if (input.answer === "allow" && state.pendingProviderTest !== null) {
+        state.transientProviderTest = {
+          ...state.pendingProviderTest,
+          provider: {
+            ...state.pendingProviderTest.provider,
+            generation: state.providerGeneration,
+          },
+        };
+      } else {
+        state.transientProviderTest = null;
+      }
+      state.pendingProviderApproval = null;
+      state.pendingProviderTest = null;
       break;
+    }
     default:
       throw new Error(`Unsupported QA Provider command: ${command}`);
   }
@@ -438,15 +584,85 @@ function providerSnapshot(state: QaProductRouteState) {
         : `${activeProviderId}::openai/gpt-5`,
     defaultRuntime: state.onboardingCompletedAtMs === null ? null : "opencode",
     defaultEnvironment: state.onboardingCompletedAtMs === null ? null : "local",
-    pendingApproval: null,
+    pendingApproval: state.pendingProviderApproval,
+    transientTest: state.transientProviderTest,
   };
+}
+
+function runtimeCommand(
+  state: QaProductRouteState,
+  command: string,
+  args: Args,
+): unknown {
+  if (command === "runtime_production_answer_approval") {
+    const input = record(args);
+    if (
+      !state.runtimeApprovalPending ||
+      text(input.runtimeId) !== "opencode-primary" ||
+      text(input.correlationId) !== "correlation:runtime-credential-review" ||
+      text(input.promptId) !== "approval:runtime-credential-review"
+    ) {
+      throw new Error("The QA runtime approval identity is stale.");
+    }
+    state.runtimeGeneration += 1;
+    state.runtimeApprovalPending = false;
+    return envelope(args, state.runtimeGeneration, {
+      runtimeId: "opencode-primary",
+      correlationId: "correlation:runtime-credential-review",
+      promptId: "approval:runtime-credential-review",
+    });
+  }
+  if (command !== "runtime_core_snapshot") {
+    throw new Error(`Unsupported QA runtime command: ${command}`);
+  }
+  return envelope(args, state.runtimeGeneration, {
+    authority: "rust-core",
+    providerGeneration: 12,
+    capabilityGeneration: 15,
+    runtimeGeneration: 18,
+    onboardingReady: true,
+    providers: [],
+    modelRoutes: [],
+    runtimes: [
+      {
+        runtimeId: "opencode-primary",
+        runtimeKind: "open-code",
+        nativeVersion: "1.18.3",
+        lifecycle: "ready",
+        health: "healthy",
+        processGeneration: 17,
+      },
+    ],
+    pendingApprovals: state.runtimeApprovalPending
+      ? [
+          {
+            runtimeId: "opencode-primary",
+            correlationId: "correlation:runtime-credential-review",
+            promptId: "approval:runtime-credential-review",
+            approvalKind: "runtime-effect",
+            summary:
+              "OpenCode requests temporary use of the OpenAI credential for this Chat turn. Credential bytes stay inside the declared provider boundary and are never exposed to the renderer or runtime arguments.",
+            serverId: null,
+            providerId: null,
+            modelId: null,
+            maxTokens: null,
+            expiresAtMs: null,
+            messageCount: null,
+            inputBytes: null,
+            hasSystemPrompt: null,
+            parentOperation: null,
+            disclosureScope: null,
+          },
+        ]
+      : [],
+  });
 }
 
 function providerModel() {
   return {
     modelId: "openai/gpt-5",
     displayName: "GPT-5",
-    recommendationRank: 0,
+    recommendationRank: 1,
     availability: "available",
     checkedAtMs: 1_784_390_400_000,
     capabilities: {
@@ -470,6 +686,26 @@ function providerModel() {
       rawCatalogSha256: `sha256:${"1".repeat(64)}`,
       declaredAtMs: 1_784_390_400_000,
       expiresAtMs: 1_784_476_800_000,
+    },
+  };
+}
+
+function providerMiniModel() {
+  const model = providerModel();
+  return {
+    ...model,
+    modelId: "openai/gpt-5-mini",
+    displayName: "GPT-5 mini",
+    recommendationRank: 0,
+    capabilities: {
+      ...model.capabilities,
+      features: {
+        tools: { state: "supported" },
+      },
+    },
+    providerDeclaration: {
+      ...model.providerDeclaration,
+      providerModelId: "openai/gpt-5-mini",
     },
   };
 }

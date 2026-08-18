@@ -1,4 +1,5 @@
 .conversation-model-control__trigger,
+.conversation-approval-control__trigger,
 .conversation-reasoning-control select {
   min-height: 30px;
   border: 1px solid var(--border-control);
@@ -15,6 +16,58 @@
   align-items: center;
   gap: 5px;
   padding-inline: 8px;
+}
+
+.conversation-approval-control__trigger {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 7px;
+}
+
+.conversation-approval-control__popover {
+  width: min(220px, calc(100vw - 24px));
+  padding: 5px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-medium);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-primary);
+}
+
+.conversation-approval-control__popover [role="menu"] {
+  display: grid;
+  gap: 2px;
+  outline: none;
+}
+
+.conversation-approval-control__option {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--control-radius-small);
+}
+
+.conversation-approval-control__option[data-hovered],
+.conversation-approval-control__option[data-focused] {
+  background: var(--selection);
+}
+
+.conversation-approval-control__option[data-focus-visible],
+.conversation-approval-control__trigger[data-focus-visible] {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.conversation-approval-control__note {
+  margin: 5px 7px 3px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.35;
 }
 
 .conversation-model-control__trigger > span {

@@ -22,8 +22,8 @@ use super::authorization::{
     CanonicalAction, GateDecision, LiveAuthorityState,
 };
 use super::policy::{
-    ActionFacts, DecisionContribution, DecisionSource, PolicyConfiguration, PolicyDecision,
-    PolicyResolution, resolve_policy,
+    ActionFacts, DecisionContribution, DecisionSource, DirectIntentContext, PolicyConfiguration,
+    PolicyDecision, PolicyResolution, resolve_direct_intent_policy, resolve_policy,
 };
 
 pub const DEFAULT_AUTHORIZATION_TTL_MS: u64 = 60_000;
@@ -837,6 +837,30 @@ impl ActionGateway {
         action: CanonicalAction,
         now_ms: u64,
     ) -> Result<GatewayProposal, ActionGatewayError> {
+        self.propose_with_resolution(facts, action, now_ms, |facts, policy, now_ms| {
+            resolve_policy(facts, policy, now_ms)
+        })
+    }
+
+    pub fn propose_direct(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        context: DirectIntentContext,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, ActionGatewayError> {
+        self.propose_with_resolution(facts, action, now_ms, |facts, policy, now_ms| {
+            resolve_direct_intent_policy(facts, policy, context, now_ms)
+        })
+    }
+
+    fn propose_with_resolution(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        now_ms: u64,
+        resolver: impl FnOnce(&ActionFacts, &PolicyConfiguration, u64) -> PolicyResolution,
+    ) -> Result<GatewayProposal, ActionGatewayError> {
         validate_fact_binding(facts, &action)?;
         validate_no_inline_credentials(&action.arguments)?;
         let intent_id = format!("{}:intent", action.action_id);
@@ -848,7 +872,7 @@ impl ActionGateway {
             now_ms,
         )?;
 
-        let resolution = resolve_policy(facts, &self.policy, now_ms);
+        let resolution = resolver(facts, &self.policy, now_ms);
         let decision_id = format!("{}:decision", action.action_id);
         self.repository.save_decision(
             &decision_id,

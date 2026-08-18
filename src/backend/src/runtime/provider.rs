@@ -5,6 +5,7 @@
 //! lease and must return normalized, non-secret discovery results.
 
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt,
     io::{self, Write},
@@ -1144,7 +1145,7 @@ where
         let recommended_model_id = models
             .iter()
             .filter(|route| route.is_production_ready())
-            .min_by_key(|route| (route.recommendation_rank, route.model_id.as_str()))
+            .min_by(|left, right| default_model_order(left, right))
             .map(|route| route.model_id.clone());
         Ok(ProviderDiscovery {
             checked_at_ms: self.checked_at_ms,
@@ -1527,7 +1528,6 @@ impl ProviderService {
                 let selected_model_id = choose_recommended(
                     &models,
                     &record.disabled_model_ids,
-                    discovery.recommended_model_id.as_deref(),
                     record.selected_model_id.as_deref(),
                 );
                 record.test_status = if usable_models == 0 {
@@ -1618,12 +1618,119 @@ impl ProviderService {
             .is_some_and(|selected| record.disabled_model_ids.contains(selected))
         {
             record.selected_model_id =
-                choose_recommended(&record.models, &record.disabled_model_ids, None, None);
+                choose_recommended(&record.models, &record.disabled_model_ids, None);
         } else if record.selected_model_id.is_none() {
             record.selected_model_id =
-                choose_recommended(&record.models, &record.disabled_model_ids, None, None);
+                choose_recommended(&record.models, &record.disabled_model_ids, None);
         }
         record.generation = generation;
+        self.generation = generation;
+        Ok(generation)
+    }
+
+    /// Commits one transiently tested provider as the durable onboarding
+    /// result. Every invariant is checked before service state changes, so the
+    /// final profile, rebound connection proof, selected route, and onboarding
+    /// marker become visible under one provider generation.
+    pub fn commit_tested_onboarding(
+        &mut self,
+        final_profile: ProviderProfile,
+        tested_record: ProviderRecord,
+        selected_model_id: &str,
+        expected_generation: u64,
+        expected_tested_generation: u64,
+        completed_at_ms: u64,
+    ) -> Result<u64, ProviderError> {
+        self.expect_generation(expected_generation)?;
+        if expected_tested_generation == 0 || tested_record.generation != expected_tested_generation
+        {
+            return Err(ProviderError::StaleGeneration {
+                expected: expected_tested_generation,
+                current: tested_record.generation,
+            });
+        }
+        final_profile.validate()?;
+        tested_record.profile.validate()?;
+        if !profiles_match_except_credential_reference(&tested_record.profile, &final_profile) {
+            return Err(ProviderError::ConnectionProofMismatch);
+        }
+        if self.providers.values().any(|current| {
+            current.profile.provider_id != final_profile.provider_id
+                && current
+                    .profile
+                    .display_name
+                    .trim()
+                    .eq_ignore_ascii_case(final_profile.display_name.trim())
+        }) {
+            return Err(ProviderError::DuplicateDisplayName);
+        }
+        if !self.providers.contains_key(&final_profile.provider_id)
+            && self.providers.len() >= MAX_PROVIDER_PROFILES
+        {
+            return Err(ProviderError::CapacityExceeded);
+        }
+
+        let tested_at_ms = match tested_record.test_status {
+            ProviderTestStatus::Succeeded { checked_at_ms } => checked_at_ms,
+            _ => return Err(ProviderError::OnboardingNotReady),
+        };
+        if completed_at_ms == 0
+            || tested_at_ms == 0
+            || tested_at_ms > completed_at_ms
+            || completed_at_ms.saturating_sub(tested_at_ms) > PROVIDER_TEST_FRESHNESS_MS
+        {
+            return Err(ProviderError::OnboardingNotReady);
+        }
+        let prior_evidence = tested_record
+            .connection_evidence
+            .as_ref()
+            .ok_or(ProviderError::MissingConnectionProof)?;
+        prior_evidence.validate_for(&tested_record.profile, tested_at_ms)?;
+        let rebound_evidence = ProviderConnectionEvidence::from_tested_profile(
+            &final_profile,
+            tested_at_ms,
+            prior_evidence.response_sha256.clone(),
+        )
+        .map_err(|_| ProviderError::ConnectionProofMismatch)?;
+
+        if tested_record.models.is_empty()
+            || tested_record.models.len() > MAX_MODELS_PER_PROVIDER
+            || !tested_record.disabled_model_ids.is_subset(
+                &tested_record
+                    .models
+                    .keys()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+            )
+            || tested_record.models.iter().any(|(model_id, route)| {
+                model_id != &route.model_id
+                    || route.checked_at_ms != tested_at_ms
+                    || route.provider_declaration.is_none()
+                    || route.validate_for(&final_profile).is_err()
+            })
+        {
+            return Err(ProviderError::InvalidDiscovery);
+        }
+
+        let generation = self.next_generation()?;
+        let candidate = ProviderRecord {
+            profile: final_profile,
+            test_status: ProviderTestStatus::Succeeded {
+                checked_at_ms: tested_at_ms,
+            },
+            connection_evidence: Some(rebound_evidence),
+            models: tested_record.models,
+            disabled_model_ids: tested_record.disabled_model_ids,
+            selected_model_id: Some(selected_model_id.into()),
+            generation,
+        };
+        if !provider_model_ready_at(&candidate, selected_model_id, completed_at_ms) {
+            return Err(ProviderError::ModelUnavailable);
+        }
+
+        self.providers
+            .insert(candidate.profile.provider_id.clone(), candidate);
+        self.onboarding_completed_at_ms = Some(completed_at_ms);
         self.generation = generation;
         Ok(generation)
     }
@@ -1704,16 +1811,26 @@ impl ProviderService {
     }
 }
 
+fn profiles_match_except_credential_reference(
+    tested: &ProviderProfile,
+    final_profile: &ProviderProfile,
+) -> bool {
+    tested.schema_version == final_profile.schema_version
+        && tested.provider_id == final_profile.provider_id
+        && tested.kind == final_profile.kind
+        && tested.display_name == final_profile.display_name
+        && tested.endpoint == final_profile.endpoint
+        && tested.authentication == final_profile.authentication
+        && tested.headers == final_profile.headers
+        && tested.enabled == final_profile.enabled
+}
+
 fn choose_recommended(
     models: &BTreeMap<String, ModelRoute>,
     disabled_model_ids: &BTreeSet<String>,
-    discovered_recommendation: Option<&str>,
     prior_selection: Option<&str>,
 ) -> Option<String> {
-    for candidate in [discovered_recommendation, prior_selection]
-        .into_iter()
-        .flatten()
-    {
+    if let Some(candidate) = prior_selection {
         if models
             .get(candidate)
             .is_some_and(ModelRoute::is_production_ready)
@@ -1727,8 +1844,24 @@ fn choose_recommended(
         .filter(|route| {
             route.is_production_ready() && !disabled_model_ids.contains(&route.model_id)
         })
-        .min_by_key(|route| (route.recommendation_rank, route.model_id.as_str()))
+        .min_by(|left, right| default_model_order(left, right))
         .map(|route| route.model_id.clone())
+}
+
+fn default_model_order(left: &ModelRoute, right: &ModelRoute) -> Ordering {
+    supported_model_feature_count(right)
+        .cmp(&supported_model_feature_count(left))
+        .then_with(|| left.recommendation_rank.cmp(&right.recommendation_rank))
+        .then_with(|| left.model_id.cmp(&right.model_id))
+}
+
+fn supported_model_feature_count(route: &ModelRoute) -> usize {
+    route
+        .capabilities
+        .features
+        .values()
+        .filter(|evidence| evidence.state == CapabilityState::Supported)
+        .count()
 }
 
 fn provider_connection_request(

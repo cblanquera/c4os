@@ -16,7 +16,7 @@ use super::configuration::{
     ConfigurationWatcherNotice, ConfigurationWatcherPlan, EffectiveConfigurationSnapshot,
     LastKnownGoodDocument, MAX_CONFIGURATION_BYTES, ManagedCeilings,
     ParentDirectoryConfigurationWatcher, SecurityConstraints, WatchedConfiguration,
-    compensate_scope_write, recover_missing_scope_file,
+    compensate_scope_write, recover_missing_scope_file, replace_legacy_scope_placeholder,
     resolve_effective_snapshot_from_last_known_good, stable_scope_text, validate_scope_document,
 };
 use super::database::{
@@ -30,9 +30,10 @@ use super::workspace::{
     ProjectReference, ReadOnlyWorkspace, SavedWorkspace, WORKSPACE_SCHEMA_VERSION, WorkspaceError,
     WorkspaceLayout, WorkspaceLockOwner, WorkspaceManifest, WorkspaceResult,
     WorkspaceSemanticValidationTarget, WorkspaceWriterLock, WritableWorkspace, WriterAccess,
-    acquire_workspace_writer_lock, create_untitled_working_copy,
-    persist_canonical_working_manifest, preflight_workspace_archive_source,
-    prepare_open_workspace_archive, prepare_workspace_archive_save,
+    acquire_workspace_writer_lock, commit_rename, commit_sync_directory,
+    create_untitled_working_copy, persist_canonical_working_manifest,
+    preflight_workspace_archive_source, prepare_open_workspace_archive,
+    prepare_workspace_archive_save,
 };
 use uuid::Uuid;
 
@@ -1544,6 +1545,9 @@ pub fn restore_app_configuration(
     security_constraints: SecurityConstraints,
 ) -> Result<ConfigurationService, ConfigurationPersistenceError> {
     let persisted = database.app_configuration_lkg()?;
+    if persisted.is_none() {
+        migrate_legacy_app_configuration_placeholder(home)?;
+    }
     let mut configuration = if let Some(persisted) = persisted {
         ConfigurationService::from_last_known_good(
             [LastKnownGoodDocument {
@@ -1567,6 +1571,25 @@ pub fn restore_app_configuration(
         current_unix_seconds(),
     )?;
     Ok(configuration)
+}
+
+/// Upgrades the exact comment-only file written by pre-schema builds. Other
+/// invalid or externally edited documents remain untouched for explicit user
+/// recovery through the strict configuration surface.
+fn migrate_legacy_app_configuration_placeholder(
+    home: &C4osHomeLayout,
+) -> Result<(), ConfigurationPersistenceError> {
+    let path = home.app_configuration();
+    let Some(bytes) = read_optional_configuration(&path)? else {
+        return Ok(());
+    };
+    if bytes.as_slice() != b"# C4OS configuration\n" {
+        return Ok(());
+    }
+    let canonical_toml = toml::to_string(&super::configuration::ConfigurationDocument::default())
+        .map_err(|_| ConfigurationPersistenceError::InvalidRecovery)?;
+    replace_legacy_scope_placeholder(ConfigurationScope::App, &path, &bytes, &canonical_toml, 0)?;
+    Ok(())
 }
 
 pub fn save_app_configuration(
@@ -2263,6 +2286,9 @@ struct PendingWorkspaceCreation {
     root: PathBuf,
     preserve_empty_root: bool,
     recovery_root: Option<(PathBuf, bool)>,
+    previous_active: Option<PathBuf>,
+    workspace_parent: Option<PathBuf>,
+    recovery_parent: Option<PathBuf>,
     finished: bool,
     lifecycle: Arc<dyn WorkspaceCreationLifecycle>,
 }
@@ -2293,9 +2319,82 @@ impl PendingWorkspaceCreation {
             root: root.to_path_buf(),
             preserve_empty_root,
             recovery_root: None,
+            previous_active: None,
+            workspace_parent: None,
+            recovery_parent: None,
             finished: false,
             lifecycle,
         })
+    }
+
+    fn with_preserved_active(
+        home: &C4osHomeLayout,
+        root: &Path,
+        lifecycle: Arc<dyn WorkspaceCreationLifecycle>,
+    ) -> WorkspaceResult<Self> {
+        let metadata = match fs::symlink_metadata(root) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Self::with_lifecycle(root, lifecycle);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(WorkspaceError::Conflict(
+                "untitled working-copy destination is not a directory".into(),
+            ));
+        }
+        if fs::read_dir(root)?.next().is_none() {
+            return Self::with_lifecycle(root, lifecycle);
+        }
+
+        let workspace_parent = root
+            .parent()
+            .ok_or_else(|| WorkspaceError::Conflict("active Workspace has no parent".into()))?
+            .to_path_buf();
+        let recovery_parent = home.workspace_recovery_root();
+        let previous_active = recovery_parent.join(format!("preserved-active-{}", Uuid::new_v4()));
+        commit_rename(root, &previous_active)?;
+        if let Err(error) = commit_sync_directory(&recovery_parent)
+            .and_then(|_| commit_sync_directory(&workspace_parent))
+        {
+            return match Self::restore_previous_active(
+                root,
+                &previous_active,
+                &workspace_parent,
+                &recovery_parent,
+            ) {
+                Ok(()) => Err(error.into()),
+                Err(rollback_error) => Err(WorkspaceError::CommitRecovery {
+                    operation: "prepare create Workspace",
+                    recovery_path: previous_active,
+                    message: rollback_error.to_string(),
+                }),
+            };
+        }
+
+        let mut pending = match Self::with_lifecycle(root, lifecycle) {
+            Ok(pending) => pending,
+            Err(error) => {
+                return match Self::restore_previous_active(
+                    root,
+                    &previous_active,
+                    &workspace_parent,
+                    &recovery_parent,
+                ) {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(WorkspaceError::CommitRecovery {
+                        operation: "prepare create Workspace",
+                        recovery_path: previous_active,
+                        message: rollback_error.to_string(),
+                    }),
+                };
+            }
+        };
+        pending.previous_active = Some(previous_active);
+        pending.workspace_parent = Some(workspace_parent);
+        pending.recovery_parent = Some(recovery_parent);
+        Ok(pending)
     }
 
     fn before_configuration_coordinator_start(&self) -> WorkspaceResult<()> {
@@ -2336,7 +2435,33 @@ impl PendingWorkspaceCreation {
                 Self::cleanup_root(root, *preserve)
             });
         let active_result = Self::cleanup_root(&self.root, self.preserve_empty_root);
-        recovery_result.and(active_result)
+        let restore_result = match (
+            self.previous_active.as_ref(),
+            self.workspace_parent.as_ref(),
+            self.recovery_parent.as_ref(),
+        ) {
+            (Some(previous), Some(workspace_parent), Some(recovery_parent)) => {
+                Self::restore_previous_active(
+                    &self.root,
+                    previous,
+                    workspace_parent,
+                    recovery_parent,
+                )
+            }
+            _ => Ok(()),
+        };
+        recovery_result.and(active_result).and(restore_result)
+    }
+
+    fn restore_previous_active(
+        root: &Path,
+        previous_active: &Path,
+        workspace_parent: &Path,
+        recovery_parent: &Path,
+    ) -> io::Result<()> {
+        commit_rename(previous_active, root)?;
+        commit_sync_directory(recovery_parent)?;
+        commit_sync_directory(workspace_parent)
     }
 
     fn commit(mut self) {
@@ -2432,7 +2557,8 @@ pub fn create_workspace_from_project_with_lifecycle(
         }
     };
     let working_root = home.active_workspace();
-    let mut pending_creation = PendingWorkspaceCreation::with_lifecycle(&working_root, lifecycle)?;
+    let mut pending_creation =
+        PendingWorkspaceCreation::with_preserved_active(home, &working_root, lifecycle)?;
     let prepared = (|| {
         let manifest = create_untitled_working_copy(
             &writer_lock,
@@ -2707,6 +2833,52 @@ pub fn restore_active_workspace(
         // reconstructed from the active working copy.
         trusted_projects: BTreeSet::new(),
     }))
+}
+
+/// Restores an unsaved active working copy only when a fresh native picker
+/// grant names its exact Project folder. A different Project returns the
+/// caller to the create path, which preserves the prior working copy before
+/// switching. Startup restoration deliberately drops Project trust; this
+/// explicit user action re-establishes trust for the matched Project without
+/// treating persisted paths as authority.
+pub fn restore_active_workspace_for_project(
+    home: &C4osHomeLayout,
+    project_folder: &Path,
+    current_app_version: &str,
+    limits: ArchiveLimits,
+    lock_owner: WorkspaceLockOwner,
+) -> WorkspaceResult<Option<ActiveWorkspace>> {
+    if !project_folder.is_dir() {
+        return Err(WorkspaceError::InvalidProject(
+            "Project folder is unavailable".into(),
+        ));
+    }
+    let Some(mut workspace) =
+        restore_active_workspace(home, true, current_app_version, limits, lock_owner)?
+    else {
+        return Ok(None);
+    };
+    let selected = fs::canonicalize(project_folder)?;
+    let (snapshot, _) = workspace
+        .database
+        .complete_workspace_snapshot(false)
+        .map_err(database_conflict)?;
+    let matching = snapshot
+        .projects
+        .iter()
+        .filter(|project| project.lifecycle_state == LifecycleState::Active)
+        .filter_map(|project| {
+            let current = fs::canonicalize(&project.current_path).ok()?;
+            (current == selected).then_some(project.project_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    let [project_id] = matching.as_slice() else {
+        return Ok(None);
+    };
+    let project_id = Uuid::parse_str(project_id)
+        .map_err(|_| WorkspaceError::Conflict("active Project identity is invalid".into()))?;
+    workspace.resolve_project_trust(project_id, true)?;
+    Ok(Some(workspace))
 }
 
 /// Production archive-open path. Structural Zip checks are followed by
@@ -3252,6 +3424,72 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn restore_app_configuration_migrates_the_legacy_comment_only_placeholder() {
+        let temp = TempDir::new().expect("temporary legacy configuration root");
+        let home = C4osHomeLayout::new(temp.path());
+        fs::write(home.app_configuration(), "# C4OS configuration\n").expect("legacy placeholder");
+        let (database, _) =
+            DatabaseActor::start(DatabaseDescriptor::app(temp.path())).expect("app database");
+
+        let configuration = restore_app_configuration(
+            &database,
+            &home,
+            ManagedCeilings::default(),
+            SecurityConstraints::default(),
+        )
+        .expect("legacy placeholder migration");
+
+        let record = configuration
+            .last_known_good(ConfigurationScope::App)
+            .expect("migrated app configuration");
+        assert!(record.canonical_toml.starts_with("schema_version = 1\n"));
+        assert_eq!(
+            fs::read_to_string(home.app_configuration()).expect("migrated file"),
+            record.canonical_toml
+        );
+        assert!(
+            database
+                .app_configuration_lkg()
+                .expect("persisted app configuration")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn restore_app_configuration_does_not_replace_a_similar_external_document() {
+        let temp = TempDir::new().expect("temporary external configuration root");
+        let home = C4osHomeLayout::new(temp.path());
+        let external = "  # C4OS configuration\n";
+        fs::write(home.app_configuration(), external).expect("external configuration");
+        let (database, _) =
+            DatabaseActor::start(DatabaseDescriptor::app(temp.path())).expect("app database");
+
+        let configuration = restore_app_configuration(
+            &database,
+            &home,
+            ManagedCeilings::default(),
+            SecurityConstraints::default(),
+        )
+        .expect("rejected external configuration remains recoverable");
+
+        assert!(
+            configuration
+                .last_known_good(ConfigurationScope::App)
+                .is_none()
+        );
+        assert_eq!(
+            fs::read_to_string(home.app_configuration()).expect("preserved external file"),
+            external
+        );
+        assert!(
+            database
+                .app_configuration_lkg()
+                .expect("no persisted replacement")
+                .is_none()
+        );
+    }
 
     #[test]
     fn stale_refresh_success_cannot_clear_a_newer_failed_epoch() {

@@ -318,7 +318,8 @@ export function readRuntimeReviewSnapshot(): Promise<RuntimeCoreSnapshot> {
                 correlationId: "correlation-approval-review",
                 promptId: "approval:runtime-review",
                 approvalKind: "runtime-effect",
-                summary: "Approval required by opencode-primary.",
+                summary:
+                  "OpenCode requests temporary use of the OpenAI credential for this Chat turn. Credential bytes stay inside the declared provider boundary and are never exposed to the renderer or runtime arguments.",
                 serverId: null,
                 providerId: null,
                 modelId: null,

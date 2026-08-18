@@ -12,9 +12,9 @@ use c4os_lib::runtime::supervisor::sha256_file;
 use c4os_lib::security::credentials::CredentialVault;
 
 const EXPECTED_NATIVE_SHA256: &str =
-    "sha256:4d8e086228e3b8effe720284b5ed5c4e1f0a98dd9e677bb16e5074eb415f27b1";
+    "sha256:99d5d922f715ea0df9605f72849c68c0404d48b43ff319cef4cf943a0ee650e8";
 const EXPECTED_NATIVE_TREE_SHA256: &str =
-    "sha256:aa6356261a3511f7c5b082bca5952f3206002b9c11639b904750b25b8c786df7";
+    "sha256:b743779f98c84d624462c6c789b4a8188b8b68355c7ee7dba32085027374c4ea";
 const EXPECTED_SDK_TREE_SHA256: &str =
     "sha256:747f554f7f533c29c61d4da3034478a46869c70f10053209d5b82464b36a96e8";
 
@@ -33,7 +33,7 @@ fn project_owned_exact_assets_resolve_without_proof_dependencies() {
 
     assert_eq!(assets.resource_root(), root.canonicalize().unwrap());
     assert_eq!(assets.native_executable_sha256(), EXPECTED_NATIVE_SHA256);
-    assert_eq!(assets.native_build_flavor(), "c4os-auth-fd.1");
+    assert_eq!(assets.native_build_flavor(), "c4os-auth-fd-terminal-stop.2");
     assert_eq!(assets.native_tree_sha256(), EXPECTED_NATIVE_TREE_SHA256);
     assert_eq!(
         assets.sdk_dependency_tree_sha256(),

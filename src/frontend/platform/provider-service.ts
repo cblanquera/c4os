@@ -60,7 +60,11 @@ export type ProviderCredentialProtection = "installation-key" | "session-only";
 
 export type ProviderPendingApproval = {
   readonly promptId: string;
-  readonly operation: "save-profile" | "test-connection" | "delete-profile";
+  readonly operation:
+    | "save-profile"
+    | "test-connection"
+    | "complete-onboarding"
+    | "delete-profile";
   readonly providerId: string;
   readonly providerName: string;
   readonly expiresAtMs: number;
@@ -108,6 +112,10 @@ export type ProviderSettingsSnapshot = {
   readonly defaultRuntime: string | null;
   readonly defaultEnvironment: string | null;
   readonly pendingApproval: ProviderPendingApproval | null;
+  readonly transientTest: {
+    readonly testToken: string;
+    readonly provider: ProviderRecord;
+  } | null;
 };
 
 export type ProviderProfileDraft = {
@@ -124,8 +132,10 @@ export type ProviderProfileDraft = {
 export type ProviderCommand =
   | "provider_snapshot"
   | "provider_accept_session_credentials"
+  | "provider_retry_secure_storage"
   | "provider_save_profile"
   | "provider_test_connection"
+  | "provider_refresh_connection"
   | "provider_answer_approval"
   | "provider_select_model"
   | "provider_set_models_enabled"
@@ -142,8 +152,12 @@ export interface ProviderTransport {
 export interface ProviderAdapter {
   readSnapshot(): Promise<ProviderSettingsSnapshot>;
   acceptSessionCredentials(): Promise<ProviderSettingsSnapshot>;
+  retrySecureStorage(): Promise<ProviderSettingsSnapshot>;
   saveProfile(draft: ProviderProfileDraft): Promise<ProviderSettingsSnapshot>;
-  testConnection(providerId: string): Promise<ProviderSettingsSnapshot>;
+  testConnection(
+    draft: ProviderProfileDraft,
+  ): Promise<ProviderSettingsSnapshot>;
+  refreshConnection(providerId: string): Promise<ProviderSettingsSnapshot>;
   answerApproval(
     promptId: string,
     answer: "allow" | "deny",
@@ -158,7 +172,7 @@ export interface ProviderAdapter {
     enabled: boolean,
   ): Promise<ProviderSettingsSnapshot>;
   completeOnboarding(
-    providerId: string,
+    testToken: string,
     modelId: string,
   ): Promise<ProviderSettingsSnapshot>;
   deleteProfile(providerId: string): Promise<ProviderSettingsSnapshot>;
@@ -173,10 +187,14 @@ const nativeAdapter = createProviderAdapter({
 export const readProviderSnapshot = () => nativeAdapter.readSnapshot();
 export const acceptProviderSessionCredentials = () =>
   nativeAdapter.acceptSessionCredentials();
+export const retryProviderSecureStorage = () =>
+  nativeAdapter.retrySecureStorage();
 export const saveProviderProfile = (draft: ProviderProfileDraft) =>
   nativeAdapter.saveProfile(draft);
-export const testProviderConnection = (providerId: string) =>
-  nativeAdapter.testConnection(providerId);
+export const testProviderConnection = (draft: ProviderProfileDraft) =>
+  nativeAdapter.testConnection(draft);
+export const refreshProviderConnection = (providerId: string) =>
+  nativeAdapter.refreshConnection(providerId);
 export const answerProviderApproval = (
   promptId: string,
   answer: "allow" | "deny",
@@ -189,9 +207,9 @@ export const setProviderModelsEnabled = (
   enabled: boolean,
 ) => nativeAdapter.setModelsEnabled(providerId, modelIds, enabled);
 export const completeProviderOnboarding = (
-  providerId: string,
+  testToken: string,
   modelId: string,
-) => nativeAdapter.completeOnboarding(providerId, modelId);
+) => nativeAdapter.completeOnboarding(testToken, modelId);
 export const deleteProviderProfile = (providerId: string) =>
   nativeAdapter.deleteProfile(providerId);
 
@@ -214,7 +232,7 @@ export function createProviderAdapter(
   const invoke = async (
     command: ProviderCommand,
     input?: Readonly<Record<string, unknown>>,
-    retryStaleSave = true,
+    retryStalePreEffectOperation = true,
   ): Promise<ProviderSettingsSnapshot> => {
     const request: SnapshotRequest = {
       protocolVersion: PROTOCOL_VERSION,
@@ -237,12 +255,16 @@ export function createProviderAdapter(
       ) {
         // Runtime composition can legitimately advance the coordinator after
         // a Provider surface reads its snapshot. Refresh the private CAS
-        // cursors, and retry only the cleanup-safe pre-effect profile save
-        // once. Other operations retain an explicit user retry so a network
-        // effect is never replayed implicitly.
+        // cursors, and retry only operations whose stale-generation rejection
+        // happens before any durable or network effect. Other operations keep
+        // an explicit user retry so an effect is never replayed implicitly.
         try {
           await invoke("provider_snapshot", undefined, false);
-          if (command === "provider_save_profile" && retryStaleSave) {
+          if (
+            retryStalePreEffectOperation &&
+            (command === "provider_save_profile" ||
+              command === "provider_test_connection")
+          ) {
             return invoke(
               command,
               {
@@ -293,6 +315,7 @@ export function createProviderAdapter(
     readSnapshot: () => invoke("provider_snapshot"),
     acceptSessionCredentials: () =>
       invoke("provider_accept_session_credentials"),
+    retrySecureStorage: () => invoke("provider_retry_secure_storage"),
     saveProfile(draft) {
       return invoke("provider_save_profile", {
         expectedCoordinatorGeneration: coordinatorGeneration,
@@ -311,8 +334,25 @@ export function createProviderAdapter(
         enabled: draft.enabled,
       });
     },
-    testConnection: (providerId) =>
-      invoke("provider_test_connection", identity(providerId)),
+    testConnection: (draft) =>
+      invoke("provider_test_connection", {
+        expectedCoordinatorGeneration: coordinatorGeneration,
+        expectedProviderGeneration: generation,
+        providerId: asIdentifier(draft.providerId, "provider ID"),
+        kind: asEnum(
+          draft.kind,
+          ["open-ai", "open-router", "hugging-face", "custom"] as const,
+          "provider kind",
+        ),
+        displayName: asText(draft.displayName, "display name", 256),
+        endpoint: validateEndpoint(draft.endpoint),
+        authentication: validateAuthentication(draft.authentication),
+        headers: validateHeaders(draft.headers),
+        secret: draft.secret,
+        enabled: draft.enabled,
+      }),
+    refreshConnection: (providerId) =>
+      invoke("provider_refresh_connection", identity(providerId)),
     answerApproval: (promptId, answer) =>
       invoke("provider_answer_approval", {
         promptId: asIdentifier(promptId, "Provider approval ID"),
@@ -329,10 +369,12 @@ export function createProviderAdapter(
         modelIds: modelIds.map(asModelIdentifier),
         enabled,
       }),
-    completeOnboarding: (providerId, modelId) =>
+    completeOnboarding: (testToken, modelId) =>
       invoke("provider_complete_onboarding", {
-        ...identity(providerId),
+        expectedCoordinatorGeneration: coordinatorGeneration,
+        expectedProviderGeneration: generation,
         expectedConfigurationGeneration: configurationGeneration,
+        testToken: asIdentifier(testToken, "Provider test token"),
         modelId: asModelIdentifier(modelId),
         runtimeId: "opencode",
         environmentId: "local",
@@ -414,6 +456,18 @@ function parseSnapshot(raw: unknown): ProviderSettingsSnapshot {
       128,
     ),
     pendingApproval: parsePendingApproval(value.pendingApproval),
+    transientTest: parseTransientTest(value.transientTest),
+  };
+}
+
+function parseTransientTest(
+  raw: unknown,
+): ProviderSettingsSnapshot["transientTest"] {
+  if (raw === null) return null;
+  const value = asObject(raw, "Provider transient test");
+  return {
+    testToken: asIdentifier(value.testToken, "Provider test token"),
+    provider: parseRecord(value.provider),
   };
 }
 
@@ -424,7 +478,12 @@ function parsePendingApproval(raw: unknown): ProviderPendingApproval | null {
     promptId: asIdentifier(value.promptId, "Provider approval ID"),
     operation: asEnum(
       value.operation,
-      ["save-profile", "test-connection", "delete-profile"] as const,
+      [
+        "save-profile",
+        "test-connection",
+        "complete-onboarding",
+        "delete-profile",
+      ] as const,
       "Provider approval operation",
     ),
     providerId: asIdentifier(value.providerId, "Provider approval provider ID"),

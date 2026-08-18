@@ -86,7 +86,8 @@ describe("ConversationTranscript", () => {
     expect(directSections[0]).toHaveClass("conversation-work");
     expect(assistant).toHaveTextContent("ActivityWorked for 4s");
     expect(assistant).toHaveTextContent("Inspected the selected files.");
-    expect(assistant).toHaveTextContent("C4OSGPT-5");
+    expect(within(assistant).getByRole("img", { name: "C4OS" })).toBeVisible();
+    expect(assistant).toHaveTextContent("GPT-5");
     expect(assistant).toHaveTextContent("OpenCode 1.18.3");
     expect(assistant).toHaveTextContent("Text and tools");
     expect(assistant).not.toHaveTextContent("Work summary");
@@ -273,7 +274,7 @@ describe("ConversationTranscript", () => {
       "aria-expanded",
       "true",
     );
-    expect(response).not.toHaveTextContent("C4OSGPT-5");
+    expect(response).not.toHaveTextContent("GPT-5");
     expect(screen.getByLabelText("Conversation")).toHaveAttribute(
       "data-reduced-motion",
       "true",

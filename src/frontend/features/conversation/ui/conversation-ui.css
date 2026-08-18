@@ -33,14 +33,17 @@
 }
 
 .conversation-navigation__search {
-  display: grid;
-  gap: 5px;
+  position: relative;
+  display: block;
 }
 
-.conversation-navigation__search > label {
+.conversation-navigation__search > .c4-icon {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 10px;
+  inset-inline-start: 9px;
   color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-weight: 680;
+  pointer-events: none;
 }
 
 .conversation-navigation__search-control {
@@ -52,11 +55,16 @@
 .conversation-navigation__search input {
   min-width: 0;
   min-height: 34px;
-  padding-inline: 9px;
+  padding-inline: 30px 9px;
   border: 1px solid var(--border-control);
   border-radius: var(--control-radius-small);
   background: var(--surface-raised);
   color: inherit;
+}
+
+.conversation-navigation__search-control > button {
+  inline-size: 30px;
+  padding: 0;
 }
 
 .conversation-navigation__projects,
@@ -311,7 +319,7 @@
 }
 
 .conversation-turn__bubble {
-  max-width: min(76ch, 88%);
+  max-width: min(88%, var(--shell-reading-maximum));
   padding: 12px 14px;
   border: 1px solid var(--border-separator);
   border-radius: 16px;
@@ -328,11 +336,16 @@
 
 .conversation-turn__attachments {
   display: grid;
-  max-width: min(76ch, 88%);
+  max-width: min(88%, var(--shell-reading-maximum));
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.shell-project-panel__context .conversation-turn__bubble,
+.shell-project-panel__context .conversation-turn__attachments {
+  max-width: min(78%, var(--shell-inline-reading-maximum));
 }
 
 .conversation-turn__attachments li {
@@ -475,6 +488,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.conversation-turn__identity .c4-brand-mark {
+  flex: none;
 }
 
 .conversation-turn__identity button {

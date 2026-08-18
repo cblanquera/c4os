@@ -6,6 +6,9 @@
   max-inline-size: 100%;
   min-inline-size: 0;
   padding: 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-large);
+  background: var(--surface-raised);
   position: relative;
 }
 
@@ -21,7 +24,7 @@
 .conversation-composer__conflict,
 .conversation-composer__direct-input {
   align-items: flex-start;
-  border: 1px solid var(--c4-border, currentColor);
+  border: 1px solid var(--border-control);
   border-radius: 8px;
   display: flex;
   gap: 8px;
@@ -76,14 +79,20 @@
   object-fit: cover;
 }
 
+.conversation-composer__attachment-icon {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
 .conversation-composer__attachment-metadata,
 .conversation-composer__attachment-status {
-  color: var(--c4-text-secondary, currentColor);
+  color: var(--text-secondary);
   font-size: 0.75rem;
 }
 
 .conversation-composer__attachment[data-compatibility="incompatible"] {
-  border-color: var(--c4-danger, currentColor);
+  border-color: var(--danger);
 }
 
 .conversation-composer__conflict {
@@ -145,7 +154,7 @@
 }
 
 .conversation-composer__source-preview {
-  color: var(--c4-text, CanvasText);
+  color: var(--text-primary);
   max-block-size: 30vh;
   min-block-size: 48px;
   overflow: hidden;
@@ -154,13 +163,13 @@
 }
 
 .conversation-composer__source-editor > textarea {
-  caret-color: var(--c4-text, CanvasText);
+  caret-color: var(--text-primary);
   color: transparent;
   position: relative;
 }
 
 .conversation-composer__source-editor > textarea::placeholder {
-  color: var(--c4-text-secondary, GrayText);
+  color: var(--text-secondary);
 }
 
 .conversation-composer__source-line {
@@ -169,13 +178,13 @@
 
 .conversation-composer__source-line.is-heading,
 .conversation-composer__source-token.is-emphasis {
-  color: var(--c4-accent, Highlight);
+  color: var(--accent);
   font-weight: 600;
 }
 
 .conversation-composer__source-line.is-quote,
 .conversation-composer__source-line.is-list {
-  color: var(--c4-text-secondary, GrayText);
+  color: var(--text-secondary);
 }
 
 .conversation-composer__source-token.is-code {
@@ -185,7 +194,7 @@
 }
 
 .conversation-composer__source-token.is-link {
-  color: var(--c4-link, LinkText);
+  color: var(--text-link);
   text-decoration: underline;
   text-decoration-thickness: from-font;
 }
@@ -195,7 +204,7 @@
 }
 
 .conversation-composer__prefix {
-  border-inline-end: 1px solid var(--c4-border, currentColor);
+  border-inline-end: 1px solid var(--border-control);
   flex: none;
   padding: 8px;
 }
@@ -214,8 +223,8 @@
 }
 
 .conversation-composer__mode-popover {
-  background: var(--c4-surface-elevated, Canvas);
-  border: 1px solid var(--c4-border, currentColor);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-control);
   border-radius: 8px;
   padding: 4px;
 }
@@ -233,7 +242,7 @@
 }
 
 .conversation-composer__mode-popover [data-focused] {
-  outline: 2px solid var(--c4-focus, Highlight);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 

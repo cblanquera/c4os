@@ -19,9 +19,10 @@ use crate::runtime::capability::{
     CapabilityDescriptor, CapabilityError, DraftRequirements, PreflightOutcome,
     effective_intersection, preflight,
 };
+use crate::runtime::capability_evidence::route_model_id;
 use crate::runtime::provider::{
-    PROVIDER_TEST_FRESHNESS_MS, ProviderError, ProviderProbe, ProviderProfile, ProviderService,
-    ProviderSnapshot, ProviderTestReport, ProviderTestStatus,
+    PROVIDER_TEST_FRESHNESS_MS, ProviderError, ProviderProbe, ProviderProfile, ProviderRecord,
+    ProviderService, ProviderSnapshot, ProviderTestReport, ProviderTestStatus,
 };
 use crate::runtime::session::{
     AttemptIdentity, FirstSubmission, RetryRequest, RunEventRecord, SessionError, SessionRecord,
@@ -38,7 +39,10 @@ use crate::security::gateway::{
     ActionEffectLease, ActionGateway, ActionGatewayError, ApprovalResponse, ExecutionPermit,
     GatewayProposal, GlobalPolicyReplacement, NormalizedActionResult,
 };
-use crate::security::policy::{ActionFacts, PolicyConfiguration, PolicyResolution, resolve_policy};
+use crate::security::policy::{
+    ActionFacts, DirectIntentContext, PolicyConfiguration, PolicyResolution,
+    resolve_direct_intent_policy,
+};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -206,6 +210,26 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
             model_ids,
             enabled,
             expected_provider_generation,
+        )?;
+        self.operation(generation)
+    }
+
+    pub fn commit_tested_provider_onboarding(
+        &mut self,
+        final_profile: ProviderProfile,
+        tested_record: ProviderRecord,
+        selected_model_id: &str,
+        expected_provider_generation: u64,
+        expected_tested_generation: u64,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, CoordinatorError> {
+        let generation = self.providers.commit_tested_onboarding(
+            final_profile,
+            tested_record,
+            selected_model_id,
+            expected_provider_generation,
+            expected_tested_generation,
+            completed_at_ms,
         )?;
         self.operation(generation)
     }
@@ -408,13 +432,7 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         let effective = effective_intersection(layers, now_ms)?;
         if effective.route.provider_id != route.capabilities.route.provider_id
             || effective.route.endpoint_id != route.capabilities.route.endpoint_id
-            || effective.route.provider_model_id.rsplit('/').next()
-                != route
-                    .capabilities
-                    .route
-                    .provider_model_id
-                    .rsplit('/')
-                    .next()
+            || route_model_id(&effective.route) != route_model_id(&route.capabilities.route)
             || effective.route.model_revision != route.capabilities.route.model_revision
         {
             return Err(CoordinatorError::BindingMismatch);
@@ -580,7 +598,25 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         action: CanonicalAction,
         now_ms: u64,
     ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
-        let proposal = self.action_gateway.propose(facts, action, now_ms)?;
+        let proposal = self.action_gateway.propose_direct(
+            facts,
+            action,
+            DirectIntentContext::from_facts(facts),
+            now_ms,
+        )?;
+        self.operation(proposal)
+    }
+
+    pub(crate) fn propose_direct_action_with_context(
+        &mut self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        context: DirectIntentContext,
+        now_ms: u64,
+    ) -> Result<CoordinatorOperation<GatewayProposal>, CoordinatorError> {
+        let proposal = self
+            .action_gateway
+            .propose_direct(facts, action, context, now_ms)?;
         self.operation(proposal)
     }
 
@@ -589,7 +625,21 @@ impl<R: SessionRepository> RuntimeCoordinator<R> {
         facts: &ActionFacts,
         now_ms: u64,
     ) -> PolicyResolution {
-        resolve_policy(facts, self.action_gateway.policy(), now_ms)
+        resolve_direct_intent_policy(
+            facts,
+            self.action_gateway.policy(),
+            DirectIntentContext::from_facts(facts),
+            now_ms,
+        )
+    }
+
+    pub(crate) fn resolve_direct_policy_with_context(
+        &self,
+        facts: &ActionFacts,
+        context: DirectIntentContext,
+        now_ms: u64,
+    ) -> PolicyResolution {
+        resolve_direct_intent_policy(facts, self.action_gateway.policy(), context, now_ms)
     }
 
     pub(crate) fn requeue_interrupted_direct_approval(

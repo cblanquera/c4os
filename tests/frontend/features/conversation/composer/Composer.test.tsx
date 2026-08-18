@@ -314,6 +314,7 @@ describe("Composer", () => {
   });
 
   it("shows only the mode-specific control slots and primary input semantics", () => {
+    const onBrowse = vi.fn();
     const controls = {
       model: <button type="button">Sonnet 4</button>,
       reasoning: <button type="button">Reasoning: High</button>,
@@ -335,7 +336,7 @@ describe("Composer", () => {
 
     rerender(
       <Composer
-        {...requiredProps({ controls, mode: "files" })}
+        {...requiredProps({ controls, mode: "files", onBrowse })}
         value="/project/README.md"
       />,
     );
@@ -344,7 +345,12 @@ describe("Composer", () => {
     ).toBeVisible();
     expect(screen.queryByRole("group", { name: "Model" })).toBeNull();
     expect(screen.getByRole("group", { name: "Git branch" })).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "File or folder path" }),
+    ).toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(onBrowse).toHaveBeenCalledTimes(1);
 
     for (const [mode, name, action] of [
       ["browser", "Web address", "Open"],

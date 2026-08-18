@@ -39,9 +39,11 @@ import {
   type BrowserViewportLifecycleEvent,
 } from "../artifacts";
 import {
+  ApprovalPresetControl,
   ChatInformationPopover,
   ModelSelector,
   ReasoningEffortControl,
+  type ComposerApprovalPreset,
   type ModelCapability,
   type ModelControlModel,
   type ReasoningEffort,
@@ -75,6 +77,11 @@ import {
   updateConversationDraft,
   type ConversationSnapshot,
 } from "../../platform/conversation-service";
+import {
+  readConfigurationSettings,
+  saveConfigurationSettings,
+  type ApprovalPreset as NativeApprovalPreset,
+} from "../../platform/configuration-service";
 import {
   answerArtifactApproval,
   acknowledgeTerminalArtifactOutput,
@@ -197,8 +204,12 @@ import {
   type ShellFocusTarget,
   type ShellRoutePath,
 } from "./ui";
+import { SHELL_PROJECT_PANEL_OVERLAY_BREAKPOINT } from "./ui/shell-geometry";
 import { publishConversationSnapshot } from "./native-bootstrap";
-import { artifactWorkspaceForActiveSession } from "./artifact-session";
+import {
+  activeSessionCanOwnArtifacts,
+  artifactWorkspaceForActiveSession,
+} from "./artifact-session";
 
 interface ShellRouteControllerProps {
   readonly route: ShellRoutePath;
@@ -231,7 +242,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const mcpSettings = useMcpSettings(route);
   const qaEnabled = useAppSelector((state) => state.shellQa.enabled);
   const viewportWidth = useViewportWidth();
-  const overlayPanel = viewportWidth <= 992;
+  const overlayPanel = viewportWidth <= SHELL_PROJECT_PANEL_OVERLAY_BREAKPOINT;
   const navigationState = location.state as ShellNavigationState | null;
   const focusRestoreRequest = navigationState?.focusRestoreRequest ?? null;
   const [searchQuery, setSearchQuery] = useState("");
@@ -243,10 +254,15 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   >([]);
   const [artifactWorkspace, setArtifactWorkspace] =
     useState<ArtifactWorkspaceSnapshot | null>(null);
-  const activeArtifactWorkspace = artifactWorkspaceForActiveSession(
-    artifactWorkspace,
-    sessions.value.activeSessionId,
+  const activeSessionOwnsArtifacts = activeSessionCanOwnArtifacts(
+    sessions.value,
   );
+  const activeArtifactWorkspace = activeSessionOwnsArtifacts
+    ? artifactWorkspaceForActiveSession(
+        artifactWorkspace,
+        sessions.value.activeSessionId,
+      )
+    : null;
   const artifactWorkspaceRef = useRef<ArtifactWorkspaceSnapshot | null>(null);
   const artifactOperationQueue = useRef<Promise<unknown>>(Promise.resolve());
   const artifactDraftTimers = useRef(new Map<string, number>());
@@ -300,7 +316,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   );
   const [requestedModelKey, setSelectedModelKey] = useState("");
   const defaultSelectableModel =
-    selectableModels.find(({ selected }) => selected) ??
+    selectableModels.find(({ selected, available }) => selected && available) ??
     selectableModels.find(({ available }) => available) ??
     selectableModels.at(0);
   const selectedModelKey = selectableModels.some(
@@ -321,6 +337,11 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       : null;
   const [dismissedConflictAttachmentId, setDismissedConflictAttachmentId] =
     useState<string | null>(null);
+  const [requestedApprovalPreset, setRequestedApprovalPreset] =
+    useState<ComposerApprovalPreset | null>(null);
+  const [approvalPresetBusy, setApprovalPresetBusy] = useState(false);
+  const selectedApprovalPreset =
+    requestedApprovalPreset ?? settings.value.approvalPreset;
   const persistedDraftSignature = useRef("");
   const attemptStatuses = useRef(new Map<string, string>());
   const priorActiveAttemptId = useRef(conversation.value.activeAttemptId);
@@ -507,7 +528,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   );
 
   useEffect(() => {
-    if (sessions.value.activeSessionId === null) {
+    if (!activeSessionOwnsArtifacts) {
       artifactWorkspaceRef.current = null;
       dispatch(shellDraftActions.chatRestored());
       return;
@@ -515,6 +536,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     void queueArtifactWorkspaceOperation(readArtifactWorkspaceSnapshot);
   }, [
     dispatch,
+    activeSessionOwnsArtifacts,
     queueArtifactWorkspaceOperation,
     sessions.value.activeSessionId,
     workspace.value.activeProjectId,
@@ -959,6 +981,30 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       await attachPickerGrants(outcome.grants.map(({ grantId }) => grantId));
     } catch (error) {
       setConversationError(messageFor(error));
+    }
+  };
+
+  /** Persists the exact user-selected app preset without changing other settings. */
+  const changeApprovalPreset = async (preset: ComposerApprovalPreset) => {
+    setApprovalPresetBusy(true);
+    setConversationError(null);
+    try {
+      const current = await readConfigurationSettings();
+      const next = await saveConfigurationSettings({
+        browserEnvironment: current.browserEnvironment,
+        defaultApprovalPreset: nativeApprovalPreset(preset),
+        defaultEnvironment: current.defaultEnvironment,
+        defaultRuntime: current.defaultRuntime,
+        inheritShellEnvironment: current.inheritShellEnvironment,
+        restoreLastWorkspace: current.restoreLastWorkspace,
+      });
+      setRequestedApprovalPreset(
+        composerApprovalPreset(next.defaultApprovalPreset),
+      );
+    } catch (error) {
+      setConversationError(messageFor(error));
+    } finally {
+      setApprovalPresetBusy(false);
     }
   };
 
@@ -1441,19 +1487,35 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       ? asShellFocusTarget(settingsReturn.focusTarget)
       : null;
     dispatch(shellDraftActions.settingsVisitEnded());
-    if (focusTarget === null) {
-      void navigate(destination);
+    const navigateBack = () => {
+      if (focusTarget === null) {
+        void navigate(destination);
+        return;
+      }
+      focusRequestSequence += 1;
+      void navigate(destination, {
+        state: {
+          focusRestoreRequest: {
+            requestId: focusRequestSequence,
+            target: focusTarget,
+          },
+        } satisfies ShellNavigationState,
+      });
+    };
+    if (destination === "/start") {
+      navigateBack();
       return;
     }
-    focusRequestSequence += 1;
-    void navigate(destination, {
-      state: {
-        focusRestoreRequest: {
-          requestId: focusRequestSequence,
-          target: focusTarget,
-        },
-      } satisfies ShellNavigationState,
-    });
+    // Provider and model mutations are native-owned while Settings is open.
+    // Rebase the shell projection before restoring the prior workspace route
+    // so a freshly tested provider is immediately selectable in Chat.
+    void readConversationSnapshot()
+      .then((snapshot) => {
+        publishConversation(snapshot);
+        setConversationError(null);
+      })
+      .catch((error: unknown) => setConversationError(messageFor(error)))
+      .finally(navigateBack);
   };
 
   const changePanelOpen = (isOpen: boolean) => {
@@ -2242,8 +2304,10 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
     replyReference === null && composerDraft.mode === "terminal";
   const browserComposerActive =
     replyReference === null && composerDraft.mode === "browser";
+  const filesComposerActive =
+    replyReference === null && composerDraft.mode === "files";
   const canSubmitComposer =
-    terminalComposerActive || browserComposerActive
+    terminalComposerActive || browserComposerActive || filesComposerActive
       ? sessions.value.activeSessionId !== null &&
         conversation.value.activeAttemptId === null
       : canSubmitChat;
@@ -2272,7 +2336,10 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
       compatibility === "needs-audio" ||
       compatibility === "incompatible",
   );
+  const composerUsesChatAttachments =
+    replyReference !== null || composerDraft.mode === "chat";
   const composerConflict =
+    !composerUsesChatAttachments ||
     incompatibleAttachment === undefined ||
     dismissedConflictAttachmentId === incompatibleAttachment.id
       ? undefined
@@ -2280,7 +2347,12 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           attachmentId: incompatibleAttachment.id,
           title: "Attachment needs a compatible model",
           description: `${incompatibleAttachment.fileName} cannot be sent on the selected route as-is.`,
-          actions: ["use-compatible-model", "remove-file", "cancel"] as const,
+          actions: [
+            "use-compatible-model",
+            "convert",
+            "remove-file",
+            "cancel",
+          ] as const,
         };
   const modelControlModels: readonly ModelControlModel[] = selectableModels.map(
     (model) => ({
@@ -2313,8 +2385,6 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
   const contextUsed =
     (latestAssistantTurn?.inputTokens ?? 0) +
     (latestAssistantTurn?.outputTokens ?? 0);
-  const directModeUnavailable =
-    replyReference === null && composerDraft.mode === "files";
   const conversationTranscript = (
     <ConversationTranscript
       onArtifactFocusRequest={(artifactId) =>
@@ -2392,6 +2462,13 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
                   ),
                 }
               : {}),
+            approval: (
+              <ApprovalPresetControl
+                isDisabled={conversationBusy || approvalPresetBusy}
+                onChange={(preset) => void changeApprovalPreset(preset)}
+                value={selectedApprovalPreset}
+              />
+            ),
             ...(workspace.value.projects.find(
               (project) => project.id === workspace.value.activeProjectId,
             )?.gitVersioned
@@ -2435,7 +2512,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
               : {}),
             ...(hasPendingChat
               ? {
-                  approval: (
+                  pending: (
                     <button
                       type="button"
                       onClick={() => void cancelPendingChat()}
@@ -2448,11 +2525,7 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           }}
           isDisabled={conversationBusy}
           isModeLocked={focusedConversationArtifact !== null}
-          isSubmitDisabled={
-            !canSubmitComposer ||
-            directModeUnavailable ||
-            incompatibleAttachment !== undefined
-          }
+          isSubmitDisabled={!canSubmitComposer}
           mode={replyReference ? "reply" : composerDraft.mode}
           onAttach={() => void attachFiles()}
           onBrowse={() => void browseArtifact("file")}
@@ -2488,6 +2561,12 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
               }
               return;
             }
+            if (action === "convert") {
+              setConversationError(
+                "No approved attachment converter is installed for this file. Choose a compatible model or remove the file.",
+              );
+              return;
+            }
             setDismissedConflictAttachmentId(incompatibleAttachment.id);
           }}
           onRemoveAttachment={(attachmentId) => {
@@ -2503,13 +2582,21 @@ export function ShellRouteController({ route }: ShellRouteControllerProps) {
           onRemoveReply={() =>
             dispatch(shellDraftActions.composerReplyChanged(null))
           }
-          onSubmit={(submission) =>
+          onSubmit={(submission) => {
+            if (
+              incompatibleAttachment !== undefined &&
+              !terminalComposerActive &&
+              !browserComposerActive
+            ) {
+              setDismissedConflictAttachmentId(null);
+              return;
+            }
             void (terminalComposerActive
               ? submitTerminalCommand(submission.source)
               : browserComposerActive
                 ? submitBrowserAddress(submission.source)
-                : submitChat(submission.source))
-          }
+                : submitChat(submission.source));
+          }}
           onValueChange={(value) =>
             dispatch(shellDraftActions.composerTextChanged(value))
           }
@@ -3663,6 +3750,30 @@ function modelCapabilities(model: {
   if (model.supportsReasoning) capabilities.push("reasoning");
   if (model.supportsAudio) capabilities.push("audio");
   return capabilities;
+}
+
+/** Maps the compact Composer value to the Configuration service schema. */
+function nativeApprovalPreset(
+  preset: ComposerApprovalPreset,
+): NativeApprovalPreset {
+  return {
+    ask: "ask_for_approval",
+    "approve-safe": "approve_safe_actions",
+    "approve-for-me": "approve_for_me",
+    custom: "custom",
+  }[preset] as NativeApprovalPreset;
+}
+
+/** Maps the authoritative Configuration response back to compact UI state. */
+function composerApprovalPreset(
+  preset: NativeApprovalPreset,
+): ComposerApprovalPreset {
+  return {
+    ask_for_approval: "ask",
+    approve_safe_actions: "approve-safe",
+    approve_for_me: "approve-for-me",
+    custom: "custom",
+  }[preset] as ComposerApprovalPreset;
 }
 
 function mcpCapabilitySummary(provenance: {

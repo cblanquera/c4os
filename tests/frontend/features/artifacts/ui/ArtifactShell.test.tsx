@@ -42,6 +42,10 @@ describe("ArtifactShell", () => {
       container.querySelectorAll("[data-artifact-scroll-region]"),
     ).toHaveLength(1);
     expect(within(artifact).getByText("Document body")).toBeVisible();
+    expect(
+      artifact.querySelector(".artifact-shell__icon .c4-icon"),
+    ).not.toBeNull();
+    expect(artifact).not.toHaveTextContent("◇");
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     fireEvent.click(screen.getByRole("button", { name: "Reply" }));

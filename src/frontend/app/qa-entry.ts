@@ -1,9 +1,10 @@
 export type QaRootEntry =
-  "chat" | "foundation" | "platform" | "policy" | "runtime";
+  "chat" | "foundation" | "onboarding" | "platform" | "policy" | "runtime";
 
 const QA_ROOT_ENTRIES = new Set<QaRootEntry>([
   "chat",
   "foundation",
+  "onboarding",
   "platform",
   "policy",
   "runtime",

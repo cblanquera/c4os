@@ -7,8 +7,9 @@ mod credentials;
 use credentials::{
     CredentialMutationKind, CredentialMutationObserver, CredentialReference, CredentialVault,
     CredentialVaultError, CredentialVaultResult, EntropySource, InstallationKey,
-    InstallationKeyStore, MonotonicClock, ReauthenticationError, ReauthenticationProvider,
-    ReauthenticationPurpose, SecretSurface, VaultProtection,
+    InstallationKeyStore, KEYCHAIN_OPERATION_MAX_ATTEMPTS, KeychainOperation, MonotonicClock,
+    ReauthenticationError, ReauthenticationProvider, ReauthenticationPurpose, SecretSurface,
+    VaultProtection, execute_keychain_operation_with_retry, receive_macos_keychain_result,
 };
 use serde_json::json;
 use std::{
@@ -46,7 +47,10 @@ impl InstallationKeyStore for FakeInstallationKeyStore {
     fn load_or_create(&self) -> CredentialVaultResult<InstallationKey> {
         self.key
             .map(InstallationKey::from_bytes)
-            .ok_or(CredentialVaultError::KeychainUnavailable)
+            .ok_or(CredentialVaultError::KeychainUnavailable {
+                operation: KeychainOperation::ReadExistingInstallationKey,
+                os_status: -25_291,
+            })
     }
 }
 
@@ -321,8 +325,131 @@ fn unavailable_keychain_never_creates_a_plaintext_fallback() {
         Err(error) => error,
     };
 
-    assert!(matches!(error, CredentialVaultError::KeychainUnavailable));
+    assert!(matches!(
+        error,
+        CredentialVaultError::KeychainUnavailable {
+            operation: KeychainOperation::ReadExistingInstallationKey,
+            os_status: -25_291,
+        }
+    ));
     assert!(!path.exists());
+}
+
+#[test]
+fn transient_keychain_status_retries_with_a_fixed_attempt_ceiling() {
+    let mut attempts = 0;
+    let mut waits = 0;
+    let error = execute_keychain_operation_with_retry(
+        KeychainOperation::CreateInstallationKey,
+        || {
+            attempts += 1;
+            Err::<(), _>(-25_308)
+        },
+        || waits += 1,
+    )
+    .expect_err("persistent transient failure must reach the retry ceiling");
+
+    assert_eq!(attempts, KEYCHAIN_OPERATION_MAX_ATTEMPTS);
+    assert_eq!(waits, KEYCHAIN_OPERATION_MAX_ATTEMPTS - 1);
+    assert_eq!(
+        error.to_string(),
+        "the operating-system credential service failed during creating the installation key (OSStatus -25308)"
+    );
+    assert!(matches!(
+        error,
+        CredentialVaultError::KeychainUnavailable {
+            operation: KeychainOperation::CreateInstallationKey,
+            os_status: -25_308,
+        }
+    ));
+}
+
+#[test]
+fn transient_keychain_status_can_recover_before_the_attempt_ceiling() {
+    let mut attempts = 0;
+    let mut waits = 0;
+    let value = execute_keychain_operation_with_retry(
+        KeychainOperation::ReadCreatedInstallationKey,
+        || {
+            attempts += 1;
+            if attempts < KEYCHAIN_OPERATION_MAX_ATTEMPTS {
+                Err(-25_291)
+            } else {
+                Ok("installation-key")
+            }
+        },
+        || waits += 1,
+    )
+    .expect("transient Keychain failure should recover within the bound");
+
+    assert_eq!(value, "installation-key");
+    assert_eq!(attempts, KEYCHAIN_OPERATION_MAX_ATTEMPTS);
+    assert_eq!(waits, KEYCHAIN_OPERATION_MAX_ATTEMPTS - 1);
+}
+
+#[test]
+fn item_not_found_and_invalid_data_statuses_are_not_retried() {
+    for os_status in [-25_300, -26_275] {
+        let mut attempts = 0;
+        let mut waits = 0;
+        let error = execute_keychain_operation_with_retry(
+            KeychainOperation::ReadExistingInstallationKey,
+            || {
+                attempts += 1;
+                Err::<(), _>(os_status)
+            },
+            || waits += 1,
+        )
+        .expect_err("non-transient status must fail immediately");
+
+        assert_eq!(attempts, 1);
+        assert_eq!(waits, 0);
+        assert!(matches!(
+            error,
+            CredentialVaultError::KeychainUnavailable {
+                operation: KeychainOperation::ReadExistingInstallationKey,
+                os_status: returned_status,
+            } if returned_status == os_status
+        ));
+    }
+}
+
+#[test]
+fn macos_keychain_receive_timeout_is_a_distinct_recoverable_failure() {
+    let (_sender, receiver) = std::sync::mpsc::sync_channel::<Result<Vec<u8>, i32>>(1);
+    let error = receive_macos_keychain_result(
+        receiver,
+        KeychainOperation::ReadExistingInstallationKey,
+        Duration::ZERO,
+    )
+    .expect_err("an unresponsive Keychain read must reach the bounded timeout");
+
+    assert!(matches!(
+        error,
+        CredentialVaultError::KeychainTimedOut {
+            operation: KeychainOperation::ReadExistingInstallationKey,
+        }
+    ));
+}
+
+#[test]
+fn invalid_installation_key_bytes_are_not_retried() {
+    let mut attempts = 0;
+    let bytes = execute_keychain_operation_with_retry(
+        KeychainOperation::ReadExistingInstallationKey,
+        || {
+            attempts += 1;
+            Ok(vec![0_u8; 31])
+        },
+        || panic!("a successful Keychain read must not schedule a retry"),
+    )
+    .expect("the Keychain operation itself succeeded");
+
+    assert!(matches!(
+        InstallationKey::from_slice(&bytes),
+        Err(CredentialVaultError::InvalidInstallationKey)
+    ));
+    assert_eq!(attempts, 1);
 }
 
 #[test]
@@ -647,6 +774,17 @@ fn live_macos_keychain_round_trip_is_opt_in() {
         .store("provider.api_key", PRIMARY_SECRET)
         .expect("store encrypted credential");
     assert!(credential_reference.as_str().starts_with("credential:"));
+    drop(vault);
+
+    let reopened =
+        CredentialVault::open_or_create_with_installation_key(vault_path(&directory), &store)
+            .expect("reopen Keychain-backed vault");
+    assert!(
+        reopened
+            .contains(&credential_reference)
+            .expect("read reopened credential index"),
+        "the same Keychain installation key must decrypt the vault after reopen",
+    );
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

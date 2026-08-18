@@ -1,3 +1,4 @@
+import { Icon } from "../../../components/accessible";
 import type { ComposerAttachment } from "./composer-types";
 
 interface ComposerAttachmentsProps {
@@ -49,7 +50,7 @@ export function ComposerAttachments({
                 aria-hidden="true"
                 className="conversation-composer__attachment-icon"
               >
-                ◇
+                <Icon name="file" size={17} />
               </span>
             )}
             <span className="conversation-composer__attachment-copy">

@@ -551,7 +551,15 @@
   }
 
   .advanced-policy-groups {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .advanced-policy-groups button {
+    width: auto;
+    flex: 0 0 min(180px, 72vw);
   }
 }
 
@@ -589,10 +597,6 @@
 
   .advanced-policy-guardrail dl div {
     justify-items: start;
-  }
-
-  .advanced-policy-groups {
-    grid-template-columns: 1fr;
   }
 
   .advanced-policy-row,

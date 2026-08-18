@@ -18,8 +18,8 @@
   display: grid;
   grid-template-columns: minmax(72px, 1fr) auto minmax(72px, 1fr);
   align-items: center;
-  block-size: 58px;
-  min-block-size: 58px;
+  block-size: var(--shell-header-height);
+  min-block-size: var(--shell-header-height);
   padding-inline: 16px;
   border-block-end: 1px solid var(--border-separator);
   background: var(--surface-raised);
@@ -85,9 +85,9 @@
   position: relative;
   display: grid;
   grid-template-columns:
-    var(--shell-project-panel-width, 228px) 7px
-    minmax(420px, 1fr);
-  height: calc(100dvh - 58px);
+    var(--shell-project-panel-width, var(--shell-project-panel-initial)) 7px
+    minmax(var(--shell-center-minimum), 1fr);
+  height: calc(100dvh - var(--shell-header-height));
   min-height: 0;
 }
 
@@ -102,7 +102,9 @@
 }
 
 .shell-project-panel[data-contextual-chat="true"] {
-  grid-template-rows: minmax(0, 1fr) minmax(180px, 40vh);
+  grid-template-rows:
+    minmax(0, 1fr) 7px
+    var(--shell-contextual-chat-height, 40vh);
 }
 
 .shell-project-panel[aria-hidden="true"] {
@@ -115,6 +117,18 @@
   min-height: 0;
   overflow: auto;
   padding: 14px;
+}
+
+.shell-project-panel__context-resizer {
+  z-index: 1;
+  height: 7px;
+  cursor: row-resize;
+  background: var(--surface-sidebar);
+}
+
+.shell-project-panel__context-resizer:hover,
+.shell-project-panel__context-resizer:focus-visible {
+  background: var(--selection);
 }
 
 .shell-project-panel__context {
@@ -196,7 +210,7 @@
 }
 
 .shell-workspace[data-panel-open="false"] .shell-workspace__body {
-  grid-template-columns: 0 0 minmax(420px, 1fr);
+  grid-template-columns: 0 0 minmax(var(--shell-center-minimum), 1fr);
 }
 
 .shell-workspace__center {
@@ -215,7 +229,7 @@
 }
 
 .shell-route-surface {
-  width: min(100%, 960px);
+  width: min(100%, var(--shell-settings-content));
   min-height: 100%;
   margin-inline: auto;
   padding: clamp(24px, 5vw, 56px);
@@ -230,8 +244,9 @@
 
 .shell-route-surface__header h1 {
   margin: 0;
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  letter-spacing: -0.045em;
+  font-size: clamp(1.42rem, 3vw, 1.56rem);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
 
 .shell-route-surface__header p {
@@ -249,17 +264,28 @@
   background: var(--surface-sunken);
 }
 
-.shell-composer {
-  position: sticky;
-  inset-block-end: 0;
+.shell-composer-dock {
   z-index: 2;
   display: grid;
-  grid-template-columns: auto minmax(0, 760px);
-  justify-content: center;
-  gap: 10px;
+  min-width: 0;
+  justify-items: center;
   padding: 12px clamp(14px, 3vw, 28px) 16px;
   border-block-start: 1px solid var(--border-separator);
   background: var(--surface-window);
+}
+
+.shell-composer-dock > * {
+  width: min(100%, var(--shell-composer-maximum));
+}
+
+.shell-composer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius-large);
+  background: var(--surface-raised);
 }
 
 .shell-composer__mode {
@@ -333,7 +359,7 @@
 
 .shell-launch {
   display: grid;
-  grid-template-rows: 58px minmax(0, 1fr);
+  grid-template-rows: var(--shell-header-height) minmax(0, 1fr);
 }
 
 .shell-launch__main {
@@ -343,7 +369,7 @@
 }
 
 .shell-launch .shell-route-surface {
-  width: min(100%, 760px);
+  width: min(100%, var(--shell-composer-maximum));
   min-height: auto;
   padding: clamp(24px, 7vw, 72px);
   border: 1px solid var(--border-separator);
@@ -353,14 +379,14 @@
 }
 
 .shell-settings {
-  display: grid;
-  grid-template-rows: 58px minmax(0, 1fr);
+  display: block;
 }
 
 .shell-settings__body {
   display: grid;
+  height: 100dvh;
   min-height: 0;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: var(--shell-settings-navigation) minmax(0, 1fr);
 }
 
 .shell-settings__navigation {
@@ -380,9 +406,18 @@
 .shell-settings__navigation ul {
   display: grid;
   gap: 3px;
-  margin: 18px 0 0;
+  margin: 9px 0 0;
   padding: 0;
   list-style: none;
+}
+
+.shell-settings__navigation-label {
+  margin: 18px 8px 0;
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+  font-weight: 720;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
 }
 
 .shell-settings__navigation li {
@@ -430,9 +465,15 @@
 }
 
 .shell-settings__content {
-  width: min(100%, 920px);
+  width: min(100%, var(--shell-settings-content));
   min-height: 100%;
   margin-inline: auto;
+  padding: 38px clamp(28px, 5vw, 56px) 64px;
+}
+
+.shell-settings .shell-route-surface {
+  width: 100%;
+  padding: 0;
 }
 
 .shell-policy-layout {
@@ -452,20 +493,27 @@
 @media (max-width: 992px) {
   .shell-workspace__body,
   .shell-workspace[data-panel-open="false"] .shell-workspace__body {
-    grid-template-columns: 0 0 minmax(420px, 1fr);
+    grid-template-columns: 0 0 minmax(var(--shell-center-minimum), 1fr);
   }
 
   .shell-project-panel {
     position: absolute;
     inset: 0 auto 0 0;
-    width: min(var(--shell-project-panel-width, 228px), 55%);
+    width: min(
+      var(--shell-project-panel-width, var(--shell-project-panel-initial)),
+      55%
+    );
     box-shadow: var(--shadow-dialog);
   }
 
   .shell-project-panel__resizer {
     position: absolute;
     z-index: 4;
-    inset: 0 auto 0 min(var(--shell-project-panel-width, 228px), 55%);
+    inset: 0 auto 0
+      min(
+        var(--shell-project-panel-width, var(--shell-project-panel-initial)),
+        55%
+      );
   }
 }
 
@@ -485,7 +533,8 @@
   }
 
   .shell-settings__nav-label,
-  .shell-settings__back-label {
+  .shell-settings__back-label,
+  .shell-settings__navigation-label {
     position: absolute;
     width: 1px;
     height: 1px;

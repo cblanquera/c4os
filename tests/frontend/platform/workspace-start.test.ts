@@ -126,7 +126,9 @@ describe("createWorkspaceStartAdapter", () => {
         message: "Workspace state is unavailable",
         retryable: true,
         correlationId,
-        details: {},
+        details: {
+          stage: { kind: "text", value: "runtime-activation" },
+        },
       }),
     };
     await expect(
@@ -137,6 +139,9 @@ describe("createWorkspaceStartAdapter", () => {
     ).rejects.toMatchObject({
       code: "unavailable",
       message: "Workspace state is unavailable",
+      details: {
+        stage: { kind: "text", value: "runtime-activation" },
+      },
     });
 
     const arbitrary: WorkspaceStartTransport = {

@@ -24,7 +24,10 @@ import type {
   SessionId,
   StateGeneration,
 } from "../../../../src/frontend/platform/protocol";
-import { artifactWorkspaceForActiveSession } from "../../../../src/frontend/features/shell/artifact-session";
+import {
+  activeSessionCanOwnArtifacts,
+  artifactWorkspaceForActiveSession,
+} from "../../../../src/frontend/features/shell/artifact-session";
 import { ShellRouteController } from "../../../../src/frontend/features/shell/ShellRouteController";
 
 const conversationServiceMocks = vi.hoisted(() => ({
@@ -348,14 +351,53 @@ describe("ShellRouteController", () => {
     expect(artifactWorkspaceForActiveSession(cached, null)).toBeNull();
   });
 
+  it("never requests Artifact state for a provisional blank Chat", () => {
+    const pendingSessionId = "session:pending" as SessionId;
+    expect(
+      activeSessionCanOwnArtifacts({
+        activeSessionId: pendingSessionId,
+        sessions: [
+          {
+            id: pendingSessionId,
+            projectId: "project:pending" as never,
+            title: "New Chat",
+            lifecycle: "pending",
+          },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      activeSessionCanOwnArtifacts({
+        activeSessionId: pendingSessionId,
+        sessions: [
+          {
+            id: pendingSessionId,
+            projectId: "project:pending" as never,
+            title: "Saved Chat",
+            lifecycle: "saved",
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
   it("keeps every accepted route directly addressable in one composed shell", () => {
     for (const definition of APP_ROUTE_DEFINITIONS) {
       const rendered = renderShellAt(definition.path);
-      if (definition.path === "/chat") {
-        expect(screen.getByRole("region", { name: "Chat" })).toHaveAttribute(
-          "data-route-surface",
-          "compact",
-        );
+      if (
+        [
+          "/chat",
+          "/chat-search",
+          "/chat-capabilities",
+          "/files",
+          "/browser",
+          "/terminal",
+        ].includes(definition.path)
+      ) {
+        expect(
+          screen.getByRole("region", { name: definition.title }),
+        ).toHaveAttribute("data-route-surface", "compact");
       } else {
         expect(
           screen.getByRole("heading", { name: definition.title, level: 1 }),
@@ -369,6 +411,9 @@ describe("ShellRouteController", () => {
   });
 
   it("round-trips through Settings without losing panel, composer, or focus state", async () => {
+    conversationServiceMocks.readConversationSnapshot.mockResolvedValueOnce(
+      conversationSubmitSnapshot(2, null),
+    );
     const { store } = renderShellAt("/chat", true);
     const composer = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(composer, { target: { value: "Keep this exact draft" } });
@@ -390,6 +435,12 @@ describe("ShellRouteController", () => {
     expect(
       screen.getByRole("button", { name: "Show project panel" }),
     ).toBeVisible();
+    expect(
+      conversationServiceMocks.readConversationSnapshot,
+    ).toHaveBeenCalledOnce();
+    expect(store.getState().shellAuthority.composer.value.activeModelId).toBe(
+      "model:test",
+    );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus(),
     );

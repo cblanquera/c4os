@@ -53,11 +53,8 @@ export function McpSettings({ actions, snapshot }: McpSettingsProps) {
     <div className="mcp-settings" data-generation={snapshot.generation}>
       <div className="mcp-settings__heading">
         <div>
-          <h2>Servers</h2>
-          <p>
-            External tools and resources stay behind C4OS trust, policy,
-            approval, credential, and output boundaries.
-          </p>
+          <h2>Connected servers</h2>
+          <p>Connect external tools and resources to C4OS.</p>
         </div>
         <McpServerDialog
           actions={actions}
@@ -87,9 +84,6 @@ export function McpSettings({ actions, snapshot }: McpSettingsProps) {
                 snapshot.activeWorkers === 1 ? "process" : "processes"
               }`}
         </strong>
-        <span>
-          Connections and executions are supervised by the native MCP service.
-        </span>
       </StatusRegion>
 
       {snapshot.servers.length === 0 ? (

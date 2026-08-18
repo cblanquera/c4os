@@ -1868,7 +1868,7 @@ fn normalize_native_category(
         }),
         "session.cancelled" | "session.aborted" => Ok(NormalizedEventCategory::Cancelled),
         "session.error" | "session.next.step.failed" => Ok(NormalizedEventCategory::Error {
-            code: "native-session-error".into(),
+            code: normalized_native_session_error_code(properties).into(),
         }),
         "session.status" => {
             let state = properties
@@ -1884,6 +1884,39 @@ fn normalize_native_category(
             Ok(NormalizedEventCategory::Lifecycle { state })
         }
         _ => Ok(NormalizedEventCategory::Unknown),
+    }
+}
+
+/// Reduces native provider failures to bounded, non-secret recovery codes.
+/// Native messages, response bodies, headers, and metadata never cross this
+/// adapter boundary or enter ordinary C4OS diagnostics.
+fn normalized_native_session_error_code(
+    properties: &serde_json::Map<String, Value>,
+) -> &'static str {
+    let Some(error) = properties.get("error").and_then(Value::as_object) else {
+        return "native-session-error";
+    };
+    let name = error.get("name").and_then(Value::as_str);
+    let data = error.get("data").and_then(Value::as_object);
+    match name {
+        Some("ProviderAuthError") => "provider-authentication-failed",
+        Some("APIError") => match data
+            .and_then(|data| data.get("statusCode"))
+            .and_then(Value::as_u64)
+        {
+            Some(401 | 403) => "provider-authentication-failed",
+            Some(408) => "provider-request-timed-out",
+            Some(429) => "provider-rate-limited",
+            Some(400..=499) => "provider-request-rejected",
+            Some(500..=599) => "provider-unavailable",
+            _ => "provider-api-error",
+        },
+        Some("MessageOutputLengthError") => "provider-output-limit-reached",
+        Some("MessageAbortedError") => "native-session-aborted",
+        Some("StructuredOutputError") => "structured-output-failed",
+        Some("ContextOverflowError") => "provider-context-limit-exceeded",
+        Some("ContentFilterError") => "provider-content-filtered",
+        _ => "native-session-error",
     }
 }
 

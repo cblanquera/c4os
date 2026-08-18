@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,7 +46,7 @@ describe("ProviderOnboarding", () => {
         snapshotWith(providerFromDraft(draft, { state: "untested" })),
     );
     providerService.testProviderConnection.mockResolvedValue(
-      snapshotWith(testedProvider()),
+      transientSnapshotWith(testedProvider()),
     );
     providerService.selectProviderModel.mockResolvedValue(
       snapshotWith(testedProvider({ selectedModelId: "gpt-5" })),
@@ -59,7 +60,7 @@ describe("ProviderOnboarding", () => {
     });
   });
 
-  it("clears the raw key after save and gates Continue on fresh model evidence", async () => {
+  it("tests transiently and completes once with an automatic model", async () => {
     const onComplete = vi.fn();
     let resolveTest!: (snapshot: ProviderSettingsSnapshot) => void;
     providerService.testProviderConnection.mockReturnValueOnce(
@@ -69,10 +70,22 @@ describe("ProviderOnboarding", () => {
     );
     render(<ProviderOnboarding onComplete={onComplete} />);
 
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "Profile label" }),
-      { target: { value: "OpenAI Work" } },
+    const onboardingForm = await screen.findByRole("form", {
+      name: "Provider onboarding",
+    });
+    expect(
+      within(onboardingForm).getByRole("button", { name: "Test Connection" }),
+    ).toBeVisible();
+    expect(
+      within(onboardingForm).getByRole("button", { name: "Continue" }),
+    ).toBeDisabled();
+    expect(within(onboardingForm).getByRole("status")).toHaveTextContent(
+      "Connection not tested",
     );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Profile label" }), {
+      target: { value: "OpenAI Work" },
+    });
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "raw-secret-value" },
     });
@@ -83,20 +96,27 @@ describe("ProviderOnboarding", () => {
     });
 
     expect(await screen.findByText("Testing connection")).toBeVisible();
-    resolveTest(snapshotWith(testedProvider()));
+    resolveTest(transientSnapshotWith(testedProvider()));
     expect(await screen.findByText("Connection passed")).toBeVisible();
-    expect(screen.getByText("Recommended")).toBeVisible();
-    expect(screen.getByText("OpenCode")).toBeVisible();
-    expect(screen.getByText("Local")).toBeVisible();
+    expect(
+      screen.queryByRole("group", { name: "Model for new Chats" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Initial defaults")).not.toBeInTheDocument();
+    expect(screen.queryByText("GPT-5")).not.toBeInTheDocument();
+    expect(screen.queryByText("GPT-5 mini")).not.toBeInTheDocument();
     expect(screen.getByLabelText("API key")).toHaveValue("");
     expect(screen.getByLabelText("API key")).toHaveAttribute(
       "placeholder",
       "Leave blank to keep the existing key",
     );
-    expect(providerService.saveProviderProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ secret: "raw-secret-value" }),
+    expect(providerService.saveProviderProfile).not.toHaveBeenCalled();
+    expect(providerService.testProviderConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "provider:openai-work",
+        displayName: "OpenAI Work",
+        secret: "raw-secret-value",
+      }),
     );
-    expect(providerService.saveProviderProfile).toHaveBeenCalledTimes(1);
     expect(providerService.testProviderConnection).toHaveBeenCalledTimes(1);
 
     const continueButton = screen.getByRole("button", { name: "Continue" });
@@ -114,7 +134,7 @@ describe("ProviderOnboarding", () => {
     expect(await screen.findByText("Saving provider setup")).toBeVisible();
     await waitFor(() =>
       expect(providerService.completeProviderOnboarding).toHaveBeenCalledWith(
-        "provider:openai-work",
+        "provider-test-token",
         "gpt-5",
       ),
     );
@@ -127,13 +147,44 @@ describe("ProviderOnboarding", () => {
     });
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
     expect(providerService.completeProviderOnboarding).toHaveBeenCalledTimes(1);
+    expect(providerService.selectProviderModel).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Provider type" }), {
       target: { value: "custom" },
     });
     expect(screen.getByRole("textbox", { name: "API base URL" })).toBeVisible();
     expect(screen.getByText("Connection test no longer current")).toBeVisible();
+    expect(
+      screen.queryByRole("group", { name: "Model for new Chats" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
+  it("keeps a successful transient test retryable when Continue fails", async () => {
+    const onComplete = vi.fn();
+    providerService.completeProviderOnboarding.mockRejectedValueOnce(
+      new Error("Provider setup could not be saved. Press Continue to retry"),
+    );
+    render(<ProviderOnboarding onComplete={onComplete} />);
+
+    await enterRequiredProviderFields();
+    fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
+    expect(await screen.findByText("Connection passed")).toBeVisible();
+    expect(screen.getByLabelText("API key")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Provider action failed")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Provider setup could not be saved. Press Continue to retry",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(providerService.completeProviderOnboarding).toHaveBeenCalledTimes(2);
+    expect(providerService.testProviderConnection).toHaveBeenCalledTimes(1);
   });
 
   it("requires credential re-entry after a session-only restart", async () => {
@@ -147,30 +198,10 @@ describe("ProviderOnboarding", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
-  it("resumes Test Connection after approving a credential save", async () => {
-    const pendingSave = {
+  it("resumes a transient Test Connection after one explicit approval", async () => {
+    const pendingTest = {
       ...emptySnapshot(),
       credentialProtection: "session-only" as const,
-      pendingApproval: {
-        promptId: "provider-save-prompt",
-        operation: "save-profile" as const,
-        providerId: "provider:openai-work",
-        providerName: "OpenAI Work",
-        expiresAtMs: 1_784_476_800_000,
-      },
-    };
-    const saved = {
-      ...snapshotWith(
-        providerRecord({
-          displayName: "OpenAI Work",
-          hasCredential: true,
-          testStatus: { state: "untested" },
-        }),
-      ),
-      credentialProtection: "session-only" as const,
-    };
-    const pendingTest = {
-      ...saved,
       pendingApproval: {
         promptId: "provider-test-prompt",
         operation: "test-connection" as const,
@@ -180,17 +211,14 @@ describe("ProviderOnboarding", () => {
       },
     };
     const connected = {
-      ...snapshotWith(testedProvider({ generation: 3 })),
+      ...transientSnapshotWith(testedProvider({ generation: 3 })),
       credentialProtection: "session-only" as const,
     };
     providerService.readProviderSnapshot.mockResolvedValueOnce({
       ...emptySnapshot(),
       credentialProtection: "session-only",
     });
-    providerService.saveProviderProfile.mockResolvedValueOnce(pendingSave);
-    providerService.answerProviderApproval
-      .mockResolvedValueOnce(saved)
-      .mockResolvedValueOnce(connected);
+    providerService.answerProviderApproval.mockResolvedValueOnce(connected);
     providerService.testProviderConnection.mockResolvedValueOnce(pendingTest);
 
     render(<ProviderOnboarding onComplete={vi.fn()} />);
@@ -198,43 +226,29 @@ describe("ProviderOnboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
 
     expect(
-      await screen.findByText(/change the securely stored credential/i),
+      await screen.findByText(
+        /use the OpenAI Work credential and contact the provider/i,
+      ),
     ).toBeVisible();
     expect(screen.getByLabelText("API key")).toHaveValue("");
     expect(screen.queryByText("Enter an API key.")).not.toBeInTheDocument();
-    expect(providerService.saveProviderProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ secret: "test-key" }),
+    expect(providerService.testProviderConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "provider:openai-work",
+        secret: "test-key",
+      }),
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() =>
-      expect(providerService.testProviderConnection).toHaveBeenCalledWith(
-        "provider:openai-work",
-      ),
-    );
-    expect(providerService.saveProviderProfile).toHaveBeenCalledTimes(1);
-    expect(
-      await screen.findByText(
-        /use the stored credential and contact OpenAI Work/i,
-      ),
-    ).toBeVisible();
-    expect(screen.getByLabelText("API key")).toHaveValue("");
 
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     expect(await screen.findByText("Connection passed")).toBeVisible();
     expect(
       screen.queryByText("Provider approval required"),
     ).not.toBeInTheDocument();
-    expect(providerService.answerProviderApproval).toHaveBeenNthCalledWith(
-      1,
-      "provider-save-prompt",
-      "allow",
-    );
-    expect(providerService.answerProviderApproval).toHaveBeenNthCalledWith(
-      2,
+    expect(providerService.answerProviderApproval).toHaveBeenCalledWith(
       "provider-test-prompt",
       "allow",
     );
+    expect(providerService.saveProviderProfile).not.toHaveBeenCalled();
     expect(providerService.testProviderConnection).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
@@ -258,18 +272,20 @@ describe("ProviderOnboarding", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
     await waitFor(() =>
-      expect(providerService.saveProviderProfile).toHaveBeenCalled(),
+      expect(providerService.testProviderConnection).toHaveBeenCalled(),
     );
-    const savedDraft = providerService.saveProviderProfile.mock.calls[0]?.[0];
-    expect(savedDraft).toEqual(
+    const testedDraft =
+      providerService.testProviderConnection.mock.calls[0]?.[0];
+    expect(testedDraft).toEqual(
       expect.objectContaining({ authentication: { type: "none" } }),
     );
-    expect(savedDraft).not.toHaveProperty("secret");
+    expect(testedDraft).not.toHaveProperty("secret");
+    expect(providerService.saveProviderProfile).not.toHaveBeenCalled();
   });
 
   it("keeps zero-model and failed tests explicit and non-continuable", async () => {
     providerService.testProviderConnection.mockResolvedValueOnce(
-      snapshotWith(
+      transientSnapshotWith(
         providerRecord({
           models: [],
           testStatus: { state: "succeededNoUsableModels", checkedAtMs: 5 },
@@ -285,7 +301,7 @@ describe("ProviderOnboarding", () => {
 
     providerService.readProviderSnapshot.mockResolvedValue(emptySnapshot());
     providerService.testProviderConnection.mockResolvedValueOnce(
-      snapshotWith(
+      transientSnapshotWith(
         providerRecord({
           models: [],
           testStatus: {
@@ -359,6 +375,7 @@ function emptySnapshot(): ProviderSettingsSnapshot {
     defaultRuntime: null,
     defaultEnvironment: null,
     pendingApproval: null,
+    transientTest: null,
   };
 }
 
@@ -368,6 +385,20 @@ function snapshotWith(provider: ProviderRecord): ProviderSettingsSnapshot {
     ...emptySnapshot(),
     generation: provider.generation,
     providers: [provider],
+  };
+}
+
+/** Creates a non-durable connection-test projection around one provider. */
+function transientSnapshotWith(
+  provider: ProviderRecord,
+): ProviderSettingsSnapshot {
+  return {
+    ...emptySnapshot(),
+    generation: provider.generation,
+    transientTest: {
+      testToken: "provider-test-token",
+      provider,
+    },
   };
 }
 
@@ -389,7 +420,7 @@ function providerFromDraft(
   });
 }
 
-/** Creates the successful provider used by the default-confirmation flow. */
+/** Creates a successful provider whose most capable model is not listed first. */
 function testedProvider(
   overrides: Partial<ProviderRecord> = {},
 ): ProviderRecord {
@@ -398,13 +429,29 @@ function testedProvider(
     hasCredential: true,
     models: [
       {
-        modelId: "gpt-5",
-        displayName: "GPT-5",
+        modelId: "gpt-5-mini",
+        displayName: "GPT-5 mini",
         recommendationRank: 0,
         availability: "available",
         checkedAtMs: 5,
         lifecycle: "active",
         features: { tools: "supported" },
+        contextTokens: 128_000,
+        outputTokens: 16_000,
+        productionReady: true,
+      },
+      {
+        modelId: "gpt-5",
+        displayName: "GPT-5",
+        recommendationRank: 1,
+        availability: "available",
+        checkedAtMs: 5,
+        lifecycle: "active",
+        features: {
+          reasoning: "supported",
+          tools: "supported",
+          vision: "supported",
+        },
         contextTokens: 400_000,
         outputTokens: 32_000,
         productionReady: true,

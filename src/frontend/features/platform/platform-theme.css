@@ -66,6 +66,17 @@
   --control-radius-medium: 10px;
   --control-radius-large: 16px;
   --motion-functional: 180ms;
+  --shell-header-height: 58px;
+  --shell-project-panel-initial: 228px;
+  --shell-project-panel-minimum: 180px;
+  --shell-center-minimum: 420px;
+  --shell-settings-navigation: 224px;
+  --shell-settings-content: 920px;
+  --shell-composer-maximum: 760px;
+  --shell-dialog-regular: 620px;
+  --shell-dialog-compact: 480px;
+  --shell-reading-maximum: 660px;
+  --shell-inline-reading-maximum: 610px;
 }
 
 .platform-qa {

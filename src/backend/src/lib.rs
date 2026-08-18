@@ -129,8 +129,9 @@ use security::gateway::{
 use security::policy::{
     ActionEffect, ActionFacts, ActionInitiator, ActionRequestOrigin, ActionReversibility,
     ActionScope, ActionSensitivity, ActionSurface, ApprovalPreset as RuntimeApprovalPreset,
-    CategoryRule, ClassificationConfidence, ConcreteException, ExceptionDuration,
-    PolicyConfiguration, PolicyDecision, PolicyGroup, RepositoryState, RuleMatcher,
+    CategoryRule, ClassificationConfidence, ConcreteException, DirectIntentContext,
+    ExceptionDuration, PolicyConfiguration, PolicyDecision, PolicyGroup, RepositoryState,
+    RuleMatcher,
 };
 use serde::{Deserialize, Serialize};
 use startup_recovery::{
@@ -157,9 +158,10 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use thiserror::Error;
 use uuid::Uuid;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const BROKER_CONTEXT_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
+const MAX_CONVERSATION_MODELS: usize = 250;
 
 /// Exact non-secret broker-tool resources installed by the C4OS production
 /// composition. Native peers and renderer intents cannot extend this set.
@@ -880,6 +882,7 @@ impl security::credentials::CredentialMutationObserver for ProductionMcpCredenti
 struct AppCoreState {
     database: Arc<core::database::DatabaseActor>,
     c4os_home: PathBuf,
+    credential_keychain_bundle: String,
     bundled_skill_root: PathBuf,
     mcp: Arc<tokio::sync::Mutex<ProductionMcpService>>,
     credential_vault: Option<security::credentials::CredentialVault>,
@@ -913,6 +916,8 @@ struct AppCoreState {
     picker_grants: Mutex<PickerGrantRegistry>,
     pending_workspace_clones: Mutex<BTreeMap<String, PendingWorkspaceClone>>,
     pending_provider_operations: Mutex<BTreeMap<String, PendingProviderOperation>>,
+    provider_onboarding_operation: Mutex<()>,
+    pending_provider_tests: Mutex<BTreeMap<String, PendingProviderDraftTest>>,
     conversation_drop: Mutex<NativeConversationDropState>,
     conversation_branch: Mutex<NativeConversationBranchState>,
 }
@@ -1357,6 +1362,7 @@ struct NativeConversationFileDropEvent {
 struct ConversationApplicationState {
     generation: u64,
     persistence_generation: Option<u64>,
+    observed_session_revision: Option<(String, u64)>,
     active_project_id: Option<String>,
     active_session_id: Option<String>,
     pending: conversation::PendingChatState,
@@ -1370,6 +1376,7 @@ impl Default for ConversationApplicationState {
         Self {
             generation: 0,
             persistence_generation: None,
+            observed_session_revision: None,
             active_project_id: None,
             active_session_id: None,
             pending: conversation::PendingChatState::Inactive,
@@ -1497,6 +1504,7 @@ impl ConversationApplicationState {
         Self {
             generation: snapshot.generation,
             persistence_generation: persisted.map(|record| record.generation),
+            observed_session_revision: None,
             active_project_id,
             active_session_id,
             pending: conversation::PendingChatState::Inactive,
@@ -1932,12 +1940,15 @@ struct ProviderApprovalInput {
 enum ProviderApprovalOperation {
     SaveProfile,
     TestConnection,
+    CompleteOnboarding,
     DeleteProfile,
 }
 
 enum PendingProviderPayload {
     SaveProfile(ProviderProfileInput),
-    TestConnection(ProviderIdentityInput),
+    TestConnection(ProviderProfileInput),
+    LegacyTestConnection(ProviderIdentityInput),
+    CompleteOnboarding(ProviderOnboardingInput),
     DeleteProfile(ProviderIdentityInput),
 }
 
@@ -1948,6 +1959,25 @@ struct PendingProviderOperation {
     provider_id: String,
     provider_name: String,
     payload: PendingProviderPayload,
+}
+
+const PROVIDER_DRAFT_TEST_TTL_MS: u64 = 10 * 60_000;
+
+#[derive(Clone)]
+struct PendingProviderDraftTest {
+    test_token: String,
+    vault: security::credentials::CredentialVault,
+    provider: runtime::provider::ProviderRecord,
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    expires_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderDraftTestSnapshot {
+    test_token: String,
+    provider: runtime::provider::ProviderRecord,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1985,6 +2015,19 @@ struct ProviderOnboardingInput {
     expected_coordinator_generation: u64,
     expected_provider_generation: u64,
     expected_configuration_generation: u64,
+    test_token: String,
+    model_id: String,
+    runtime_id: String,
+    environment_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
+struct LegacyProviderOnboardingInput {
+    expected_coordinator_generation: u64,
+    expected_provider_generation: u64,
+    expected_configuration_generation: u64,
     provider_id: String,
     model_id: String,
     runtime_id: String,
@@ -2012,6 +2055,7 @@ struct ProviderSettingsSnapshot {
     default_runtime: Option<String>,
     default_environment: Option<String>,
     pending_approval: Option<ProviderPendingApprovalSnapshot>,
+    transient_test: Option<ProviderDraftTestSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3270,6 +3314,19 @@ impl RuntimeApplicationService {
             .value)
     }
 
+    pub(crate) fn propose_direct_action_with_context(
+        &self,
+        facts: &ActionFacts,
+        action: CanonicalAction,
+        context: DirectIntentContext,
+        now_ms: u64,
+    ) -> Result<GatewayProposal, RuntimeApplicationError> {
+        Ok(self
+            .coordinator()?
+            .propose_direct_action_with_context(facts, action, context, now_ms)?
+            .value)
+    }
+
     pub(crate) fn propose_direct_trust_confirmation(
         &self,
         facts: &ActionFacts,
@@ -3833,6 +3890,48 @@ impl RuntimeApplicationService {
         let previous = coordinator.snapshot(completed_at_ms);
         let operation =
             coordinator.complete_onboarding(expected_provider_generation, completed_at_ms)?;
+        let snapshot = coordinator.snapshot(completed_at_ms);
+        if let Err(error) = self.provider_store.save_snapshot(
+            &snapshot.providers,
+            persistence_expectation(expected_provider_generation),
+            completed_at_ms,
+        ) {
+            self.quarantine_failed_transaction(previous)?;
+            return Err(error.into());
+        }
+        Ok(operation)
+    }
+
+    pub fn commit_tested_provider_onboarding(
+        &self,
+        expected_coordinator_generation: u64,
+        final_profile: ProviderProfile,
+        tested_record: runtime::provider::ProviderRecord,
+        selected_model_id: &str,
+        expected_provider_generation: u64,
+        expected_tested_generation: u64,
+        completed_at_ms: u64,
+    ) -> Result<CoordinatorOperation<u64>, RuntimeApplicationError> {
+        let mut coordinator = self.coordinator()?;
+        require_coordinator_generation(
+            &coordinator,
+            expected_coordinator_generation,
+            completed_at_ms,
+        )?;
+        self.require_persisted_generation(
+            "provider-snapshot",
+            "providers",
+            persistence_expectation(expected_provider_generation),
+        )?;
+        let previous = coordinator.snapshot(completed_at_ms);
+        let operation = coordinator.commit_tested_provider_onboarding(
+            final_profile,
+            tested_record,
+            selected_model_id,
+            expected_provider_generation,
+            expected_tested_generation,
+            completed_at_ms,
+        )?;
         let snapshot = coordinator.snapshot(completed_at_ms);
         if let Err(error) = self.provider_store.save_snapshot(
             &snapshot.providers,
@@ -4613,17 +4712,12 @@ impl RuntimeApplicationService {
             let requested_model_id =
                 model_id.unwrap_or_else(|| parent.context.model_route.model_id.clone());
             let snapshot = coordinator.snapshot(created_at_ms);
-            let provider = snapshot
-                .providers
-                .providers
-                .iter()
-                .filter(|provider| provider.profile.enabled)
-                .find(|provider| {
-                    provider.profile.provider_id == requested_provider_id
-                        && provider.selected_model_id.as_deref()
-                            == Some(requested_model_id.as_str())
-                })
-                .ok_or(CoordinatorError::ModelRouteUnavailable)?;
+            let (provider_id, model_id) = resolve_conversation_provider_model(
+                &snapshot,
+                Some(&requested_provider_id),
+                Some(&requested_model_id),
+                created_at_ms,
+            )?;
             if !snapshot.runtimes.records.iter().any(|runtime| {
                 runtime.installation.runtime_id == binding.runtime_id
                     && runtime.lifecycle == runtime::supervisor::RuntimeLifecycle::Ready
@@ -4636,8 +4730,8 @@ impl RuntimeApplicationService {
                 &coordinator,
                 &capabilities,
                 &binding.runtime_id,
-                &provider.profile.provider_id,
-                &requested_model_id,
+                &provider_id,
+                &model_id,
                 created_at_ms,
             )?;
             let layers = capabilities.layers(&route, created_at_ms)?;
@@ -4695,13 +4789,7 @@ impl RuntimeApplicationService {
                     attachment_conversion_allowed: false,
                 },
             };
-            (
-                snapshot.generation,
-                provider.profile.provider_id.clone(),
-                requested_model_id,
-                authority,
-                draft,
-            )
+            (snapshot.generation, provider_id, model_id, authority, draft)
         };
         let retry_id = Uuid::new_v4();
         self.retry_dispatch(
@@ -5901,6 +5989,8 @@ struct CredentialServiceState {
     _protection: ProviderCredentialProtection,
 }
 
+const C4OS_BUNDLE_IDENTIFIER: &str = "com.c4os.desktop";
+
 impl CredentialServiceState {
     fn vault(&self) -> Option<security::credentials::CredentialVault> {
         self._vault.clone()
@@ -5917,12 +6007,13 @@ impl CredentialServiceState {
     #[cfg(target_os = "macos")]
     fn initialize(
         c4os_home: &std::path::Path,
+        keychain_bundle: &str,
     ) -> Result<Self, security::credentials::CredentialVaultError> {
         use security::credentials::{
             CredentialVault, CredentialVaultError, MacOsInstallationKeyStore,
         };
 
-        let key_store = MacOsInstallationKeyStore::new("com.c4os.desktop");
+        let key_store = MacOsInstallationKeyStore::new(keychain_bundle);
         match CredentialVault::open_or_create_with_installation_key(
             c4os_home.join("vault/credentials.vault"),
             &key_store,
@@ -5932,11 +6023,21 @@ impl CredentialServiceState {
                 _requires_explicit_fallback: false,
                 _protection: ProviderCredentialProtection::InstallationKey,
             }),
-            Err(CredentialVaultError::KeychainUnavailable) => Ok(Self {
-                _vault: Some(CredentialVault::session_only()?),
-                _requires_explicit_fallback: true,
-                _protection: ProviderCredentialProtection::SessionOnly,
-            }),
+            Err(error)
+                if matches!(
+                    &error,
+                    CredentialVaultError::KeychainUnavailable { .. }
+                        | CredentialVaultError::KeychainTimedOut { .. }
+                ) =>
+            {
+                #[cfg(debug_assertions)]
+                eprintln!("C4OS secure storage initialization failed: {error}");
+                Ok(Self {
+                    _vault: Some(CredentialVault::session_only()?),
+                    _requires_explicit_fallback: true,
+                    _protection: ProviderCredentialProtection::SessionOnly,
+                })
+            }
             Err(error) => Err(error),
         }
     }
@@ -5944,6 +6045,7 @@ impl CredentialServiceState {
     #[cfg(not(target_os = "macos"))]
     fn initialize(
         _c4os_home: &std::path::Path,
+        _keychain_bundle: &str,
     ) -> Result<Self, security::credentials::CredentialVaultError> {
         Ok(Self {
             _vault: Some(security::credentials::CredentialVault::session_only()?),
@@ -9453,17 +9555,50 @@ fn require_workspace_start_generation(
     core: &AppCoreState,
     request: &SnapshotRequest,
 ) -> Result<(), ProtocolError> {
-    let current = core::services::load_workspace_start_state(&core.database)
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    if current.generation != request.expected_generation.0 {
+    let current = build_workspace_start_snapshot(core, request.correlation_id.clone())?;
+    validate_workspace_start_generation(current.generation, request)
+}
+
+fn validate_workspace_start_generation(
+    current: StateGeneration,
+    request: &SnapshotRequest,
+) -> Result<(), ProtocolError> {
+    if request.expected_generation.0 > current.0 {
         return Err(platform_boundary_error(
             request.correlation_id.clone(),
-            ProtocolErrorCode::StaleGeneration,
-            "Workspace Start changed before the open request",
+            ProtocolErrorCode::FutureGeneration,
+            "Workspace Start request is ahead of native state",
             true,
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod workspace_start_generation_tests {
+    use super::*;
+
+    fn request(expected_generation: u64) -> SnapshotRequest {
+        SnapshotRequest {
+            protocol_version: protocol::PROTOCOL_VERSION,
+            request_id: protocol::RequestId::new("request:workspace-generation").unwrap(),
+            correlation_id: protocol::CorrelationId::new("correlation:workspace-generation")
+                .unwrap(),
+            expected_generation: StateGeneration(expected_generation),
+        }
+    }
+
+    #[test]
+    fn unrelated_native_advances_do_not_invalidate_explicit_workspace_actions() {
+        assert!(validate_workspace_start_generation(StateGeneration(9), &request(7)).is_ok());
+        assert!(validate_workspace_start_generation(StateGeneration(9), &request(9)).is_ok());
+        assert_eq!(
+            validate_workspace_start_generation(StateGeneration(9), &request(10))
+                .expect_err("future renderer state must fail closed")
+                .code,
+            ProtocolErrorCode::FutureGeneration
+        );
+    }
 }
 
 fn take_workspace_start_picker_grant(
@@ -9521,16 +9656,31 @@ fn workspace_start_lock_owner(now_ms: u64) -> core::workspace::WorkspaceLockOwne
     }
 }
 
+fn advance_workspace_activation_conversation(
+    candidate: &mut ConversationApplicationState,
+    prior: &ConversationApplicationState,
+    launch_generation: u64,
+    workspace_generation: u64,
+    runtime_generation: u64,
+) -> Result<u64, ProtocolError> {
+    candidate.advance(
+        prior
+            .generation
+            .max(launch_generation)
+            .max(workspace_generation)
+            .max(runtime_generation),
+    )
+}
+
 fn activate_workspace_from_start(
     core: &AppCoreState,
     workspace: core::services::ActiveWorkspace,
     now_ms: u64,
     correlation_id: protocol::CorrelationId,
 ) -> Result<(WorkspaceStartOpenSnapshot, u64), ProtocolError> {
-    let _policy_transition = core
-        .runtime
-        .policy_transition_guard()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let _policy_transition = core.runtime.policy_transition_guard().map_err(|error| {
+        workspace_activation_unavailable("policy-transition-lock", &error, correlation_id.clone())
+    })?;
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     let policy_quiescence: Arc<dyn Fn() + Send + Sync> = {
         let cancellations = core.mcp_cancellations.clone();
@@ -9548,16 +9698,27 @@ fn activate_workspace_from_start(
         &core.runtime,
         policy_quiescence,
     )
-    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-    let query = core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS)
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-    let snapshot = workspace
-        .snapshot(query)
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-    let workspace_record = snapshot
-        .workspace
-        .as_ref()
-        .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+    .map_err(|error| {
+        workspace_activation_unavailable(
+            "workspace-configuration-observer",
+            &error,
+            correlation_id.clone(),
+        )
+    })?;
+    let query =
+        core::database::SnapshotQuery::new(core::database::MAX_READ_RECORDS).map_err(|error| {
+            workspace_activation_unavailable("workspace-query", &error, correlation_id.clone())
+        })?;
+    let snapshot = workspace.snapshot(query).map_err(|error| {
+        workspace_activation_unavailable("workspace-snapshot", &error, correlation_id.clone())
+    })?;
+    let workspace_record = snapshot.workspace.as_ref().ok_or_else(|| {
+        workspace_activation_unavailable(
+            "workspace-identity",
+            &"workspace snapshot has no active identity",
+            correlation_id.clone(),
+        )
+    })?;
     let workspace_id = workspace_record.workspace_id.clone();
     let workspace_name = workspace_record.display_name.clone();
     let recovery_notice = workspace
@@ -9565,38 +9726,76 @@ fn activate_workspace_from_start(
         .map(|notice| {
             workspace_recovery_notice_snapshot(notice, &workspace_name, correlation_id.clone())
         })
-        .transpose()?;
+        .transpose()
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "workspace-recovery-notice",
+                &error,
+                correlation_id.clone(),
+            )
+        })?;
     let recovered = recovery_notice.is_some();
     let database = Arc::clone(workspace.database_actor());
-    let persisted = database
-        .conversation_state()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-    let restored_conversation =
+    let persisted = database.conversation_state().map_err(|error| {
+        workspace_activation_unavailable("conversation-restore", &error, correlation_id.clone())
+    })?;
+    let mut restored_conversation =
         ConversationApplicationState::restore(Some(&snapshot), persisted.as_ref());
     let app_configuration = core
         .configuration
         .lock()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "app-configuration-lock",
+                &error,
+                correlation_id.clone(),
+            )
+        })?
         .last_known_good()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "app-configuration-read",
+                &error,
+                correlation_id.clone(),
+            )
+        })?;
     let candidate_project_id = restored_conversation
         .active_project_id
         .as_deref()
         .map(Uuid::parse_str)
         .transpose()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "project-selection-restore",
+                &error,
+                correlation_id.clone(),
+            )
+        })?;
     let candidate_chat_id = restored_conversation
         .active_session_id
         .as_deref()
         .map(Uuid::parse_str)
         .transpose()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "chat-selection-restore",
+                &error,
+                correlation_id.clone(),
+            )
+        })?;
     let prior_configuration = core::configuration::resolve_effective_snapshot_from_last_known_good(
         app_configuration.clone(),
         core::configuration::ManagedCeilings::default(),
         core::configuration::SecurityConstraints::default(),
     )
-    .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    .map_err(|error| {
+        let diagnostic = format!("{error:?}");
+        workspace_activation_unavailable(
+            "app-configuration-resolution",
+            &diagnostic,
+            correlation_id.clone(),
+        )
+    })?;
     let candidate_configuration = workspace
         .restore_effective_configuration_snapshot(
             app_configuration,
@@ -9605,12 +9804,26 @@ fn activate_workspace_from_start(
             core::configuration::ManagedCeilings::default(),
             core::configuration::SecurityConstraints::default(),
         )
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "workspace-configuration-resolution",
+                &error,
+                correlation_id.clone(),
+            )
+        })?;
+    let launch_generation = core::services::load_workspace_start_state(&core.database)
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "workspace-publication-floor",
+                &error,
+                correlation_id.clone(),
+            )
+        })?
+        .generation;
 
-    let mut active = core
-        .active_workspace
-        .lock()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut active = core.active_workspace.lock().map_err(|error| {
+        workspace_activation_unavailable("active-workspace-lock", &error, correlation_id.clone())
+    })?;
     if active.is_some() {
         return Err(platform_boundary_error(
             correlation_id,
@@ -9619,10 +9832,9 @@ fn activate_workspace_from_start(
             false,
         ));
     }
-    let mut conversation = core
-        .conversation
-        .lock()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let mut conversation = core.conversation.lock().map_err(|error| {
+        workspace_activation_unavailable("conversation-state-lock", &error, correlation_id.clone())
+    })?;
     let runtime_generation;
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -9635,11 +9847,28 @@ fn activate_workspace_from_start(
             resource_root,
             core.credential_vault.clone(),
         )
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        .map_err(|error| {
+            workspace_activation_unavailable("runtime-bootstrap", &error, correlation_id.clone())
+        })?;
         let installations = bootstrap
             .runtime_installations(&workspace_id, &core.c4os_home)
-            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-        let runtime_production = core.runtime_production.load(correlation_id.clone())?;
+            .map_err(|error| {
+                workspace_activation_unavailable(
+                    "runtime-installations",
+                    &error,
+                    correlation_id.clone(),
+                )
+            })?;
+        let runtime_production = core
+            .runtime_production
+            .load(correlation_id.clone())
+            .map_err(|error| {
+                workspace_activation_unavailable(
+                    "runtime-publication",
+                    &error,
+                    correlation_id.clone(),
+                )
+            })?;
         // Publish the candidate policy before runtime binding or active-state
         // publication. Policy failure therefore leaves Workspace Start
         // untouched. Later runtime-start failures restore the app-only policy.
@@ -9648,31 +9877,36 @@ fn activate_workspace_from_start(
                 candidate_configuration.configuration.as_ref(),
                 now_ms,
             )
-            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
-        if core
-            .runtime
-            .bind_workspace_runtime_installations(
-                Arc::clone(&database),
-                installations.into_iter().collect(),
-                now_ms,
-            )
-            .is_err()
-        {
+            .map_err(|error| {
+                workspace_activation_unavailable("runtime-policy", &error, correlation_id.clone())
+            })?;
+        if let Err(error) = core.runtime.bind_workspace_runtime_installations(
+            Arc::clone(&database),
+            installations.into_iter().collect(),
+            now_ms,
+        ) {
+            let failure =
+                workspace_activation_unavailable("runtime-binding", &error, correlation_id.clone());
             let _ = core.runtime.reconcile_effective_configuration_policy(
                 prior_configuration.configuration.as_ref(),
                 now_ms,
             );
-            return Err(workspace_state_unavailable(correlation_id));
+            return Err(failure);
         }
         let runtime_snapshot = match core.runtime.snapshot(now_ms) {
             Ok(snapshot) => snapshot,
-            Err(_) => {
+            Err(error) => {
+                let failure = workspace_activation_unavailable(
+                    "runtime-snapshot",
+                    &error,
+                    correlation_id.clone(),
+                );
                 let _ = core.runtime.unbind_workspace(&workspace_id);
                 let _ = core.runtime.reconcile_effective_configuration_policy(
                     prior_configuration.configuration.as_ref(),
                     now_ms,
                 );
-                return Err(workspace_state_unavailable(correlation_id));
+                return Err(failure);
             }
         };
         let preferred_runtime = candidate_configuration
@@ -9683,26 +9917,55 @@ fn activate_workspace_from_start(
             &runtime_snapshot.runtimes.records,
             preferred_runtime.as_deref(),
         ) else {
+            let failure = workspace_activation_unavailable(
+                "runtime-selection",
+                &"no compatible production runtime is installed",
+                correlation_id.clone(),
+            );
             let _ = core.runtime.unbind_workspace(&workspace_id);
             let _ = core.runtime.reconcile_effective_configuration_policy(
                 prior_configuration.configuration.as_ref(),
                 now_ms,
             );
-            return Err(workspace_state_unavailable(correlation_id));
+            return Err(failure);
         };
+        if let Err(error) = advance_workspace_activation_conversation(
+            &mut restored_conversation,
+            &conversation,
+            launch_generation,
+            snapshot.generation,
+            runtime_snapshot.generation,
+        ) {
+            let failure = workspace_activation_unavailable(
+                "conversation-publication",
+                &error,
+                correlation_id.clone(),
+            );
+            let _ = core.runtime.unbind_workspace(&workspace_id);
+            let _ = core.runtime.reconcile_effective_configuration_policy(
+                prior_configuration.configuration.as_ref(),
+                now_ms,
+            );
+            return Err(failure);
+        }
         let activated_runtime = match runtime_production.activate_runtime(
             runtime_snapshot.generation,
             &runtime_id,
             now_ms,
         ) {
             Ok(activated) => activated,
-            Err(_) => {
+            Err(error) => {
+                let failure = workspace_activation_unavailable(
+                    "runtime-activation",
+                    &error,
+                    correlation_id.clone(),
+                );
                 let _ = core.runtime.unbind_workspace(&workspace_id);
                 let _ = core.runtime.reconcile_effective_configuration_policy(
                     prior_configuration.configuration.as_ref(),
                     now_ms,
                 );
-                return Err(workspace_state_unavailable(correlation_id));
+                return Err(failure);
             }
         };
         runtime_generation = activated_runtime.coordinator_generation;
@@ -9733,6 +9996,22 @@ fn activate_workspace_from_start(
                 return Err(workspace_state_unavailable(correlation_id));
             }
         };
+        if advance_workspace_activation_conversation(
+            &mut restored_conversation,
+            &conversation,
+            launch_generation,
+            snapshot.generation,
+            runtime_generation,
+        )
+        .is_err()
+        {
+            let _ = core.runtime.unbind_workspace(&workspace_id);
+            let _ = core.runtime.reconcile_effective_configuration_policy(
+                prior_configuration.configuration.as_ref(),
+                now_ms,
+            );
+            return Err(workspace_state_unavailable(correlation_id));
+        }
     }
 
     let generation = snapshot.generation.max(runtime_generation);
@@ -9795,14 +10074,28 @@ fn workspace_start_open_folder(
     request: SnapshotRequest,
     input: WorkspaceStartGrantInput,
 ) -> Result<ProtocolEnvelope<WorkspaceStartOpenSnapshot>, protocol::StructuredCoreError> {
-    validate_snapshot_request(&request)?;
-    let _operation = core
-        .conversation_operation
-        .lock()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    require_workspace_start_generation(&core, &request)?;
-    let now_ms = current_time_ms()
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    validate_snapshot_request(&request).map_err(|error| {
+        error.with_detail(
+            "stage",
+            protocol::SafeDetailValue::Text("request-validation".into()),
+        )
+    })?;
+    let _operation = core.conversation_operation.lock().map_err(|error| {
+        workspace_activation_unavailable(
+            "workspace-operation-lock",
+            &error,
+            request.correlation_id.clone(),
+        )
+    })?;
+    require_workspace_start_generation(&core, &request).map_err(|error| {
+        error.with_detail(
+            "stage",
+            protocol::SafeDetailValue::Text("workspace-generation".into()),
+        )
+    })?;
+    let now_ms = current_time_ms().map_err(|error| {
+        workspace_activation_unavailable("workspace-clock", &error, request.correlation_id.clone())
+    })?;
     let folder = take_workspace_start_picker_grant(
         &core,
         &input.picker_grant_id,
@@ -9810,24 +10103,60 @@ fn workspace_start_open_folder(
         PickerObjectKind::Folder,
         now_ms,
         request.correlation_id.clone(),
-    )?;
+    )
+    .map_err(|error| {
+        error.with_detail(
+            "stage",
+            protocol::SafeDetailValue::Text("picker-grant".into()),
+        )
+    })?;
     let display_name = folder
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
-        .ok_or_else(|| invalid_picker_selection(request.correlation_id.clone()))?;
-    let created_at = i64::try_from(now_ms / 1_000)
-        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let workspace = core::services::create_workspace_from_project(
-        &core::workspace::C4osHomeLayout::new(&core.c4os_home),
+        .ok_or_else(|| {
+            invalid_picker_selection(request.correlation_id.clone()).with_detail(
+                "stage",
+                protocol::SafeDetailValue::Text("picker-display-name".into()),
+            )
+        })?;
+    let created_at = i64::try_from(now_ms / 1_000).map_err(|error| {
+        workspace_activation_unavailable(
+            "workspace-created-at",
+            &error,
+            request.correlation_id.clone(),
+        )
+    })?;
+    let home = core::workspace::C4osHomeLayout::new(&core.c4os_home);
+    let lock_owner = workspace_start_lock_owner(now_ms);
+    let workspace = match core::services::restore_active_workspace_for_project(
+        &home,
         &folder,
-        display_name,
-        display_name,
         env!("CARGO_PKG_VERSION"),
-        workspace_start_lock_owner(now_ms),
-        created_at,
+        core::workspace::ArchiveLimits::default(),
+        lock_owner.clone(),
     )
-    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    .map_err(|error| {
+        workspace_activation_unavailable("workspace-retry", &error, request.correlation_id.clone())
+    })? {
+        Some(workspace) => workspace,
+        None => core::services::create_workspace_from_project(
+            &home,
+            &folder,
+            display_name,
+            display_name,
+            env!("CARGO_PKG_VERSION"),
+            lock_owner,
+            created_at,
+        )
+        .map_err(|error| {
+            workspace_activation_unavailable(
+                "workspace-create",
+                &error,
+                request.correlation_id.clone(),
+            )
+        })?,
+    };
     let (payload, generation) =
         activate_workspace_from_start(&core, workspace, now_ms, request.correlation_id.clone())?;
     workspace_start_open_envelope(request, payload, generation).map_err(Into::into)
@@ -17223,7 +17552,7 @@ fn detach_active_native_browser(
     };
     if let Some(identity) = identity {
         browser::native::dispatch_detach(app, identity)
-            .map_err(|_| workspace_state_unavailable(correlation_id))?;
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     }
     Ok(())
 }
@@ -19614,7 +19943,7 @@ fn conversation_begin_pending(
             false,
         ));
     }
-    let session_id = format!("chat-{}", Uuid::new_v4());
+    let session_id = new_conversation_session_id();
     let runtime_generation = core
         .runtime
         .snapshot(now_ms)
@@ -20406,7 +20735,7 @@ fn conversation_submit(
     };
     let dispatch_generation = match dispatch_generation {
         Ok(generation) => generation,
-        Err(_) => {
+        Err(_error) => {
             let mut conversation = core
                 .conversation
                 .lock()
@@ -20486,6 +20815,13 @@ fn valid_conversation_route_selection(provider_id: Option<&str>, model_id: Optio
         && model_id.is_none_or(|value| valid_conversation_identifier(value, true))
 }
 
+fn new_conversation_session_id() -> String {
+    // Workspace configuration scopes are UUID-backed. Keep the provisional
+    // identifier valid for that same scope so the blank Chat can resolve its
+    // inherited configuration before the first durable submission.
+    Uuid::new_v4().to_string()
+}
+
 fn parse_configured_model_route(value: &str) -> Option<(String, String)> {
     let (provider_id, model_id) = value.split_once("::")?;
     valid_conversation_route_selection(Some(provider_id), Some(model_id))
@@ -20505,13 +20841,18 @@ fn valid_conversation_identifier(value: &str, allow_route_separator: bool) -> bo
 #[cfg(test)]
 mod conversation_input_validation_tests {
     use super::{
-        conversation_authority_generation, parse_configured_model_route,
-        reconcile_attachment_references, resolve_conversation_provider_model,
+        ConversationApplicationState, MAX_CONVERSATION_MODELS,
+        advance_workspace_activation_conversation, bounded_conversation_models,
+        conversation_authority_generation, conversation_model_is_dispatch_viable,
+        new_conversation_session_id, parse_configured_model_route, reconcile_attachment_references,
+        reconcile_conversation_session_revision, resolve_conversation_provider_model,
         valid_conversation_identifier, valid_conversation_route_selection,
     };
+    use crate::protocol::ConversationModelSnapshot;
     use crate::runtime::capability::{
-        CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityLayer, ModelLifecycle,
-        RouteIdentity,
+        CAPABILITY_SCHEMA_VERSION, CapabilityDescriptor, CapabilityEvidence, CapabilityLayer,
+        CapabilityState, LimitConfidence, ModelLifecycle, NumericCapabilityEvidence,
+        NumericCapabilityKey, RouteIdentity,
     };
     use crate::runtime::coordinator::RuntimeCoordinatorSnapshot;
     use crate::runtime::provider::{
@@ -20532,6 +20873,146 @@ mod conversation_input_validation_tests {
         assert_eq!(conversation_authority_generation(1, 2, 3, 9, 4, 5), 9);
         assert_eq!(conversation_authority_generation(1, 2, 3, 4, 9, 5), 9);
         assert_eq!(conversation_authority_generation(1, 2, 3, 4, 5, 9), 9);
+    }
+
+    #[test]
+    fn active_session_revisions_advance_the_publication_cursor_once_per_change() {
+        let mut conversation = ConversationApplicationState::default();
+        conversation.generation = 5;
+
+        assert!(
+            reconcile_conversation_session_revision(&mut conversation, Some(("session-a", 1)), 20,)
+                .unwrap()
+        );
+        assert_eq!(conversation.generation, 21);
+        assert!(
+            !reconcile_conversation_session_revision(
+                &mut conversation,
+                Some(("session-a", 1)),
+                30,
+            )
+            .unwrap()
+        );
+        assert_eq!(conversation.generation, 21);
+        assert!(
+            reconcile_conversation_session_revision(&mut conversation, Some(("session-a", 2)), 30,)
+                .unwrap()
+        );
+        assert_eq!(conversation.generation, 31);
+        assert!(!reconcile_conversation_session_revision(&mut conversation, None, 40).unwrap());
+        assert_eq!(conversation.generation, 31);
+        assert!(
+            reconcile_conversation_session_revision(&mut conversation, Some(("session-b", 1)), 40,)
+                .unwrap()
+        );
+        assert_eq!(conversation.generation, 41);
+    }
+
+    #[test]
+    fn workspace_activation_advances_beyond_every_prior_publication_floor() {
+        let mut candidate = ConversationApplicationState::default();
+        candidate.generation = 3;
+        let mut prior = ConversationApplicationState::default();
+        prior.generation = 12;
+
+        let generation =
+            advance_workspace_activation_conversation(&mut candidate, &prior, 20, 8, 15)
+                .expect("Workspace activation generation");
+
+        assert_eq!(generation, 21);
+        assert_eq!(candidate.generation, 21);
+    }
+
+    #[test]
+    fn conversation_model_projection_is_bounded_and_retains_the_selected_route() {
+        let candidates = (0..260)
+            .map(|index| {
+                let selected = index == 259;
+                (
+                    selected,
+                    if selected { u32::MAX } else { index },
+                    ConversationModelSnapshot {
+                        provider_id: "provider-openrouter".into(),
+                        provider_name: "OpenRouter".into(),
+                        model_id: format!("model-{index:03}"),
+                        selected,
+                        available: true,
+                        supports_vision: false,
+                        supports_tools: true,
+                        supports_reasoning: false,
+                        supports_audio: false,
+                        context_tokens: 128_000,
+                    },
+                )
+            })
+            .collect();
+
+        let models = bounded_conversation_models(candidates);
+
+        assert_eq!(models.len(), MAX_CONVERSATION_MODELS);
+        assert_eq!(models[0].model_id, "model-259");
+        assert!(models[0].selected);
+        assert_eq!(models[1].model_id, "model-000");
+    }
+
+    #[test]
+    fn default_conversation_models_require_confirmed_input_and_output_limits() {
+        let supported = || CapabilityEvidence {
+            state: CapabilityState::Supported,
+            layer: CapabilityLayer::Effective,
+            source: "c4os.test.effective".into(),
+            checked_at_ms: 10,
+            expires_at_ms: Some(100),
+            constraints: Vec::new(),
+            allowed_values: Vec::new(),
+            reason: None,
+        };
+        let numeric = |maximum| NumericCapabilityEvidence {
+            evidence: supported(),
+            maximum: Some(maximum),
+            confidence: LimitConfidence::Confirmed,
+        };
+        let mut descriptor = CapabilityDescriptor {
+            schema_version: CAPABILITY_SCHEMA_VERSION,
+            layer: CapabilityLayer::Effective,
+            route: RouteIdentity {
+                provider_id: "provider-one".into(),
+                endpoint_id: "endpoint-one".into(),
+                provider_model_id: "provider-one/model-one".into(),
+                model_revision: "revision-one".into(),
+                adapter_kind: "opencode".into(),
+                adapter_version: "1.0.0".into(),
+                runtime_kind: "opencode".into(),
+                native_runtime_version: "1.18.3".into(),
+                session_configuration_sha256: format!("sha256:{}", "1".repeat(64)),
+            },
+            lifecycle: ModelLifecycle::Active,
+            features: BTreeMap::new(),
+            numeric_limits: BTreeMap::new(),
+            raw_evidence_sha256: format!("sha256:{}", "2".repeat(64)),
+        };
+
+        assert!(!conversation_model_is_dispatch_viable(&descriptor));
+        descriptor
+            .numeric_limits
+            .insert(NumericCapabilityKey::ContextTokens, numeric(128_000));
+        assert!(!conversation_model_is_dispatch_viable(&descriptor));
+        descriptor
+            .numeric_limits
+            .insert(NumericCapabilityKey::OutputTokens, numeric(8_192));
+        assert!(conversation_model_is_dispatch_viable(&descriptor));
+        descriptor.lifecycle = ModelLifecycle::Unavailable;
+        assert!(!conversation_model_is_dispatch_viable(&descriptor));
+    }
+
+    #[test]
+    fn provisional_conversation_ids_are_valid_workspace_configuration_scopes() {
+        let session_id = new_conversation_session_id();
+
+        assert_eq!(
+            uuid::Uuid::parse_str(&session_id).unwrap().to_string(),
+            session_id
+        );
     }
 
     #[test]
@@ -21911,10 +22392,33 @@ fn require_conversation_generation(
         .runtime
         .snapshot_with_capability_generation(now_ms)
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-    let conversation = core
+    let durable_sessions = core
+        .runtime
+        .durable_sessions()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let publication_floor = workspace_generation
+        .max(runtime_generation)
+        .max(runtime.generation)
+        .max(runtime.providers.generation)
+        .max(runtime.runtimes.state_generation)
+        .max(capability_generation);
+    let mut conversation = core
         .conversation
         .lock()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let active_session = conversation
+        .active_session_id
+        .as_deref()
+        .and_then(|session_id| {
+            durable_sessions
+                .iter()
+                .find(|record| record.session_id == session_id)
+        });
+    reconcile_conversation_session_revision(
+        &mut conversation,
+        active_session.map(|record| (record.session_id.as_str(), record.revision)),
+        publication_floor,
+    )?;
     let current = conversation_authority_generation(
         conversation.generation,
         workspace_generation,
@@ -21949,6 +22453,29 @@ fn conversation_authority_generation(
         .max(provider_generation)
         .max(supervisor_generation)
         .max(capability_generation)
+}
+
+/// Advances the renderer publication cursor when the active durable session
+/// changes independently in the native runtime worker. Session revisions are
+/// repository-local counters, so they cannot safely participate in the
+/// cross-domain `max` directly; observing a new revision advances the shared
+/// Conversation generation beyond the current publication floor instead.
+fn reconcile_conversation_session_revision(
+    conversation: &mut ConversationApplicationState,
+    active_session: Option<(&str, u64)>,
+    publication_floor: u64,
+) -> Result<bool, ProtocolError> {
+    let observed = active_session.map(|(session_id, revision)| (session_id.to_owned(), revision));
+    if conversation.observed_session_revision == observed {
+        return Ok(false);
+    }
+    if observed.is_none() {
+        conversation.observed_session_revision = None;
+        return Ok(false);
+    }
+    conversation.advance(publication_floor)?;
+    conversation.observed_session_revision = observed;
+    Ok(true)
 }
 
 fn take_folder_picker_grant(
@@ -22533,11 +23060,6 @@ fn build_conversation_snapshot(
     let now_ms =
         current_time_ms().map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     let workspace = active_workspace_snapshot(core, correlation_id.clone())?;
-    let state = core
-        .conversation
-        .lock()
-        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
-        .clone();
     let (runtime, capability_generation) = core
         .runtime
         .snapshot_with_capability_generation(now_ms)
@@ -22546,11 +23068,27 @@ fn build_conversation_snapshot(
         .runtime
         .durable_sessions()
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+    let publication_floor = workspace
+        .generation
+        .max(runtime.generation)
+        .max(runtime.providers.generation)
+        .max(runtime.runtimes.state_generation)
+        .max(capability_generation);
+    let mut state = core
+        .conversation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     let active_session_record = state.active_session_id.as_deref().and_then(|session_id| {
         durable_sessions
             .iter()
             .find(|record| record.session_id == session_id)
     });
+    reconcile_conversation_session_revision(
+        &mut state,
+        active_session_record.map(|record| (record.session_id.as_str(), record.revision)),
+        publication_floor,
+    )?;
+    let state = state.clone();
     let preferred_runtime_id = active_session_record
         .and_then(SessionRecord::binding)
         .map(|binding| binding.runtime_id.as_str());
@@ -22638,8 +23176,48 @@ fn build_conversation_snapshot(
                     provider
                         .selected_model_id
                         .as_ref()
+                        .filter(|model_id| {
+                            provider
+                                .models
+                                .get(*model_id)
+                                .is_some_and(|model| model.is_production_ready_at(now_ms))
+                                && effective_models
+                                    .get(&(
+                                        provider.profile.provider_id.clone(),
+                                        (*model_id).clone(),
+                                    ))
+                                    .is_some_and(conversation_model_is_dispatch_viable)
+                        })
                         .map(|model_id| (provider.profile.provider_id.clone(), model_id.clone()))
                 })
+        })
+        .or_else(|| {
+            runtime
+                .providers
+                .providers
+                .iter()
+                .filter(|provider| provider.profile.enabled)
+                .flat_map(|provider| {
+                    provider
+                        .models
+                        .values()
+                        .filter(|model| model.is_production_ready_at(now_ms))
+                        .filter_map(|model| {
+                            effective_models
+                                .get(&(
+                                    provider.profile.provider_id.clone(),
+                                    model.model_id.clone(),
+                                ))
+                                .is_some_and(conversation_model_is_dispatch_viable)
+                                .then_some((
+                                    model.recommendation_rank,
+                                    provider.profile.provider_id.clone(),
+                                    model.model_id.clone(),
+                                ))
+                        })
+                })
+                .min()
+                .map(|(_, provider_id, model_id)| (provider_id, model_id))
         });
     let workspace_record = workspace.workspace.as_ref();
     let branch_control = conversation_branch_snapshot(core, &workspace, &state, now_ms);
@@ -22719,58 +23297,95 @@ fn build_conversation_snapshot(
             })
             .collect::<Result<Vec<_>, ProtocolError>>()?,
         active_conversation: active_record,
-        models: runtime
-            .providers
-            .providers
-            .iter()
-            .filter(|provider| provider.profile.enabled)
-            .flat_map(|provider| {
-                let active_model_route = active_model_route.as_ref();
-                let effective_models = &effective_models;
-                provider
-                    .models
-                    .values()
-                    .filter(move |model| model.is_production_ready_at(now_ms))
-                    .map(move |model| {
-                        let effective = effective_models
-                            .get(&(provider.profile.provider_id.clone(), model.model_id.clone()));
-                        ConversationModelSnapshot {
-                            provider_id: provider.profile.provider_id.clone(),
-                            provider_name: provider.profile.display_name.clone(),
-                            model_id: model.model_id.clone(),
-                            selected: active_model_route.is_some_and(|(provider_id, model_id)| {
-                                provider_id == &provider.profile.provider_id
-                                    && model_id == &model.model_id
-                            }),
-                            available: effective.is_some_and(|descriptor| {
-                                descriptor.lifecycle
-                                    != runtime::capability::ModelLifecycle::Unavailable
-                            }),
-                            supports_vision: effective.is_some_and(|descriptor| {
-                                descriptor.feature_state(CapabilityKey::InputImage).usable()
-                            }),
-                            supports_tools: effective.is_some_and(|descriptor| {
-                                descriptor
-                                    .feature_state(CapabilityKey::ToolCalling)
-                                    .usable()
-                            }),
-                            supports_reasoning: effective.is_some_and(|descriptor| {
-                                descriptor.feature_state(CapabilityKey::Reasoning).usable()
-                            }),
-                            supports_audio: effective.is_some_and(|descriptor| {
-                                descriptor.feature_state(CapabilityKey::InputAudio).usable()
-                            }),
-                            context_tokens: effective
-                                .and_then(|descriptor| {
-                                    descriptor.numeric_maximum(NumericCapabilityKey::ContextTokens)
-                                })
-                                .unwrap_or(0),
-                        }
-                    })
-            })
-            .collect(),
+        models: bounded_conversation_models(
+            runtime
+                .providers
+                .providers
+                .iter()
+                .filter(|provider| provider.profile.enabled)
+                .flat_map(|provider| {
+                    let active_model_route = active_model_route.as_ref();
+                    let effective_models = &effective_models;
+                    provider
+                        .models
+                        .values()
+                        .filter(move |model| model.is_production_ready_at(now_ms))
+                        .map(move |model| {
+                            let effective = effective_models.get(&(
+                                provider.profile.provider_id.clone(),
+                                model.model_id.clone(),
+                            ));
+                            let selected =
+                                active_model_route.is_some_and(|(provider_id, model_id)| {
+                                    provider_id == &provider.profile.provider_id
+                                        && model_id == &model.model_id
+                                });
+                            (
+                                selected,
+                                model.recommendation_rank,
+                                ConversationModelSnapshot {
+                                    provider_id: provider.profile.provider_id.clone(),
+                                    provider_name: provider.profile.display_name.clone(),
+                                    model_id: model.model_id.clone(),
+                                    selected,
+                                    available: effective
+                                        .is_some_and(conversation_model_is_dispatch_viable),
+                                    supports_vision: effective.is_some_and(|descriptor| {
+                                        descriptor.feature_state(CapabilityKey::InputImage).usable()
+                                    }),
+                                    supports_tools: effective.is_some_and(|descriptor| {
+                                        descriptor
+                                            .feature_state(CapabilityKey::ToolCalling)
+                                            .usable()
+                                    }),
+                                    supports_reasoning: effective.is_some_and(|descriptor| {
+                                        descriptor.feature_state(CapabilityKey::Reasoning).usable()
+                                    }),
+                                    supports_audio: effective.is_some_and(|descriptor| {
+                                        descriptor.feature_state(CapabilityKey::InputAudio).usable()
+                                    }),
+                                    context_tokens: effective
+                                        .and_then(|descriptor| {
+                                            descriptor.numeric_maximum(
+                                                NumericCapabilityKey::ContextTokens,
+                                            )
+                                        })
+                                        .unwrap_or(0),
+                                },
+                            )
+                        })
+                })
+                .collect(),
+        ),
         branch_control,
     })
+}
+
+fn conversation_model_is_dispatch_viable(descriptor: &CapabilityDescriptor) -> bool {
+    descriptor.lifecycle != runtime::capability::ModelLifecycle::Unavailable
+        && descriptor
+            .numeric_maximum(NumericCapabilityKey::InputTokens)
+            .or_else(|| descriptor.numeric_maximum(NumericCapabilityKey::ContextTokens))
+            .is_some_and(|limit| limit > 0)
+        && descriptor
+            .numeric_maximum(NumericCapabilityKey::OutputTokens)
+            .is_some_and(|limit| limit > 0)
+}
+
+fn bounded_conversation_models(
+    mut candidates: Vec<(bool, u32, ConversationModelSnapshot)>,
+) -> Vec<ConversationModelSnapshot> {
+    candidates.sort_by(
+        |(left_selected, left_rank, left), (right_selected, right_rank, right)| {
+            right_selected
+                .cmp(left_selected)
+                .then_with(|| left_rank.cmp(right_rank))
+                .then_with(|| left.provider_id.cmp(&right.provider_id))
+                .then_with(|| left.model_id.cmp(&right.model_id))
+        },
+    );
+    candidates.truncate(MAX_CONVERSATION_MODELS);
+    candidates.into_iter().map(|(_, _, model)| model).collect()
 }
 
 fn project_attachment_snapshot(
@@ -23765,7 +24380,7 @@ fn provider_settings_snapshot(
         let mut pending = core
             .pending_provider_operations
             .lock()
-            .map_err(|_| workspace_state_unavailable(correlation_id))?;
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
         pending.retain(|_, operation| now_ms < operation.prompt.expires_at_ms);
         pending
             .values()
@@ -23777,6 +24392,28 @@ fn provider_settings_snapshot(
                 provider_name: operation.provider_name.clone(),
                 expires_at_ms: operation.prompt.expires_at_ms,
             })
+    };
+    let transient_test = {
+        let mut pending = core
+            .pending_provider_tests
+            .lock()
+            .map_err(|_| workspace_state_unavailable(correlation_id))?;
+        pending.retain(|_, test| now_ms < test.expires_at_ms);
+        pending.values().next().map(|test| {
+            let mut provider = test.provider.clone();
+            let available = provider
+                .profile
+                .credential_reference
+                .as_ref()
+                .is_none_or(|reference| test.vault.contains(reference).unwrap_or(false));
+            if !available {
+                provider.profile.credential_reference = None;
+            }
+            ProviderDraftTestSnapshot {
+                test_token: test.test_token.clone(),
+                provider,
+            }
+        })
     };
     Ok(ProviderSettingsSnapshot {
         authority: "rust-provider-service",
@@ -23792,6 +24429,7 @@ fn provider_settings_snapshot(
         default_runtime: configuration.configuration.default_runtime.clone(),
         default_environment: configuration.configuration.default_environment.clone(),
         pending_approval,
+        transient_test,
     })
 }
 
@@ -23831,6 +24469,18 @@ fn provider_credential_kind(provider_id: &str) -> String {
     )
 }
 
+fn provider_operation_coordinator_generation(
+    mediated: bool,
+    current_generation: u64,
+    expected_generation: u64,
+) -> Option<u64> {
+    if mediated || current_generation == expected_generation {
+        Some(current_generation)
+    } else {
+        None
+    }
+}
+
 fn current_provider_live_authority(
     core: &AppCoreState,
     now_ms: u64,
@@ -23852,6 +24502,151 @@ fn remove_provider_credential(
             Ok(true) | Err(_) => Err(error),
         },
     }
+}
+
+fn lock_provider_onboarding_operation(
+    operation: &Mutex<()>,
+    correlation_id: protocol::CorrelationId,
+) -> Result<std::sync::MutexGuard<'_, ()>, protocol::StructuredCoreError> {
+    operation
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id).into())
+}
+
+fn settle_provider_onboarding_commit<T, Reload, ReloadError>(
+    pending_tests: &Mutex<BTreeMap<String, T>>,
+    test_token: &str,
+    persistent_vault: Option<&security::credentials::CredentialVault>,
+    new_credential_reference: Option<&security::credentials::CredentialReference>,
+    commit_result: Result<(), protocol::StructuredCoreError>,
+    correlation_id: protocol::CorrelationId,
+    reload_after_commit: Reload,
+) -> Result<(), protocol::StructuredCoreError>
+where
+    Reload: FnOnce() -> Result<(), ReloadError>,
+{
+    if let Err(error) = commit_result {
+        if let (Some(vault), Some(reference)) = (persistent_vault, new_credential_reference)
+            && remove_provider_credential(vault, reference).is_err()
+        {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Unavailable,
+                "Provider setup failed and its new credential could not be removed securely",
+                false,
+            )
+            .into());
+        }
+        return Err(error);
+    }
+    pending_tests
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id))?
+        .remove(test_token);
+    // Onboarding is already durable. Runtime route reconciliation is allowed
+    // to quarantine stale peers, but it cannot reverse or misreport the commit.
+    let _ = reload_after_commit();
+    Ok(())
+}
+
+fn run_provider_onboarding_transaction<CommitContext, Validate, Commit, Reload, ReloadError>(
+    operation: &Mutex<()>,
+    pending_tests: &Mutex<BTreeMap<String, PendingProviderDraftTest>>,
+    persistent_vault: Option<&security::credentials::CredentialVault>,
+    test_token: &str,
+    correlation_id: protocol::CorrelationId,
+    validate: Validate,
+    commit: Commit,
+    reload_after_commit: Reload,
+) -> Result<(), protocol::StructuredCoreError>
+where
+    Validate:
+        FnOnce(&PendingProviderDraftTest) -> Result<CommitContext, protocol::StructuredCoreError>,
+    Commit: FnOnce(
+        CommitContext,
+        runtime::provider::ProviderProfile,
+        runtime::provider::ProviderRecord,
+    ) -> Result<(), protocol::StructuredCoreError>,
+    Reload: FnOnce() -> Result<(), ReloadError>,
+{
+    let _onboarding_operation =
+        lock_provider_onboarding_operation(operation, correlation_id.clone())?;
+    let pending = pending_tests
+        .lock()
+        .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?
+        .get(test_token)
+        .cloned()
+        .ok_or_else(|| {
+            platform_boundary_error(
+                correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "The successful provider test is no longer current",
+                true,
+            )
+        })?;
+    let commit_context = validate(&pending)?;
+    let final_reference = if pending
+        .provider
+        .profile
+        .authentication
+        .requires_credential()
+    {
+        let transient_reference = pending
+            .provider
+            .profile
+            .credential_reference
+            .as_ref()
+            .ok_or_else(|| workspace_state_unavailable(correlation_id.clone()))?;
+        let lease = pending
+            .vault
+            .lease_for_operation(
+                transient_reference,
+                "provider.onboarding-commit",
+                Duration::from_secs(30),
+            )
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        let mut secret = Zeroizing::new(Vec::new());
+        lease
+            .deliver_to(&mut *secret)
+            .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
+        Some(
+            persistent_vault
+                .ok_or_else(|| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::Unavailable,
+                        "Secure credential storage is unavailable",
+                        false,
+                    )
+                })?
+                .store(
+                    provider_credential_kind(&pending.provider.profile.provider_id),
+                    &secret,
+                )
+                .map_err(|_| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::Unavailable,
+                        "Secure credential storage is unavailable",
+                        true,
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
+    let mut final_profile = pending.provider.profile.clone();
+    final_profile.credential_reference = final_reference.clone();
+    let commit_result = commit(commit_context, final_profile, pending.provider);
+    settle_provider_onboarding_commit(
+        pending_tests,
+        test_token,
+        persistent_vault,
+        final_reference.as_ref(),
+        commit_result,
+        correlation_id,
+        reload_after_commit,
+    )
 }
 
 struct ProviderActionGrant {
@@ -23908,7 +24703,11 @@ fn provider_action_facts(
         scope,
         initiator: ActionInitiator::User,
         sensitivity,
-        reversibility: ActionReversibility::Reversible,
+        reversibility: if tool == "c4os.provider.delete" {
+            ActionReversibility::Destructive
+        } else {
+            ActionReversibility::Reversible
+        },
         confidence: ClassificationConfidence::Known,
         request_origin: ActionRequestOrigin::DirectUserEdit,
         repository_state: RepositoryState::NotApplicable,
@@ -23953,7 +24752,11 @@ fn prepare_provider_action(
         let mut strictest = PolicyDecision::Allow;
         for candidate in candidate_facts {
             let decision = coordinator
-                .resolve_direct_policy(&candidate, now_ms)
+                .resolve_direct_policy_with_context(
+                    &candidate,
+                    DirectIntentContext::declared_provider_boundary(),
+                    now_ms,
+                )
                 .decision;
             if decision > strictest {
                 strictest = decision;
@@ -23997,7 +24800,12 @@ fn prepare_provider_action(
         .map_err(|_| workspace_state_unavailable(correlation_id.clone()))?;
     match core
         .runtime
-        .propose_direct_action(&facts, action.clone(), now_ms)
+        .propose_direct_action_with_context(
+            &facts,
+            action.clone(),
+            DirectIntentContext::declared_provider_boundary(),
+            now_ms,
+        )
         .map_err(|_| workspace_state_unavailable(correlation_id))?
     {
         GatewayProposal::Denied { .. } => unreachable!("the selected strictest policy was checked"),
@@ -24072,7 +24880,66 @@ fn publish_pending_provider_operation(
 
 #[cfg(test)]
 mod provider_credential_kind_tests {
-    use super::provider_credential_kind;
+    use super::{
+        BTreeMap, C4OS_BUNDLE_IDENTIFIER, Mutex, PendingProviderDraftTest, ProtocolErrorCode,
+        platform_boundary_error, protocol, provider_credential_kind,
+        provider_operation_coordinator_generation, run_provider_onboarding_transaction, runtime,
+        security,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{RecvTimeoutError, sync_channel},
+    };
+    use std::time::Duration;
+
+    fn pending_provider_test(
+        test_token: &str,
+    ) -> (
+        PendingProviderDraftTest,
+        security::credentials::CredentialReference,
+    ) {
+        let vault = security::credentials::CredentialVault::session_only().unwrap();
+        let credential_reference = vault
+            .store("provider.onboarding-transient", b"fixture-secret")
+            .unwrap();
+        let profile = runtime::provider::ProviderProfile {
+            schema_version: runtime::provider::PROVIDER_SCHEMA_VERSION,
+            provider_id: "provider-onboarding-fixture".into(),
+            kind: runtime::provider::ProviderKind::OpenRouter,
+            display_name: "Onboarding fixture".into(),
+            endpoint: runtime::provider::ProviderEndpoint {
+                endpoint_id: "openrouter".into(),
+                base_url: "https://openrouter.ai/api/v1".into(),
+                api_kind: "openai-compatible".into(),
+            },
+            authentication: runtime::provider::ProviderAuthentication::Bearer,
+            credential_reference: Some(credential_reference.clone()),
+            headers: BTreeMap::new(),
+            enabled: true,
+        };
+        (
+            PendingProviderDraftTest {
+                test_token: test_token.into(),
+                vault,
+                provider: runtime::provider::ProviderRecord {
+                    profile,
+                    test_status: runtime::provider::ProviderTestStatus::Succeeded {
+                        checked_at_ms: 10,
+                    },
+                    connection_evidence: None,
+                    models: BTreeMap::new(),
+                    disabled_model_ids: Default::default(),
+                    selected_model_id: None,
+                    generation: 1,
+                },
+                expected_coordinator_generation: 0,
+                expected_provider_generation: 0,
+                expires_at_ms: 1_000,
+            },
+            credential_reference,
+        )
+    }
 
     #[test]
     fn provider_identity_becomes_a_bounded_non_secret_vault_kind() {
@@ -24084,6 +24951,244 @@ mod provider_credential_kind_tests {
                 .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') })
         );
         assert!(!kind.contains("task-00013"));
+    }
+
+    #[test]
+    fn mediated_provider_effect_uses_the_post_authorization_generation() {
+        assert_eq!(
+            provider_operation_coordinator_generation(true, 9, 8),
+            Some(9)
+        );
+        assert_eq!(provider_operation_coordinator_generation(false, 9, 8), None);
+        assert_eq!(
+            provider_operation_coordinator_generation(false, 8, 8),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn same_token_onboarding_transaction_allows_one_commit() {
+        let test_token = "provider-test:same-token";
+        let (pending, _) = pending_provider_test(test_token);
+        let operation = Arc::new(Mutex::new(()));
+        let pending_tests = Arc::new(Mutex::new(BTreeMap::from([(
+            test_token.to_owned(),
+            pending,
+        )])));
+        let persistent_vault = security::credentials::CredentialVault::session_only().unwrap();
+        let commit_count = Arc::new(AtomicUsize::new(0));
+        let (first_entered_tx, first_entered_rx) = sync_channel(1);
+        let (release_first_tx, release_first_rx) = sync_channel(1);
+        let (first_result_tx, first_result_rx) = sync_channel(1);
+        let first_operation = Arc::clone(&operation);
+        let first_pending_tests = Arc::clone(&pending_tests);
+        let first_vault = persistent_vault.clone();
+        let first_commit_count = Arc::clone(&commit_count);
+        let first = std::thread::spawn(move || {
+            let result = run_provider_onboarding_transaction(
+                &first_operation,
+                &first_pending_tests,
+                Some(&first_vault),
+                test_token,
+                protocol::CorrelationId::new("provider-onboarding-first").unwrap(),
+                |_| Ok(()),
+                move |(), _, _| {
+                    first_commit_count.fetch_add(1, Ordering::AcqRel);
+                    first_entered_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                    Ok(())
+                },
+                || Ok::<(), ()>(()),
+            );
+            first_result_tx.send(result.is_ok()).unwrap();
+        });
+        first_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+
+        let (second_attempted_tx, second_attempted_rx) = sync_channel(1);
+        let (second_result_tx, second_result_rx) = sync_channel(1);
+        let second_operation = Arc::clone(&operation);
+        let second_pending_tests = Arc::clone(&pending_tests);
+        let second_vault = persistent_vault.clone();
+        let second_commit_count = Arc::clone(&commit_count);
+        let second = std::thread::spawn(move || {
+            second_attempted_tx.send(()).unwrap();
+            let result = run_provider_onboarding_transaction(
+                &second_operation,
+                &second_pending_tests,
+                Some(&second_vault),
+                test_token,
+                protocol::CorrelationId::new("provider-onboarding-second").unwrap(),
+                |_| Ok(()),
+                move |(), _, _| {
+                    second_commit_count.fetch_add(1, Ordering::AcqRel);
+                    Ok(())
+                },
+                || Ok::<(), ()>(()),
+            );
+            second_result_tx.send(result.is_ok()).unwrap();
+        });
+        second_attempted_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            second_result_rx.recv_timeout(Duration::from_millis(50)),
+            Err(RecvTimeoutError::Timeout),
+            "the second transaction must wait before reading the pending token"
+        );
+
+        release_first_tx.send(()).unwrap();
+        assert!(
+            first_result_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+        );
+        assert!(
+            !second_result_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+            "the second transaction must observe the token consumed by the first"
+        );
+        first.join().unwrap();
+        second.join().unwrap();
+        assert_eq!(commit_count.load(Ordering::Acquire), 1);
+        assert!(pending_tests.lock().unwrap().is_empty());
+        assert_eq!(persistent_vault.metadata().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn precommit_failure_retains_transient_test_removes_new_credential_and_retries() {
+        let test_token = "provider-test:retry";
+        let (pending, transient_reference) = pending_provider_test(test_token);
+        let operation = Mutex::new(());
+        let pending_tests = Mutex::new(BTreeMap::from([(test_token.to_owned(), pending)]));
+        let persistent_vault = security::credentials::CredentialVault::session_only().unwrap();
+        let failed_reference = Arc::new(Mutex::new(None));
+        let failed_reference_capture = Arc::clone(&failed_reference);
+        let correlation_id =
+            protocol::CorrelationId::new("provider-onboarding-precommit-failure").unwrap();
+        let commit_error = platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Conflict,
+            "Injected pre-commit failure",
+            true,
+        )
+        .into();
+
+        let first_result = run_provider_onboarding_transaction(
+            &operation,
+            &pending_tests,
+            Some(&persistent_vault),
+            test_token,
+            correlation_id,
+            |_| Ok(()),
+            move |(), final_profile, _| {
+                *failed_reference_capture.lock().unwrap() = final_profile.credential_reference;
+                Err(commit_error)
+            },
+            || Ok::<(), ()>(()),
+        );
+
+        assert!(first_result.is_err());
+        let failed_reference = failed_reference.lock().unwrap().clone().unwrap();
+        assert!(!persistent_vault.contains(&failed_reference).unwrap());
+        let retained = pending_tests
+            .lock()
+            .unwrap()
+            .get(test_token)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            retained.provider.profile.credential_reference.as_ref(),
+            Some(&transient_reference)
+        );
+        assert!(retained.vault.contains(&transient_reference).unwrap());
+
+        let successful_reference = Arc::new(Mutex::new(None));
+        let successful_reference_capture = Arc::clone(&successful_reference);
+        let second_result = run_provider_onboarding_transaction(
+            &operation,
+            &pending_tests,
+            Some(&persistent_vault),
+            test_token,
+            protocol::CorrelationId::new("provider-onboarding-retry").unwrap(),
+            |_| Ok(()),
+            move |(), final_profile, _| {
+                *successful_reference_capture.lock().unwrap() = final_profile.credential_reference;
+                Ok(())
+            },
+            || Ok::<(), ()>(()),
+        );
+
+        assert!(second_result.is_ok());
+        assert!(pending_tests.lock().unwrap().is_empty());
+        let successful_reference = successful_reference.lock().unwrap().clone().unwrap();
+        assert!(persistent_vault.contains(&successful_reference).unwrap());
+    }
+
+    #[test]
+    fn durable_onboarding_consumes_test_and_ignores_route_reload_failure() {
+        let test_token = "provider-test:committed";
+        let (pending, _) = pending_provider_test(test_token);
+        let operation = Mutex::new(());
+        let pending_tests = Mutex::new(BTreeMap::from([(test_token.to_owned(), pending)]));
+        let persistent_vault = security::credentials::CredentialVault::session_only().unwrap();
+        let committed_reference = Arc::new(Mutex::new(None));
+        let committed_reference_capture = Arc::clone(&committed_reference);
+        let reload_called = Arc::new(AtomicBool::new(false));
+        let reload_observer = Arc::clone(&reload_called);
+
+        let result = run_provider_onboarding_transaction(
+            &operation,
+            &pending_tests,
+            Some(&persistent_vault),
+            test_token,
+            protocol::CorrelationId::new("provider-onboarding-postcommit-reload").unwrap(),
+            |_| Ok(()),
+            move |(), final_profile, _| {
+                *committed_reference_capture.lock().unwrap() = final_profile.credential_reference;
+                Ok(())
+            },
+            move || -> Result<(), &'static str> {
+                reload_observer.store(true, Ordering::Release);
+                Err("injected route reload failure")
+            },
+        );
+
+        assert!(result.is_ok());
+        assert!(pending_tests.lock().unwrap().is_empty());
+        let committed_reference = committed_reference.lock().unwrap().clone().unwrap();
+        assert!(persistent_vault.contains(&committed_reference).unwrap());
+        assert!(reload_called.load(Ordering::Acquire));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_service_identity_matches_the_tauri_bundle_identifier() {
+        use crate::security::credentials::MacOsInstallationKeyStore;
+
+        let configuration: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("Tauri config");
+        assert_eq!(
+            configuration
+                .get("identifier")
+                .and_then(|value| value.as_str()),
+            Some(C4OS_BUNDLE_IDENTIFIER),
+        );
+        let key_store = MacOsInstallationKeyStore::new(C4OS_BUNDLE_IDENTIFIER);
+        assert_eq!(
+            key_store.service_name(),
+            "com.c4os.desktop.credential-vault"
+        );
+        assert_eq!(key_store.account_name(), "installation-master-key-v1");
+        assert_eq!(key_store.read_timeout(), Duration::from_secs(2));
+
+        let recovery_store =
+            MacOsInstallationKeyStore::new_for_interactive_recovery(C4OS_BUNDLE_IDENTIFIER);
+        assert_eq!(recovery_store.service_name(), key_store.service_name());
+        assert_eq!(recovery_store.account_name(), key_store.account_name());
+        assert_eq!(recovery_store.read_timeout(), Duration::from_secs(30));
     }
 }
 
@@ -24118,6 +25223,69 @@ fn provider_accept_session_credentials(
     let now_ms = current_time_ms()
         .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
     provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+}
+
+#[tauri::command]
+fn provider_retry_secure_storage(
+    app: tauri::AppHandle,
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    if core.credential_protection == ProviderCredentialProtection::InstallationKey {
+        return provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use security::credentials::{
+            CredentialVault, CredentialVaultError, MacOsInstallationKeyStore,
+        };
+        let key_store = MacOsInstallationKeyStore::new_for_interactive_recovery(
+            &core.credential_keychain_bundle,
+        );
+        match CredentialVault::open_or_create_with_installation_key(
+            core.c4os_home.join("vault/credentials.vault"),
+            &key_store,
+        ) {
+            Ok(_) => app.restart(),
+            Err(error)
+                if matches!(
+                    &error,
+                    CredentialVaultError::KeychainUnavailable { .. }
+                        | CredentialVaultError::KeychainTimedOut { .. }
+                ) =>
+            {
+                eprintln!("C4OS secure storage retry failed: {error}");
+                Err(platform_boundary_error(
+                    request.correlation_id,
+                    ProtocolErrorCode::Unavailable,
+                    "macOS secure storage remains unavailable; retry or choose session-only credentials",
+                    true,
+                )
+                .into())
+            }
+            Err(_) => Err(platform_boundary_error(
+                request.correlation_id,
+                ProtocolErrorCode::Unavailable,
+                "macOS secure storage could not be reopened safely",
+                true,
+            )
+            .into()),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::Unavailable,
+            "macOS secure storage retry is unavailable on this target",
+            false,
+        )
+        .into())
+    }
 }
 
 #[tauri::command]
@@ -24557,14 +25725,17 @@ fn execute_provider_connection_probe(
     if let Some(application) = core.runtime_production.published() {
         application
             .reload_active_provider_routes(now_ms)
-            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            .map_err(|error| {
+                eprintln!("C4OS provider route reload failed: {error}");
+                workspace_state_unavailable(request.correlation_id.clone())
+            })?;
     }
     tested.map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
     Ok(())
 }
 
 #[tauri::command]
-fn provider_test_connection(
+fn provider_refresh_connection(
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
     input: ProviderIdentityInput,
@@ -24713,9 +25884,16 @@ fn provider_test_connection(
                     .runtime
                     .coordinator()
                     .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
-                let credential_resolution =
-                    coordinator.resolve_direct_policy(&credential_facts, now_ms);
-                let network_resolution = coordinator.resolve_direct_policy(&facts, now_ms);
+                let credential_resolution = coordinator.resolve_direct_policy_with_context(
+                    &credential_facts,
+                    DirectIntentContext::declared_provider_boundary(),
+                    now_ms,
+                );
+                let network_resolution = coordinator.resolve_direct_policy_with_context(
+                    &facts,
+                    DirectIntentContext::declared_provider_boundary(),
+                    now_ms,
+                );
                 if credential_resolution.decision == PolicyDecision::Deny {
                     return Err(platform_boundary_error(
                         request.correlation_id.clone(),
@@ -24731,7 +25909,12 @@ fn provider_test_connection(
             }
             let proposal = core
                 .runtime
-                .propose_direct_action(&facts, action.clone(), now_ms)
+                .propose_direct_action_with_context(
+                    &facts,
+                    action.clone(),
+                    DirectIntentContext::declared_provider_boundary(),
+                    now_ms,
+                )
                 .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
             let (token, prompt_id) = match proposal {
                 GatewayProposal::Denied { .. } => {
@@ -24751,7 +25934,7 @@ fn provider_test_connection(
                         operation: ProviderApprovalOperation::TestConnection,
                         provider_id: input.provider_id.clone(),
                         provider_name: profile.display_name.clone(),
-                        payload: PendingProviderPayload::TestConnection(input.clone()),
+                        payload: PendingProviderPayload::LegacyTestConnection(input.clone()),
                     }));
                 }
             };
@@ -24777,6 +25960,401 @@ fn provider_test_connection(
         Ok(None) => {}
     }
     provider_snapshot_envelope(&core, request, now_ms)
+}
+
+fn provider_transient_profile(
+    core: &AppCoreState,
+    current: &runtime::coordinator::RuntimeCoordinatorSnapshot,
+    mut input: ProviderProfileInput,
+    correlation_id: protocol::CorrelationId,
+) -> Result<
+    (
+        security::credentials::CredentialVault,
+        runtime::provider::ProviderProfile,
+    ),
+    protocol::StructuredCoreError,
+> {
+    let submitted_secret = input.secret.take().map(Zeroizing::new);
+    if submitted_secret.as_ref().is_some_and(|secret| {
+        secret.is_empty()
+            || secret.len() > 64 * 1024
+            || secret
+                .bytes()
+                .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'"' | b'\\'))
+    }) || (!input.authentication.requires_credential() && submitted_secret.is_some())
+    {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The provider credential is invalid",
+            false,
+        )
+        .into());
+    }
+    if submitted_secret.as_ref().is_some_and(|secret| {
+        input
+            .headers
+            .values()
+            .any(|value| value.contains(secret.as_str()))
+    }) {
+        return Err(platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Provider credentials cannot be stored in literal headers",
+            false,
+        )
+        .into());
+    }
+
+    let transient_vault = security::credentials::CredentialVault::session_only().map_err(|_| {
+        platform_boundary_error(
+            correlation_id.clone(),
+            ProtocolErrorCode::Unavailable,
+            "Transient secure credential storage is unavailable",
+            true,
+        )
+    })?;
+    let credential_reference = if input.authentication.requires_credential() {
+        if core
+            .credential_fallback_required
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(platform_boundary_error(
+                correlation_id,
+                ProtocolErrorCode::Conflict,
+                "Retry secure storage or explicitly choose session-only credentials before testing",
+                false,
+            )
+            .into());
+        }
+        if let Some(secret) = submitted_secret.as_ref() {
+            Some(
+                transient_vault
+                    .store(
+                        provider_credential_kind(&input.provider_id),
+                        secret.as_bytes(),
+                    )
+                    .map_err(|_| {
+                        platform_boundary_error(
+                            correlation_id.clone(),
+                            ProtocolErrorCode::Unavailable,
+                            "Transient secure credential storage is unavailable",
+                            true,
+                        )
+                    })?,
+            )
+        } else {
+            let existing = current
+                .providers
+                .providers
+                .iter()
+                .find(|record| record.profile.provider_id == input.provider_id)
+                .filter(|record| {
+                    record.profile.kind == input.kind
+                        && record.profile.endpoint == input.endpoint
+                        && record.profile.authentication == input.authentication
+                        && record.profile.headers == input.headers
+                })
+                .and_then(|record| record.profile.credential_reference.as_ref())
+                .ok_or_else(|| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::InvalidPayload,
+                        "Enter the API key for the exact provider settings being tested",
+                        false,
+                    )
+                })?;
+            let durable_vault = core.credential_vault.as_ref().ok_or_else(|| {
+                platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::Unavailable,
+                    "Secure credential storage is unavailable",
+                    true,
+                )
+            })?;
+            let lease = durable_vault
+                .lease_for_operation(
+                    existing,
+                    "provider.transient-test-copy",
+                    Duration::from_secs(30),
+                )
+                .map_err(|_| {
+                    platform_boundary_error(
+                        correlation_id.clone(),
+                        ProtocolErrorCode::Unavailable,
+                        "The stored provider credential is unavailable",
+                        true,
+                    )
+                })?;
+            let mut copied = Zeroizing::new(Vec::new());
+            lease.deliver_to(&mut *copied).map_err(|_| {
+                platform_boundary_error(
+                    correlation_id.clone(),
+                    ProtocolErrorCode::Unavailable,
+                    "The stored provider credential is unavailable",
+                    true,
+                )
+            })?;
+            Some(
+                transient_vault
+                    .store(provider_credential_kind(&input.provider_id), &copied)
+                    .map_err(|_| {
+                        platform_boundary_error(
+                            correlation_id.clone(),
+                            ProtocolErrorCode::Unavailable,
+                            "Transient secure credential storage is unavailable",
+                            true,
+                        )
+                    })?,
+            )
+        }
+    } else {
+        None
+    };
+    let profile = runtime::provider::ProviderProfile {
+        schema_version: runtime::provider::PROVIDER_SCHEMA_VERSION,
+        provider_id: input.provider_id.clone(),
+        kind: input.kind,
+        display_name: input.display_name.clone(),
+        endpoint: input.endpoint.clone(),
+        authentication: input.authentication.clone(),
+        credential_reference,
+        headers: input.headers.clone(),
+        enabled: input.enabled,
+    };
+    profile.validate().map_err(|_| {
+        platform_boundary_error(
+            correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "The provider request is invalid",
+            false,
+        )
+    })?;
+    Ok((transient_vault, profile))
+}
+
+fn execute_provider_draft_connection_probe(
+    core: &AppCoreState,
+    request: &SnapshotRequest,
+    input: ProviderProfileInput,
+    grant: ProviderActionGrant,
+    now_ms: u64,
+) -> Result<(), protocol::StructuredCoreError> {
+    let lease = core
+        .runtime
+        .begin_direct_action_effect(
+            &grant.token,
+            &grant.action,
+            grant.live,
+            grant.prompt_id.as_deref(),
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    let expected_coordinator_generation = input.expected_coordinator_generation;
+    let expected_provider_generation = input.expected_provider_generation;
+    let tested = (|| {
+        let (transient_vault, profile) =
+            provider_transient_profile(core, &current, input, request.correlation_id.clone())?;
+        let mut service = runtime::provider::ProviderService::new();
+        service.save_profile(profile, 0).map_err(|_| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::InvalidPayload,
+                "The provider request is invalid",
+                false,
+            )
+        })?;
+        let mut connectivity = runtime::provider::CurlProviderConnectivity::new("/usr/bin/curl")
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let mut probe = runtime::provider::DirectProviderProbe::new(
+            &transient_vault,
+            &mut connectivity,
+            now_ms,
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        service
+            .test_provider(
+                &service.snapshot().providers[0].profile.provider_id.clone(),
+                1,
+                now_ms,
+                &mut probe,
+            )
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let provider = service
+            .snapshot()
+            .providers
+            .into_iter()
+            .next()
+            .ok_or_else(|| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let test_token = format!("provider-test:{}", Uuid::new_v4().as_simple());
+        Ok::<_, protocol::StructuredCoreError>(PendingProviderDraftTest {
+            test_token,
+            vault: transient_vault,
+            provider,
+            expected_coordinator_generation,
+            expected_provider_generation,
+            expires_at_ms: now_ms.saturating_add(PROVIDER_DRAFT_TEST_TTL_MS),
+        })
+    })();
+    let succeeded = tested.as_ref().is_ok_and(|pending| {
+        matches!(
+            pending.provider.test_status,
+            runtime::provider::ProviderTestStatus::Succeeded { .. }
+                | runtime::provider::ProviderTestStatus::SucceededNoUsableModels { .. }
+        )
+    });
+    core.runtime
+        .complete_direct_action_effect(
+            lease,
+            NormalizedActionResult {
+                status: if succeeded {
+                    NormalizedActionStatus::Succeeded
+                } else {
+                    NormalizedActionStatus::Failed
+                },
+                result_code: if succeeded {
+                    "provider-draft-test-completed"
+                } else {
+                    "provider-draft-test-failed"
+                }
+                .into(),
+                exit_code: None,
+                changed_targets: Vec::new(),
+                output_sha256: None,
+                completed_at_ms: now_ms.saturating_add(1),
+            },
+        )
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    let mut pending = tested?;
+    pending.expected_coordinator_generation = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?
+        .generation;
+    let token = pending.test_token.clone();
+    let mut tests = core
+        .pending_provider_tests
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    tests.clear();
+    tests.insert(token, pending);
+    Ok(())
+}
+
+#[tauri::command]
+fn provider_test_connection(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderProfileInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_no_pending_provider_operation(&core, now_ms, request.correlation_id.clone())?;
+    let current = core
+        .runtime
+        .snapshot(now_ms)
+        .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+    if current.generation != input.expected_coordinator_generation
+        || current.providers.generation != input.expected_provider_generation
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::StaleGeneration,
+            "Provider state changed before the connection test",
+            true,
+        )
+        .into());
+    }
+    core.pending_provider_tests
+        .lock()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .clear();
+    let provider_id = input.provider_id.clone();
+    let provider_name = input.display_name.clone();
+    let target = input.endpoint.base_url.clone();
+    let has_credential = input.authentication.requires_credential();
+    let target_version = sha256_bytes(
+        serde_json::to_vec(&serde_json::json!({
+            "providerId": input.provider_id,
+            "kind": input.kind,
+            "endpoint": input.endpoint,
+            "authentication": input.authentication,
+            "headers": input.headers,
+            "enabled": input.enabled,
+            "hasSubmittedCredential": input.secret.as_ref().is_some_and(|secret| !secret.is_empty()),
+        }))
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+        .as_slice(),
+    );
+    let mut candidate_facts = vec![provider_action_facts(
+        "network.retrieve",
+        "c4os.provider.test",
+        BTreeSet::from([ActionEffect::Read]),
+        ActionSurface::Network,
+        ActionScope::Remote,
+        if has_credential {
+            ActionSensitivity::Credential
+        } else {
+            ActionSensitivity::Ordinary
+        },
+        &target,
+        has_credential,
+    )];
+    let mut requested_authority = BTreeSet::from(["network.retrieve".into()]);
+    if has_credential {
+        candidate_facts.push(provider_action_facts(
+            "credential.use",
+            "c4os.provider.test",
+            BTreeSet::from([ActionEffect::Read]),
+            ActionSurface::Credential,
+            ActionScope::System,
+            ActionSensitivity::Credential,
+            &target,
+            true,
+        ));
+        requested_authority.insert("credential.use".into());
+    }
+    match prepare_provider_action(
+        &core,
+        "c4os.provider.test",
+        requested_authority,
+        serde_json::json!({
+            "providerId": provider_id,
+            "endpointSha256": sha256_bytes(target.as_bytes()),
+            "hasCredential": has_credential,
+        }),
+        target,
+        target_version,
+        candidate_facts,
+        now_ms,
+        request.correlation_id.clone(),
+    )? {
+        ProviderActionPreparation::Authorized(grant) => {
+            execute_provider_draft_connection_probe(&core, &request, input, grant, now_ms)?;
+            provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+        }
+        ProviderActionPreparation::Pending { prompt, action } => {
+            publish_pending_provider_operation(
+                &core,
+                request,
+                now_ms,
+                PendingProviderOperation {
+                    prompt,
+                    action,
+                    operation: ProviderApprovalOperation::TestConnection,
+                    provider_id,
+                    provider_name,
+                    payload: PendingProviderPayload::TestConnection(input),
+                },
+            )
+        }
+    }
 }
 
 #[tauri::command]
@@ -24826,11 +26404,11 @@ fn provider_set_models_enabled(
     provider_snapshot_envelope(&core, request, now_ms)
 }
 
-#[tauri::command]
-fn provider_complete_onboarding(
+#[allow(dead_code)]
+fn provider_complete_onboarding_legacy(
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
-    input: ProviderOnboardingInput,
+    input: LegacyProviderOnboardingInput,
 ) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
     validate_snapshot_request(&request)?;
     require_provider_input_generation(&request, input.expected_provider_generation)?;
@@ -24935,6 +26513,276 @@ fn provider_complete_onboarding(
 }
 
 #[tauri::command]
+fn provider_complete_onboarding(
+    core: tauri::State<'_, AppCoreState>,
+    request: SnapshotRequest,
+    input: ProviderOnboardingInput,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    if input.runtime_id != "opencode"
+        || input.environment_id != "local"
+        || input.test_token.trim().is_empty()
+        || input.test_token.len() > protocol::MAX_IDENTIFIER_BYTES
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Onboarding requires a valid tested provider, OpenCode, and Local environment",
+            false,
+        )
+        .into());
+    }
+    let now_ms = current_time_ms()
+        .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+    require_no_pending_provider_operation(&core, now_ms, request.correlation_id.clone())?;
+    let (provider_id, provider_name, requires_credential, target_version) = {
+        let tests = core
+            .pending_provider_tests
+            .lock()
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+        let pending = tests.get(&input.test_token).ok_or_else(|| {
+            platform_boundary_error(
+                request.correlation_id.clone(),
+                ProtocolErrorCode::Conflict,
+                "The successful provider test is no longer current",
+                true,
+            )
+        })?;
+        let profile = &pending.provider.profile;
+        let target_version = sha256_bytes(
+            serde_json::to_vec(&serde_json::json!({
+                "providerId": profile.provider_id,
+                "kind": profile.kind,
+                "endpoint": profile.endpoint,
+                "authentication": profile.authentication,
+                "headers": profile.headers,
+                "modelId": input.model_id,
+                "runtimeId": input.runtime_id,
+                "environmentId": input.environment_id,
+            }))
+            .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+            .as_slice(),
+        );
+        (
+            profile.provider_id.clone(),
+            profile.display_name.clone(),
+            profile.authentication.requires_credential(),
+            target_version,
+        )
+    };
+    if !requires_credential {
+        return provider_complete_onboarding_unmediated(&core, request, input, now_ms, false);
+    }
+    let facts = provider_action_facts(
+        "credential.add",
+        "c4os.provider.complete-onboarding",
+        BTreeSet::from([ActionEffect::Create]),
+        ActionSurface::Credential,
+        ActionScope::System,
+        ActionSensitivity::Credential,
+        &provider_id,
+        false,
+    );
+    match prepare_provider_action(
+        &core,
+        "c4os.provider.complete-onboarding",
+        BTreeSet::from(["credential.add".into()]),
+        serde_json::json!({
+            "providerId": provider_id,
+            "modelId": input.model_id,
+            "runtimeId": input.runtime_id,
+            "environmentId": input.environment_id,
+            "credentialEffect": ActionEffect::Create,
+        }),
+        provider_id.clone(),
+        target_version,
+        vec![facts],
+        now_ms,
+        request.correlation_id.clone(),
+    )? {
+        ProviderActionPreparation::Authorized(grant) => {
+            execute_provider_action(&core, grant, now_ms, request.correlation_id.clone(), || {
+                provider_complete_onboarding_unmediated(&core, request.clone(), input, now_ms, true)
+                    .map(|_| ())
+            })?;
+            provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+        }
+        ProviderActionPreparation::Pending { prompt, action } => {
+            publish_pending_provider_operation(
+                &core,
+                request,
+                now_ms,
+                PendingProviderOperation {
+                    prompt,
+                    action,
+                    operation: ProviderApprovalOperation::CompleteOnboarding,
+                    provider_id,
+                    provider_name,
+                    payload: PendingProviderPayload::CompleteOnboarding(input),
+                },
+            )
+        }
+    }
+}
+
+fn provider_complete_onboarding_unmediated(
+    core: &AppCoreState,
+    request: SnapshotRequest,
+    input: ProviderOnboardingInput,
+    now_ms: u64,
+    mediated: bool,
+) -> Result<ProtocolEnvelope<ProviderSettingsSnapshot>, protocol::StructuredCoreError> {
+    validate_snapshot_request(&request)?;
+    require_provider_input_generation(&request, input.expected_provider_generation)?;
+    if input.runtime_id != "opencode"
+        || input.environment_id != "local"
+        || input.test_token.trim().is_empty()
+        || input.test_token.len() > protocol::MAX_IDENTIFIER_BYTES
+    {
+        return Err(platform_boundary_error(
+            request.correlation_id,
+            ProtocolErrorCode::InvalidPayload,
+            "Onboarding requires a valid tested provider, OpenCode, and Local environment",
+            false,
+        )
+        .into());
+    }
+    let persistent_vault = core.credential_vault.as_ref();
+    run_provider_onboarding_transaction(
+        &core.provider_onboarding_operation,
+        &core.pending_provider_tests,
+        persistent_vault,
+        &input.test_token,
+        request.correlation_id.clone(),
+        |pending| {
+            let current = core
+                .runtime
+                .snapshot(now_ms)
+                .map_err(|error| provider_boundary_error(error, request.correlation_id.clone()))?;
+            let commit_coordinator_generation = provider_operation_coordinator_generation(
+                mediated,
+                current.generation,
+                input.expected_coordinator_generation,
+            );
+            if now_ms >= pending.expires_at_ms
+                || pending.expected_coordinator_generation != input.expected_coordinator_generation
+                || pending.expected_provider_generation != input.expected_provider_generation
+                || commit_coordinator_generation.is_none()
+                || current.providers.generation != input.expected_provider_generation
+                || !matches!(
+                    pending.provider.test_status,
+                    runtime::provider::ProviderTestStatus::Succeeded { .. }
+                )
+                || !pending
+                    .provider
+                    .models
+                    .get(&input.model_id)
+                    .is_some_and(|model| model.is_production_ready_at(now_ms))
+            {
+                return Err(platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Conflict,
+                    "The selected provider model must pass the latest test before continuing",
+                    true,
+                )
+                .into());
+            }
+            Ok(commit_coordinator_generation.expect("validated provider coordinator generation"))
+        },
+        |commit_coordinator_generation, final_profile, pending_provider| {
+            let configuration = core
+                .configuration
+                .lock()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let before_snapshot = configuration
+                .snapshot()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            if before_snapshot.generation != input.expected_configuration_generation {
+                return Err(platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::StaleGeneration,
+                    "Configuration changed before onboarding could be completed",
+                    true,
+                )
+                .into());
+            }
+            let before_toml = configuration
+                .last_known_good()
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?
+                .map(|record| record.canonical_toml)
+                .unwrap_or_else(|| {
+                    toml::to_string(&core::configuration::ConfigurationDocument::default())
+                        .expect("default app configuration serializes")
+                });
+            let mut document =
+                toml::from_str::<core::configuration::ConfigurationDocument>(&before_toml)
+                    .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            document.model_route =
+                Some(format!("{}::{}", final_profile.provider_id, input.model_id));
+            document.default_runtime = Some(input.runtime_id.clone());
+            document.default_environment = Some(input.environment_id.clone());
+            let proposed_toml = toml::to_string(&document)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let activated_at = i64::try_from(now_ms / 1_000)
+                .map_err(|_| workspace_state_unavailable(request.correlation_id.clone()))?;
+            let update = configuration
+                .save(&proposed_toml, before_snapshot.generation, activated_at)
+                .map_err(|error| {
+                    provider_onboarding_configuration_save_error(
+                        error,
+                        request.correlation_id.clone(),
+                    )
+                })?;
+            let configuration_changed = matches!(
+                update,
+                core::configuration::ConfigurationUpdate::Activated { .. }
+            );
+            if matches!(
+                update,
+                core::configuration::ConfigurationUpdate::Rejected { .. }
+            ) {
+                return Err(platform_boundary_error(
+                    request.correlation_id.clone(),
+                    ProtocolErrorCode::Conflict,
+                    "The C4OS configuration must be corrected before provider setup can be saved",
+                    false,
+                )
+                .into());
+            }
+            let tested_generation = pending_provider.generation;
+            let result = core.runtime.commit_tested_provider_onboarding(
+                commit_coordinator_generation,
+                final_profile,
+                pending_provider,
+                &input.model_id,
+                input.expected_provider_generation,
+                tested_generation,
+                now_ms,
+            );
+            if let Err(error) = result {
+                if configuration_changed && let Ok(current) = configuration.snapshot() {
+                    let _ = configuration.save(&before_toml, current.generation, activated_at);
+                }
+                return Err(provider_boundary_error(error, request.correlation_id.clone()).into());
+            }
+            Ok(())
+        },
+        || -> Result<(), ()> {
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            if let Some(application) = core.runtime_production.published() {
+                return application
+                    .reload_active_provider_routes(now_ms)
+                    .map(|_| ())
+                    .map_err(|_| ());
+            }
+            Ok(())
+        },
+    )?;
+    provider_snapshot_envelope(&core, request, now_ms)
+}
+
+#[tauri::command]
 fn provider_delete_profile(
     core: tauri::State<'_, AppCoreState>,
     request: SnapshotRequest,
@@ -24977,7 +26825,7 @@ fn provider_delete_profile(
         return provider_delete_profile_unmediated(&core, request, input, now_ms, false);
     }
     let facts = provider_action_facts(
-        "credential.add",
+        "credential.remove",
         "c4os.provider.delete",
         BTreeSet::from([ActionEffect::Delete]),
         ActionSurface::Credential,
@@ -24989,7 +26837,7 @@ fn provider_delete_profile(
     match prepare_provider_action(
         &core,
         "c4os.provider.delete",
-        BTreeSet::from(["credential.add".into()]),
+        BTreeSet::from(["credential.remove".into()]),
         serde_json::json!({
             "providerId": input.provider_id,
             "credentialEffect": ActionEffect::Delete,
@@ -25268,13 +27116,42 @@ fn provider_answer_approval(
                     )?;
                     provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
                 }
-                PendingProviderPayload::TestConnection(provider_input) => {
+                PendingProviderPayload::LegacyTestConnection(provider_input) => {
                     execute_provider_connection_probe(
                         &core,
                         &request,
                         &provider_input,
                         grant,
                         now_ms,
+                    )?;
+                    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+                }
+                PendingProviderPayload::TestConnection(provider_input) => {
+                    execute_provider_draft_connection_probe(
+                        &core,
+                        &request,
+                        provider_input,
+                        grant,
+                        now_ms,
+                    )?;
+                    provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
+                }
+                PendingProviderPayload::CompleteOnboarding(provider_input) => {
+                    execute_provider_action(
+                        &core,
+                        grant,
+                        now_ms,
+                        request.correlation_id.clone(),
+                        || {
+                            provider_complete_onboarding_unmediated(
+                                &core,
+                                request.clone(),
+                                provider_input,
+                                now_ms,
+                                true,
+                            )
+                            .map(|_| ())
+                        },
                     )?;
                     provider_snapshot_envelope(&core, request, now_ms).map_err(Into::into)
                 }
@@ -25358,6 +27235,45 @@ fn configuration_settings_envelope(
 ) -> Result<ProtocolEnvelope<ConfigurationSettingsSnapshot>, ProtocolError> {
     let payload = configuration_settings_snapshot(core, now_ms, request.correlation_id.clone())?;
     protocol::snapshot_envelope(request, StateGeneration(payload.generation), payload)
+}
+
+fn provider_onboarding_configuration_save_error(
+    error: core::services::ConfigurationPersistenceError,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    match error {
+        core::services::ConfigurationPersistenceError::Configuration(
+            core::configuration::ConfigurationError::StaleGeneration(_),
+        ) => ProtocolError::new(
+            ProtocolErrorCode::StaleGeneration,
+            "Configuration changed before provider setup could be saved. Press Continue again",
+            true,
+        )
+        .with_correlation(correlation_id),
+        core::services::ConfigurationPersistenceError::Configuration(
+            core::configuration::ConfigurationError::ExternalReplacement(_),
+        ) => ProtocolError::new(
+            ProtocolErrorCode::Conflict,
+            "The C4OS configuration file changed outside the app and must be reviewed before provider setup can continue",
+            false,
+        )
+        .with_correlation(correlation_id),
+        core::services::ConfigurationPersistenceError::RecoveryRequired
+        | core::services::ConfigurationPersistenceError::PolicyActivation => {
+            ProtocolError::new(
+                ProtocolErrorCode::Unavailable,
+                "C4OS configuration recovery is required before provider setup can continue",
+                false,
+            )
+            .with_correlation(correlation_id)
+        }
+        _ => ProtocolError::new(
+            ProtocolErrorCode::Unavailable,
+            "Provider setup could not be saved. Press Continue to retry",
+            true,
+        )
+        .with_correlation(correlation_id),
+    }
 }
 
 fn configuration_settings_save_error(
@@ -27980,6 +29896,7 @@ fn current_time_ms() -> Result<u64, std::io::Error> {
 }
 
 const DEBUG_ACCEPTANCE_HOME_ARGUMENT: &str = "--c4os-acceptance-home";
+const DEBUG_ACCEPTANCE_KEYCHAIN_BUNDLE_ARGUMENT: &str = "--c4os-acceptance-keychain-bundle";
 
 fn application_resource_dir_for_startup(
     resolved_resource_dir: Result<PathBuf, tauri::Error>,
@@ -28023,6 +29940,68 @@ fn c4os_home_for_startup(default_home: PathBuf) -> Result<PathBuf, std::io::Erro
         ));
     }
     Ok(default_home)
+}
+
+fn keychain_bundle_for_startup(
+    debug_acceptance_home_active: bool,
+) -> Result<String, std::io::Error> {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(bundle) = debug_acceptance_keychain_bundle_from_args()? {
+            if !debug_acceptance_home_active {
+                return Err(std::io::Error::other(
+                    "the native acceptance Keychain bundle requires an acceptance home",
+                ));
+            }
+            return Ok(bundle);
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    if std::env::args_os().any(|argument| argument == DEBUG_ACCEPTANCE_KEYCHAIN_BUNDLE_ARGUMENT) {
+        return Err(std::io::Error::other(
+            "the native acceptance Keychain bundle is unavailable in release builds",
+        ));
+    }
+    Ok(C4OS_BUNDLE_IDENTIFIER.into())
+}
+
+#[cfg(debug_assertions)]
+fn debug_acceptance_keychain_bundle_from_args() -> Result<Option<String>, std::io::Error> {
+    let mut arguments = std::env::args_os().skip(1);
+    let mut selected = None;
+    while let Some(argument) = arguments.next() {
+        if argument != DEBUG_ACCEPTANCE_KEYCHAIN_BUNDLE_ARGUMENT {
+            continue;
+        }
+        if selected.is_some() {
+            return Err(std::io::Error::other(
+                "the native acceptance Keychain bundle may be supplied only once",
+            ));
+        }
+        let value = arguments.next().ok_or_else(|| {
+            std::io::Error::other("the native acceptance Keychain bundle requires a value")
+        })?;
+        let value = value.into_string().map_err(|_| {
+            std::io::Error::other("the native acceptance Keychain bundle must be valid UTF-8")
+        })?;
+        selected = Some(validate_debug_acceptance_keychain_bundle(&value)?);
+    }
+    Ok(selected)
+}
+
+#[cfg(debug_assertions)]
+fn validate_debug_acceptance_keychain_bundle(value: &str) -> Result<String, std::io::Error> {
+    if !value.starts_with("dev.c4os.live-test.")
+        || value.len() > 120
+        || value
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-')))
+    {
+        return Err(std::io::Error::other(
+            "the native acceptance Keychain bundle must use a bounded dev.c4os.live-test namespace",
+        ));
+    }
+    Ok(value.into())
 }
 
 #[cfg(debug_assertions)]
@@ -28091,7 +30070,7 @@ fn validate_debug_acceptance_home(_path: &Path) -> Result<PathBuf, std::io::Erro
 
 #[cfg(all(test, debug_assertions, unix))]
 mod debug_acceptance_home_tests {
-    use super::validate_debug_acceptance_home;
+    use super::{validate_debug_acceptance_home, validate_debug_acceptance_keychain_bundle};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
@@ -28110,6 +30089,22 @@ mod debug_acceptance_home_tests {
         fs::set_permissions(&canonical, fs::Permissions::from_mode(0o755))
             .expect("loosen acceptance permissions");
         assert!(validate_debug_acceptance_home(&canonical).is_err());
+    }
+
+    #[test]
+    fn disposable_keychain_bundle_requires_the_live_test_namespace() {
+        assert_eq!(
+            validate_debug_acceptance_keychain_bundle("dev.c4os.live-test.task-00016")
+                .expect("accepted disposable namespace"),
+            "dev.c4os.live-test.task-00016",
+        );
+        assert!(
+            validate_debug_acceptance_keychain_bundle("com.c4os.desktop").is_err(),
+            "production-looking identities must not be accepted as disposable",
+        );
+        assert!(
+            validate_debug_acceptance_keychain_bundle("dev.c4os.live-test.invalid/value").is_err(),
+        );
     }
 }
 
@@ -28153,6 +30148,17 @@ fn workspace_state_unavailable(correlation_id: protocol::CorrelationId) -> Proto
         true,
     )
     .with_correlation(correlation_id)
+}
+
+fn workspace_activation_unavailable(
+    stage: &'static str,
+    error: &dyn std::fmt::Display,
+    correlation_id: protocol::CorrelationId,
+) -> ProtocolError {
+    #[cfg(debug_assertions)]
+    eprintln!("C4OS Workspace activation failed at {stage}: {error}");
+    workspace_state_unavailable(correlation_id)
+        .with_detail("stage", protocol::SafeDetailValue::Text(stage.into()))
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -28408,9 +30414,13 @@ pub fn run() {
             });
             let startup_boundary = Cell::new(StartupRecoveryBoundary::Configuration);
             let initialization: Result<(), Box<dyn std::error::Error>> = (|| {
-                let c4os_home = c4os_home_for_startup(app.path().home_dir()?.join(".c4os"))?;
-                let credential_service = CredentialServiceState::initialize(&c4os_home)
-                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                let default_c4os_home = app.path().home_dir()?.join(".c4os");
+                let c4os_home = c4os_home_for_startup(default_c4os_home.clone())?;
+                let credential_keychain_bundle =
+                    keychain_bundle_for_startup(c4os_home != default_c4os_home)?;
+                let credential_service =
+                    CredentialServiceState::initialize(&c4os_home, &credential_keychain_bundle)
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
                 let credential_vault = credential_service.vault();
                 let credential_protection = credential_service.protection();
                 let credential_fallback_required = credential_service.requires_explicit_fallback();
@@ -28838,6 +30848,7 @@ pub fn run() {
                 app.manage(AppCoreState {
                     database,
                     c4os_home: c4os_home.clone(),
+                    credential_keychain_bundle,
                     bundled_skill_root: application_resource_dir.join("skills"),
                     mcp: Arc::clone(&mcp),
                     credential_vault: credential_vault.clone(),
@@ -28870,6 +30881,8 @@ pub fn run() {
                     picker_grants: Mutex::new(PickerGrantRegistry::default()),
                     pending_workspace_clones: Mutex::new(BTreeMap::new()),
                     pending_provider_operations: Mutex::new(BTreeMap::new()),
+                    provider_onboarding_operation: Mutex::new(()),
+                    pending_provider_tests: Mutex::new(BTreeMap::new()),
                     conversation_drop: Mutex::new(NativeConversationDropState::default()),
                     conversation_branch: Mutex::new(NativeConversationBranchState::default()),
                 });
@@ -29025,8 +31038,10 @@ pub fn run() {
             conversation_inactivate_session,
             provider_snapshot,
             provider_accept_session_credentials,
+            provider_retry_secure_storage,
             provider_save_profile,
             provider_test_connection,
+            provider_refresh_connection,
             provider_answer_approval,
             provider_select_model,
             provider_set_models_enabled,
@@ -29490,7 +31505,6 @@ mod settings_policy_persistence_tests {
         )
         .unwrap();
         let service = RuntimeApplicationService::restore(Arc::new(database), 10).unwrap();
-        let live = service.current_provider_live_authority(11).unwrap();
         let facts = provider_action_facts(
             "network.retrieve",
             "c4os.provider.test",
@@ -29501,6 +31515,24 @@ mod settings_policy_persistence_tests {
             "https://provider.example/v1",
             false,
         );
+        let explicit_ask = policy_rules_for_setting(
+            "network.retrieve",
+            PolicyGroup::NetworkAndSharing,
+            PolicyDecision::Ask,
+        )
+        .into_iter()
+        .find(|rule| rule.matcher.matches(&facts))
+        .expect("network retrieve policy must cover the provider test");
+        let mut configuration = service
+            .raw_coordinator()
+            .unwrap()
+            .policy_configuration()
+            .clone();
+        configuration.category_rules.push(explicit_ask);
+        service
+            .replace_policy_settings(0, 1, configuration, true, 11)
+            .unwrap();
+        let live = service.current_provider_live_authority(12).unwrap();
         let action = CanonicalAction {
             schema_version: CANONICAL_ACTION_SCHEMA_VERSION,
             action_id: "provider-approval-generation".into(),
@@ -29523,29 +31555,29 @@ mod settings_policy_persistence_tests {
             revocation_epoch: live.revocation_epoch,
         };
         let prompt = match service
-            .propose_direct_action(&facts, action.clone(), 11)
+            .propose_direct_action(&facts, action.clone(), 13)
             .unwrap()
         {
             GatewayProposal::PendingApproval { prompt, .. } => prompt,
             other => panic!("expected pending provider approval, found {other:?}"),
         };
-        let generation_after_prompt = service.snapshot(12).unwrap().generation;
+        let generation_after_prompt = service.snapshot(14).unwrap().generation;
         let token = match service
             .coordinator()
             .unwrap()
-            .answer_direct_approval(&prompt.prompt_id, ApprovalAnswer::Allow, 12)
+            .answer_direct_approval(&prompt.prompt_id, ApprovalAnswer::Allow, 15)
             .unwrap()
             .value
         {
             ApprovalResponse::Authorized { token, .. } => token,
             other => panic!("expected authorized provider approval, found {other:?}"),
         };
-        assert!(service.snapshot(13).unwrap().generation > generation_after_prompt);
+        assert!(service.snapshot(16).unwrap().generation > generation_after_prompt);
 
-        let refreshed = service.current_provider_live_authority(13).unwrap();
+        let refreshed = service.current_provider_live_authority(17).unwrap();
         assert_eq!(refreshed.configuration_version, live.configuration_version);
         let lease = service
-            .begin_direct_action_effect(&token, &action, refreshed, Some(&prompt.prompt_id), 13)
+            .begin_direct_action_effect(&token, &action, refreshed, Some(&prompt.prompt_id), 17)
             .unwrap();
         service
             .complete_direct_action_effect(
@@ -29556,7 +31588,7 @@ mod settings_policy_persistence_tests {
                     exit_code: None,
                     changed_targets: Vec::new(),
                     output_sha256: None,
-                    completed_at_ms: 14,
+                    completed_at_ms: 18,
                 },
             )
             .unwrap();

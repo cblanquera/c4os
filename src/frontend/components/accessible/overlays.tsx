@@ -46,6 +46,7 @@ export interface ModalDialogProps {
   readonly closeLabel?: string;
   readonly isDismissable?: boolean;
   readonly renderActions?: (close: () => void) => ReactNode;
+  readonly size?: "regular" | "compact";
   readonly title: string;
   readonly triggerLabel: string;
   readonly triggerVariant?: "primary" | "secondary" | "quiet" | "danger";
@@ -58,6 +59,7 @@ export interface ControlledModalDialogProps {
   readonly isOpen: boolean;
   readonly onDismiss: () => void;
   readonly renderActions?: () => ReactNode;
+  readonly size?: "regular" | "compact";
   readonly title: string;
 }
 
@@ -163,6 +165,7 @@ export function ModalDialog({
   closeLabel = "Close",
   isDismissable = true,
   renderActions,
+  size = "regular",
   title,
   triggerLabel,
   triggerVariant = "secondary",
@@ -171,7 +174,7 @@ export function ModalDialog({
     <DialogTrigger>
       <Button variant={triggerVariant}>{triggerLabel}</Button>
       <ModalOverlay className="c4-modal-overlay" isDismissable={isDismissable}>
-        <Modal className="c4-modal">
+        <Modal className={`c4-modal c4-modal--${size}`}>
           <Dialog className="c4-modal-dialog">
             {({ close }) => (
               <>
@@ -212,6 +215,7 @@ export function ControlledModalDialog({
   isOpen,
   onDismiss,
   renderActions,
+  size = "regular",
   title,
 }: ControlledModalDialogProps) {
   return (
@@ -223,7 +227,7 @@ export function ControlledModalDialog({
         if (!open) onDismiss();
       }}
     >
-      <Modal className="c4-modal">
+      <Modal className={`c4-modal c4-modal--${size}`}>
         <Dialog className="c4-modal-dialog">
           <header className="c4-overlay-header">
             <Heading slot="title">{title}</Heading>

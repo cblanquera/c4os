@@ -236,7 +236,7 @@ test("contains production MCP Settings without renderer failures", async ({
   await page.goto("/#/settings/mcp");
 
   await expect(
-    page.getByRole("heading", { name: "MCP Servers" }),
+    page.getByRole("heading", { name: "MCP Servers", level: 1 }),
   ).toBeVisible();
   await expect(page.getByText("1 active server process")).toBeVisible();
   await expect(

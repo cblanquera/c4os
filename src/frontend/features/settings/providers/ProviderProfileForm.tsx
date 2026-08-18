@@ -4,7 +4,6 @@ import { Button, Notice, StatusRegion } from "../../../components/accessible";
 import type {
   ConfigurableProviderKind,
   ProviderAuthentication,
-  ProviderModel,
 } from "../../../platform/provider-service";
 import {
   PROVIDER_TYPE_OPTIONS,
@@ -17,22 +16,24 @@ import "./provider-settings.css";
 export type ProviderProfileFormMode = "onboarding" | "settings";
 
 export type ProviderProfileFormProps = {
+  readonly actions?: ReactNode;
   readonly controller: ProviderProfileController;
   readonly mode: ProviderProfileFormMode;
   readonly onDismiss?: () => void;
+  readonly onSubmit?: () => void;
 };
 
 /** Renders the provider fields shared by onboarding and Settings dialogs. */
 export function ProviderProfileForm({
+  actions,
   controller,
   mode,
   onDismiss,
+  onSubmit,
 }: ProviderProfileFormProps) {
   const dismissRef = useRef(onDismiss);
   const [revealsSecret, setRevealsSecret] = useState(false);
   const compatibleTitleId = useId();
-  const defaultsTitleId = useId();
-  const modelGroupName = useId();
   const showsCompatibleFields = controller.draft.kind === "custom";
   const requiresSecret =
     !showsCompatibleFields || controller.draft.authenticationType !== "none";
@@ -53,8 +54,11 @@ export function ProviderProfileForm({
       aria-label={
         mode === "onboarding" ? "Provider onboarding" : "Provider profile"
       }
-      className="provider-form"
-      onSubmit={(event) => event.preventDefault()}
+      className={`provider-form provider-form--${mode}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit?.();
+      }}
     >
       <div className="provider-form__grid">
         <ProviderField label="Provider type">
@@ -251,42 +255,8 @@ export function ProviderProfileForm({
         <span>{controller.connection.detail}</span>
       </StatusRegion>
 
-      {controller.models.length > 0 ? (
-        <ProviderModelChoices
-          controller={controller}
-          groupName={modelGroupName}
-        />
-      ) : null}
-
-      {mode === "onboarding" && controller.connection.state === "success" ? (
-        <section
-          aria-labelledby={defaultsTitleId}
-          className="provider-defaults"
-        >
-          <h3 id={defaultsTitleId}>Initial defaults</h3>
-          <p>
-            Confirm these revisable defaults. The first valid Chat submission
-            binds them to that Chat.
-          </p>
-          <dl>
-            <div>
-              <dt>Model</dt>
-              <dd>
-                {controller.models.find(
-                  ({ modelId }) => modelId === controller.selectedModelId,
-                )?.displayName ?? "Choose a production-ready model"}
-              </dd>
-            </div>
-            <div>
-              <dt>Runtime</dt>
-              <dd>OpenCode</dd>
-            </div>
-            <div>
-              <dt>Environment</dt>
-              <dd>Local</dd>
-            </div>
-          </dl>
-        </section>
+      {actions ? (
+        <footer className="provider-form__actions">{actions}</footer>
       ) : null}
     </form>
   );
@@ -331,70 +301,5 @@ function ProviderField({
         </small>
       ) : null}
     </div>
-  );
-}
-
-/** Renders route-specific model evidence with one explicit selection. */
-function ProviderModelChoices({
-  controller,
-  groupName,
-}: {
-  readonly controller: ProviderProfileController;
-  readonly groupName: string;
-}) {
-  return (
-    <fieldset className="provider-models">
-      <legend>Model for new Chats</legend>
-      <div className="provider-models__list">
-        {controller.models.map((model) => (
-          <ProviderModelChoice
-            controller={controller}
-            groupName={groupName}
-            key={model.modelId}
-            model={model}
-          />
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-/** Renders one model with availability, context, and recommendation evidence. */
-function ProviderModelChoice({
-  controller,
-  groupName,
-  model,
-}: {
-  readonly controller: ProviderProfileController;
-  readonly groupName: string;
-  readonly model: ProviderModel;
-}) {
-  const isRecommended = model.modelId === controller.recommendedModelId;
-  return (
-    <label className="provider-model" data-ready={model.productionReady}>
-      <input
-        checked={model.modelId === controller.selectedModelId}
-        disabled={
-          controller.isBusy ||
-          controller.connection.state !== "success" ||
-          !model.productionReady
-        }
-        name={groupName}
-        onChange={() => void controller.selectModel(model.modelId)}
-        type="radio"
-      />
-      <span className="provider-model__copy">
-        <strong>{model.displayName}</strong>
-        <small>
-          {model.modelId} · {model.availability}
-          {model.contextTokens === null
-            ? ""
-            : ` · ${model.contextTokens.toLocaleString()} context tokens`}
-        </small>
-      </span>
-      {isRecommended ? (
-        <span className="provider-model__recommended">Recommended</span>
-      ) : null}
-    </label>
   );
 }

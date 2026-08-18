@@ -6,10 +6,11 @@ use c4os_lib::runtime::capability::{
 };
 use c4os_lib::runtime::provider::{
     ModelRoute, PROVIDER_MODEL_DECLARATION_SCHEMA_VERSION, PROVIDER_SCHEMA_VERSION,
-    ProviderAuthentication, ProviderConnectionEvidence, ProviderDiscovery, ProviderEndpoint,
-    ProviderError, ProviderFeatureClaim, ProviderFieldKey, ProviderKind, ProviderModelDeclaration,
-    ProviderNumericClaim, ProviderProbe, ProviderProbeFailure, ProviderProfile, ProviderService,
-    ProviderSnapshot, ProviderTestStatus, RouteAvailability,
+    PROVIDER_TEST_FRESHNESS_MS, ProviderAuthentication, ProviderConnectionEvidence,
+    ProviderDiscovery, ProviderEndpoint, ProviderError, ProviderFeatureClaim, ProviderFieldKey,
+    ProviderKind, ProviderModelDeclaration, ProviderNumericClaim, ProviderProbe,
+    ProviderProbeFailure, ProviderProfile, ProviderService, ProviderSnapshot, ProviderTestStatus,
+    RouteAvailability,
 };
 use c4os_lib::security::credentials::CredentialVault;
 
@@ -302,6 +303,110 @@ fn launch_requires_explicit_onboarding_completion() {
 }
 
 #[test]
+fn transient_test_commit_publishes_one_ready_generation() {
+    let (tested_service, mut final_profile, tested_generation) = tested_service();
+    let tested_record = tested_service.snapshot().providers.remove(0);
+    final_profile.credential_reference = profile().credential_reference;
+    let mut service = ProviderService::new();
+
+    let generation = service
+        .commit_tested_onboarding(
+            final_profile.clone(),
+            tested_record,
+            "model-a",
+            0,
+            tested_generation,
+            NOW,
+        )
+        .unwrap();
+
+    assert_eq!(generation, 1);
+    let snapshot = service.snapshot();
+    assert_eq!(snapshot.generation, 1);
+    assert_eq!(snapshot.onboarding_completed_at_ms, Some(NOW));
+    assert!(snapshot.launch_ready());
+    assert!(snapshot.provider_model_ready_at("provider-openrouter", "model-a", NOW));
+    assert_eq!(snapshot.providers.len(), 1);
+    assert_eq!(snapshot.providers[0].generation, 1);
+    assert_eq!(snapshot.providers[0].profile, final_profile);
+    assert_eq!(
+        snapshot.providers[0].selected_model_id.as_deref(),
+        Some("model-a")
+    );
+}
+
+#[test]
+fn invalid_or_stale_transient_test_commit_does_not_mutate_state() {
+    let (tested_service, mut final_profile, tested_generation) = tested_service();
+    let tested_record = tested_service.snapshot().providers.remove(0);
+    final_profile.credential_reference = profile().credential_reference;
+    let mut service = ProviderService::new();
+    let original = service.snapshot();
+
+    assert!(matches!(
+        service.commit_tested_onboarding(
+            final_profile.clone(),
+            tested_record.clone(),
+            "model-missing",
+            0,
+            tested_generation,
+            NOW,
+        ),
+        Err(ProviderError::ModelUnavailable)
+    ));
+    assert_eq!(service.snapshot(), original);
+
+    assert!(matches!(
+        service.commit_tested_onboarding(
+            final_profile.clone(),
+            tested_record.clone(),
+            "model-a",
+            0,
+            tested_generation,
+            NOW + PROVIDER_TEST_FRESHNESS_MS + 1,
+        ),
+        Err(ProviderError::OnboardingNotReady)
+    ));
+    assert_eq!(service.snapshot(), original);
+
+    assert!(matches!(
+        service.commit_tested_onboarding(
+            final_profile,
+            tested_record,
+            "model-a",
+            0,
+            tested_generation + 1,
+            NOW,
+        ),
+        Err(ProviderError::StaleGeneration { .. })
+    ));
+    assert_eq!(service.snapshot(), original);
+}
+
+#[test]
+fn transient_test_commit_rejects_changed_profile_binding_without_mutation() {
+    let (tested_service, mut final_profile, tested_generation) = tested_service();
+    let tested_record = tested_service.snapshot().providers.remove(0);
+    final_profile.display_name = "Changed after test".into();
+    final_profile.credential_reference = profile().credential_reference;
+    let mut service = ProviderService::new();
+    let original = service.snapshot();
+
+    assert!(matches!(
+        service.commit_tested_onboarding(
+            final_profile,
+            tested_record,
+            "model-a",
+            0,
+            tested_generation,
+            NOW,
+        ),
+        Err(ProviderError::ConnectionProofMismatch)
+    ));
+    assert_eq!(service.snapshot(), original);
+}
+
+#[test]
 fn completed_onboarding_persists_after_test_freshness_expires() {
     let (mut service, _candidate, tested_generation) = tested_service();
     service.complete_onboarding(tested_generation, NOW).unwrap();
@@ -417,21 +522,31 @@ fn authentication_and_credential_presence_must_agree() {
 }
 
 #[test]
-fn many_models_honor_a_valid_upstream_recommendation_and_allow_revision() {
+fn many_models_default_to_most_capable_viable_route_and_allow_revision() {
     let mut service = ProviderService::new();
     service.save_profile(profile(), 0).unwrap();
+    let model_a = route("model-a", 1, RouteAvailability::Available);
+    let mut model_b = route("model-b", 20, RouteAvailability::Available);
+    let image_evidence = model_b.capabilities.features[&CapabilityKey::InputText].clone();
+    model_b
+        .capabilities
+        .features
+        .insert(CapabilityKey::InputImage, image_evidence);
+    let mut model_c = route("model-c", 0, RouteAvailability::Unavailable);
+    let unavailable_image_evidence =
+        model_c.capabilities.features[&CapabilityKey::InputText].clone();
+    model_c
+        .capabilities
+        .features
+        .insert(CapabilityKey::InputImage, unavailable_image_evidence);
     let report = service
         .test_provider(
             "provider-openrouter",
             1,
             NOW,
             &mut FixtureProbe(Ok(discovery(
-                vec![
-                    route("model-a", 1, RouteAvailability::Available),
-                    route("model-b", 20, RouteAvailability::Available),
-                    route("model-c", 0, RouteAvailability::Unavailable),
-                ],
-                Some("model-b"),
+                vec![model_a, model_b, model_c],
+                Some("model-a"),
             ))),
         )
         .unwrap();

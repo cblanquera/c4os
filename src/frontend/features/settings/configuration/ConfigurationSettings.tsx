@@ -289,10 +289,7 @@ function ConfigurationForm({
         <div className="configuration-file-action">
           <span>
             <strong>C4OS configuration file</strong>
-            <span>
-              Open {snapshot.live.displayPath} externally. Raw credentials are
-              never stored in this file.
-            </span>
+            <span>Open {snapshot.live.displayPath} externally.</span>
           </span>
           <Button
             isDisabled={snapshot.openConfiguration.status === "pending"}

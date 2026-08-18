@@ -1017,6 +1017,30 @@ pub(crate) fn recover_missing_scope_file(
     )
 }
 
+/// Replaces one recognized legacy placeholder only while its exact bytes still
+/// own the path. This keeps startup migration from overwriting a concurrent
+/// external edit or weakening the normal strict configuration parser.
+pub(crate) fn replace_legacy_scope_placeholder(
+    scope: ConfigurationScope,
+    path: &Path,
+    expected_bytes: &[u8],
+    canonical_toml: &str,
+    generation: u64,
+) -> Result<(), ConfigurationError> {
+    atomic_write(
+        path,
+        canonical_toml.as_bytes(),
+        AtomicWriteGuard {
+            expected_disk: ExpectedDiskState::Fingerprint(fingerprint(expected_bytes)),
+            stable_read_policy: StableReadPolicy::default(),
+            scope,
+            previous: None,
+            base_generation: generation,
+            active_generation: generation,
+        },
+    )
+}
+
 /// Performs the same stable, bounded read used by watcher reloads without
 /// activating the candidate. Coordinators can therefore publish a canonical
 /// LKG transaction before changing in-memory effective state.

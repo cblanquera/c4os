@@ -31,7 +31,8 @@ use crate::runtime::{
 };
 
 pub const MAX_EVIDENCE_ROUTES: usize = 512;
-pub const MAX_HISTORICAL_EVIDENCE_ROUTES: usize = 4_096;
+pub const MAX_HISTORICAL_EVIDENCE_ROUTES: usize = 32;
+const MAX_RESTORABLE_HISTORICAL_EVIDENCE_ROUTES: usize = 4_096;
 const MAX_EVIDENCE_VALUES: usize = 256;
 const MAX_HEALTH_OBSERVATION_AGE_MS: u64 = 60_000;
 
@@ -254,9 +255,7 @@ pub fn provider_model_declared_evidence(
     declaration: &ProviderModelDeclaration,
     route: RouteIdentity,
 ) -> Result<DeclaredEvidence, CapabilityEvidenceError> {
-    if declaration.provider_model_id.rsplit('/').next()
-        != route.provider_model_id.rsplit('/').next()
-    {
+    if route_model_id(&route) != Some(declaration.provider_model_id.as_str()) {
         return Err(CapabilityEvidenceError::ArtifactMismatch);
     }
     let features = declaration
@@ -321,8 +320,7 @@ pub fn opencode_adapter_evidence(
             .numeric_limits
             .values()
             .any(|numeric| numeric.evidence.checked_at_ms != model_route.checked_at_ms)
-        || descriptor.route.provider_model_id.rsplit('/').next()
-            != Some(model_route.model_id.as_str())
+        || route_model_id(&descriptor.route) != Some(model_route.model_id.as_str())
     {
         return Err(CapabilityEvidenceError::ArtifactMismatch);
     }
@@ -427,8 +425,8 @@ pub fn pi_adapter_evidence(
         || route.adapter_version != "1.0.0"
         || route.runtime_kind != "pi"
         || route.native_runtime_version != PI_NATIVE_VERSION
-        || route.provider_model_id.split('/').next() != Some(model_route.provider.as_str())
-        || route.provider_model_id.rsplit('/').next() != Some(model_route.model_id.as_str())
+        || route.provider_model_id.split_once('/')
+            != Some((model_route.provider.as_str(), model_route.model_id.as_str()))
     {
         return Err(CapabilityEvidenceError::ArtifactMismatch);
     }
@@ -766,7 +764,7 @@ impl CapabilityEvidenceRegistry {
     /// fresh generation is minted so retained renderer/run CAS values fail.
     pub fn restore(snapshot: CapabilityEvidenceSnapshot) -> Result<Self, CapabilityEvidenceError> {
         if snapshot.active_routes.len() > MAX_EVIDENCE_ROUTES
-            || snapshot.historical_routes.len() > MAX_HISTORICAL_EVIDENCE_ROUTES
+            || snapshot.historical_routes.len() > MAX_RESTORABLE_HISTORICAL_EVIDENCE_ROUTES
         {
             return Err(CapabilityEvidenceError::CapacityExceeded);
         }
@@ -789,12 +787,21 @@ impl CapabilityEvidenceRegistry {
         }
         let had_active =
             !snapshot.active_processes.is_empty() || !snapshot.active_routes.is_empty();
+        let mut historical_routes = snapshot.historical_routes;
+        let compacted_routes = historical_routes
+            .len()
+            .saturating_sub(MAX_HISTORICAL_EVIDENCE_ROUTES);
+        if compacted_routes > 0 {
+            historical_routes.drain(..compacted_routes);
+        }
         let mut registry = Self {
             generation: snapshot.generation,
             routes: BTreeMap::new(),
             processes: BTreeMap::new(),
-            history: snapshot.historical_routes,
-            history_dropped: snapshot.historical_routes_dropped,
+            history: historical_routes,
+            history_dropped: snapshot
+                .historical_routes_dropped
+                .saturating_add(compacted_routes as u64),
         };
         for epoch in snapshot.active_routes.into_values() {
             registry.archive(epoch);
@@ -976,7 +983,7 @@ impl CapabilityEvidenceRegistry {
                 && self.processes.get(runtime_id) == Some(&epoch.process_generation)
                 && epoch.route.provider_id == provider_id
                 && epoch.route.endpoint_id == endpoint_id
-                && epoch.route.provider_model_id.rsplit('/').next() == Some(model_id)
+                && route_model_id(&epoch.route) == Some(model_id)
         });
         let route = matches
             .next()
@@ -1020,7 +1027,7 @@ impl CapabilityEvidenceRegistry {
     }
 
     fn archive(&mut self, epoch: CapabilityRouteEpoch) {
-        if self.history.len() == MAX_HISTORICAL_EVIDENCE_ROUTES {
+        while self.history.len() >= MAX_HISTORICAL_EVIDENCE_ROUTES {
             self.history.remove(0);
             self.history_dropped = self.history_dropped.saturating_add(1);
         }
@@ -1519,6 +1526,14 @@ fn restrictive_state(left: CapabilityState, right: CapabilityState) -> Capabilit
 
 fn route_key(route: &RouteIdentity) -> Result<String, CapabilityEvidenceError> {
     serde_json::to_string(route).map_err(|_| CapabilityEvidenceError::Serialization)
+}
+
+pub(crate) fn route_model_id(route: &RouteIdentity) -> Option<&str> {
+    route
+        .provider_model_id
+        .split_once('/')
+        .map(|(_, model_id)| model_id)
+        .filter(|model_id| !model_id.is_empty())
 }
 
 fn digest_json(value: &impl Serialize) -> Result<String, CapabilityEvidenceError> {

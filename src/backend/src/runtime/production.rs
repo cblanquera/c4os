@@ -223,7 +223,28 @@ struct VerifiedNodeRuntime {
     version: String,
 }
 
-const MAX_PRODUCTION_PROVIDER_MODELS: usize = 512;
+const MAX_PRODUCTION_PROVIDER_MODELS: usize = 250;
+
+/// Pinned provider SDKs such as OpenRouter call their API-key loader before
+/// request-level headers are merged. This fixed public value satisfies that
+/// construction precondition; the C4OS `chat.headers` hook then replaces the
+/// SDK's bootstrap authorization header with the one-use credential delivered
+/// over the private descriptor. No credential bytes or references belong here.
+const OPENCODE_PROVIDER_CREDENTIAL_BOOTSTRAP: &str = "c4os-private-credential-channel";
+
+fn bound_production_models(
+    mut models: Vec<ModelRoute>,
+    selected_model_id: &str,
+) -> Vec<ModelRoute> {
+    models.sort_by(|left, right| {
+        (left.model_id != selected_model_id)
+            .cmp(&(right.model_id != selected_model_id))
+            .then_with(|| left.recommendation_rank.cmp(&right.recommendation_rank))
+            .then_with(|| left.model_id.cmp(&right.model_id))
+    });
+    models.truncate(MAX_PRODUCTION_PROVIDER_MODELS);
+    models
+}
 
 /// Exact non-secret provider/model material needed to construct one native
 /// route. The profile's opaque vault reference stays inside Rust; native
@@ -288,7 +309,6 @@ impl ProductionProviderRoute {
             })
             .collect::<Vec<_>>();
         if models.is_empty()
-            || models.len() > MAX_PRODUCTION_PROVIDER_MODELS
             || !models.iter().any(|model| {
                 model.model_id == selected_model_id
                     && model.is_production_ready_at(checked_at_ms)
@@ -299,6 +319,7 @@ impl ProductionProviderRoute {
         {
             return Err(RuntimeProductionError::ProviderRouteUnavailable);
         }
+        let models = bound_production_models(models, &selected_model_id);
         let opencode_sdk_npm = match runtime_kind {
             RuntimeKind::OpenCode => Some(opencode_provider_npm(&profile)?),
             RuntimeKind::Pi => {
@@ -2576,6 +2597,12 @@ fn materialize_opencode_provider_configuration(
             "baseURL".into(),
             serde_json::Value::String(profile.endpoint.base_url.clone()),
         )]);
+        if profile.authentication.requires_credential() {
+            options.insert(
+                "apiKey".into(),
+                serde_json::Value::String(OPENCODE_PROVIDER_CREDENTIAL_BOOTSTRAP.into()),
+            );
+        }
         if !profile.headers.is_empty() {
             options.insert(
                 "headers".into(),
@@ -2953,6 +2980,7 @@ mod tests {
         RuntimeExecutionReceipt, RuntimeGatewayDecision,
     };
     use crate::runtime::broker_worker::{BrokerDeferredStart, BrokerDeferredTicket};
+    use crate::runtime::capability::{CapabilityDescriptor, CapabilityLayer};
     use crate::runtime::dispatch::{
         PeerDispatchError, PeerDispatchEvent, PeerDispatchRequest, RuntimeDispatchPeer,
         normalize_pi_event,
@@ -2962,12 +2990,115 @@ mod tests {
         InstalledBrokerClassification, InstalledBrokerFacility, InstalledDeferredBrokerFacility,
     };
     use crate::runtime::pi::{PI_PROTOCOL_SCHEMA_VERSION, PiEventEnvelope, PiSidecarManifest};
+    use crate::runtime::provider::RouteAvailability;
     use crate::security::authorization::LiveAuthorityState;
     use crate::security::gateway::{ActionGateway, ExecutionPermit, NormalizedActionResult};
     use crate::security::policy::{
         ActionEffect, ActionReversibility, ActionScope, ActionSensitivity, ActionSurface,
         PolicyConfiguration, RepositoryState,
     };
+
+    fn model_for_production_bound(model_id: String, recommendation_rank: u32) -> ModelRoute {
+        ModelRoute {
+            display_name: model_id.clone(),
+            model_id: model_id.clone(),
+            recommendation_rank,
+            availability: RouteAvailability::Available,
+            checked_at_ms: 1,
+            capabilities: CapabilityDescriptor {
+                schema_version: 1,
+                layer: CapabilityLayer::AdapterNormalized,
+                route: RouteIdentity {
+                    provider_id: "provider-test".into(),
+                    endpoint_id: "test-api".into(),
+                    provider_model_id: format!("test/{model_id}"),
+                    model_revision: "test".into(),
+                    adapter_kind: "opencode".into(),
+                    adapter_version: "1.0.0".into(),
+                    runtime_kind: "opencode".into(),
+                    native_runtime_version: "test".into(),
+                    session_configuration_sha256: format!("sha256:{}", "0".repeat(64)),
+                },
+                lifecycle: ModelLifecycle::Active,
+                features: BTreeMap::new(),
+                numeric_limits: BTreeMap::new(),
+                raw_evidence_sha256: format!("sha256:{}", "1".repeat(64)),
+            },
+            provider_declaration: None,
+        }
+    }
+
+    #[test]
+    fn production_model_routes_keep_selected_then_best_ranked_within_protocol_bound() {
+        let selected_model_id = "model-259";
+        let models = (0..260)
+            .map(|index| model_for_production_bound(format!("model-{index:03}"), index))
+            .collect::<Vec<_>>();
+
+        let bounded = bound_production_models(models, selected_model_id);
+
+        assert_eq!(bounded.len(), MAX_PRODUCTION_PROVIDER_MODELS);
+        assert_eq!(bounded[0].model_id, selected_model_id);
+        assert_eq!(bounded[1].model_id, "model-000");
+        assert_eq!(bounded.last().unwrap().model_id, "model-248");
+        assert!(!bounded.iter().any(|model| model.model_id == "model-249"));
+    }
+
+    #[test]
+    fn opencode_provider_config_uses_only_a_public_bootstrap_for_private_credentials() {
+        let temporary = TempDir::new().expect("temporary OpenCode config root");
+        let namespace = StateNamespace::new(
+            temporary.path(),
+            "workspace-provider-config",
+            1,
+            "launch-provider-config",
+        )
+        .expect("isolated OpenCode namespace");
+        let vault = CredentialVault::session_only().expect("session-only provider vault");
+        let raw_secret = b"sk-or-test-secret-must-not-enter-native-config";
+        let credential_reference = vault
+            .store("openrouter-config-test", raw_secret)
+            .expect("opaque provider credential reference");
+        let profile = ProviderProfile {
+            schema_version: crate::runtime::provider::PROVIDER_SCHEMA_VERSION,
+            provider_id: "provider-openrouter".into(),
+            kind: ProviderKind::OpenRouter,
+            display_name: "OpenRouter".into(),
+            endpoint: crate::runtime::provider::ProviderEndpoint {
+                endpoint_id: "openrouter-default".into(),
+                base_url: "https://openrouter.ai/api/v1".into(),
+                api_kind: "openai-compatible".into(),
+            },
+            authentication: ProviderAuthentication::Bearer,
+            credential_reference: Some(credential_reference.clone()),
+            headers: BTreeMap::new(),
+            enabled: true,
+        };
+        let mut model = model_for_production_bound("qwen/qwen3.7-flash".into(), 0);
+        model.capabilities.route.provider_id = profile.provider_id.clone();
+        model.capabilities.route.endpoint_id = profile.endpoint.endpoint_id.clone();
+        model.capabilities.route.provider_model_id = model.model_id.clone();
+        let route = ProductionProviderRoute {
+            profile,
+            selected_model_id: model.model_id.clone(),
+            models: vec![model],
+            opencode_sdk_npm: Some("@openrouter/ai-sdk-provider"),
+        };
+
+        materialize_opencode_provider_configuration(&namespace, &[route])
+            .expect("materialize OpenRouter configuration");
+        let encoded = fs::read_to_string(namespace.config_home().join("opencode/opencode.json"))
+            .expect("read materialized OpenRouter configuration");
+        let config: serde_json::Value =
+            serde_json::from_str(&encoded).expect("valid OpenCode provider JSON");
+
+        assert_eq!(
+            config["provider"]["provider-openrouter"]["options"]["apiKey"],
+            OPENCODE_PROVIDER_CREDENTIAL_BOOTSTRAP
+        );
+        assert!(!encoded.contains(std::str::from_utf8(raw_secret).unwrap()));
+        assert!(!encoded.contains(credential_reference.as_str()));
+    }
 
     #[test]
     fn test_tls_capability_accepts_only_one_bounded_loopback_root() {

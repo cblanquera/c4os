@@ -165,3 +165,19 @@ index 440b992..dd1ef56 100644
      yield* Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
      return yield* Effect.die(new Error(`Unexpected HttpServer address tag: ${state.server.address._tag}`))
    })
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index eb116f6..cc539b0 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -1316,6 +1316,11 @@ const layer = Layer.effect(
+               }
+             }
+ 
++            // A provider terminal finish without a pending tool call ends the
++            // turn. Continuing here creates another assistant step against the
++            // same user message and can loop indefinitely.
++            if (finished) return "break" as const
++
+             if (result === "stop") return "break" as const
+             if (result === "compact") {
+               yield* compaction.create({

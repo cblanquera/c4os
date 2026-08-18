@@ -2487,12 +2487,12 @@ fn fail_injected_commit_operation(_operation: CommitOperation) -> io::Result<()>
     Ok(())
 }
 
-fn commit_rename(source: &Path, destination: &Path) -> io::Result<()> {
+pub(super) fn commit_rename(source: &Path, destination: &Path) -> io::Result<()> {
     fail_injected_commit_operation(CommitOperation::Rename)?;
     fs::rename(source, destination)
 }
 
-fn commit_sync_directory(path: &Path) -> io::Result<()> {
+pub(super) fn commit_sync_directory(path: &Path) -> io::Result<()> {
     fail_injected_commit_operation(CommitOperation::SyncDirectory)?;
     File::open(path)?.sync_all()
 }

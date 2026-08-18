@@ -8,11 +8,15 @@ export type IconName =
   | "chevron-down"
   | "chevron-right"
   | "close"
+  | "file"
+  | "folder"
+  | "globe"
   | "info"
   | "more"
   | "project"
   | "search"
-  | "settings";
+  | "settings"
+  | "terminal";
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "children"> {
   readonly name: IconName;
@@ -42,6 +46,21 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
   "chevron-down": <path d="m4 6.5 5 5 5-5" />,
   "chevron-right": <path d="m6.5 4 5 5-5 5" />,
   close: <path d="M4.2 4.2 13.8 13.8M13.8 4.2 4.2 13.8" />,
+  file: (
+    <>
+      <path d="M4 1.8h6l4 4v10.4H4Z" />
+      <path d="M10 1.8v4h4M6.5 9h5M6.5 12h5" />
+    </>
+  ),
+  folder: (
+    <path d="M2 5.3h5l1.4 1.5H16v6.7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 2 13.5V5.3Z" />
+  ),
+  globe: (
+    <>
+      <circle cx="9" cy="9" r="6.8" />
+      <path d="M2.5 9h13M9 2.2c2 2 3 4.2 3 6.8s-1 4.8-3 6.8M9 2.2C7 4.2 6 6.4 6 9s1 4.8 3 6.8" />
+    </>
+  ),
   info: (
     <>
       <circle cx="9" cy="9" r="7" />
@@ -68,6 +87,12 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="9" cy="9" r="2.5" />
       <path d="M7.4 2.2h3.2l.5 2a5.3 5.3 0 0 1 1.2.7l2-.6 1.6 2.8-1.5 1.4a5.5 5.5 0 0 1 0 1.4l1.5 1.4-1.6 2.8-2-.6a5.3 5.3 0 0 1-1.2.7l-.5 2H7.4l-.5-2a5.3 5.3 0 0 1-1.2-.7l-2 .6-1.6-2.8 1.5-1.4a5.5 5.5 0 0 1 0-1.4L2.1 7.1l1.6-2.8 2 .6a5.3 5.3 0 0 1 1.2-.7l.5-2Z" />
+    </>
+  ),
+  terminal: (
+    <>
+      <rect height="12.5" rx="2" width="14" x="2" y="2.75" />
+      <path d="m5 6 2.2 2.2L5 10.4M9.2 11h3.4" />
     </>
   ),
 };

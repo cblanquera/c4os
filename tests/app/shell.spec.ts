@@ -33,6 +33,13 @@ test("QA adapters exercise the production onboarding and Workspace Start control
     .fill("qa-renderer-only-key");
   await page.getByRole("button", { name: "Test Connection" }).click();
   await expect(page.getByText("Connection passed")).toBeVisible();
+  await expect(
+    page.getByText("2 production-ready models discovered."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Model for new Chats" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("Initial defaults")).toHaveCount(0);
   await page.getByRole("button", { name: "Continue" }).click();
 
   await expect(page).toHaveURL(/#\/start$/);
@@ -42,6 +49,34 @@ test("QA adapters exercise the production onboarding and Workspace Start control
   await page.getByRole("button", { name: /AI Desktop UI/ }).click();
   await expect(page).toHaveURL(/#\/chat$/);
   await expect(page.getByRole("region", { name: "Chat" })).toBeVisible();
+});
+
+test("an explicit Ask rule pauses Provider Test without persisting the draft", async ({
+  page,
+}) => {
+  await page.goto("/#/onboarding");
+  await page
+    .getByRole("textbox", { name: "Profile label" })
+    .fill("QA Ask Provider");
+  await page
+    .getByRole("textbox", { name: "API key" })
+    .fill("qa-renderer-only-key");
+  await page.getByRole("button", { name: "Test Connection" }).click();
+
+  await expect(
+    page.getByText("Provider approval required", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Allow C4OS to use the QA Ask Provider credential and contact the provider for this connection test?",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Deny" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await page.screenshot({
+    path: "output/playwright/task-00022-provider-explicit-ask.png",
+    fullPage: true,
+  });
 });
 
 async function expectNoDocumentOverflow(page: Page) {
@@ -76,7 +111,14 @@ test("all accepted product routes are directly addressable", async ({
 
   for (const [path, title] of routes) {
     await page.goto(`/#${path}`);
-    if (path === "/chat") {
+    if (
+      path === "/chat" ||
+      path === "/chat-search" ||
+      path === "/chat-capabilities" ||
+      path === "/files" ||
+      path === "/browser" ||
+      path === "/terminal"
+    ) {
       await expect(page.getByRole("region", { name: title })).toBeVisible();
     } else {
       await expect(
@@ -98,7 +140,9 @@ test("workspace review routes expose their accepted material state", async ({
   page,
 }) => {
   await page.goto("/#/chat-search");
-  const search = page.getByRole("searchbox", { name: "Search chats" });
+  const search = page.getByRole("searchbox", {
+    name: "Search chat sessions",
+  });
   await expect(search).toHaveValue("project");
   await expect(
     page.getByRole("heading", { name: "Search results", level: 2 }),
@@ -239,8 +283,8 @@ test("responsive overlay, compressed Settings, and deferred gates stay explicit"
   await page.setViewportSize({ width: 700, height: 720 });
   await expect(resizer).toHaveAttribute("aria-valuenow", "280");
   await expect(resizer).toHaveAttribute("aria-valuemax", "280");
-  await page.locator("main.shell-workspace__stage").click({
-    position: { x: 600, y: 300 },
+  await page.getByRole("region", { name: "Conversation center" }).click({
+    position: { x: 400, y: 40 },
   });
   await expect(panel).toHaveAttribute("aria-hidden", "true");
 

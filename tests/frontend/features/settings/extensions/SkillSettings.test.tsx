@@ -58,15 +58,14 @@ function snapshot(
 }
 
 describe("SkillSettings", () => {
-  it("keeps row availability controlled and exposes effective resolution", () => {
+  it("keeps rows compact and exposes effective resolution in Details", async () => {
     const actions = createActions();
     render(<SkillSettings actions={actions} snapshot={snapshot()} />);
 
-    expect(
-      screen.getByText("plugin:github-workflow/review"),
-    ).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByText("Name collision")).toBeInTheDocument();
+    expect(
+      screen.queryByText("plugin:github-workflow/review"),
+    ).not.toBeInTheDocument();
     const toggle = screen.getByRole("switch", {
       name: /Review availability/u,
     });
@@ -77,6 +76,14 @@ describe("SkillSettings", () => {
       false,
     );
     expect(toggle).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review" });
+    expect(
+      within(dialog).getAllByText("plugin:github-workflow/review"),
+    ).toHaveLength(2);
+    expect(
+      within(dialog).getByText("Collision resolution"),
+    ).toBeInTheDocument();
   });
 
   it("loads instructions progressively only after a details request", async () => {
@@ -154,14 +161,14 @@ describe("SkillSettings", () => {
       />,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Unknown key `network_access` at line 4.",
-    );
     expect(
       screen.getByRole("switch", { name: /Review availability/u }),
     ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     const dialog = await screen.findByRole("dialog", { name: "Review" });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Unknown key `network_access` at line 4.",
+    );
     expect(
       within(dialog).getByRole("switch", { name: /Available in Chat/u }),
     ).toBeDisabled();

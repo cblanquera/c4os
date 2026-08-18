@@ -18,6 +18,7 @@ const providerService = vi.hoisted(() => ({
   acceptProviderSessionCredentials: vi.fn(),
   answerProviderApproval: vi.fn(),
   deleteProviderProfile: vi.fn(),
+  refreshProviderConnection: vi.fn(),
   readProviderSnapshot: vi.fn(),
   saveProviderProfile: vi.fn(),
   selectProviderModel: vi.fn(),
@@ -56,6 +57,7 @@ describe("ProviderSettings", () => {
         }),
     );
     providerService.testProviderConnection.mockResolvedValue(snapshot);
+    providerService.refreshProviderConnection.mockResolvedValue(snapshot);
     providerService.selectProviderModel.mockImplementation(
       async (_providerId: string, modelId: string) =>
         providerSnapshot({
@@ -68,6 +70,21 @@ describe("ProviderSettings", () => {
       generation: 4,
       providers: [],
     });
+  });
+
+  it("leaves the page title and support copy to the Settings route shell", async () => {
+    render(<ProviderSettings />);
+
+    expect(
+      await screen.findByRole("region", { name: "Provider settings content" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Provider connections" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Connect the AI services available to C4OS."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Provider" })).toBeVisible();
   });
 
   it("requires an explicit answer for a native Provider approval", async () => {
@@ -88,10 +105,10 @@ describe("ProviderSettings", () => {
 
     expect(await screen.findByText("Provider approval required")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent(
-      /use the stored credential and contact OpenAI Work/i,
+      /use the OpenAI Work credential and contact the provider/i,
     );
     expect(
-      screen.getByRole("button", { name: "Test OpenAI Work" }),
+      screen.getByRole("button", { name: "Edit OpenAI Work" }),
     ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>
@@ -107,22 +124,12 @@ describe("ProviderSettings", () => {
     );
   });
 
-  it("continues Save & Test through separate save and connection approvals", async () => {
-    const saved = providerSnapshot(
+  it("continues one transient Test through one explicit approval", async () => {
+    const untested = providerSnapshot(
       providerRecord({ testStatus: { state: "untested" }, models: [] }),
     );
-    const saveApproval = {
-      ...saved,
-      pendingApproval: {
-        promptId: "provider-save-prompt",
-        operation: "save-profile" as const,
-        providerId: "provider:openai-work",
-        providerName: "OpenAI Work",
-        expiresAtMs: 1_784_476_800_000,
-      },
-    };
     const testApproval = {
-      ...saved,
+      ...untested,
       pendingApproval: {
         promptId: "provider-test-prompt",
         operation: "test-connection" as const,
@@ -131,11 +138,15 @@ describe("ProviderSettings", () => {
         expiresAtMs: 1_784_476_800_000,
       },
     };
-    const connected = providerSnapshot();
-    providerService.saveProviderProfile.mockResolvedValueOnce(saveApproval);
-    providerService.answerProviderApproval
-      .mockResolvedValueOnce(saved)
-      .mockResolvedValueOnce(connected);
+    const testedProvider = providerRecord();
+    const connected = {
+      ...providerSnapshot(),
+      transientTest: {
+        testToken: "provider-test-token",
+        provider: testedProvider,
+      },
+    };
+    providerService.answerProviderApproval.mockResolvedValueOnce(connected);
     providerService.testProviderConnection.mockResolvedValueOnce(testApproval);
 
     render(<ProviderSettings />);
@@ -149,26 +160,23 @@ describe("ProviderSettings", () => {
       target: { value: "replacement-secret" },
     });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save & Test Connection" }),
+      within(dialog).getByRole("button", { name: "Test Connection" }),
     );
 
     expect(
-      await screen.findByText(/change the securely stored credential/i),
-    ).toBeVisible();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Deny" })).toHaveFocus(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() =>
-      expect(providerService.testProviderConnection).toHaveBeenCalledWith(
-        "provider:openai-work",
+      await screen.findByText(
+        /use the OpenAI Work credential and contact the provider/i,
       ),
-    );
-    expect(
-      await screen.findByText(/contact OpenAI Work for this connection test/i),
     ).toBeVisible();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Deny" })).toHaveFocus(),
+    );
+    expect(providerService.saveProviderProfile).not.toHaveBeenCalled();
+    expect(providerService.testProviderConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "provider:openai-work",
+        secret: "replacement-secret",
+      }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() =>
@@ -177,16 +185,19 @@ describe("ProviderSettings", () => {
         "allow",
       ),
     );
-    expect(await screen.findByText("Connection passed")).toBeVisible();
-    expect(screen.getByText("2 production-ready models")).toBeVisible();
-    await waitFor(() =>
-      expect(
-        screen.getByRole("heading", { name: "Provider profiles" }),
-      ).toHaveFocus(),
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit OpenAI Work" }),
     );
+    const testedDialog = await screen.findByRole("dialog", {
+      name: "Edit OpenAI Work",
+    });
+    expect(within(testedDialog).getByText("Connection passed")).toBeVisible();
+    expect(
+      within(testedDialog).getByText("2 production-ready models discovered."),
+    ).toBeVisible();
   });
 
-  it("supports enablement, testing, model selection, editing, and deletion", async () => {
+  it("keeps Provider rows bounded and edits, tests, and deletes in context", async () => {
     render(<ProviderSettings />);
     expect(
       await screen.findByRole("heading", { name: "OpenAI Work" }),
@@ -207,32 +218,17 @@ describe("ProviderSettings", () => {
     expect(toggleDraft).toEqual(expect.objectContaining({ enabled: false }));
     expect(toggleDraft).not.toHaveProperty("secret");
 
-    fireEvent.click(screen.getByRole("button", { name: "Test OpenAI Work" }));
-    await waitFor(() =>
-      expect(providerService.testProviderConnection).toHaveBeenCalledWith(
-        "provider:openai-work",
-      ),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Test OpenAI Work" }),
-      ).toBeEnabled(),
-    );
-
-    fireEvent.change(
-      screen.getByRole("combobox", {
+    expect(
+      screen.queryByRole("button", { name: "Test OpenAI Work" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete OpenAI Work" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", {
         name: "OpenAI Work selected model",
       }),
-      {
-        target: { value: "gpt-4.1" },
-      },
-    );
-    await waitFor(() =>
-      expect(providerService.selectProviderModel).toHaveBeenCalledWith(
-        "provider:openai-work",
-        "gpt-4.1",
-      ),
-    );
+    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Edit OpenAI Work" }),
@@ -248,6 +244,18 @@ describe("ProviderSettings", () => {
       "placeholder",
       "Leave blank to keep the existing key",
     );
+    fireEvent.click(
+      within(editDialog).getByRole("button", { name: "Test Connection" }),
+    );
+    await waitFor(() =>
+      expect(providerService.testProviderConnection).toHaveBeenCalled(),
+    );
+    expect(providerService.refreshProviderConnection).not.toHaveBeenCalled();
+    expect(
+      within(editDialog).queryByRole("group", {
+        name: "Model for new Chats",
+      }),
+    ).not.toBeInTheDocument();
     fireEvent.click(
       within(editDialog).getByRole("button", { name: "Save Profile" }),
     );
@@ -265,7 +273,13 @@ describe("ProviderSettings", () => {
       ).toBeNull(),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete OpenAI Work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit OpenAI Work" }));
+    const reopenedEditDialog = await screen.findByRole("dialog", {
+      name: "Edit OpenAI Work",
+    });
+    fireEvent.click(
+      within(reopenedEditDialog).getByRole("button", { name: "Delete…" }),
+    );
     const deleteDialog = await screen.findByRole("dialog", {
       name: "Delete OpenAI Work?",
     });
@@ -279,48 +293,33 @@ describe("ProviderSettings", () => {
     );
   });
 
-  it("serializes provider mutations and qualifies every repeated row action", async () => {
-    let resolveTest!: (snapshot: ProviderSettingsSnapshot) => void;
-    providerService.testProviderConnection.mockReturnValueOnce(
+  it("serializes row availability with every competing Provider action", async () => {
+    let resolveSave!: (snapshot: ProviderSettingsSnapshot) => void;
+    providerService.saveProviderProfile.mockReturnValueOnce(
       new Promise<ProviderSettingsSnapshot>((resolve) => {
-        resolveTest = resolve;
+        resolveSave = resolve;
       }),
     );
     render(<ProviderSettings />);
 
-    const testButton = await screen.findByRole("button", {
-      name: "Test OpenAI Work",
-    });
-    const switchControl = screen.getByRole("switch", {
+    const switchControl = await screen.findByRole("switch", {
       name: "OpenAI Work availability",
     });
-    const modelSelect = screen.getByRole("combobox", {
-      name: "OpenAI Work selected model",
-    });
-    fireEvent.click(testButton);
+    fireEvent.click(switchControl);
 
     await waitFor(() => {
-      expect(testButton).toBeDisabled();
       expect(switchControl).toBeDisabled();
-      expect(modelSelect).toBeDisabled();
       expect(
         screen.getByRole("button", { name: "Add Provider" }),
       ).toBeDisabled();
       expect(
         screen.getByRole("button", { name: "Edit OpenAI Work" }),
       ).toBeDisabled();
-      expect(
-        screen.getByRole("button", { name: "Delete OpenAI Work" }),
-      ).toBeDisabled();
     });
-    expect(providerService.testProviderConnection).toHaveBeenCalledTimes(1);
+    expect(providerService.saveProviderProfile).toHaveBeenCalledTimes(1);
 
-    resolveTest(providerSnapshot());
-    await waitFor(() => {
-      expect(testButton).toBeEnabled();
-      expect(switchControl).toBeEnabled();
-      expect(modelSelect).toBeEnabled();
-    });
+    resolveSave(providerSnapshot());
+    await waitFor(() => expect(switchControl).toBeEnabled());
   });
 
   it("shares conditional compatible fields and visible validation in Add Provider", async () => {
@@ -411,7 +410,7 @@ describe("ProviderSettings", () => {
     ).toHaveValue("");
   });
 
-  it("makes Add Provider test persistence explicit before the dialog closes", async () => {
+  it("keeps Add Provider Test transient until an explicit Save", async () => {
     providerService.readProviderSnapshot.mockResolvedValueOnce({
       ...providerSnapshot(),
       providers: [],
@@ -431,17 +430,22 @@ describe("ProviderSettings", () => {
 
     fireEvent.click(
       within(dialog).getByRole("button", {
-        name: "Save & Test Connection",
+        name: "Test Connection",
       }),
     );
     await waitFor(() =>
       expect(providerService.testProviderConnection).toHaveBeenCalledWith(
-        "provider:openai-work",
+        expect.objectContaining({
+          providerId: "provider:openai-work",
+          secret: "new-secret",
+        }),
       ),
     );
-    expect(within(dialog).getByRole("button", { name: "Close" })).toBeVisible();
-    expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeVisible();
+    expect(providerService.saveProviderProfile).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Add Provider" })).toBeNull(),
     );
@@ -456,14 +460,31 @@ describe("ProviderSettings", () => {
     });
     render(<ProviderSettings />);
 
-    const testButton = await screen.findByRole("button", {
-      name: "Test OpenAI Work",
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit OpenAI Work" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit OpenAI Work",
+    });
+    const testButton = within(dialog).getByRole("button", {
+      name: "Test Connection",
     });
     expect(testButton).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Use session-only credentials" }),
     );
-    await waitFor(() => expect(testButton).toBeEnabled());
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit OpenAI Work" }),
+    );
+    const recoveredDialog = await screen.findByRole("dialog", {
+      name: "Edit OpenAI Work",
+    });
+    expect(
+      within(recoveredDialog).getByRole("button", {
+        name: "Test Connection",
+      }),
+    ).toBeEnabled();
     expect(providerService.acceptProviderSessionCredentials).toHaveBeenCalled();
   });
 
@@ -473,10 +494,9 @@ describe("ProviderSettings", () => {
     );
     render(<ProviderSettings />);
 
-    expect(
-      await screen.findByRole("button", { name: "Test OpenAI Work" }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Edit OpenAI Work" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit OpenAI Work" }),
+    );
     const editDialog = await screen.findByRole("dialog", {
       name: "Edit OpenAI Work",
     });
@@ -484,6 +504,13 @@ describe("ProviderSettings", () => {
       "placeholder",
       "Enter API key",
     );
+    fireEvent.click(
+      within(editDialog).getByRole("button", { name: "Test Connection" }),
+    );
+    expect(
+      await within(editDialog).findByText("Enter an API key."),
+    ).toBeVisible();
+    expect(providerService.testProviderConnection).not.toHaveBeenCalled();
   });
 });
 
@@ -504,6 +531,7 @@ function providerSnapshot(
     defaultRuntime: "opencode",
     defaultEnvironment: "local",
     pendingApproval: null,
+    transientTest: null,
   };
 }
 

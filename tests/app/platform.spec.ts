@@ -104,7 +104,11 @@ test.describe("native semantic platform foundation", () => {
     await page.setViewportSize({ width: 1100, height: 680 });
     await page.goto("/#/settings/providers");
     await expect(
-      page.getByRole("heading", { name: "Providers", exact: true }),
+      page.getByRole("heading", {
+        name: "Providers",
+        exact: true,
+        level: 1,
+      }),
     ).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "Settings" }),

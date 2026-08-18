@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "buildFlavor": "c4os-auth-fd.1",
+  "buildFlavor": "c4os-auth-fd-terminal-stop.2",
   "upstream": {
     "repository": "https://github.com/anomalyco/opencode.git",
     "tag": "v1.18.3",
@@ -15,7 +15,7 @@
   },
   "patch": {
     "path": "patches/c4os-server-auth-fd.patch",
-    "sha256": "sha256:3b07e427f8c7f85b4ec1ec7d51c1474f396643d12b44df01926591acb500b33f"
+    "sha256": "sha256:512a8a82a157b5e7952c9637b6d4a7a03535418b868f8d25b9a06540c6f6a3b1"
   },
   "modelsSnapshot": {
     "path": "build-inputs/models-dev-api-20260719.json.gz",
@@ -34,6 +34,6 @@
     "relativeBuildPath": "packages/opencode/dist/opencode-darwin-arm64/bin/opencode",
     "relativeInstallPath": "node_modules/opencode-darwin-arm64/bin/opencode",
     "sizeBytes": 137518946,
-    "sha256": "sha256:4d8e086228e3b8effe720284b5ed5c4e1f0a98dd9e677bb16e5074eb415f27b1"
+    "sha256": "sha256:99d5d922f715ea0df9605f72849c68c0404d48b43ff319cef4cf943a0ee650e8"
   }
 }

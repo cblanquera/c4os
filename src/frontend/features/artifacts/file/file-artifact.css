@@ -138,3 +138,12 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
+
+.artifact-shell[data-artifact-context="contextual"] .artifact-file__header {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.artifact-shell[data-artifact-context="contextual"] .artifact-file__body {
+  min-width: 0;
+}

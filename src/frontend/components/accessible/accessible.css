@@ -214,7 +214,7 @@
 }
 
 .c4-modal {
-  width: min(100%, 520px);
+  width: min(100%, var(--shell-dialog-regular));
   max-height: calc(100vh - 48px);
   overflow: auto;
   border: 1px solid var(--border-separator);
@@ -222,6 +222,10 @@
   background: var(--surface-overlay);
   box-shadow: var(--shadow-dialog);
   color: var(--text-primary);
+}
+
+.c4-modal--compact {
+  width: min(100%, var(--shell-dialog-compact));
 }
 
 .c4-modal-dialog {
@@ -328,11 +332,11 @@
   --c4-row-actions-width: 72px;
   display: grid;
   min-width: 0;
-  min-height: 48px;
+  min-height: 68px;
   grid-template-columns: auto minmax(0, 1fr) auto var(--c4-row-actions-width);
   align-items: center;
   gap: 10px;
-  padding: 7px 8px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border-separator);
 }
 

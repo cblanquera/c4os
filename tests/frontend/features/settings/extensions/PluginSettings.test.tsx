@@ -212,6 +212,7 @@ describe("PluginSettings", () => {
     const actions = createActions();
     render(<PluginSettings actions={actions} snapshot={readySnapshot} />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Directory" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Marketplace" }));
     const dialog = await screen.findByRole("dialog", {
       name: "Add Marketplace",
@@ -463,10 +464,11 @@ describe("PluginSettings", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "No marketplaces added" }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole("heading", { name: "No plugins installed" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Directory" }));
+    expect(
+      screen.getByRole("heading", { name: "No marketplaces added" }),
     ).toBeInTheDocument();
   });
 });

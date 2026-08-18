@@ -16,6 +16,7 @@ export function resolveQaRootElement(candidate: string | undefined): ReactNode {
   if (entry === "runtime") return <RuntimeQaSurface />;
   if (entry === "policy") return <QaPolicyRoute />;
   if (entry === "chat") return <Navigate replace to="/chat" />;
+  if (entry === "onboarding") return <Navigate replace to="/onboarding" />;
   if (entry === "foundation") return <Navigate replace to="/qa/foundation" />;
   return null;
 }

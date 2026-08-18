@@ -10,16 +10,11 @@ import {
 import {
   deleteProviderProfile,
   saveProviderProfile,
-  selectProviderModel,
-  testProviderConnection,
   type ProviderRecord,
   type ProviderSettingsSnapshot,
 } from "../../../platform/provider-service";
 import { ProviderProfileForm } from "./ProviderProfileForm";
-import {
-  ProviderApprovalNotice,
-  type ProviderApprovalDecision,
-} from "./ProviderApprovalNotice";
+import { ProviderApprovalNotice } from "./ProviderApprovalNotice";
 import { ProviderCredentialFallbackNotice } from "./ProviderCredentialFallbackNotice";
 import {
   draftFromProvider,
@@ -75,13 +70,11 @@ function ProviderSettingsReady({
     null,
   );
   const activeMutationOwnerRef = useRef<string | null>(null);
-  const approvalReturnFocusRef = useRef<HTMLHeadingElement>(null);
+  const approvalReturnFocusRef = useRef<HTMLDivElement>(null);
   const previousApprovalPromptRef = useRef<string | null>(
     snapshot.pendingApproval?.promptId ?? null,
   );
   const [operationError, setOperationError] = useState<string | null>(null);
-  const [testAfterSaveApprovalProviderId, setTestAfterSaveApprovalProviderId] =
-    useState<string | null>(null);
 
   useEffect(() => {
     const currentPromptId = snapshot.pendingApproval?.promptId ?? null;
@@ -140,53 +133,23 @@ function ProviderSettingsReady({
   const mutationPending =
     activeMutationOwner !== null || snapshot.pendingApproval !== null;
 
-  async function continueTestAfterSaveApproval(
-    decision: ProviderApprovalDecision,
-    next: ProviderSettingsSnapshot,
-  ) {
-    const providerId = testAfterSaveApprovalProviderId;
-    setTestAfterSaveApprovalProviderId(null);
-    if (decision !== "allow" || providerId === null) return;
-    if (next.pendingApproval !== null) {
-      setOperationError(
-        "The Provider save approval did not settle before its connection test.",
-      );
-      return;
-    }
-    setOperationError(null);
-    try {
-      const tested = await withMutationLock(
-        `test-after-save:${providerId}`,
-        () => testProviderConnection(providerId),
-      );
-      onSnapshot(tested);
-    } catch (error) {
-      setOperationError(providerMessage(error));
-    }
-  }
-
   return (
     <div
+      aria-label="Provider settings content"
       aria-busy={mutationPending}
       className="provider-settings"
       data-generation={snapshot.generation}
+      ref={approvalReturnFocusRef}
+      role="region"
+      tabIndex={-1}
     >
-      <div className="provider-settings__heading">
-        <div>
-          <h2 ref={approvalReturnFocusRef} tabIndex={-1}>
-            Provider profiles
-          </h2>
-          <p>
-            Credentials stay in secure native storage. Settings receives only
-            opaque credential presence and bounded connection evidence.
-          </p>
-        </div>
+      <div className="provider-settings__actions">
         <ProviderDialog
           isLocked={
             mutationPending && activeMutationOwner !== "dialog:add-provider"
           }
           mutationOwner="dialog:add-provider"
-          onTestAfterSaveApproval={setTestAfterSaveApprovalProviderId}
+          mutate={mutate}
           onSnapshot={onSnapshot}
           snapshot={snapshot}
           withMutationLock={withMutationLock}
@@ -198,13 +161,7 @@ function ProviderSettingsReady({
         snapshot={snapshot}
       />
 
-      <ProviderApprovalNotice
-        {...(testAfterSaveApprovalProviderId === null
-          ? {}
-          : { onAnswered: continueTestAfterSaveApproval })}
-        onSnapshot={onSnapshot}
-        snapshot={snapshot}
-      />
+      <ProviderApprovalNotice onSnapshot={onSnapshot} snapshot={snapshot} />
 
       {operationError ? (
         <Notice title="Provider change was not applied" tone="danger">
@@ -237,7 +194,6 @@ function ProviderSettingsReady({
               provider={provider}
               setEnabled={setEnabled}
               snapshot={snapshot}
-              onTestAfterSaveApproval={setTestAfterSaveApprovalProviderId}
               withMutationLock={withMutationLock}
             />
           ))}
@@ -247,13 +203,12 @@ function ProviderSettingsReady({
   );
 }
 
-/** Renders one provider profile with CRUD, test, and model actions. */
+/** Renders the compact provider identity, availability, and Edit boundary. */
 function ProviderRow({
   activeMutationOwner,
   isBusy,
   mutate,
   onSnapshot,
-  onTestAfterSaveApproval,
   provider,
   setEnabled,
   snapshot,
@@ -266,7 +221,6 @@ function ProviderRow({
     operation: () => Promise<ProviderSettingsSnapshot>,
   ) => Promise<boolean>;
   readonly onSnapshot: (snapshot: ProviderSettingsSnapshot) => void;
-  readonly onTestAfterSaveApproval: (providerId: string) => void;
   readonly provider: ProviderRecord;
   readonly setEnabled: (provider: ProviderRecord, enabled: boolean) => void;
   readonly snapshot: ProviderSettingsSnapshot;
@@ -274,7 +228,6 @@ function ProviderRow({
 }) {
   const configurable = isConfigurableProvider(provider);
   const editMutationOwner = `dialog:edit:${provider.providerId}`;
-  const deleteMutationOwner = `dialog:delete:${provider.providerId}`;
   return (
     <article
       aria-busy={isBusy}
@@ -292,19 +245,6 @@ function ProviderRow({
         </div>
       </div>
 
-      <div className="provider-row__state">
-        <span data-state={provider.testStatus.state}>
-          {providerTestLabel(provider)}
-        </span>
-        <span>
-          {
-            provider.models.filter(({ productionReady }) => productionReady)
-              .length
-          }{" "}
-          production-ready models
-        </span>
-      </div>
-
       <div className="provider-row__actions">
         <Switch
           aria-label={`${provider.displayName} availability`}
@@ -318,68 +258,14 @@ function ProviderRow({
           <ProviderDialog
             initialProvider={provider}
             isLocked={isBusy && activeMutationOwner !== editMutationOwner}
+            mutate={mutate}
             mutationOwner={editMutationOwner}
-            onTestAfterSaveApproval={onTestAfterSaveApproval}
             onSnapshot={onSnapshot}
             snapshot={snapshot}
             withMutationLock={withMutationLock}
           />
         ) : null}
-        <Button
-          aria-label={`Test ${provider.displayName}`}
-          isDisabled={
-            isBusy ||
-            (!provider.hasCredential &&
-              provider.authentication.type !== "none") ||
-            (snapshot.credentialFallbackRequired &&
-              provider.authentication.type !== "none")
-          }
-          onPress={() =>
-            void mutate(`test:${provider.providerId}`, () =>
-              testProviderConnection(provider.providerId),
-            )
-          }
-        >
-          Test
-        </Button>
-        <DeleteProviderDialog
-          isBusy={isBusy}
-          isLocked={isBusy && activeMutationOwner !== deleteMutationOwner}
-          mutate={mutate}
-          mutationOwner={deleteMutationOwner}
-          provider={provider}
-        />
       </div>
-
-      {provider.models.length > 0 ? (
-        <label className="provider-row__model">
-          <span>Selected model</span>
-          <select
-            aria-label={`${provider.displayName} selected model`}
-            disabled={isBusy}
-            onChange={(event) => {
-              const modelId = event.currentTarget.value;
-              if (!modelId) return;
-              void mutate(`model:${provider.providerId}`, () =>
-                selectProviderModel(provider.providerId, modelId),
-              );
-            }}
-            value={provider.selectedModelId ?? ""}
-          >
-            <option value="">Choose a model</option>
-            {provider.models.map((model) => (
-              <option
-                disabled={!model.productionReady}
-                key={model.modelId}
-                value={model.modelId}
-              >
-                {model.displayName}
-                {model.productionReady ? "" : " — unavailable"}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
     </article>
   );
 }
@@ -388,26 +274,29 @@ function ProviderRow({
 function ProviderDialog({
   initialProvider,
   isLocked,
+  mutate,
   mutationOwner,
-  onTestAfterSaveApproval,
   onSnapshot,
   snapshot,
   withMutationLock,
 }: {
   readonly initialProvider?: ProviderRecord;
   readonly isLocked: boolean;
+  readonly mutate: (
+    providerId: string,
+    operation: () => Promise<ProviderSettingsSnapshot>,
+  ) => Promise<boolean>;
   readonly mutationOwner: string;
-  readonly onTestAfterSaveApproval: (providerId: string) => void;
   readonly onSnapshot: (snapshot: ProviderSettingsSnapshot) => void;
   readonly snapshot: ProviderSettingsSnapshot;
   readonly withMutationLock: ProviderMutationLock;
 }) {
   const controller = useProviderProfile({
     ...(initialProvider ? { initialProvider } : {}),
-    onTestAfterSaveApproval,
     onSnapshot,
     snapshot,
   });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const editing = initialProvider !== undefined;
   const triggerLabel = editing
     ? `Edit ${initialProvider.displayName}`
@@ -443,109 +332,93 @@ function ProviderDialog({
     <ModalDialog
       closeLabel={dismissLabel}
       isDismissable={!controller.isBusy}
-      renderActions={(close) => (
-        <>
-          <Button
-            isDisabled={controller.isBusy}
-            onPress={() => {
-              controller.reset();
-              close();
-            }}
-          >
-            {dismissLabel}
-          </Button>
-          <Button
-            isDisabled={controller.isBusy || credentialBlocked}
-            onPress={() => void runDialogMutation(controller.testConnection)}
-          >
-            {controller.operation === "testing"
-              ? "Testing…"
-              : "Save & Test Connection"}
-          </Button>
-          <Button
-            isDisabled={controller.isBusy || credentialBlocked}
-            onPress={() => {
-              void runDialogMutation(controller.save).then((saved) => {
-                if (saved) {
-                  controller.reset();
+      renderActions={(close) =>
+        confirmingDelete && initialProvider ? (
+          <>
+            <Button onPress={() => setConfirmingDelete(false)}>
+              Keep Provider
+            </Button>
+            <Button
+              onPress={() => {
+                void mutate(`${mutationOwner}:delete`, () =>
+                  deleteProviderProfile(initialProvider.providerId),
+                ).then(() => {
+                  setConfirmingDelete(false);
                   close();
-                }
-              });
-            }}
-            variant="primary"
-          >
-            {controller.operation === "saving" ? "Saving…" : "Save Profile"}
-          </Button>
-        </>
-      )}
+                });
+              }}
+              variant="danger"
+            >
+              Delete Provider
+            </Button>
+          </>
+        ) : (
+          <>
+            {initialProvider ? (
+              <Button
+                isDisabled={controller.isBusy}
+                onPress={() => setConfirmingDelete(true)}
+                variant="danger"
+              >
+                Delete…
+              </Button>
+            ) : null}
+            <Button
+              isDisabled={controller.isBusy}
+              onPress={() => {
+                controller.reset();
+                close();
+              }}
+            >
+              {dismissLabel}
+            </Button>
+            <Button
+              isDisabled={controller.isBusy || credentialBlocked}
+              onPress={() => void runDialogMutation(controller.testConnection)}
+            >
+              {controller.operation === "testing"
+                ? "Testing…"
+                : "Test Connection"}
+            </Button>
+            <Button
+              isDisabled={controller.isBusy || credentialBlocked}
+              onPress={() => {
+                void runDialogMutation(controller.save).then((saved) => {
+                  if (saved) {
+                    controller.reset();
+                    close();
+                  }
+                });
+              }}
+              variant="primary"
+            >
+              {controller.operation === "saving" ? "Saving…" : "Save Profile"}
+            </Button>
+          </>
+        )
+      }
       title={
-        initialProvider ? `Edit ${initialProvider.displayName}` : "Add Provider"
+        confirmingDelete && initialProvider
+          ? `Delete ${initialProvider.displayName}?`
+          : initialProvider
+            ? `Edit ${initialProvider.displayName}`
+            : "Add Provider"
       }
       triggerLabel={triggerLabel}
       triggerVariant={editing ? "secondary" : "primary"}
     >
-      <ProviderProfileForm
-        controller={guardedController}
-        mode="settings"
-        onDismiss={controller.reset}
-      />
-    </ModalDialog>
-  );
-}
-
-/** Confirms deletion before asking the native service to remove a profile. */
-function DeleteProviderDialog({
-  isBusy,
-  isLocked,
-  mutate,
-  mutationOwner,
-  provider,
-}: {
-  readonly isBusy: boolean;
-  readonly isLocked: boolean;
-  readonly mutate: (
-    providerId: string,
-    operation: () => Promise<ProviderSettingsSnapshot>,
-  ) => Promise<boolean>;
-  readonly mutationOwner: string;
-  readonly provider: ProviderRecord;
-}) {
-  const triggerLabel = `Delete ${provider.displayName}`;
-  if (isLocked) {
-    return (
-      <Button isDisabled variant="danger">
-        {triggerLabel}
-      </Button>
-    );
-  }
-  return (
-    <ModalDialog
-      renderActions={(close) => (
-        <>
-          <Button onPress={close}>Cancel</Button>
-          <Button
-            isDisabled={isBusy}
-            onPress={() => {
-              void mutate(mutationOwner, () =>
-                deleteProviderProfile(provider.providerId),
-              ).then((deleted) => {
-                if (deleted) close();
-              });
-            }}
-            variant="danger"
-          >
-            Delete Provider
-          </Button>
-        </>
+      {confirmingDelete && initialProvider ? (
+        <p>
+          This removes the provider and its model availability. This action
+          requires destructive confirmation.
+        </p>
+      ) : (
+        <ProviderProfileForm
+          controller={guardedController}
+          mode="settings"
+          onDismiss={controller.reset}
+        />
       )}
-      title={`Delete ${provider.displayName}?`}
-      triggerLabel={triggerLabel}
-      triggerVariant="danger"
-    >
-      <p>
-        This removes the provider profile and its model availability. The native
-        credential service applies the corresponding secure-storage policy.
-      </p>
     </ModalDialog>
   );
 }
@@ -554,20 +427,6 @@ type ProviderMutationLock = <Result>(
   owner: string,
   operation: () => Promise<Result>,
 ) => Promise<Result>;
-
-/** Converts frozen test states into concise provider-row status labels. */
-function providerTestLabel(provider: ProviderRecord): string {
-  switch (provider.testStatus.state) {
-    case "untested":
-      return "Not tested";
-    case "succeeded":
-      return "Connection passed";
-    case "succeededNoUsableModels":
-      return "Connected · no usable models";
-    case "failed":
-      return "Connection failed";
-  }
-}
 
 /** Keeps provider mutations bounded to service-authored renderer messages. */
 function providerMessage(error: unknown): string {

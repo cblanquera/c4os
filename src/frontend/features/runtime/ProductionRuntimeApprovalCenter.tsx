@@ -15,6 +15,7 @@ interface ProductionRuntimeApprovalCenterProps {
   readonly pollIntervalMs?: number;
   readonly readSnapshot?: () => Promise<RuntimeCoreSnapshot>;
   readonly answerApproval?: typeof answerProductionRuntimeApproval;
+  readonly qualification?: string;
 }
 
 /**
@@ -27,6 +28,7 @@ export function ProductionRuntimeApprovalCenter({
   pollIntervalMs = 500,
   readSnapshot = readRuntimeCoreSnapshot,
   answerApproval = answerProductionRuntimeApproval,
+  qualification,
 }: ProductionRuntimeApprovalCenterProps) {
   const [snapshot, setSnapshot] = useState<RuntimeCoreSnapshot | null>(null);
   const [settlingPromptId, setSettlingPromptId] = useState<string | null>(null);
@@ -106,6 +108,11 @@ export function ProductionRuntimeApprovalCenter({
         className="production-runtime-approval"
         role="dialog"
       >
+        {qualification === undefined ? null : (
+          <p className="production-runtime-approval__qualification" role="note">
+            {qualification}
+          </p>
+        )}
         <p className="production-runtime-approval__eyebrow">
           Action Gateway approval
         </p>

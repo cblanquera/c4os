@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
-import { BrandMark, Button } from "../../../components/accessible";
+import { Button } from "../../../components/accessible";
 import type { SettingsRoutePath, ShellRoutePath } from "./shell-routes";
-import { getShellRouteCopy, SETTINGS_DESTINATIONS } from "./shell-routes";
+import { SETTINGS_DESTINATIONS } from "./shell-routes";
 import { RouteSurface } from "./RouteSurface";
 
 interface SettingsLayoutProps {
@@ -24,13 +24,6 @@ export function SettingsLayout({
 
   return (
     <div className="shell-view shell-settings" data-shell-layout="settings">
-      <header className="shell-title-header" aria-label="C4OS window title">
-        <BrandMark label="C4OS" />
-        <span className="shell-title-header__route">
-          {getShellRouteCopy(route).title}
-        </span>
-      </header>
-
       <div className="shell-settings__body">
         <nav className="shell-settings__navigation" aria-label="Settings">
           <Button
@@ -41,6 +34,7 @@ export function SettingsLayout({
             <span aria-hidden="true">‹</span>
             <span className="shell-settings__back-label">Back to C4OS</span>
           </Button>
+          <p className="shell-settings__navigation-label">Settings</p>
           <ul>
             {SETTINGS_DESTINATIONS.map((destination, index) => (
               <li

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Icon, type IconName } from "../../../components/accessible";
 import type {
   ArtifactContext,
   ArtifactIdentity,
@@ -52,7 +53,9 @@ export function ArtifactShell({
       <header className="artifact-shell__header" data-artifact-static="header">
         <div className="artifact-shell__identity">
           <span aria-hidden="true" className="artifact-shell__icon">
-            {identity.icon ?? "◇"}
+            {identity.icon ?? (
+              <Icon name={artifactIconName(identity.typeLabel)} size={16} />
+            )}
           </span>
           <span className="artifact-shell__identity-copy">
             <span>{identity.typeLabel}</span>
@@ -115,6 +118,17 @@ export function ArtifactShell({
       </footer>
     </article>
   );
+}
+
+/** Maps provider identity to the shared outline icon vocabulary. */
+function artifactIconName(typeLabel: string): IconName {
+  const icons: Record<string, IconName> = {
+    Browser: "globe",
+    File: "file",
+    Folder: "folder",
+    Terminal: "terminal",
+  };
+  return icons[typeLabel] ?? "info";
 }
 
 interface ArtifactStatusProps {

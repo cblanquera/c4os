@@ -177,6 +177,17 @@
   white-space: nowrap;
 }
 
+.artifact-shell[data-artifact-context="contextual"]
+  .artifact-terminal__metadata {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.artifact-shell[data-artifact-context="contextual"]
+  .artifact-terminal__location {
+  flex-basis: 100%;
+}
+
 @media (max-width: 560px) {
   .artifact-terminal__metadata {
     align-items: stretch;

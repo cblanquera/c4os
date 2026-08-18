@@ -23,7 +23,7 @@ const policyMocks = vi.hoisted(() => ({
 const providerMocks = vi.hoisted(() => ({
   answerProviderApproval: vi.fn(),
   readProviderSnapshot: vi.fn(),
-  testProviderConnection: vi.fn(),
+  refreshProviderConnection: vi.fn(),
 }));
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -187,6 +187,7 @@ function providerSnapshot(
     onboardingCompleted: true,
     pendingApproval,
     providers: [provider("provider-one"), provider("provider-two")],
+    transientTest: null,
   };
 }
 
@@ -282,7 +283,7 @@ describe("CoreSettingsController model refresh authority", () => {
     });
     const approved = providerSnapshot(3);
     const complete = providerSnapshot(4);
-    providerMocks.testProviderConnection
+    providerMocks.refreshProviderConnection
       .mockResolvedValueOnce(pending)
       .mockResolvedValueOnce(complete);
     providerMocks.answerProviderApproval.mockResolvedValueOnce(approved);
@@ -296,7 +297,7 @@ describe("CoreSettingsController model refresh authority", () => {
       await screen.findByText("Provider approval required"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Models refreshed")).not.toBeInTheDocument();
-    expect(providerMocks.testProviderConnection).toHaveBeenCalledTimes(1);
+    expect(providerMocks.refreshProviderConnection).toHaveBeenCalledTimes(1);
     expect(
       screen.getByRole("button", { name: "Disable visible models" }),
     ).toBeDisabled();
@@ -310,11 +311,11 @@ describe("CoreSettingsController model refresh authority", () => {
       "approval-provider-one",
       "allow",
     );
-    expect(providerMocks.testProviderConnection).toHaveBeenNthCalledWith(
+    expect(providerMocks.refreshProviderConnection).toHaveBeenNthCalledWith(
       1,
       "provider-one",
     );
-    expect(providerMocks.testProviderConnection).toHaveBeenNthCalledWith(
+    expect(providerMocks.refreshProviderConnection).toHaveBeenNthCalledWith(
       2,
       "provider-two",
     );
@@ -328,7 +329,7 @@ describe("CoreSettingsController model refresh authority", () => {
       providerId: "provider-one",
       providerName: "provider-one",
     });
-    providerMocks.testProviderConnection.mockResolvedValueOnce(pending);
+    providerMocks.refreshProviderConnection.mockResolvedValueOnce(pending);
     providerMocks.answerProviderApproval.mockResolvedValueOnce(
       providerSnapshot(3),
     );
@@ -342,7 +343,7 @@ describe("CoreSettingsController model refresh authority", () => {
 
     expect(await screen.findByText("Model refresh failed")).toBeInTheDocument();
     expect(screen.queryByText("Models refreshed")).not.toBeInTheDocument();
-    expect(providerMocks.testProviderConnection).toHaveBeenCalledTimes(1);
+    expect(providerMocks.refreshProviderConnection).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -394,7 +395,7 @@ describe("CoreSettingsController recovery composition", () => {
     });
   });
 
-  it("loads update and redacted diagnostic authority on the production Configuration route", async () => {
+  it("keeps the production Configuration route scoped to application defaults", async () => {
     render(
       <CoreSettingsController
         onNavigate={vi.fn()}
@@ -403,13 +404,12 @@ describe("CoreSettingsController recovery composition", () => {
     );
 
     expect(await screen.findByText("Application defaults")).toBeVisible();
-    expect(await screen.findByText("Updates and recovery")).toBeVisible();
-    expect(await screen.findByText("Diagnostics")).toBeVisible();
-    expect(screen.getByText("Not established")).toBeVisible();
+    expect(screen.queryByText("Updates and recovery")).not.toBeInTheDocument();
+    expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument();
     expect(configurationMocks.readConfigurationSettings).toHaveBeenCalledTimes(
       1,
     );
-    expect(updateMocks.readUpdateSnapshot).toHaveBeenCalledTimes(1);
-    expect(diagnosticMocks.readDiagnosticsSnapshot).toHaveBeenCalledTimes(1);
+    expect(updateMocks.readUpdateSnapshot).not.toHaveBeenCalled();
+    expect(diagnosticMocks.readDiagnosticsSnapshot).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
   display: grid;
   min-width: 0;
   gap: 14px;
-  margin-block-start: 26px;
+  margin-block-start: 0;
 }
 
 .mcp-settings__heading {
@@ -256,7 +256,7 @@
 
 .c4-modal:has(.mcp-form),
 .c4-modal:has(.mcp-details) {
-  width: min(100%, 760px);
+  width: min(100%, var(--shell-dialog-regular));
 }
 
 .mcp-form,

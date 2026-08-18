@@ -729,6 +729,7 @@ function providerSnapshot(
     modelRoute: "provider:openai-work::gpt-5",
     defaultRuntime: "opencode",
     defaultEnvironment: "local",
+    transientTest: null,
     pendingApproval: null,
     ...overrides,
   };

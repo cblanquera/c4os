@@ -14,8 +14,8 @@ use c4os_lib::core::services::{
     ManagedAppConfiguration, WorkspaceCreationLifecycle, WorkspaceServiceOpen,
     create_workspace_from_completed_clone, create_workspace_from_project,
     create_workspace_from_project_with_lifecycle, load_workspace_start_state,
-    open_workspace_with_database, restore_active_workspace, restore_app_configuration,
-    save_app_configuration, validate_workspace_semantics,
+    open_workspace_with_database, restore_active_workspace, restore_active_workspace_for_project,
+    restore_app_configuration, save_app_configuration, validate_workspace_semantics,
 };
 use c4os_lib::core::workspace::{
     ArchiveLimits, ArchiveViolation, C4osHomeLayout, WorkspaceError, WorkspaceLayout,
@@ -1168,6 +1168,166 @@ fn production_restore_returns_none_when_disabled_or_no_active_copy_exists() {
             .expect("disabled restore leaves lock available"),
         WriterAccess::Writable(_)
     ));
+}
+
+#[test]
+fn project_picker_retry_restores_only_the_exact_active_project_and_reestablishes_trust() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let project = temp.path().join("project");
+    let other_project = temp.path().join("other-project");
+    fs::create_dir_all(&project).expect("Project");
+    fs::create_dir_all(&other_project).expect("other Project");
+    let created = create_workspace_from_project(
+        &home,
+        &project,
+        "Primary Project",
+        "Picker Retry Fixture",
+        APP_VERSION,
+        owner("picker-retry-create"),
+        NOW,
+    )
+    .expect("create active Workspace");
+    let project_id = created.manifest().projects[0].project_id;
+    assert!(created.is_project_trusted(project_id));
+    drop(created);
+
+    let mismatch = restore_active_workspace_for_project(
+        &home,
+        &other_project,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("picker-retry-mismatch"),
+    )
+    .expect("a different picker grant is a recoverable create path");
+    assert!(mismatch.is_none());
+    assert!(
+        home.active_workspace().is_dir(),
+        "a mismatched picker grant must preserve recovery state"
+    );
+
+    let restored = restore_active_workspace_for_project(
+        &home,
+        &project,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("picker-retry-exact"),
+    )
+    .expect("restore exact picker Project")
+    .expect("active Workspace");
+    assert_eq!(restored.manifest().projects[0].project_id, project_id);
+    assert!(restored.is_project_trusted(project_id));
+}
+
+#[test]
+fn opening_a_new_project_preserves_the_prior_active_working_copy() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let first_project = temp.path().join("first-project");
+    let second_project = temp.path().join("second-project");
+    fs::create_dir_all(&first_project).expect("first Project");
+    fs::create_dir_all(&second_project).expect("second Project");
+    let first = create_workspace_from_project(
+        &home,
+        &first_project,
+        "First Project",
+        "First Workspace",
+        APP_VERSION,
+        owner("preserve-first-create"),
+        NOW,
+    )
+    .expect("create first active Workspace");
+    let first_workspace_id = first.manifest().workspace_id;
+    drop(first);
+
+    let second = create_workspace_from_project(
+        &home,
+        &second_project,
+        "Second Project",
+        "Second Workspace",
+        APP_VERSION,
+        owner("preserve-second-create"),
+        NOW + 1,
+    )
+    .expect("create second Workspace without discarding the first");
+    assert_eq!(
+        second.manifest().projects[0].last_known_path,
+        second_project.to_string_lossy()
+    );
+
+    let preserved = fs::read_dir(home.workspace_recovery_root())
+        .expect("Workspace recovery root")
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("preserved-active-")
+        })
+        .expect("prior active working copy is preserved");
+    let manifest: WorkspaceManifest = toml::from_str(
+        &fs::read_to_string(WorkspaceLayout::new(preserved.path()).manifest())
+            .expect("preserved Workspace manifest"),
+    )
+    .expect("valid preserved Workspace manifest");
+    assert_eq!(manifest.workspace_id, first_workspace_id);
+}
+
+#[test]
+fn failed_new_project_creation_restores_the_prior_active_working_copy() {
+    let temp = TempDir::new().expect("temporary root");
+    let home = C4osHomeLayout::new(temp.path().join("home"));
+    let first_project = temp.path().join("first-project");
+    let second_project = temp.path().join("second-project");
+    fs::create_dir_all(&first_project).expect("first Project");
+    fs::create_dir_all(&second_project).expect("second Project");
+    let first = create_workspace_from_project(
+        &home,
+        &first_project,
+        "First Project",
+        "First Workspace",
+        APP_VERSION,
+        owner("rollback-first-create"),
+        NOW,
+    )
+    .expect("create first active Workspace");
+    let first_workspace_id = first.manifest().workspace_id;
+    drop(first);
+
+    let error = create_workspace_from_project_with_lifecycle(
+        &home,
+        &second_project,
+        "Second Project",
+        "Second Workspace",
+        APP_VERSION,
+        owner("rollback-second-create"),
+        NOW + 1,
+        Arc::new(RejectWorkspaceConfigurationCoordinatorStart),
+    )
+    .err()
+    .expect("failed replacement creation must roll back");
+    assert!(matches!(error, WorkspaceError::Conflict(_)));
+
+    let restored = restore_active_workspace_for_project(
+        &home,
+        &first_project,
+        APP_VERSION,
+        ArchiveLimits::default(),
+        owner("rollback-first-restore"),
+    )
+    .expect("restore prior active Workspace")
+    .expect("prior active Workspace remains current");
+    assert_eq!(restored.manifest().workspace_id, first_workspace_id);
+    assert!(
+        fs::read_dir(home.workspace_recovery_root())
+            .expect("Workspace recovery root")
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("preserved-active-")),
+        "rolled-back preservation root is removed"
+    );
 }
 
 #[test]

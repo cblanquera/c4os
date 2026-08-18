@@ -56,7 +56,9 @@ test("QA direct route launcher enters a production-composed destination", async 
     .click();
 
   await expect(page).toHaveURL(/#\/settings\/models$/);
-  await expect(page.getByRole("heading", { name: "Models" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Models", exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel("QA fixture identity")).toContainText(
     "not production state",
   );

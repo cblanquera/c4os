@@ -683,6 +683,8 @@ struct PeerControl {
     fail_create: bool,
     fail_dispatch: bool,
     cancel_accepted: bool,
+    require_created_session_for_dispatch: bool,
+    created_sessions: BTreeSet<String>,
     events: VecDeque<PeerDispatchEvent>,
     requests: Vec<PeerDispatchRequest>,
 }
@@ -707,11 +709,15 @@ impl RuntimeDispatchPeer for DeterministicPeer {
         }
     }
 
-    fn create_session(&mut self, _request: &PeerDispatchRequest) -> Result<(), PeerDispatchError> {
+    fn create_session(&mut self, request: &PeerDispatchRequest) -> Result<(), PeerDispatchError> {
         self.trace.lock().unwrap().push("create".into());
-        if self.control.lock().unwrap().fail_create {
+        let mut control = self.control.lock().unwrap();
+        if control.fail_create {
             Err(PeerDispatchError::SessionCreate)
         } else {
+            control
+                .created_sessions
+                .insert(request.identity.session_id.clone());
             Ok(())
         }
     }
@@ -719,6 +725,13 @@ impl RuntimeDispatchPeer for DeterministicPeer {
     fn dispatch(&mut self, request: &PeerDispatchRequest) -> Result<(), PeerDispatchError> {
         self.trace.lock().unwrap().push("dispatch".into());
         let mut control = self.control.lock().unwrap();
+        if control.require_created_session_for_dispatch
+            && !control
+                .created_sessions
+                .contains(&request.identity.session_id)
+        {
+            return Err(PeerDispatchError::StaleIdentity);
+        }
         control.requests.push(request.clone());
         if control.fail_dispatch {
             Err(PeerDispatchError::Dispatch)
@@ -1541,7 +1554,10 @@ fn retry_reuses_native_session_with_fresh_identity_and_failure_terminally_closes
     );
     assert_eq!(retry_attempt.correlation_id, "correlation-2");
     assert_eq!(retry_attempt.authorization_scope_id, "authority-attempt-2");
-    assert_eq!(*trace.lock().unwrap(), ["ready", "ready", "dispatch"]);
+    assert_eq!(
+        *trace.lock().unwrap(),
+        ["ready", "ready", "create", "dispatch"]
+    );
 
     let retry_identity = DispatchIdentity {
         attempt_id: "attempt-2".into(),
@@ -1572,6 +1588,91 @@ fn retry_reuses_native_session_with_fresh_identity_and_failure_terminally_closes
         RunAttemptStatus::Failed { .. }
     ));
     assert_eq!(record.active_attempt_id, None);
+}
+
+#[test]
+fn post_restart_retry_recreates_process_local_native_session() {
+    let temporary = TempDir::new().unwrap();
+    let trace = Arc::new(Mutex::new(Vec::new()));
+    let (mut coordinator, process_generation) =
+        ready_coordinator(temporary.path(), Arc::clone(&trace));
+    let first_control = Arc::new(Mutex::new(PeerControl {
+        ready: true,
+        cancel_accepted: true,
+        require_created_session_for_dispatch: true,
+        ..PeerControl::default()
+    }));
+    let mut registry = registry_with_peer(
+        process_generation,
+        Arc::clone(&first_control),
+        Arc::clone(&trace),
+    );
+    coordinate_first_dispatch(
+        &mut coordinator,
+        &mut registry,
+        first_submission(process_generation),
+        options(),
+    )
+    .unwrap();
+    coordinate_cancellation(
+        &mut coordinator,
+        &mut registry,
+        &dispatch_identity(process_generation),
+        NOW + 20,
+    )
+    .unwrap();
+
+    trace.lock().unwrap().clear();
+    let restarted_control = Arc::new(Mutex::new(PeerControl {
+        ready: true,
+        require_created_session_for_dispatch: true,
+        ..PeerControl::default()
+    }));
+    let mut restarted_registry = registry_with_peer(
+        process_generation,
+        Arc::clone(&restarted_control),
+        Arc::clone(&trace),
+    );
+    assert!(
+        restarted_control
+            .lock()
+            .unwrap()
+            .created_sessions
+            .is_empty()
+    );
+
+    let retry = retry_request(
+        &coordinator,
+        process_generation,
+        RetryFixture {
+            parent_attempt_id: "attempt-1",
+            attempt_id: "attempt-after-restart",
+            correlation_id: "correlation-after-restart",
+            automatic: false,
+            reviewed_unknown_effect: false,
+            created_at_ms: NOW + 21,
+        },
+    );
+    let result = coordinate_retry_dispatch(
+        &mut coordinator,
+        &mut restarted_registry,
+        retry,
+        retry_options(),
+    )
+    .unwrap();
+
+    assert!(matches!(result, CoordinatedRetryDispatch::Accepted { .. }));
+    assert_eq!(
+        *trace.lock().unwrap(),
+        ["ready", "ready", "create", "dispatch"]
+    );
+    assert!(
+        restarted_control
+            .lock()
+            .unwrap()
+            .created_sessions
+            .contains("session-1")
+    );
 }
 
 #[test]
@@ -1622,7 +1723,10 @@ fn follow_up_turn_reuses_native_session_and_terminally_closes_rejection() {
         record.turn("turn-2").unwrap().prompt.as_deref(),
         Some("Prompt for turn-2")
     );
-    assert_eq!(*trace.lock().unwrap(), ["ready", "ready", "dispatch"]);
+    assert_eq!(
+        *trace.lock().unwrap(),
+        ["ready", "ready", "create", "dispatch"]
+    );
     assert!(
         control
             .lock()

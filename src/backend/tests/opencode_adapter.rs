@@ -800,6 +800,45 @@ data: {"type":"message.part.updated","properties":{"part":{"id":"part-text-1","s
 }
 
 #[test]
+fn native_session_errors_publish_only_bounded_recovery_codes() {
+    let mut adapter = ready_adapter();
+    let active = begin_run(&mut adapter);
+    let authentication = adapter
+        .normalize_sse(
+            &active,
+            br#"data: {"type":"session.error","properties":{"sessionID":"native-session-1","error":{"name":"ProviderAuthError","data":{"providerID":"provider-openrouter","message":"secret-bearing native detail"}}}}
+
+"#,
+            210,
+        )
+        .expect("provider authentication error");
+    assert_eq!(
+        authentication.category,
+        NormalizedEventCategory::Error {
+            code: "provider-authentication-failed".into()
+        }
+    );
+    assert!(!format!("{authentication:?}").contains("secret-bearing"));
+
+    let rate_limit = adapter
+        .normalize_sse(
+            &active,
+            br#"data: {"type":"session.error","properties":{"sessionID":"native-session-1","error":{"name":"APIError","data":{"message":"provider detail","statusCode":429,"isRetryable":true,"responseHeaders":{"authorization":"must-not-cross"}}}}}
+
+"#,
+            211,
+        )
+        .expect("provider rate limit error");
+    assert_eq!(
+        rate_limit.category,
+        NormalizedEventCategory::Error {
+            code: "provider-rate-limited".into()
+        }
+    );
+    assert!(!format!("{rate_limit:?}").contains("must-not-cross"));
+}
+
+#[test]
 fn authenticated_assistant_message_updates_preserve_exact_parent_identity() {
     let mut adapter = ready_adapter();
     let active = begin_run(&mut adapter);

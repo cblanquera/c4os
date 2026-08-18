@@ -9,6 +9,7 @@ import {
 
 import { CapabilityPreflightPanel } from "./CapabilityPreflightPanel";
 import { ProviderLifecyclePanel } from "./ProviderLifecyclePanel";
+import { ProductionRuntimeApprovalCenter } from "./ProductionRuntimeApprovalCenter";
 import { RuntimeSupervisorPanel } from "./RuntimeSupervisorPanel";
 import { SessionLifecyclePanel } from "./SessionLifecyclePanel";
 import "./runtime-qa.css";
@@ -18,9 +19,7 @@ type RuntimeSurface = "providers" | "models" | "runtimes" | "sessions";
 type RuntimeQaSurfaceProps = {
   readonly isEnabled?: boolean;
   readonly readCoreSnapshot?: () => Promise<RuntimeCoreSnapshot>;
-  readonly answerApproval?: (
-    approval: ProductionRuntimeApprovalRequest,
-  ) => Promise<unknown>;
+  readonly answerApproval?: typeof answerProductionRuntimeApproval;
 };
 
 const SURFACE_LABELS: Record<RuntimeSurface, string> = {
@@ -36,6 +35,8 @@ export function RuntimeQaSurface({
   readCoreSnapshot = readRuntimeReviewSnapshot,
   answerApproval = answerProductionRuntimeApproval,
 }: RuntimeQaSurfaceProps) {
+  const nativeCredentialReviewEnabled =
+    import.meta.env.VITE_C4OS_QA_ENTRY === "runtime";
   const [surface, setSurface] = useState<RuntimeSurface>("providers");
   const [coreSnapshot, setCoreSnapshot] = useState<RuntimeCoreSnapshot | null>(
     null,
@@ -98,6 +99,9 @@ export function RuntimeQaSurface({
 
   return (
     <main className="runtime-qa" aria-labelledby="runtime-qa-title">
+      <p className="runtime-notice" role="note">
+        Deterministic QA fixture data · not production state
+      </p>
       <header className="runtime-qa__masthead">
         <div>
           <div className="runtime-qa__mark" aria-hidden="true">
@@ -203,6 +207,15 @@ export function RuntimeQaSurface({
       {surface === "models" ? <CapabilityPreflightPanel /> : null}
       {surface === "runtimes" ? <RuntimeSupervisorPanel /> : null}
       {surface === "sessions" ? <SessionLifecyclePanel /> : null}
+      {nativeCredentialReviewEnabled ? (
+        <ProductionRuntimeApprovalCenter
+          answerApproval={answerApproval}
+          enabled
+          pollIntervalMs={60_000}
+          qualification="Deterministic QA fixture data · not production state"
+          readSnapshot={readCoreSnapshot}
+        />
+      ) : null}
     </main>
   );
 }

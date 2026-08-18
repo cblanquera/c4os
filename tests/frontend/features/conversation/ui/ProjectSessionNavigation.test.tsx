@@ -352,9 +352,9 @@ describe("ProjectSessionNavigation", () => {
       "session-research",
       "project-alpha",
     );
-    expect(screen.getByRole("searchbox", { name: "Search chats" })).toHaveValue(
-      "release",
-    );
+    expect(
+      screen.getByRole("searchbox", { name: "Search chat sessions" }),
+    ).toHaveValue("release");
   });
 
   it("shows no-results and clears with button or Escape while restoring search focus", () => {
@@ -368,12 +368,14 @@ describe("ProjectSessionNavigation", () => {
     expect(props.onSearchQueryChange).toHaveBeenCalledWith("");
     expect(props.onSearchClear).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByRole("searchbox", { name: "Search chats" }),
+      screen.getByRole("searchbox", { name: "Search chat sessions" }),
     ).toHaveFocus();
 
     const escapeProps = { ...createProps(), searchQuery: "design" };
     rerender(<ProjectSessionNavigation {...escapeProps} />);
-    const search = screen.getByRole("searchbox", { name: "Search chats" });
+    const search = screen.getByRole("searchbox", {
+      name: "Search chat sessions",
+    });
     fireEvent.keyDown(search, { key: "Escape" });
     expect(escapeProps.onSearchQueryChange).toHaveBeenCalledWith("");
     expect(escapeProps.onSearchClear).toHaveBeenCalledTimes(1);

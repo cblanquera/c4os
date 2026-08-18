@@ -126,6 +126,34 @@ describe("ShellView", () => {
     expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
   });
 
+  it("contains the real composer content inside the shared dock", () => {
+    const { container } = renderShell({
+      composerContent: (
+        <form
+          aria-label="Production composer"
+          className="conversation-composer"
+        />
+      ),
+    });
+
+    const dock = container.querySelector('[data-shell-region="composer-dock"]');
+    expect(dock).toContainElement(
+      screen.getByRole("form", { name: "Production composer" }),
+    );
+  });
+
+  it("lets project navigation own the panel start without an extra heading", () => {
+    const { container } = renderShell({
+      projectPanelContent: <nav aria-label="Project navigation" />,
+      projectPanelContentOwnsHeading: true,
+    });
+
+    expect(container.querySelector(".shell-project-panel__heading")).toBeNull();
+    expect(
+      screen.getByRole("navigation", { name: "Project navigation" }),
+    ).toBeVisible();
+  });
+
   it("dismisses an overlay without consuming the intended center action", () => {
     const onPanelOverlayDismiss = vi.fn();
     const centerAction = vi.fn();
@@ -196,6 +224,8 @@ describe("ShellView", () => {
     renderShell({ route: "/settings/advanced-policies", onNavigate });
 
     const navigation = screen.getByRole("navigation", { name: "Settings" });
+    expect(navigation).toHaveTextContent("Settings");
+    expect(screen.queryByRole("banner")).toBeNull();
     const destinationButtons = SETTINGS_DESTINATIONS.map((destination) =>
       screen.getByRole("button", { name: destination.label }),
     );
@@ -286,6 +316,32 @@ describe("ShellView", () => {
       "Projects and contextual chat",
     );
     expect(screen.getByRole("button", { name: "Detach Chat" })).toBeDisabled();
+  });
+
+  it("retains a bounded contextual Chat height with pointer and keyboard resize semantics", () => {
+    renderShell({
+      contextualChatContent: <section aria-label="Contextual transcript" />,
+      showContextualChat: true,
+    });
+
+    const resizer = screen.getByRole("separator", {
+      name: "Resize contextual Chat",
+    });
+    const initialHeight = Number(resizer.getAttribute("aria-valuenow"));
+    expect(initialHeight).toBe(Math.round(window.innerHeight * 0.4));
+    expect(resizer).toHaveAttribute("aria-orientation", "horizontal");
+
+    fireEvent.keyDown(resizer, { key: "ArrowUp" });
+    expect(resizer).toHaveAttribute(
+      "aria-valuenow",
+      String(initialHeight + 12),
+    );
+
+    fireEvent.keyDown(resizer, { key: "End" });
+    expect(resizer).toHaveAttribute(
+      "aria-valuenow",
+      String(Math.round(window.innerHeight * 0.6)),
+    );
   });
 });
 

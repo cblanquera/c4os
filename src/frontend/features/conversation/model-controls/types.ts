@@ -19,6 +19,9 @@ export interface ModelControlModel {
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 
+export type ComposerApprovalPreset =
+  "ask" | "approve-safe" | "approve-for-me" | "custom";
+
 export interface ChatContextUsage {
   readonly totalTokens: number;
   readonly usedTokens: number;

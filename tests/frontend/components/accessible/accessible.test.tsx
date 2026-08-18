@@ -123,7 +123,11 @@ describe("accessible controls", () => {
     render(
       <div>
         <button type="button">Outside action</button>
-        <ModalDialog title="Remove project" triggerLabel="Open removal">
+        <ModalDialog
+          size="compact"
+          title="Remove project"
+          triggerLabel="Open removal"
+        >
           This keeps files on disk.
         </ModalDialog>
       </div>,
@@ -137,6 +141,7 @@ describe("accessible controls", () => {
       name: "Remove project",
     });
     expect(dialog).toBeVisible();
+    expect(dialog.closest(".c4-modal")).toHaveClass("c4-modal--compact");
     expect(outside.closest("[aria-hidden=true]")).not.toBeNull();
     await waitFor(() =>
       expect(dialog).toContainElement(document.activeElement as HTMLElement),

@@ -75,11 +75,7 @@ function SkillCatalog({ actions, snapshot }: SkillCatalogProps) {
         <div className="extension-section-heading">
           <div>
             <h2 id="skill-discovery-title">Installed skills</h2>
-            <p>
-              Discovery reads validated metadata only. Instructions load after
-              resolution, eligibility, and an explicit request. Precedence is
-              Project, Workspace, User, Plugin, then Bundled.
-            </p>
+            <p>Manage the Skills available to Chat.</p>
           </div>
         </div>
 
@@ -151,27 +147,7 @@ function SkillRow({
           </span>
         </header>
         <p>{skill.summary}</p>
-        <code>{skill.sourceQualifiedId}</code>
-        <div className="skill-row__metadata">
-          <span>
-            Source: {skill.sourceLabel} · precedence {skill.sourcePrecedence}
-          </span>
-          <span>{skill.eligibilityDetail}</span>
-          {skill.isExplicitSelection ? (
-            <strong>Explicit selection</strong>
-          ) : null}
-        </div>
-        {skill.frontmatter.state === "invalid" ? (
-          <Notice title="Invalid frontmatter" tone="danger">
-            {skill.frontmatter.diagnostic}
-          </Notice>
-        ) : null}
-        {skill.collisions.length > 0 ? (
-          <Notice title="Name collision" tone="warning">
-            {skill.collisions.length + 1} source-qualified Skills share this
-            name. Effective resolution is shown above.
-          </Notice>
-        ) : null}
+        <small>{skill.sourceLabel}</small>
       </div>
       <div className="skill-row__actions">
         <Switch
@@ -270,6 +246,12 @@ function SkillDetails({
             }
           />
         </dl>
+
+        {skill.frontmatter.state === "invalid" ? (
+          <Notice title="Invalid frontmatter" tone="danger">
+            {skill.frontmatter.diagnostic}
+          </Notice>
+        ) : null}
 
         <Switch
           description="Changing this requests a Rust-owned lifecycle transition."

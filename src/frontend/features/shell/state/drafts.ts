@@ -10,18 +10,22 @@ import type {
   WorkspaceId,
 } from "../../../platform/protocol";
 import type { ComposerMode, SettingsSection, ShellDraftState } from "./types";
-
-const DEFAULT_PANEL_WIDTH = 228;
-const MIN_PANEL_WIDTH = 180;
-const MIN_CENTER_WIDTH = 420;
+import {
+  SHELL_CENTER_MINIMUM_WIDTH,
+  SHELL_PROJECT_PANEL_INITIAL_WIDTH,
+  SHELL_PROJECT_PANEL_MINIMUM_WIDTH,
+} from "../ui/shell-geometry";
 
 /** Keeps view-level ARIA bounds and reducer clamping on one exact contract. */
 export function shellPanelBounds(viewportWidth: number) {
   return {
-    minimum: MIN_PANEL_WIDTH,
+    minimum: SHELL_PROJECT_PANEL_MINIMUM_WIDTH,
     maximum: Math.max(
-      MIN_PANEL_WIDTH,
-      Math.min(viewportWidth * 0.55, viewportWidth - MIN_CENTER_WIDTH),
+      SHELL_PROJECT_PANEL_MINIMUM_WIDTH,
+      Math.min(
+        viewportWidth * 0.55,
+        viewportWidth - SHELL_CENTER_MINIMUM_WIDTH,
+      ),
     ),
   };
 }
@@ -30,7 +34,7 @@ export const initialShellDraftState: ShellDraftState = {
   workspace: {
     panel: {
       collapsed: false,
-      width: DEFAULT_PANEL_WIDTH,
+      width: SHELL_PROJECT_PANEL_INITIAL_WIDTH,
       overlayOpen: false,
     },
     focusedArtifactId: null,
@@ -68,7 +72,10 @@ const shellDraftsSlice = createSlice({
     ) {
       const { maximum } = shellPanelBounds(payload.viewportWidth);
       state.workspace.panel.width = Math.round(
-        Math.min(maximum, Math.max(MIN_PANEL_WIDTH, payload.width)),
+        Math.min(
+          maximum,
+          Math.max(SHELL_PROJECT_PANEL_MINIMUM_WIDTH, payload.width),
+        ),
       );
     },
     leftPanelCollapsed(state, { payload }: PayloadAction<boolean>) {

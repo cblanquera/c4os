@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { BrandMark } from "../../../components/accessible";
 import { SafeMarkdown } from "./SafeMarkdown";
 import type {
   AssistantTranscriptTurn,
@@ -347,8 +348,8 @@ function AssistantTurn({
       {responseVisible ? (
         <>
           <div className="conversation-turn__identity">
-            <strong>C4OS</strong>
-            <span>{turn.modelLabel}</span>
+            <BrandMark label="C4OS" size={28} />
+            <strong>{turn.modelLabel}</strong>
             <button
               type="button"
               aria-expanded={turn.provenance.isExpanded}
