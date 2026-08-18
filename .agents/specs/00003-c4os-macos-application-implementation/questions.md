@@ -98,9 +98,9 @@ This is the lossless resumable ledger for the Spec 00003 grill pass. Evidence-re
 - **Source:** Q-001, GAP-010.
 - **Question:** What must succeed before Continue, and how are the first provider, model, runtime, and execution environment chosen?
 - **User answers:** “testing must succeed. basically we need a model to start chat.” and “GAP-010 - Suggested default”.
-- **Agent recommendation accepted:** Require a successful current provider test and at least one usable discovered model; select an explicit recommended model with visible confirmation, OpenCode as the revisable default runtime, and Local as the initial execution environment.
-- **Normalized decision:** The successful-test state visibly confirms the recommended usable model, OpenCode runtime, and Local environment before Continue. These are revisable before the first valid Chat submission, when the Chat binding becomes durable.
-- **Decision update:** D-020 resolves GAP-010; SET-001 owns implementation and acceptance.
+- **Agent recommendation corrected by the user 2026-07-27:** Require a successful current provider test and at least one usable discovered model, but do not insert a model picker or default-confirmation step into onboarding.
+- **Normalized decision:** C4OS automatically chooses the production-ready model with the most normalized `supported` features, breaking ties by discovery rank and stable identity. Continue persists it with OpenCode and Local; ordinary model controls own later changes before first-Chat binding.
+- **Decision update:** Corrected D-020 resolves GAP-010; SET-001 owns implementation and acceptance.
 
 ### Q-013 — Agent change-set review
 - **Status:** accepted-decision.

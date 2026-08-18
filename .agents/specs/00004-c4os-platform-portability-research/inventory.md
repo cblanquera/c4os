@@ -1,0 +1,54 @@
+# Current Implementation Portability Inventory
+
+Audit basis: production source at commit `336dd5e8f53fed85f02adf692afb0e9b53cc59b0`, completed Spec 00003 records, accepted Context, and a read-only observation of the 2026-07-28 working tree. “Reusable” means the contract or logic is plausibly shared; it does not mean another target has compiled or passed.
+
+## Audit Signals
+
+- The live tree contains about 135,786 lines of Rust under `src/backend/src` and 53,479 lines of TS/TSX/CSS under `src/frontend`; this is a foundation migration, not a shell swap.
+- Backend source contains 333 conditional-compilation occurrences, including 173 explicit `target_os = "macos"` or `target_arch = "aarch64"` occurrences. `src/backend/src/lib.rs` alone contains 125 such macOS/arm64 occurrences.
+- Current production composition accepts only macOS arm64; non-macOS fallback branches often fail closed or provide weaker placeholder behavior rather than target parity.
+- OpenCode and Pi already run through Node/native sidecar packages, so the current Rust core pays cross-language process/protocol cost around JavaScript-first integrations.
+
+## Restart Classification
+
+| Classification | Areas |
+| --- | --- |
+| Preserve as behavioral contract | Product/domain semantics, IDs and schemas, Action Gateway and policy, approvals/audit/redaction, workspace/session/turn behavior, runtime conformance, recovery states, test fixtures and acceptance cases |
+| Reuse with transport/UI adaptation | React views, design tokens, interaction intent, normalized runtime events, archive formats where compatible |
+| Replace in the proposed foundation | Tauri command/event composition, native WKWebView host, Rust-owned SDK sidecar orchestration, macOS bundle scripts |
+| Re-prove or retain a native helper | Credentials, hostile-filesystem enforcement, SQLite recovery/durability, process trees, PTY, containment, signed packaging and updates |
+
+## Detailed Current-State Inventory
+
+The last column records the work required **if the current Tauri/Rust architecture is retained**. The Electron/Node alternative is compared separately in `architecture-comparison.md`.
+
+| Area | Current macOS implementation | Reusable boundary | Retained-architecture portability disposition |
+| --- | --- | --- | --- |
+| Build qualification | `PlatformService` accepts only `macos/aarch64`; production runtime modules and commands use the same compile gate. Cargo describes a local macOS app. | Product records, protocol envelopes, generations, and fail-closed publication. | Replace hard-coded target identity with explicit platform/architecture capabilities; separate shared production composition from target adapters. |
+| Native shell | Tauri standard window, macOS application-menu structure, `Cmd+,`, `⌘/⌥/⇧` labels, Finder wording, hidden-first reveal, native dialogs, and macOS native acceptance. | Stable Settings command/route, capability flags, picker grants, standard-decoration requirement, initial-reveal state machine. | Add per-platform menu composition, vocabulary, shortcuts, appearance source, capability reporting, and native tests. |
+| Theme and semantic UI | macOS initial appearance plus live webview `prefers-color-scheme`; macOS font/metric tokens; Light/Dark and accessibility evidence. | Semantic color tokens, system-following rule, reduced motion, responsive/focus behavior, React component system. | Add Windows high/forced-contrast and Linux portal/desktop inputs without assuming identical events or metrics. |
+| Native Browser | Rust-owned AppKit `NSView`/public `WKWebView`, WebKit delegates, stable `WKWebsiteDataStore` identifiers, ephemeral store, scoped clearing, focus/geometry, and no page bridge. Non-macOS calls return `UnsupportedTarget`. | Browser artifact state, normalized navigation, generation checks, sanitized event queue, policy, profile scope registry, Reply-context bounds. | Implement and prove separate WebView2 and WebKitGTK hosts with equivalent isolation, profile, permission, clearing, crash, focus, and geometry contracts. |
+| Credential protection | Encrypted vault installation key stored in macOS Keychain through `security-framework`; Keychain failure requires explicit session-only fallback. | Encrypted vault format, opaque references, one-use leases, redaction, mutation observers, password/session-only modes. | Supply target key stores and reauthentication; never silently downgrade to plaintext or treat the current non-macOS session-only fallback as support. |
+| Runtime production | OpenCode/Pi production bootstrap is compiled only for macOS arm64. OpenCode assets pin a C4OS `opencode-darwin-arm64` build and exact digests. | Runtime adapters, capability model, dispatch authority, approvals, persistence, provider model, broker semantics. | Split shared runtime application logic from target launch/process/asset adapters and create target-triple manifests/digests. |
+| Secret/readiness channels | Unix socket pairs and inherited file descriptors carry bounded credentials and readiness; macOS arm64 production verifies their lifecycle. | Operation-scoped secret lease and readiness protocols. | Linux may reuse POSIX descriptors after proof. Windows needs bounded inheritable handles or pipes with explicit handle-list and closure rules. |
+| Process supervision | POSIX process groups, `SIGTERM`/`SIGKILL`, `/bin/kill`, descendant cleanup, Unix permissions, and macOS-specific timing/evidence. | Lifecycle states, timeouts, cancellation, revocation, crash-loop policy, audit records. | Prove Linux process-group semantics; implement Windows Job Object/process-tree shutdown and target cancellation semantics. |
+| Terminal | `portable-pty` is used, but supervision assumes Unix permissions, shells, process groups, signals, foreground groups, and `/bin/zsh` evidence. | Chat ownership, command/artifact model, bounded output, resize, restart recovery, redaction, approvals. | Linux needs shell/path/signal and native PTY proof. Windows needs ConPTY-compatible interruption, process ownership, shell defaults, and revised process provenance. |
+| Hook sandbox | Reviewed hooks run only on macOS through `/usr/bin/sandbox-exec`, generated profiles, sanitized environment, scratch directory, process group, and bounded I/O. Other targets return `UnsupportedHookTarget`. | Signed immutable package, review digest, declarative proposal, Action Gateway, revocation barrier, bounded protocol. | Select and prove a Linux containment boundary and a Windows restricted-process boundary before enabling hooks. |
+| MCP STDIO sandbox | Trusted STDIO servers launch through a macOS sandbox profile and `sandbox-exec`; the non-macOS profile builder fails closed. Streamable HTTP has more target-neutral logic. | Definition/trust lifecycle, HTTP validation, credentials, sampling policy, bounded transport, cancellation records. | Add target STDIO containment and process cleanup; independently verify HTTP DNS/TLS/network behavior on each target. |
+| Project filesystem | Descriptor-relative POSIX `openat`/`fstatat`/`unlinkat`, `O_NOFOLLOW`, device/inode identity, modes, directory sync, macOS `renameatx_np`; Linux `renameat2` create/exchange branches already exist but are unproved. | Trusted-root and stale-target model, normalized operations, limits, content hashes, Action Gateway binding. | Linux validates the existing branch and filesystem matrix. Windows needs handle-relative/reparse-safe traversal, file identity, ACL, atomic replace, case/drive/UNC rules, and equivalent stale-target checks. |
+| Database and recovery | SQLite authority uses POSIX no-follow opens, device/inode identity, directory descriptors, and `/dev/fd/<n>` immutable reads. | Schemas, migrations, one-writer actor, WAL, backup validation, recovery state. | Linux requires native proof. Windows needs an equivalent handle-safe backup/restore and immutable inspection path; do not assume POSIX no-follow or `/dev/fd`. |
+| Configuration/profile/package files | Unix paths enforce `0600`, `O_NOFOLLOW`, directory sync, symlink rejection, and atomic rename. Some non-Unix fallbacks currently skip permission and parent-sync enforcement. | Strict TOML, generation conflict, immutable package digests, registry lifecycle, last-known-good state. | Linux validates existing protections. Windows adds DACL/private-file checks, reparse-point rejection, durable replacement, and target-specific watcher behavior. |
+| Git/execution environment | Local Git uses Unix device/inode identity, sanitized `/usr/bin:/bin`, and POSIX path assumptions. Execution environment identity uses Unix metadata. | Action classification, trusted roots, Git operation model, Docker/SSH abstraction. | Discover target Git/shell executables safely, preserve environment isolation, and define Windows path/process identity. Named Docker/SSH targets remain separately gated. |
+| Bundle/resources | Tauri resources are assembled into a macOS `.app`; scripts use `ditto` and `.app/Contents/Resources`; bundle verification paths are macOS-specific. | Source manifests, exact dependency locks, resource integrity receipts, QA boundary checks. | Create target bundle layouts, copy/install steps, runtime assets, artifact verification, and reproducible build records. |
+| Updates/diagnostics | Core update/recovery/diagnostic state exists, but signed distribution and updater evidence are outside the macOS development milestone. | Channels, staged activation, rollback/revocation records, redaction, recovery UI. | Platform implementation specs cover local activation/recovery only if accepted; signing, installers, and feeds belong in later target distribution specs. |
+| Tests and evidence | Renderer fixtures and platform parser assert `macos/aarch64`; native evidence is macOS arm64 only. | Unit/domain tests, protocol checks, deterministic renderer QA, evidence schema. | Generalize fixtures, add target compile/test lanes, and require exact interactive native evidence for every claimed OS/architecture/desktop/display combination. |
+
+## Source Clusters
+
+- Platform and shell: `src/backend/src/platform/service.rs`, `src/frontend/platform/platform-service.ts`, `src/backend/src/lib.rs`, `src/backend/tauri.conf.json`.
+- Browser: `src/backend/src/browser/native.rs`, `src/backend/src/browser/profile.rs`.
+- Credentials and containment: `src/backend/src/security/credentials.rs`, `src/backend/src/extension/hook.rs`, `src/backend/src/mcp/transport.rs`.
+- Runtime/process/Terminal: `src/backend/src/runtime/`, `src/backend/src/execution/terminal.rs`.
+- Filesystem/persistence: `src/backend/src/execution/`, `src/backend/src/core/`, `src/backend/src/extension/store.rs`.
+- Assets and bundles: `src/backend/Cargo.toml`, `src/backend/tauri.conf.json`, `package.json`, `sidecars/`.
+- Cross-platform visual provenance: Frozen Spec 00002; all Windows/Linux native rows remain `not run`.

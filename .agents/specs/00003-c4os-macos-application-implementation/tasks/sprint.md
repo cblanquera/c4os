@@ -1,16 +1,26 @@
 # Spec 00003 Implementation Sprint
 
-Plan state: Accepted 2026-07-18 by the user's advance maintainability-first plan authorization.
+Plan state: Original phase accepted 2026-07-18. Corrective r013 convergence phase accepted 2026-07-27 by the user's explicit request for new tasks, a less restrictive practical journey, and production shape/functionality as close to r013 as possible.
 
 Implementation status source: [Spec status](../status.md). Task status source: [Task status](status.md). Normative coverage source: [Coverage ledger](coverage.md).
 
-## Completion Rule
+## Completion Rules
 
-The local macOS development milestone completes only when every task and side quest is `verified`, every task-level Agent Acceptance is `passed`, all 50 Feature Coverage IDs are closed, the integrated acceptance matrix passes, context-promotion review is complete, and the Agent Workspace validator passes.
+Tasks 00001 through 00015C preserve the historical local-development verification record and its coordinator-owned Agent Acceptance model. The 2026-07-27 human audit supersedes that record only for current visible-product readiness; it does not erase the underlying security, service, persistence, or test evidence.
 
-Task status never uses `accepted`. Every task carries the exact override:
+Corrective Tasks 00016 through 00022 and their required review side quests complete only when verification passes and the user explicitly accepts each named human-reviewable result. Their allowed statuses are `open`, `started`, `verified`, and `accepted`. Task 00022 cannot complete at `verified`; unresolved review findings become new open tasks.
 
-`Acceptance criteria: none — implementation acceptance is delegated to the coordinator’s Agent Acceptance process for Spec 00003.`
+The current corrective milestone completes only when Tasks 00016 through 00022 and required review side quests are `accepted`, the corrective coverage supplement is closed, the integrated r013 comparison passes, context-promotion review is complete, and the Agent Workspace validator passes.
+
+## Corrective Journey Contract
+
+1. A new user enters provider details in the compact r013 onboarding form.
+2. Test Connection uses the submitted credential transiently and does not persist it or ask for duplicate C4OS approval.
+3. A successful current test keeps the compact form and automatically selects the viable model with the most normalized C4OS-supported features; onboarding shows no model picker or default-confirmation step.
+4. Continue persists the provider and secure credential reference once, then enters Workspace Start.
+5. If macOS credential storage genuinely fails, the user sees one exceptional recovery choice with Retry; no UI implies that a C4OS prompt is an Apple permission dialog.
+6. Exact direct user controls count as intent for their named action and target. Runtime-, agent-, extension-, changed-target-, destructive-, explicit-`Ask`-, and managed-policy actions retain the appropriate approval or denial path.
+7. The returning user reaches the compact r013 Workspace, Settings, Chat, composer, model, and artifact journeys without implementation commentary or responsibility duplicated across routes.
 
 ## Maintainability-First Sequence
 
@@ -32,11 +42,27 @@ Task status never uses `accepted`. Every task carries the exact override:
 | 14 | 00014 Updates, recovery, diagnostics, and degraded-state integration | Close independent update channels, last-known-good behavior, restart recovery, redacted diagnostics, and honest failure/degraded surfaces. |
 | 15 | 00015 Deterministic QA and integrated Agent Acceptance | Run the complete production-rendered r013 matrix and all Rust, adapter, security, persistence, native, accessibility, responsive, failure, and recovery suites. |
 
+## Corrective r013 Convergence Sequence
+
+| Order | Task | Output and rationale |
+| --- | --- | --- |
+| 16 | [00016 Practical direct intent and credentials](00016-practical-direct-intent-and-credentials.md) | Repair the normal Keychain path and remove redundant direct-action prompts before reshaping user journeys. |
+| 17 | [00017 r013 visual foundation and shell geometry](00017-r013-visual-foundation-and-shell-geometry.md) | Establish shared r013-derived geometry and density so route work does not accumulate independent CSS patches. |
+| 18 | [00018 r013 onboarding and Workspace Start](00018-r013-onboarding-and-workspace-start.md) | Compose the first-run and returning-user launch journeys on Tasks 00016 and 00017. |
+| 19 | [00019 r013 Settings information architecture](00019-r013-settings-information-architecture.md) | Restore compact Settings hierarchy and provider/model responsibility boundaries against real services. |
+| 20 | [00020 r013 Workspace, Chat, and composer](00020-r013-workspace-chat-and-composer.md) | Converge the primary work surface, model navigation, capability feedback, transcript, and composer. |
+| 21 | [00021 r013 artifact and responsive convergence](00021-r013-artifact-and-responsive-convergence.md) | Align every artifact shell and focus/contextual state after the shared Workspace composition stabilizes. |
+| 22 | [00022 r013 integrated human acceptance](00022-r013-integrated-human-acceptance.md) | Run the complete production-rendered comparison and require explicit user acceptance before closeout. |
+| 22A | [00022A onboarding automatic model selection](00022A-onboarding-automatic-model-selection.md) | Resolve the user's review finding by removing the post-Test picker and enforcing strongest-supported automatic selection. |
+| 22B | [00022B onboarding Continue recovery](00022B-onboarding-continue-recovery.md) | Resolve the user's blocking production finding by migrating the legacy app configuration placeholder and preserving secure retry after a failed Continue. |
+
 ## Required Side Quests
 
 - `00015A`: independent security and denial-before-side-effect audit.
 - `00015B`: accessibility, native macOS, keyboard, responsive, theme, focus, and Computer Use audit.
 - `00015C`: 50-ID coverage, evidence, documentation, context-promotion, validator, worktree, and commit-history audit.
+- `00022A`: onboarding automatic-model correction discovered during Task 00022 user review.
+- `00022B`: onboarding Continue/configuration recovery discovered during Task 00022 user review.
 
 These side quests are required cross-checks, not substitutes for parent-task verification.
 
@@ -49,7 +75,7 @@ These side quests are required cross-checks, not substitutes for parent-task ver
 
 ## Verification Loop
 
-For every task: mark `started`, implement, run focused tests, launch affected surfaces, record evidence, run Agent Acceptance, fix failures, run broader regressions, close mapped coverage only after supporting tasks also pass, mark `verified`, and make a coherent local checkpoint commit.
+For Tasks 00001 through 00015C, preserve their recorded verification loop. For each corrective task: mark `started`, implement, run focused tests, launch affected surfaces, compare them with r013 at matched states and viewports, record evidence, fix failures, run broader regressions, mark `verified`, and present the named visual/functional artifact to the user. Mark `accepted` only after explicit user review. A local checkpoint commit still requires separate user authorization.
 
 ## External Gates
 

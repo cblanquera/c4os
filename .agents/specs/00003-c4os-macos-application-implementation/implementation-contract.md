@@ -92,7 +92,7 @@ OpenCode runs as an authenticated loopback service with isolated C4OS-managed st
 
 ## Turn And Capability Lifecycle
 
-The first valid text or attachment submission promotes a provisional chat and atomically captures its runtime, adapter, execution environment, Workspace/Project mapping, and capability baseline. Onboarding cannot reach this state until the provider test has succeeded and at least one usable model exists. Its successful-test state selects and visibly confirms an explicit recommended usable model, OpenCode as the revisable runtime default, and Local as the initial environment; the user may revise them until first-submit binding. Before every dispatch, C4OS:
+The first valid text or attachment submission promotes a provisional chat and atomically captures its runtime, adapter, execution environment, Workspace/Project mapping, and capability baseline. Onboarding cannot reach this state until the provider test has succeeded and at least one usable model exists. The successful-test state adds no model picker: C4OS automatically chooses the production-ready model with the most normalized `supported` features, using discovery rank and stable identity as tie-breakers, and Continue persists it with OpenCode and Local. Ordinary model controls may revise the route until first-submit binding. Before every dispatch, C4OS:
 
 1. creates stable turn, attempt, and correlation identities;
 2. resolves the full provider/endpoint/model-revision/adapter/runtime route;

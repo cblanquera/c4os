@@ -93,8 +93,8 @@ State: Accepted by the user 2026-07-18. The first implementation and review mile
 ### D-019 — Implement the complete contract without review-slice gates
 State: Accepted by the user 2026-07-18. The implementation target is the complete accepted application contract, including real supported Plugin, Skill, and MCP installation, activation, execution, supervision, revocation, and failure behavior. Metadata-only facades or a partial product slice do not count as completion. Task sequencing may divide engineering work, but it must not introduce intermediate product-review gates or silently defer accepted functionality. During post-Freeze implementation, the agent is delegated authority to resolve bounded technical blockers from current research and record the decision and rationale; it may not weaken accepted product behavior, security boundaries, final verification, or human acceptance.
 
-### D-020 — Confirm recommended onboarding defaults
-State: Accepted by the user 2026-07-18. After the required successful provider test yields at least one usable model, C4OS selects an explicit recommended usable model and visibly confirms it with OpenCode as the revisable runtime default and Local as the initial execution environment. The user may revise these choices before the first valid Chat submission binds them to the Chat.
+### D-020 — Select onboarding defaults without another step
+State: Corrected by the user 2026-07-27 after production review. After the required successful provider test yields at least one usable model, onboarding does not show a model picker or default-confirmation panel. C4OS automatically selects the production-ready model with the most normalized `supported` features, breaking ties by discovery rank and stable model identity, then persists it with OpenCode and Local when Continue enters Workspace Start. The ordinary post-onboarding model controls own later changes before first-Chat binding.
 
 ### D-021 — Select the renderer stack
 State: Evidence-backed selection 2026-07-18. Use the React/TypeScript/Vite SPA, domain Redux Toolkit stores, React Aria primitives, typed Rust boundary, and test layers defined by [IS-001](implementation-selections.md#is-001--renderer).
@@ -157,7 +157,7 @@ State: Evidence-backed selection 2026-07-18. Use the separated configuration, da
 
 ### GAP-010 — How are initial operating defaults selected after onboarding?
 
-- **State:** Resolved by accepted D-020. The successful-test state visibly confirms a recommended usable model, OpenCode runtime, and Local execution environment; the choices remain revisable until first Chat binding.
+- **State:** Resolved by D-020 as corrected during production review. The successful-test state keeps the compact provider form, automatically chooses the strongest supported usable model, and leaves later changes to ordinary model controls.
 
 ### GAP-011 — What does the user see during agent-directed file changes from Chat?
 
